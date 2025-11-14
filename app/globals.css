@@ -24,3 +24,42 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+html {
+  scroll-behavior: smooth;
+}
+
+@keyframes marquee-continuous {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-wrapper {
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+}
+
+.marquee-content {
+  display: inline-flex;
+  gap: 2rem;
+
+  /* 👇 Perfect smooth infinite scrolling */
+  animation: marquee-continuous 30s linear infinite;
+
+  /* Pause on hover/click */
+  cursor: pointer;
+}
+
+.marquee-content:hover,
+.marquee-content:active {
+  animation-play-state: paused;
+}
+
+
+
+
