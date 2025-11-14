@@ -1,8 +1,9 @@
 'use client';
 
 import Header from "./components/Header";
-import HeroSection from "./components/Login";
+import Login from "./components/Login";
 import ImportantMessage from "./components/ImportantMessage";
+import ForgotPasswordModal from "./components/ForgotPasswordModal";
 import InfoBlocks, {
 	DepartmentLink,
 	Notification,
@@ -45,7 +46,7 @@ const TILES: Tile[] = [
 	},
 	{
 		title: "REGISTRATION",
-		items: ["Developer/Owner/User", "Department", "BMC Contractors"],
+		items: ["Developer","Owner", "Department", "BMC Contractors"],
 		color: "bg-indigo-800",
 	},
 ];
@@ -116,7 +117,7 @@ export default function Home() {
 		<div className="min-h-screen bg-white/90 text-zinc-900 backdrop-blur-sm">
 			<Header />
 			<main>
-				<HeroSection slides={SLIDES} />
+				<Login slides={SLIDES} />
 				<ImportantMessage message={IMPORTANT_MESSAGE} />
 				<TileGrid tiles={TILES} />
 				<InfoBlocks
