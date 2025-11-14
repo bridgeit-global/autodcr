@@ -71,17 +71,17 @@ const TileGrid = ({ tiles }: TileGridProps) => {
 
       {/* MODALS */}
       <DeveloperModal
-        isOpen={activeModal === "Developer"}
+        open={activeModal === "Developer"}
         onClose={() => setActiveModal("")}
       />
 
       <DepartmentModal
-        isOpen={activeModal === "Department"}
+        open={activeModal === "Department"}
         onClose={() => setActiveModal("")}
       />
 
       <ContractorModal
-        isOpen={activeModal === "Contractor"}
+        open={activeModal === "Contractor"}
         onClose={() => setActiveModal("")}
       />
     </>
