@@ -128,21 +128,21 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 								</div>
 
                                 {/* ⭐ Forgot Password Logic */}
-								<div className="flex items-center justify-between pt-1">
-									<button className="rounded bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800">
+								<div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+									<button className="w-full rounded bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 sm:w-auto">
 										Login
 									</button>
-									<div>
+									<div className="flex flex-col gap-2 sm:flex-row sm:gap-0">
 									<button
 										type="button"
-										className="rounded bg-sky-700 px-2 py-2 text-sm font-medium text-white hover:bg-sky-800 mx-2"
+										className="w-full rounded bg-sky-700 px-3 py-2 text-xs sm:text-sm font-medium text-white hover:bg-sky-800 sm:mx-2 sm:w-auto"
 										onClick={() => setForgotOpen(true)} // ⭐ OPEN MODAL
 									>
-										Forgot Password ?
+										Forgot Password
 									</button>
 									<button
 										type="button"
-										className="rounded bg-sky-700 px-2 py-2 text-sm font-medium text-white hover:bg-sky-800"
+										className="w-full rounded bg-sky-700 px-3 py-2 text-xs sm:text-sm font-medium text-white hover:bg-sky-800 sm:w-auto"
 										onClick={() => setUserForgotOpen(true)} // ⭐ OPEN MODAL
 									>
 										Forgot Username 

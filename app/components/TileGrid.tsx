@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import DeveloperModal from "./Registration";
-import OwnerModal from "./Registration";
 import DepartmentModal from "./Registration";
 import ContractorModal from "./Registration";
 
@@ -25,8 +25,15 @@ const MODAL_KEYS: Record<string, string> = {
 
 const TileGrid = ({ tiles }: TileGridProps) => {
   const [activeModal, setActiveModal] = useState("");
+  const router = useRouter();
 
   function onClick(item: string) {
+    // Navigate to owner registration page
+    if (item === "Owner") {
+      router.push("/owner");
+      return;
+    }
+    
     const modalKey = MODAL_KEYS[item];
     if (modalKey) setActiveModal(modalKey);
   }
@@ -65,11 +72,6 @@ const TileGrid = ({ tiles }: TileGridProps) => {
       {/* MODALS */}
       <DeveloperModal
         isOpen={activeModal === "Developer"}
-        onClose={() => setActiveModal("")}
-      />
-
-      <OwnerModal
-        isOpen={activeModal === "Owner"}
         onClose={() => setActiveModal("")}
       />
 
