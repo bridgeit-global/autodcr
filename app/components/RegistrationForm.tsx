@@ -1,87 +1,47 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
 
 interface RegistrationFormProps {
   title?: string;
 }
 
+type FormValues = {
+  firmName: string;
+  type: string;
+  panNumber: string;
+  aadharNumber: string;
+  telephoneNumber: string;
+  emailId: string;
+  address: string;
+  pincode: string;
+  mobileNumber: string;
+
+  panFile: FileList;
+  aadharFile: FileList;
+  photoFile: FileList;
+  signatureFile: FileList;
+};
+
 const RegistrationForm: React.FC<RegistrationFormProps> = ({ title = "Registration" }) => {
   const router = useRouter();
-  
-  const [formData, setFormData] = useState({
-    firmName: "",
-    type: "",
-    panNumber: "",
-    aadharNumber: "",
-    panFile: null as File | null,
-    aadharFile: null as File | null,
-    telephoneNumber: "",
-    emailId: "",
-    address: "",
-    pincode: "",
-    mobileNumber: "",
-    photoFile: null as File | null,
-    signatureFile: null as File | null,
-  });
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset
+  } = useForm<FormValues>();
 
-  const handleFileChange = (field: string, file: File | null) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: file
-    }));
-  };
+  const onSubmit = (data: FormValues) => {
+    console.log("Form Data:", data);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Check if all fields are filled
-    const requiredFields = [
-      'firmName',
-      'type',
-      'panNumber',
-      'aadharNumber',
-      'telephoneNumber',
-      'emailId',
-      'address',
-      'pincode',
-      'mobileNumber',
-    ];
+    // success message inside page
+    alert("Registration Successful!");
 
-    const requiredFiles = [
-      'panFile',
-      'aadharFile',
-      'photoFile',
-      'signatureFile',
-    ];
-
-    // Check text/select fields
-    const hasEmptyTextFields = requiredFields.some(field => !formData[field as keyof typeof formData]);
-
-    // Check file fields
-    const hasEmptyFileFields = requiredFiles.some(field => !formData[field as keyof typeof formData]);
-
-    if (hasEmptyTextFields || hasEmptyFileFields) {
-      alert('Please fill all the necessary fields');
-      return;
-    }
-
-    // If all fields are filled, proceed with submission
-    console.log('Form submitted:', formData);
-    
-    // Show submission complete alert
-    alert('Submission complete');
-    
-    // Navigate back to landing page
-    router.push('/');
+    router.push("/");
   };
 
   return (
@@ -90,9 +50,10 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ title = "Registrati
       <div className="mb-6 pb-3 border-b">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
           <h2 className="text-2xl font-bold text-black">{title}</h2>
+
           <button
             onClick={() => router.push("/")}
-            className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors self-start sm:self-auto"
+            className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -103,27 +64,33 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ title = "Registrati
       </div>
 
       {/* Body */}
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Row: Firm / Developer Name + Type */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Firm Name */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Firm / Developer Name
+              Firm / Developer Name <span className="text-red-500">*</span>
             </label>
+
             <input
-              value={formData.firmName}
-              onChange={(e) => handleInputChange("firmName", e.target.value)}
+              {...register("firmName", { required: "Firm / Developer Name is required" })}
               className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
               placeholder="Enter Firm / Developer Name"
             />
+
+            {errors.firmName && <p className="text-red-600 text-sm mt-1">{errors.firmName.message}</p>}
           </div>
 
+          {/* Type */}
           <div>
-            <label className="block font-medium text-black mb-1">Type</label>
-            <select 
-              value={formData.type}
-              onChange={(e) => handleInputChange("type", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+            <label className="block font-medium text-black mb-1">
+              Type <span className="text-red-500">*</span>
+            </label>
+
+            <select
+              {...register("type", { required: "Type is required" })}
+              className="border rounded-lg px-3 py-2 w-full text-black"
             >
               <option value="">Select</option>
               <option>Single Owner Proprietary Firm</option>
@@ -138,153 +105,228 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ title = "Registrati
               <option>Special Purpose Vehicle SPV</option>
               <option>Joint Development Agreement JDA</option>
             </select>
+
+            {errors.type && <p className="text-red-600 text-sm mt-1">{errors.type.message}</p>}
           </div>
         </div>
 
-        {/* Row: PAN No + Aadhar No */}
+        {/* Row: PAN Number + Aadhar Number */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* PAN */}
           <div>
             <label className="block font-medium text-black mb-1">
-              PAN Card Number
+              PAN Card Number <span className="text-red-500">*</span>
             </label>
+
             <input
-              value={formData.panNumber}
-              onChange={(e) => handleInputChange("panNumber", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("panNumber", { required: "PAN Number is required",
+                pattern: {
+                  value: /^[0-9]{12}$/,
+                  message: "PAN Number must be 12 digits"
+                }
+               })}
+              className="border rounded-lg px-3 py-2 w-full text-black"
               placeholder="Enter PAN Number"
+              type="number"
+
             />
+            {errors.panNumber && <p className="text-red-600 text-sm mt-1">{errors.panNumber.message}</p>}
           </div>
 
+          {/* Aadhar */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Aadhar Number
+              Aadhar Number <span className="text-red-500">*</span>
             </label>
+
             <input
-              value={formData.aadharNumber}
-              onChange={(e) => handleInputChange("aadharNumber", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("aadharNumber", { required: "Aadhar Number is required" ,
+                pattern: {
+                  value: /^[0-9]{12}$/,
+                  message: "Aadhar Number must be 12 digits"
+                }})}
+              className="border rounded-lg px-3 py-2 w-full text-black"
               placeholder="Enter Aadhar Number"
+              type="number"
             />
+            {errors.aadharNumber && <p className="text-red-600 text-sm mt-1">{errors.aadharNumber.message}</p>}
           </div>
         </div>
 
         {/* Row: PAN PDF + Aadhar PDF */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* PAN File */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Upload PAN (PDF)
+              Upload PAN (PDF) <span className="text-red-500">*</span>
             </label>
+
             <input
               type="file"
               accept="application/pdf"
-              onChange={(e) => handleFileChange("panFile", e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("panFile", { required: "PAN PDF is required" })}
+              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black"
             />
+            {errors.panFile && <p className="text-red-600 text-sm mt-1">{errors.panFile.message}</p>}
           </div>
 
+          {/* Aadhar File */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Upload Aadhar (PDF)
+              Upload Aadhar (PDF) <span className="text-red-500">*</span>
             </label>
+
             <input
               type="file"
               accept="application/pdf"
-              onChange={(e) => handleFileChange("aadharFile", e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("aadharFile", { required: "Aadhar PDF is required" })}
+              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black"
             />
+            {errors.aadharFile && <p className="text-red-600 text-sm mt-1">{errors.aadharFile.message}</p>}
           </div>
         </div>
 
         {/* Row: Telephone + Email */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Telephone */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Telephone Number
+              Telephone Number <span className="text-red-500">*</span>
             </label>
+
             <input
-              value={formData.telephoneNumber}
-              onChange={(e) => handleInputChange("telephoneNumber", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("telephoneNumber", { required: "Telephone Number is required",
+                pattern: {
+                  value: /^[0-9]{10}$/,
+                  message: "Telephone Number must be 10 digits"
+                }
+               },
+                
+              )}
+              className="border rounded-lg px-3 py-2 w-full text-black"
               placeholder="Enter Telephone Number"
+              type="number"
             />
+            {errors.telephoneNumber && (
+              <p className="text-red-600 text-sm mt-1">{errors.telephoneNumber.message}</p>
+            )}
           </div>
 
+          {/* Email */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Email ID
+              Email ID <span className="text-red-500">*</span>
             </label>
+
             <input
               type="email"
-              value={formData.emailId}
-              onChange={(e) => handleInputChange("emailId", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("emailId", {
+                required: "Email is required",
+                pattern: {
+                  value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                  message: "Invalid Email Address"
+                }
+              })}
+              className="border rounded-lg px-3 py-2 w-full text-black"
               placeholder="Enter Email ID"
             />
+            {errors.emailId && <p className="text-red-600 text-sm mt-1">{errors.emailId.message}</p>}
           </div>
         </div>
 
-        {/* Full Width Address */}
+        {/* Address */}
         <div>
-          <label className="block font-medium text-black mb-1">Address</label>
+          <label className="block font-medium text-black mb-1">
+            Address <span className="text-red-500">*</span>
+          </label>
+
           <textarea
-            value={formData.address}
-            onChange={(e) => handleInputChange("address", e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full h-20 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+            {...register("address", { required: "Address is required" })}
+            className="border rounded-lg px-3 py-2 w-full h-20 text-black"
             placeholder="Enter Address"
           ></textarea>
+
+          {errors.address && <p className="text-red-600 text-sm mt-1">{errors.address.message}</p>}
         </div>
 
-        {/* Row: Pincode + Mobile No */}
+        {/* Row: Pincode + Mobile */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Pincode */}
           <div>
-            <label className="block font-medium text-black mb-1">Pincode</label>
+            <label className="block font-medium text-black mb-1">
+              Pincode <span className="text-red-500">*</span>
+            </label>
+
             <input
-              value={formData.pincode}
-              onChange={(e) => handleInputChange("pincode", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("pincode", { required: "Pincode is required" ,
+                pattern: {
+                  value: /^[0-9]{6}$/,
+                  message: "Telephone Number must be 6 digits"
+                }})}
+              className="border rounded-lg px-3 py-2 w-full text-black"
               placeholder="Enter Pincode"
+              type="number"
             />
+            {errors.pincode && <p className="text-red-600 text-sm mt-1">{errors.pincode.message}</p>}
           </div>
 
+          {/* Mobile Number */}
           <div>
-            <label className="block font-medium text-black mb-1">Mobile Number</label>
+            <label className="block font-medium text-black mb-1">
+            Alternate Telephone Number <span className="text-red-500">*</span>
+            </label>
+
             <input
-              value={formData.mobileNumber}
-              onChange={(e) => handleInputChange("mobileNumber", e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("mobileNumber", {
+                required: "Telephone Number is required",
+                pattern: {
+                  value: /^[0-9]{10}$/,
+                  message: "Telephone Number must be 10 digits"
+                }
+              })}
+              className="border rounded-lg px-3 py-2 w-full text-black"
               placeholder="Enter Mobile Number"
             />
+            {errors.mobileNumber && <p className="text-red-600 text-sm mt-1">{errors.mobileNumber.message}</p>}
           </div>
         </div>
 
         {/* Row: Photo + Signature */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block font-medium text-black mb-1">Photo</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleFileChange("photoFile", e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-
+          {/* Photo */}
           <div>
             <label className="block font-medium text-black mb-1">
-              Signature Image
+              Photo <span className="text-red-500">*</span>
             </label>
+
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => handleFileChange("signatureFile", e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+              {...register("photoFile", { required: "Photo is required" })}
+              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black"
             />
+            {errors.photoFile && <p className="text-red-600 text-sm mt-1">{errors.photoFile.message}</p>}
+          </div>
+
+          {/* Signature */}
+          <div>
+            <label className="block font-medium text-black mb-1">
+              Signature Image <span className="text-red-500">*</span>
+            </label>
+
+            <input
+              type="file"
+              accept="image/*"
+              {...register("signatureFile", { required: "Signature image is required" })}
+              className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black"
+            />
+            {errors.signatureFile && <p className="text-red-600 text-sm mt-1">{errors.signatureFile.message}</p>}
           </div>
         </div>
 
         {/* Submit */}
         <div className="text-center mt-4">
-          <button 
+          <button
             type="submit"
             className="bg-blue-600 text-white px-10 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
           >
@@ -297,4 +339,3 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ title = "Registrati
 };
 
 export default RegistrationForm;
-
