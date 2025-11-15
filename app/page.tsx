@@ -46,7 +46,7 @@ const TILES: Tile[] = [
 	},
 	{
 		title: "REGISTRATION",
-		items: ["Developer","Owner", "Department", "BMC Contractors"],
+		items: ["Owner","Consultant", "Department", "BMC Contractors"],
 		color: "bg-indigo-800",
 	},
 ];

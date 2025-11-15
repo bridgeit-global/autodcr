@@ -96,7 +96,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 									<span className="mb-1 block text-zinc-700">Username</span>
 									<input
 										type="text"
-										className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+										className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
 										placeholder="Enter username"
 									/>
 								</label>
@@ -105,7 +105,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 									<span className="mb-1 block text-zinc-700">Password</span>
 									<input
 										type="password"
-										className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+										className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
 										placeholder="Enter password"
 									/>
 								</label>
@@ -122,7 +122,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
 									<input
 										type="text"
-										className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+										className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
 										placeholder="Type the code from the image"
 									/>
 								</div>

@@ -1,0 +1,622 @@
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+
+interface ConsultantRegistrationFormProps {
+  title?: string;
+}
+
+const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({ 
+  title = "Consultant Registration" 
+}) => {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("profile");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  
+  // Form state to preserve data across tabs
+  const [formData, setFormData] = useState({
+    // Profile
+    consultantType: "",
+    city: "",
+    pincode: "",
+    email: "",
+    alternatePhone: "",
+    pan: "",
+    address: "",
+    state: "",
+    authorizedSignatory: "",
+    // Credentials
+    coaRegNo: "",
+    coaExpiryDate: "",
+    otherRegId: "",
+    otherRegExpiryDate: "",
+    // Files
+    panFile: null as File | null,
+    addressProofFile: null as File | null,
+    passportPhotoFile: null as File | null,
+    profileStatementFile: null as File | null,
+    // Login
+    loginId: "",
+    password: "",
+    confirmPassword: "",
+    acceptDeclaration: false,
+  });
+
+  const handleInputChange = (field: string, value: string | boolean) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleFileChange = (field: string, file: File | null) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: file
+    }));
+  };
+
+  const tabs = [
+    { id: "profile", label: "Profile" },
+    { id: "credentials", label: "Credentials & Uploads" },
+    { id: "login", label: "Login & Declaration" },
+  ];
+
+  return (
+    <div className="max-w-4xl mx-auto p-8">
+      {/* Header */}
+      <div className="mb-6 pb-3 border-b">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+          <h2 className="text-2xl font-bold text-black">{title}</h2>
+          <button
+            onClick={() => router.push("/")}
+            className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors self-start sm:self-auto"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            <span className="font-medium">Back to Home</span>
+          </button>
+        </div>
+        {/* Breadcrumb */}
+        <nav className="text-sm text-gray-600">
+          <span>Dashboard</span>
+          <span className="mx-2">›</span>
+          <span>Registrations</span>
+          <span className="mx-2">›</span>
+          <span className="text-black font-medium">Consultant</span>
+        </nav>
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-6 border-b">
+        <div className="flex space-x-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-6 py-3 font-medium text-sm transition-colors ${
+                activeTab === tab.id
+                  ? "border-b-2 border-blue-600 text-blue-600"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div className="space-y-6">
+        {/* Profile Tab */}
+        {activeTab === "profile" && (
+          <div className="space-y-6">
+            {/* Basic Details Section */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-black">
+                  Basic Details
+                </h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4 ml-11">
+                Tell us who you are
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Row 1 */}
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Consultant Type *
+                  </label>
+                  <select 
+                    value={formData.consultantType}
+                    onChange={(e) => handleInputChange("consultantType", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">Select</option>
+                    <option>Architect</option>
+                    <option>Structural Engineer</option>
+                    <option>PMC/Project Management Consultant</option>
+                    <option>MEP Engineer</option>
+                    <option>Licensed Surveyor</option>
+                    <option>Town Planner</option>
+                    <option>Legal Consultant</option>
+                    <option>Liaison/Approval Consultant</option>
+                    <option>Environmental Consultant</option>
+                    <option>Valuer</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Email *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => handleInputChange("email", e.target.value)}
+                      className="border rounded-lg px-3 py-2 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="name@example.com"
+                    />
+                    <button
+                      type="button"
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition whitespace-nowrap"
+                    >
+                      Verify
+                    </button>
+                  </div>
+                </div>
+
+                {/* Row 2 */}
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    City *
+                  </label>
+                  <input
+                    value={formData.city}
+                    onChange={(e) => handleInputChange("city", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Enter City"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Alternate Phone
+                  </label>
+                  <input
+                    value={formData.alternatePhone}
+                    onChange={(e) => handleInputChange("alternatePhone", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Optional"
+                  />
+                </div>
+
+                {/* Row 3 */}
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Pincode *
+                  </label>
+                  <input
+                    value={formData.pincode}
+                    onChange={(e) => handleInputChange("pincode", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Enter Pincode"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    PAN
+                  </label>
+                  <input
+                    value={formData.pan}
+                    onChange={(e) => handleInputChange("pan", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="ABCDE1234F"
+                  />
+                </div>
+
+                {/* Row 4 */}
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Address *
+                  </label>
+                  <input
+                    value={formData.address}
+                    onChange={(e) => handleInputChange("address", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Office address"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    State *
+                  </label>
+                  <input
+                    value={formData.state}
+                    onChange={(e) => handleInputChange("state", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Enter State"
+                  />
+                </div>
+
+                {/* Row 5 */}
+                <div className="md:col-span-2">
+                  <label className="block font-medium text-black mb-1">
+                    Authorized Signatory *
+                  </label>
+                  <input
+                    value={formData.authorizedSignatory}
+                    onChange={(e) => handleInputChange("authorizedSignatory", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Name of authorized signatory"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Credentials & Uploads Tab */}
+        {activeTab === "credentials" && (
+          <div className="space-y-8">
+            {/* Registration Numbers Section */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-black">
+                  Registration Numbers
+                </h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4 ml-11">
+                Enter IDs & Expiry Dates
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {/* Left Column */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-medium text-black mb-1">
+                      Council of Architecture (COA) Reg. No.
+                    </label>
+                    <input
+                      value={formData.coaRegNo}
+                      onChange={(e) => handleInputChange("coaRegNo", e.target.value)}
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="Enter number"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-black mb-1">
+                      Validity / Expiry Date
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.coaExpiryDate}
+                      onChange={(e) => handleInputChange("coaExpiryDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Right Column */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-medium text-black mb-1">
+                      Other Registration ID
+                    </label>
+                    <input
+                      value={formData.otherRegId}
+                      onChange={(e) => handleInputChange("otherRegId", e.target.value)}
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="If any"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-black mb-1">
+                      Validity / Expiry Date
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.otherRegExpiryDate}
+                      onChange={(e) => handleInputChange("otherRegExpiryDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Indicators */}
+              <div className="flex flex-wrap gap-6 mb-6">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                  <span className="text-sm font-medium text-black">Active</span>
+                  <span className="text-xs text-gray-600">expiry is more than 30 days away</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+                  <span className="text-sm font-medium text-black">Expiring Soon</span>
+                  <span className="text-xs text-gray-600">within 30 days</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[10px] border-l-transparent border-r-transparent border-t-red-500"></div>
+                  <span className="text-sm font-medium text-black">Expired</span>
+                  <span className="text-xs text-gray-600">past date (also blocked by validation)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Documents Upload Section */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-black">
+                  Documents Upload
+                </h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4 ml-11">
+                Upload clear, legible copies (PDF/JPG)
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    PAN (PDF/JPG) *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => handleFileChange("panFile", e.target.files?.[0] || null)}
+                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  {formData.panFile && (
+                    <p className="text-xs text-green-600 mt-1">Selected: {formData.panFile.name}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Address Proof *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => handleFileChange("addressProofFile", e.target.files?.[0] || null)}
+                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  {formData.addressProofFile && (
+                    <p className="text-xs text-green-600 mt-1">Selected: {formData.addressProofFile.name}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Passport Photo *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png"
+                    onChange={(e) => handleFileChange("passportPhotoFile", e.target.files?.[0] || null)}
+                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  {formData.passportPhotoFile && (
+                    <p className="text-xs text-green-600 mt-1">Selected: {formData.passportPhotoFile.name}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Profile/Capability Statement (PDF) *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => handleFileChange("profileStatementFile", e.target.files?.[0] || null)}
+                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  {formData.profileStatementFile && (
+                    <p className="text-xs text-green-600 mt-1">Selected: {formData.profileStatementFile.name}</p>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 mt-4">
+                Max 10MB per file. Allowed: PDF, JPG, PNG.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Login & Declaration Tab */}
+        {activeTab === "login" && (
+          <div className="space-y-8">
+            {/* Login Setup Section */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-black">
+                  Login Setup
+                </h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4 ml-11">
+                Create your credentials
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Login ID *
+                  </label>
+                  <input
+                    value={formData.loginId}
+                    onChange={(e) => handleInputChange("loginId", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Choose a unique ID"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Password *
+                  </label>
+                  <input
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => handleInputChange("password", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="At least 8 characters (letters & numbers)"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Confirm Password *
+                  </label>
+                  <input
+                    type="password"
+                    value={formData.confirmPassword}
+                    onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Re-enter password"
+                  />
+                </div>
+              </div>
+
+              {/* Notifications Section */}
+              <div className="mt-6 p-4 border rounded-lg bg-gray-50">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-black">
+                      Receive critical alerts on email & SMS
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={notificationsEnabled}
+                      onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    <span className="ml-3 text-sm font-medium text-black whitespace-nowrap">
+                      Enable notifications
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Declaration Section */}
+            <div>
+              <h3 className="text-lg font-semibold text-black mb-4">
+                Declaration *
+              </h3>
+
+              <div className="border rounded-lg p-4 bg-gray-50 mb-4">
+                <textarea
+                  readOnly
+                  className="w-full h-32 p-3 bg-white border rounded-lg text-sm text-black resize-none focus:outline-none"
+                  value="I hereby declare that the information and documents submitted are true and correct to the best of my knowledge. I agree to abide by the portal Terms of Use and all applicable municipal/authority rules, and understand that any false information may result in blacklisting and/or legal action."
+                />
+              </div>
+
+              <div className="flex items-start gap-3 mb-4">
+                <input
+                  type="checkbox"
+                  checked={formData.acceptDeclaration}
+                  onChange={(e) => handleInputChange("acceptDeclaration", e.target.checked)}
+                  className="mt-1 w-4 h-4"
+                />
+                <label className="text-sm text-black">
+                  I accept the declaration.
+                </label>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                By submitting, you consent to verification of credentials with issuing bodies (COA, IEI, MCGM Empanelment, etc.)
+              </p>
+            </div>
+
+            {/* Submit Button with Previous - Only in Login & Declaration Tab */}
+            <div className="flex justify-between mt-8 pt-6 border-t">
+              <button
+                onClick={() => {
+                  const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
+                  if (currentIndex > 0) {
+                    setActiveTab(tabs[currentIndex - 1].id);
+                  }
+                }}
+                className="bg-blue-500 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-600 transition"
+              >
+                Previous
+              </button>
+              <button className="bg-blue-600 text-white px-10 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition">
+                Submit
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Navigation Buttons - Show for Profile and Credentials tabs */}
+        {activeTab !== "login" && (
+          <div className="flex justify-between mt-8 pt-6 border-t">
+            <button
+              onClick={() => {
+                const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
+                if (currentIndex > 0) {
+                  setActiveTab(tabs[currentIndex - 1].id);
+                }
+              }}
+              disabled={activeTab === "profile"}
+              className={`px-6 py-2 rounded-lg font-medium transition ${
+                activeTab === "profile"
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-blue-500 text-white shadow hover:bg-blue-600"
+              }`}
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => {
+                const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
+                if (currentIndex < tabs.length - 1) {
+                  setActiveTab(tabs[currentIndex + 1].id);
+                }
+              }}
+              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
+            >
+              Next
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ConsultantRegistrationForm;
+

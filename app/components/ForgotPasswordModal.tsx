@@ -69,7 +69,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
               {/* Login Name */}
               <div>
                 <label className="block font-medium text-black mb-1">
-                  Login Name
+                  Login Name <span className="text-red-500 text-2xl">*</span>
                 </label>
                 <input
                   className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
@@ -80,7 +80,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
               {/* Email ID */}
               <div>
                 <label className="block font-medium text-black mb-1">
-                  E-mail ID
+                  E-mail ID <span className="text-red-500 text-2xl">*</span>
                 </label>
                 <input
                   className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
@@ -91,7 +91,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
               {/* Mobile No */}
               <div>
                 <label className="block font-medium text-black mb-1">
-                  Mobile No.
+                  Mobile No. <span className="text-red-500 text-2xl">*</span>
                 </label>
                 <input
                   className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
