@@ -2,6 +2,7 @@
 
 import React, { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 
 interface Props {
   open: boolean;
@@ -9,6 +10,8 @@ interface Props {
 }
 
 const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
+  const router = useRouter();
+  
   useEffect(() => {
     if (open) {
       // Lock background scroll
@@ -58,14 +61,30 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
             transition={{ duration: 0.25 }}
           >
             {/* Header */}
-            <div className="flex justify-between items-center mb-6 pb-3 border-b">
-              <h2 className="text-2xl font-bold text-black">Forgot Password</h2>
-              <button
-                onClick={onClose}
-                className="text-2xl font-bold text-gray-700 hover:text-black"
-              >
-                ×
-              </button>
+            <div className="mb-6 pb-3 border-b">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+                <h2 className="text-2xl font-bold text-black">Owner Registration</h2>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      onClose();
+                      router.push("/");
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    <span className="font-medium">Back</span>
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="text-2xl font-bold text-gray-700 hover:text-black"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Body */}
