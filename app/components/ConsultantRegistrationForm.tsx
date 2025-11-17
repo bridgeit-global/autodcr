@@ -12,7 +12,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
 }) => {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("profile");
+  const [tabError, setTabError] = useState("");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notificationError, setNotificationError] = useState("");
   
   // Form state to preserve data across tabs
   const [formData, setFormData] = useState({
@@ -25,16 +27,15 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     pan: "",
     address: "",
     state: "",
-    authorizedSignatory: "",
+    authorizedSignatoryPhotoFile: null as File | null,
+    authorizedSignatorySignatureFile: null as File | null,
     // Credentials
     coaRegNo: "",
     coaExpiryDate: "",
     otherRegId: "",
     otherRegExpiryDate: "",
     // Files
-    panFile: null as File | null,
     addressProofFile: null as File | null,
-    passportPhotoFile: null as File | null,
     profileStatementFile: null as File | null,
     // Login
     loginId: "",
@@ -42,19 +43,36 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     confirmPassword: "",
     acceptDeclaration: false,
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    const normalizedValue =
+      field === "pan" && typeof value === "string" ? value.toUpperCase() : value;
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [field]: normalizedValue
+      };
+      validateField(field, normalizedValue, updated);
+      if (field === "password") {
+        validateField("confirmPassword", updated.confirmPassword, updated);
+      }
+      if (field === "confirmPassword") {
+        validateField("password", updated.password, updated);
+      }
+      return updated;
+    });
   };
 
   const handleFileChange = (field: string, file: File | null) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: file
-    }));
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [field]: file
+      };
+      validateField(field, file, updated);
+      return updated;
+    });
   };
 
   const tabs = [
@@ -62,6 +80,257 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     { id: "credentials", label: "Credentials & Uploads" },
     { id: "login", label: "Login & Declaration" },
   ];
+
+  const tabFieldMap: Record<string, readonly string[]> = {
+    profile: [
+      "consultantType",
+      "email",
+      "city",
+      "pincode",
+      "address",
+      "state",
+      "alternatePhone",
+      "pan",
+    ],
+    credentials: [
+      "coaRegNo",
+      "coaExpiryDate",
+      "authorizedSignatoryPhotoFile",
+      "authorizedSignatorySignatureFile",
+      "addressProofFile",
+      "profileStatementFile",
+    ],
+    login: ["loginId", "password", "confirmPassword", "acceptDeclaration"],
+  };
+
+  const tabValidationMessages: Record<string, string> = {
+    profile: "Please complete all required profile details before continuing.",
+    credentials: "Please upload all mandatory credentials and documents.",
+    login: "Please complete login setup and accept the declaration.",
+  };
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const pincodeRegex = /^\d{6}$/;
+  const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+  const setFieldError = (field: string, error: string) => {
+    setErrors((prev) => {
+      if (error) {
+        if (prev[field] === error) {
+          return prev;
+        }
+        return { ...prev, [field]: error };
+      }
+      if (!(field in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validateField = (
+    field: string,
+    value: unknown,
+    data: typeof formData = formData
+  ): boolean => {
+    let error = "";
+
+    switch (field) {
+      case "consultantType":
+        if (!value) error = "Select a consultant type";
+        break;
+      case "email":
+        if (!value) error = "Email is required";
+        else if (!emailRegex.test(value as string)) error = "Enter a valid email address";
+        break;
+      case "city":
+        if (!value) error = "City is required";
+        break;
+      case "alternatePhone":
+        if (!value) error = "Phone number is required";
+        else if (!/^\d{10}$/.test(value as string)) {
+          error = "Phone number must be 10 digits";
+        }
+        break;
+      case "pincode":
+        if (!value) error = "Pincode is required";
+        else if (!pincodeRegex.test(value as string)) error = "Enter a 6-digit pincode";
+        break;
+      case "address":
+        if (!value) error = "Address is required";
+        break;
+      case "state":
+        if (!value) error = "State is required";
+        break;
+      case "pan":
+        if (!value) error = "PAN is required";
+        else if (!panRegex.test(value as string)) {
+          error = "Enter valid PAN: first 5 letters, 4 digits, last letter";
+        }
+        break;
+      case "authorizedSignatoryPhotoFile":
+        if (!value) error = "Upload photograph";
+        break;
+      case "authorizedSignatorySignatureFile":
+        if (!value) error = "Upload signature";
+        break;
+      case "coaRegNo":
+        if (!value) error = "COA registration number is required";
+        break;
+      case "coaExpiryDate":
+        if (!value) {
+          error = "Select expiry date";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected < today) {
+            error = "Expiry date cannot be in the past";
+          }
+        }
+        break;
+      case "addressProofFile":
+        if (!value) error = "Upload address proof";
+        break;
+      case "profileStatementFile":
+        if (!value) error = "Upload profile/capability statement";
+        break;
+      case "loginId":
+        if (!value) error = "Login ID is required";
+        else if (!emailRegex.test(value as string)) error = "Enter a valid email address";
+        break;
+      case "password":
+        if (!value) error = "Password is required";
+        else if ((value as string).length < 8) error = "Password must be at least 8 characters";
+        break;
+      case "confirmPassword":
+        if (!value) error = "Confirm your password";
+        else if (value !== data.password) error = "Passwords must match";
+        break;
+      case "acceptDeclaration":
+        if (!value) error = "You must accept the declaration";
+        break;
+      default:
+        break;
+    }
+
+    setFieldError(field, error);
+    return !error;
+  };
+
+  const validateFields = (fields: readonly string[]) => {
+    let valid = true;
+    fields.forEach((field) => {
+      const value = (formData as Record<string, unknown>)[field];
+      if (!validateField(field, value)) {
+        valid = false;
+      }
+    });
+    return valid;
+  };
+
+  const validateTab = (tabId: string) => {
+    const fields = tabFieldMap[tabId] || [];
+    if (fields.length && !validateFields(fields)) {
+      return {
+        valid: false,
+        message: tabValidationMessages[tabId] || "Please complete required details before continuing.",
+      };
+    }
+
+    if (tabId === "login" && !notificationsEnabled) {
+      setNotificationError("Enable notifications to receive critical alerts.");
+      return {
+        valid: false,
+        message: "Please enable notifications to continue.",
+      };
+    }
+
+    return { valid: true, message: "" };
+  };
+
+  const handleNotificationChange = (checked: boolean) => {
+    setNotificationsEnabled(checked);
+    if (!checked) {
+      setNotificationError("Enable notifications to receive critical alerts.");
+    } else {
+      setNotificationError("");
+    }
+  };
+
+  const handleSubmitForm = () => {
+    const result = validateTab("login");
+    if (!result.valid) {
+      setTabError(result.message);
+      return;
+    }
+    // Placeholder submit handler
+    alert("Submitted successfully!");
+  };
+
+  const handleTabChange = (targetTabId: string) => {
+    if (targetTabId === activeTab) return;
+
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
+    const targetIndex = tabs.findIndex((tab) => tab.id === targetTabId);
+
+    if (targetIndex < currentIndex) {
+      setActiveTab(targetTabId);
+      setTabError("");
+      return;
+    }
+
+    const { valid, message } = validateTab(activeTab);
+
+    if (valid) {
+      setActiveTab(targetTabId);
+      setTabError("");
+    } else {
+      setTabError(message);
+    }
+  };
+
+  const getExpiryStatus = () => {
+    if (!formData.coaExpiryDate) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const expiryDate = new Date(formData.coaExpiryDate);
+    expiryDate.setHours(0, 0, 0, 0);
+
+    const diffInMs = expiryDate.getTime() - today.getTime();
+    const diffInDays = Math.ceil(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInDays > 30) {
+      return {
+        label: "Active",
+        description: "expiry is more than 30 days away",
+        icon: <div className="w-3 h-3 rounded-full bg-green-500"></div>,
+      };
+    }
+
+    if (diffInDays >= 0) {
+      return {
+        label: "Expiring Soon",
+        description: "within 30 days",
+        icon: <div className="w-3 h-3 rounded-full bg-orange-500"></div>,
+      };
+    }
+
+    return {
+      label: "Expired",
+      description: "past date (also blocked by validation)",
+      icon: (
+        <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[10px] border-l-transparent border-r-transparent border-t-red-500"></div>
+      ),
+    };
+  };
+
+  const expiryStatus = getExpiryStatus();
 
   return (
     <div className="max-w-4xl mx-auto p-8">
@@ -95,7 +364,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
               className={`px-6 py-3 font-medium text-sm transition-colors ${
                 activeTab === tab.id
                   ? "border-b-2 border-blue-600 text-blue-600"
@@ -110,6 +379,12 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
 
       {/* Tab Content */}
       <div className="space-y-6">
+        {tabError && (
+          <div className="p-3 border border-red-200 bg-red-50 text-sm text-red-700 rounded-lg">
+            {tabError}
+          </div>
+        )}
+
         {/* Profile Tab */}
         {activeTab === "profile" && (
           <div className="space-y-6">
@@ -152,6 +427,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     <option>Environmental Consultant</option>
                     <option>Valuer</option>
                   </select>
+                  {errors.consultantType && (
+                    <p className="text-xs text-red-600 mt-1">{errors.consultantType}</p>
+                  )}
                 </div>
 
                 <div>
@@ -173,6 +451,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                       Verify
                     </button>
                   </div>
+                  {errors.email && (
+                    <p className="text-xs text-red-600 mt-1">{errors.email}</p>
+                  )}
                 </div>
 
                 {/* Row 2 */}
@@ -186,18 +467,32 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter City"
                   />
+                  {errors.city && (
+                    <p className="text-xs text-red-600 mt-1">{errors.city}</p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Alternate Phone
+                    Phone Number
                   </label>
-                  <input
-                    value={formData.alternatePhone}
-                    onChange={(e) => handleInputChange("alternatePhone", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Optional"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      value={formData.alternatePhone}
+                      onChange={(e) => handleInputChange("alternatePhone", e.target.value)}
+                      className="border rounded-lg px-3 py-2 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="Optional"
+                    />
+                    <button
+                      type="button"
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition whitespace-nowrap"
+                    >
+                      Verify
+                    </button>
+                  </div>
+                  {errors.alternatePhone && (
+                    <p className="text-xs text-red-600 mt-1">{errors.alternatePhone}</p>
+                  )}
                 </div>
 
                 {/* Row 3 */}
@@ -211,6 +506,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter Pincode"
                   />
+                  {errors.pincode && (
+                    <p className="text-xs text-red-600 mt-1">{errors.pincode}</p>
+                  )}
                 </div>
 
                 <div>
@@ -223,6 +521,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="ABCDE1234F"
                   />
+                  {errors.pan && (
+                    <p className="text-xs text-red-600 mt-1">{errors.pan}</p>
+                  )}
                 </div>
 
                 {/* Row 4 */}
@@ -236,6 +537,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Office address"
                   />
+                  {errors.address && (
+                    <p className="text-xs text-red-600 mt-1">{errors.address}</p>
+                  )}
                 </div>
 
                 <div>
@@ -248,20 +552,12 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter State"
                   />
+                  {errors.state && (
+                    <p className="text-xs text-red-600 mt-1">{errors.state}</p>
+                  )}
                 </div>
 
-                {/* Row 5 */}
-                <div className="md:col-span-2">
-                  <label className="block font-medium text-black mb-1">
-                    Authorized Signatory *
-                  </label>
-                  <input
-                    value={formData.authorizedSignatory}
-                    onChange={(e) => handleInputChange("authorizedSignatory", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Name of authorized signatory"
-                  />
-                </div>
+                {/* Row 5 intentionally left blank to keep layout balanced */}
               </div>
             </div>
           </div>
@@ -286,9 +582,8 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                 Enter IDs & Expiry Dates
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                {/* Left Column */}
-                <div className="space-y-4">
+              <div className="mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block font-medium text-black mb-1">
                       Council of Architecture (COA) Reg. No.
@@ -299,65 +594,40 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                       className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                       placeholder="Enter number"
                     />
+                    {errors.coaRegNo && (
+                      <p className="text-xs text-red-600 mt-1">{errors.coaRegNo}</p>
+                    )}
                   </div>
 
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      Validity / Expiry Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.coaExpiryDate}
-                      onChange={(e) => handleInputChange("coaExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Validity / Expiry Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.coaExpiryDate}
+                    onChange={(e) => handleInputChange("coaExpiryDate", e.target.value)}
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  {expiryStatus ? (
+                    <div className="flex items-center gap-2 mt-2">
+                      {expiryStatus.icon}
+                      <span className="text-sm font-medium text-black">
+                        {expiryStatus.label}
+                      </span>
+                      <span className="text-xs text-gray-600">
+                        {expiryStatus.description}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Select an expiry date to view status.
+                    </p>
+                  )}
+                  {errors.coaExpiryDate && (
+                    <p className="text-xs text-red-600 mt-1">{errors.coaExpiryDate}</p>
+                  )}
                 </div>
-
-                {/* Right Column */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      Other Registration ID
-                    </label>
-                    <input
-                      value={formData.otherRegId}
-                      onChange={(e) => handleInputChange("otherRegId", e.target.value)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                      placeholder="If any"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      Validity / Expiry Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.otherRegExpiryDate}
-                      onChange={(e) => handleInputChange("otherRegExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Indicators */}
-              <div className="flex flex-wrap gap-6 mb-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                  <span className="text-sm font-medium text-black">Active</span>
-                  <span className="text-xs text-gray-600">expiry is more than 30 days away</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                  <span className="text-sm font-medium text-black">Expiring Soon</span>
-                  <span className="text-xs text-gray-600">within 30 days</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[10px] border-l-transparent border-r-transparent border-t-red-500"></div>
-                  <span className="text-sm font-medium text-black">Expired</span>
-                  <span className="text-xs text-gray-600">past date (also blocked by validation)</span>
                 </div>
               </div>
             </div>
@@ -381,16 +651,45 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    PAN (PDF/JPG) *
+                    Authorized Signatory Photograph *
                   </label>
                   <input
                     type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={(e) => handleFileChange("panFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    accept=".jpg,.jpeg,.png"
+                    onChange={(e) =>
+                      handleFileChange("authorizedSignatoryPhotoFile", e.target.files?.[0] || null)
+                    }
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                   />
-                  {formData.panFile && (
-                    <p className="text-xs text-green-600 mt-1">Selected: {formData.panFile.name}</p>
+                  {formData.authorizedSignatoryPhotoFile && (
+                    <p className="text-xs text-green-600 mt-1">
+                      Selected: {formData.authorizedSignatoryPhotoFile.name}
+                    </p>
+                  )}
+                  {errors.authorizedSignatoryPhotoFile && (
+                    <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatoryPhotoFile}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Authorized Signatory Signature *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png"
+                    onChange={(e) =>
+                      handleFileChange("authorizedSignatorySignatureFile", e.target.files?.[0] || null)
+                    }
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  {formData.authorizedSignatorySignatureFile && (
+                    <p className="text-xs text-green-600 mt-1">
+                      Selected: {formData.authorizedSignatorySignatureFile.name}
+                    </p>
+                  )}
+                  {errors.authorizedSignatorySignatureFile && (
+                    <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatorySignatureFile}</p>
                   )}
                 </div>
 
@@ -402,25 +701,13 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.png"
                     onChange={(e) => handleFileChange("addressProofFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                   {formData.addressProofFile && (
                     <p className="text-xs text-green-600 mt-1">Selected: {formData.addressProofFile.name}</p>
                   )}
-                </div>
-
-                <div>
-                  <label className="block font-medium text-black mb-1">
-                    Passport Photo *
-                  </label>
-                  <input
-                    type="file"
-                    accept=".jpg,.jpeg,.png"
-                    onChange={(e) => handleFileChange("passportPhotoFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                  {formData.passportPhotoFile && (
-                    <p className="text-xs text-green-600 mt-1">Selected: {formData.passportPhotoFile.name}</p>
+                  {errors.addressProofFile && (
+                    <p className="text-xs text-red-600 mt-1">{errors.addressProofFile}</p>
                   )}
                 </div>
 
@@ -432,10 +719,15 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     type="file"
                     accept=".pdf"
                     onChange={(e) => handleFileChange("profileStatementFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full bg-gray-50 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                   {formData.profileStatementFile && (
-                    <p className="text-xs text-green-600 mt-1">Selected: {formData.profileStatementFile.name}</p>
+                    <p className="text-xs text-green-600 mt-1">
+                      Selected: {formData.profileStatementFile.name}
+                    </p>
+                  )}
+                  {errors.profileStatementFile && (
+                    <p className="text-xs text-red-600 mt-1">{errors.profileStatementFile}</p>
                   )}
                 </div>
               </div>
@@ -472,11 +764,15 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     Login ID *
                   </label>
                   <input
+                    type="email"
                     value={formData.loginId}
                     onChange={(e) => handleInputChange("loginId", e.target.value)}
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Choose a unique ID"
+                    placeholder="Enter email ID"
                   />
+                  {errors.loginId && (
+                    <p className="text-xs text-red-600 mt-1">{errors.loginId}</p>
+                  )}
                 </div>
 
                 <div>
@@ -490,6 +786,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="At least 8 characters (letters & numbers)"
                   />
+                  {errors.password && (
+                    <p className="text-xs text-red-600 mt-1">{errors.password}</p>
+                  )}
                 </div>
 
                 <div>
@@ -503,6 +802,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Re-enter password"
                   />
+                  {errors.confirmPassword && (
+                    <p className="text-xs text-red-600 mt-1">{errors.confirmPassword}</p>
+                  )}
                 </div>
               </div>
 
@@ -518,7 +820,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     <input
                       type="checkbox"
                       checked={notificationsEnabled}
-                      onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                      onChange={(e) => handleNotificationChange(e.target.checked)}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
@@ -527,6 +829,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     </span>
                   </label>
                 </div>
+                {notificationError && (
+                  <p className="text-xs text-red-600 mt-2">{notificationError}</p>
+                )}
               </div>
             </div>
 
@@ -555,6 +860,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   I accept the declaration.
                 </label>
               </div>
+              {errors.acceptDeclaration && (
+                <p className="text-xs text-red-600">{errors.acceptDeclaration}</p>
+              )}
 
               <p className="text-xs text-gray-500">
                 By submitting, you consent to verification of credentials with issuing bodies (COA, IEI, MCGM Empanelment, etc.)
@@ -565,16 +873,20 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
             <div className="flex justify-between mt-8 pt-6 border-t">
               <button
                 onClick={() => {
-                  const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
+                const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
                   if (currentIndex > 0) {
-                    setActiveTab(tabs[currentIndex - 1].id);
+                  setActiveTab(tabs[currentIndex - 1].id);
                   }
                 }}
                 className="bg-blue-500 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-600 transition"
               >
                 Previous
               </button>
-              <button className="bg-blue-600 text-white px-10 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition">
+              <button
+                type="button"
+                onClick={handleSubmitForm}
+                className="bg-blue-600 text-white px-10 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
+              >
                 Submit
               </button>
             </div>
@@ -589,6 +901,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                 const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
                 if (currentIndex > 0) {
                   setActiveTab(tabs[currentIndex - 1].id);
+                  setTabError("");
                 }
               }}
               disabled={activeTab === "profile"}
@@ -604,7 +917,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
               onClick={() => {
                 const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
                 if (currentIndex < tabs.length - 1) {
-                  setActiveTab(tabs[currentIndex + 1].id);
+                  handleTabChange(tabs[currentIndex + 1].id);
                 }
               }}
               className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
