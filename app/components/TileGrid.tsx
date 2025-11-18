@@ -33,6 +33,10 @@ const TileGrid = ({ tiles }: TileGridProps) => {
       router.push("/owner");
       return;
     }
+    else if (item === "Consultant") {
+      router.push("/consultant");
+      return;
+    }
     
     const modalKey = MODAL_KEYS[item];
     if (modalKey) setActiveModal(modalKey);

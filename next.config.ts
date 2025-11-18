@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
 			},
 		],
 	},
+	// Turbopack configuration - empty config to silence the warning
+	// The dynamic import with ssr: false in RegistrationForm handles the canvas module issue
+	turbopack: {},
 };
 
 export default nextConfig;
