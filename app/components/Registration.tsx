@@ -16,16 +16,9 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
     if (open) {
       // Lock background scroll
       document.body.style.overflow = "hidden";
-  
-      // Scroll window to top
-      setTimeout(() => {
-        window.scrollTo(0, 0);
-      }, 10);
-  
-      // Scroll modal content to top
+      // Ensure modal content starts at the top without altering page scroll
       const modal = document.getElementById("modal-content");
       if (modal) modal.scrollTop = 0;
-  
     } else {
       document.body.style.overflow = "auto";
     }

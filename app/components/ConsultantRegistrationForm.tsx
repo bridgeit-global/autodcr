@@ -7,16 +7,15 @@ interface ConsultantRegistrationFormProps {
   title?: string;
 }
 
-const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({ 
-  title = "Consultant Registration" 
+const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
+  title = "Consultant Registration"
 }) => {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("profile");
-  const [tabError, setTabError] = useState("");
+  const [formError, setFormError] = useState("");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationError, setNotificationError] = useState("");
   
-  // Form state to preserve data across tabs
+  // Form state to preserve data across sections
   const [formData, setFormData] = useState({
     // Profile
     consultantType: "",
@@ -75,38 +74,41 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     });
   };
 
-  const tabs = [
-    { id: "profile", label: "Profile" },
-    { id: "credentials", label: "Credentials & Uploads" },
-    { id: "login", label: "Login & Declaration" },
+  const sections = [
+    { id: "consultant-profile", label: "Profile" },
+    { id: "consultant-credentials", label: "Credentials & Uploads" },
+    { id: "consultant-login", label: "Login & Declaration" },
   ];
 
-  const tabFieldMap: Record<string, readonly string[]> = {
-    profile: [
-      "consultantType",
-      "email",
-      "city",
-      "pincode",
-      "address",
-      "state",
-      "alternatePhone",
-      "pan",
-    ],
-    credentials: [
-      "coaRegNo",
-      "coaExpiryDate",
-      "authorizedSignatoryPhotoFile",
-      "authorizedSignatorySignatureFile",
-      "addressProofFile",
-      "profileStatementFile",
-    ],
-    login: ["loginId", "password", "confirmPassword", "acceptDeclaration"],
-  };
+  const profileFields: readonly string[] = [
+    "consultantType",
+    "email",
+    "city",
+    "pincode",
+    "address",
+    "state",
+    "alternatePhone",
+    "pan",
+  ];
 
-  const tabValidationMessages: Record<string, string> = {
-    profile: "Please complete all required profile details before continuing.",
-    credentials: "Please upload all mandatory credentials and documents.",
-    login: "Please complete login setup and accept the declaration.",
+  const credentialFields: readonly string[] = [
+    "coaRegNo",
+    "coaExpiryDate",
+    "authorizedSignatoryPhotoFile",
+    "authorizedSignatorySignatureFile",
+    "addressProofFile",
+    "profileStatementFile",
+  ];
+
+  const loginFields: readonly string[] = ["loginId", "password", "confirmPassword", "acceptDeclaration"];
+
+  const requiredFields = [...profileFields, ...credentialFields, ...loginFields];
+
+  const scrollToSection = (sectionId: string) => {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -232,65 +234,30 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     return valid;
   };
 
-  const validateTab = (tabId: string) => {
-    const fields = tabFieldMap[tabId] || [];
-    if (fields.length && !validateFields(fields)) {
-      return {
-        valid: false,
-        message: tabValidationMessages[tabId] || "Please complete required details before continuing.",
-      };
-    }
-
-    if (tabId === "login" && !notificationsEnabled) {
-      setNotificationError("Enable notifications to receive critical alerts.");
-      return {
-        valid: false,
-        message: "Please enable notifications to continue.",
-      };
-    }
-
-    return { valid: true, message: "" };
-  };
-
   const handleNotificationChange = (checked: boolean) => {
     setNotificationsEnabled(checked);
     if (!checked) {
       setNotificationError("Enable notifications to receive critical alerts.");
     } else {
       setNotificationError("");
+      setFormError("");
     }
   };
 
   const handleSubmitForm = () => {
-    const result = validateTab("login");
-    if (!result.valid) {
-      setTabError(result.message);
+    const isValid = validateFields(requiredFields);
+    if (!isValid) {
+      setFormError("Please complete all required details before submitting.");
       return;
     }
+    if (!notificationsEnabled) {
+      setNotificationError("Enable notifications to receive critical alerts.");
+      setFormError("Please enable notifications to continue.");
+      return;
+    }
+    setFormError("");
     // Placeholder submit handler
     alert("Submitted successfully!");
-  };
-
-  const handleTabChange = (targetTabId: string) => {
-    if (targetTabId === activeTab) return;
-
-    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
-    const targetIndex = tabs.findIndex((tab) => tab.id === targetTabId);
-
-    if (targetIndex < currentIndex) {
-      setActiveTab(targetTabId);
-      setTabError("");
-      return;
-    }
-
-    const { valid, message } = validateTab(activeTab);
-
-    if (valid) {
-      setActiveTab(targetTabId);
-      setTabError("");
-    } else {
-      setTabError(message);
-    }
   };
 
   const getExpiryStatus = () => {
@@ -358,38 +325,33 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
         </nav>
       </div>
 
-      {/* Tabs */}
-      <div className="mb-6 border-b">
-        <div className="flex space-x-1">
-          {tabs.map((tab) => (
+      {/* Navigation Menu */}
+      <div className="sticky top-0 z-50 bg-white border-b shadow-sm mb-6">
+        <div className="flex flex-wrap gap-2 p-4">
+          {sections.map((section) => (
             <button
-              key={tab.id}
-              onClick={() => handleTabChange(tab.id)}
-              className={`px-6 py-3 font-medium text-sm transition-colors ${
-                activeTab === tab.id
-                  ? "border-b-2 border-blue-600 text-blue-600"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
+              key={section.id}
+              type="button"
+              onClick={() => scrollToSection(section.id)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
             >
-              {tab.label}
+              {section.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Tab Content */}
       <div className="space-y-6">
-        {tabError && (
+        {formError && (
           <div className="p-3 border border-red-200 bg-red-50 text-sm text-red-700 rounded-lg">
-            {tabError}
+            {formError}
           </div>
         )}
 
-        {/* Profile Tab */}
-        {activeTab === "profile" && (
+        {/* Profile Section */}
           <div className="space-y-6">
             {/* Basic Details Section */}
-            <div>
+            <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
                   <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -413,7 +375,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <select 
                     value={formData.consultantType}
                     onChange={(e) => handleInputChange("consultantType", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                   >
                     <option value="">Select</option>
                     <option>Architect</option>
@@ -441,7 +403,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                       type="email"
                       value={formData.email}
                       onChange={(e) => handleInputChange("email", e.target.value)}
-                      className="border rounded-lg px-3 py-2 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
                       placeholder="name@example.com"
                     />
                     <button
@@ -464,7 +426,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <input
                     value={formData.city}
                     onChange={(e) => handleInputChange("city", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter City"
                   />
                   {errors.city && (
@@ -480,7 +442,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     <input
                       value={formData.alternatePhone}
                       onChange={(e) => handleInputChange("alternatePhone", e.target.value)}
-                      className="border rounded-lg px-3 py-2 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
                       placeholder="Optional"
                     />
                     <button
@@ -503,7 +465,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <input
                     value={formData.pincode}
                     onChange={(e) => handleInputChange("pincode", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter Pincode"
                   />
                   {errors.pincode && (
@@ -518,7 +480,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <input
                     value={formData.pan}
                     onChange={(e) => handleInputChange("pan", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="ABCDE1234F"
                   />
                   {errors.pan && (
@@ -534,7 +496,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <input
                     value={formData.address}
                     onChange={(e) => handleInputChange("address", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Office address"
                   />
                   {errors.address && (
@@ -549,7 +511,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <input
                     value={formData.state}
                     onChange={(e) => handleInputChange("state", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter State"
                   />
                   {errors.state && (
@@ -561,13 +523,11 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
               </div>
             </div>
           </div>
-        )}
 
-        {/* Credentials & Uploads Tab */}
-        {activeTab === "credentials" && (
+        {/* Credentials & Uploads Section */}
           <div className="space-y-8">
             {/* Registration Numbers Section */}
-            <div>
+            <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
                   <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -591,7 +551,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     <input
                       value={formData.coaRegNo}
                       onChange={(e) => handleInputChange("coaRegNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                       placeholder="Enter number"
                     />
                     {errors.coaRegNo && (
@@ -603,12 +563,23 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                   <label className="block font-medium text-black mb-1">
                     Validity / Expiry Date
                   </label>
-                  <input
-                    type="date"
-                    value={formData.coaExpiryDate}
-                    onChange={(e) => handleInputChange("coaExpiryDate", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={formData.coaExpiryDate}
+                      onChange={(e) => handleInputChange("coaExpiryDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 pr-10 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-2 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    <svg 
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
                   {expiryStatus ? (
                     <div className="flex items-center gap-2 mt-2">
                       {expiryStatus.icon}
@@ -633,7 +604,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
             </div>
 
             {/* Documents Upload Section */}
-            <div>
+            <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
                   <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -737,13 +708,11 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
               </p>
             </div>
           </div>
-        )}
 
-        {/* Login & Declaration Tab */}
-        {activeTab === "login" && (
+        {/* Login & Declaration Section */}
           <div className="space-y-8">
             {/* Login Setup Section */}
-            <div>
+            <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
                   <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -767,7 +736,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     type="email"
                     value={formData.loginId}
                     onChange={(e) => handleInputChange("loginId", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Enter email ID"
                   />
                   {errors.loginId && (
@@ -783,7 +752,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     type="password"
                     value={formData.password}
                     onChange={(e) => handleInputChange("password", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="At least 8 characters (letters & numbers)"
                   />
                   {errors.password && (
@@ -799,7 +768,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
                     type="password"
                     value={formData.confirmPassword}
                     onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Re-enter password"
                   />
                   {errors.confirmPassword && (
@@ -836,7 +805,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
             </div>
 
             {/* Declaration Section */}
-            <div>
+            <div className="border rounded-lg p-4 bg-white">
               <h3 className="text-lg font-semibold text-black mb-4">
                 Declaration *
               </h3>
@@ -869,63 +838,16 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
               </p>
             </div>
 
-            {/* Submit Button with Previous - Only in Login & Declaration Tab */}
-            <div className="flex justify-between mt-8 pt-6 border-t">
-              <button
-                onClick={() => {
-                const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
-                  if (currentIndex > 0) {
-                  setActiveTab(tabs[currentIndex - 1].id);
-                  }
-                }}
-                className="bg-blue-500 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-600 transition"
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmitForm}
-                className="bg-blue-600 text-white px-10 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
-              >
-                Submit
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Navigation Buttons - Show for Profile and Credentials tabs */}
-        {activeTab !== "login" && (
-          <div className="flex justify-between mt-8 pt-6 border-t">
+          <div className="flex justify-end mt-8 pt-6 border-t">
             <button
-              onClick={() => {
-                const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
-                if (currentIndex > 0) {
-                  setActiveTab(tabs[currentIndex - 1].id);
-                  setTabError("");
-                }
-              }}
-              disabled={activeTab === "profile"}
-              className={`px-6 py-2 rounded-lg font-medium transition ${
-                activeTab === "profile"
-                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-500 text-white shadow hover:bg-blue-600"
-              }`}
+              type="button"
+              onClick={handleSubmitForm}
+              className="bg-blue-600 text-white px-10 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
             >
-              Previous
-            </button>
-            <button
-              onClick={() => {
-                const currentIndex = tabs.findIndex(tab => tab.id === activeTab);
-                if (currentIndex < tabs.length - 1) {
-                  handleTabChange(tabs[currentIndex + 1].id);
-                }
-              }}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium shadow hover:bg-blue-700 transition"
-            >
-              Next
+              Submit
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
