@@ -349,7 +349,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
         )}
 
         {/* Profile Section */}
-          <div className="space-y-6">
+          <div id="consultant-profile" className="scroll-mt-24 space-y-6">
             {/* Basic Details Section */}
             <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
@@ -525,7 +525,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
           </div>
 
         {/* Credentials & Uploads Section */}
-          <div className="space-y-8">
+          <div id="consultant-credentials" className="scroll-mt-24 space-y-8">
             {/* Registration Numbers Section */}
             <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
@@ -710,7 +710,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
           </div>
 
         {/* Login & Declaration Section */}
-          <div className="space-y-8">
+          <div id="consultant-login" className="scroll-mt-24 space-y-8">
             {/* Login Setup Section */}
             <div className="border rounded-lg p-4 bg-white">
               <div className="flex items-center gap-3 mb-2">
