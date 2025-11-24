@@ -76,7 +76,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
               className="flex items-center gap-2 hover:bg-sky-800 px-3 py-2 rounded transition-colors"
             >
               <div className="text-right">
-                <div className="text-sm font-medium">Sana N Malik Shaikh</div>
+                <div className="text-sm font-medium">Ansari Munib Naeemuddin</div>
                 <div className="text-xs text-gray-300">Architect</div>
               </div>
               <svg
