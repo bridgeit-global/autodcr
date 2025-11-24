@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useRouter } from "next/navigation";
 import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
 
@@ -17,6 +18,7 @@ type LoginForm = {
 };
 
 const HeroSection = ({ slides }: HeroSectionProps) => {
+  const router = useRouter();
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -32,6 +34,8 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
   const onSubmit = (data: LoginForm) => {
     console.log("Login Data:", data);
+    // Navigate to dashboard on successful login (irrespective of backend connectivity)
+    router.push("/dashboard/project-details");
     reset();
   };
 
