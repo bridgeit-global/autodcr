@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
+import DraftApplicationsModal, { DraftApplication } from "../components/DraftApplicationsModal";
 
 type ApplicationType = {
   name: string;
@@ -17,6 +18,215 @@ type ApplicationType = {
   approvedOrVerified: number | string;
   systemApproved: number | string;
 };
+
+const departments = [
+  "Building Permission",
+  "Fire",
+  "Traffic and Co-ordination",
+  "Solid Waste Management",
+  "Assessment and Collection Dept",
+  "Storm Water Drain (Internal)",
+  "Garden (Tree)",
+  "Road Planning",
+  "Mechanical & Electrical",
+  "Hydraulic Engineering",
+  "Pest Control",
+  "Sewerage",
+  "High Rise Building Commitee",
+  "Mumbai Heritage Conservation Committee",
+  "Revenue- Excavation Permission",
+  "Development Plan",
+  "Electricity",
+  "National Monuments Authority",
+  "Advertisement",
+  "Indian Railways",
+  "DP(TDR)",
+  "Estate and Land Management",
+  "Airport Authority of India",
+  "General",
+];
+
+const DEVELOPMENT_PLAN_APPLICATION_DATA: ApplicationType[] = [
+  {
+    name: "Survey",
+    draft: 1,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+];
+
+const GENERAL_APPLICATION_DATA: ApplicationType[] = [
+  {
+    name: "Acceptance by Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Architect Licensed Surveyor",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Fire Safety Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Horticulturist",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "M&E Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Parking Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Plumber",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Rain Water Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Site Supervisor",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Structural Engineer",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Development Completion Certificate",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Notice for Start of Work",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Owners Plot Area Affidavit",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Plot Area Certificate",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Supervision Memo of Architect",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+];
 
 const APPLICATION_DATA: ApplicationType[] = [
   {
@@ -157,7 +367,6 @@ const ANNOUNCEMENTS = [
   "Now Developers/Owners can Avail their \"User Id\" by using forgot User name under Registration in case they have forgot user name.",
   "Dear Users, it is recommended to have 16 mbps of internet bandwidth on your local laptop/ PC for optimized application access.",
   "All Developers/Architects who have uploaded the valid C& D transport approval in the AutoDCR for IOD/CC/OCC etc. after 15th March 2018 or auto generated the C& D approval from system, then they must upload the details of transportation of C& D waste in AutoDCR portal by 04/Aug/2018.",
-  "As per instruction of then ChE DP, all staff members were informed that all refusals will be given by only by approving authority and at the most by ExE. This is not being followed and ExE are instructed to warn concerned for lanses observed Also when",
 ];
 
 type MenuItem = {
@@ -291,13 +500,56 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
   );
 };
 
+// Sample draft applications data
+const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
+  "Survey": [
+    {
+      applicationNo: "Need to discuss",
+      ward: "M/E Ward",
+      applicationType: "Survey",
+      status: "Draft",
+      startedOn: "10-09-2025",
+      currentStage: 0,
+    },
+  ],
+  "Commencement": [
+    {
+      applicationNo: "Need to discuss",
+      ward: "M/E Ward",
+      applicationType: "Commencement",
+      status: "Draft",
+      startedOn: "10-09-2025",
+      currentStage: 0,
+    },
+  ],
+};
+
 export default function UserDashboardPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("tile-view");
   const [selectedProject, setSelectedProject] = useState("All");
   const [selectedApplicationType, setSelectedApplicationType] = useState("Building Permission");
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
   const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
+  const [selectedDraftApp, setSelectedDraftApp] = useState<{ appType: string; status: string } | null>(null);
+
+  // Read department from URL query parameter
+  useEffect(() => {
+    const departmentParam = searchParams.get("department");
+    if (departmentParam && departments.includes(departmentParam)) {
+      setSelectedApplicationType(departmentParam);
+    }
+  }, [searchParams]);
+
+  const handleCellClick = (appType: string, count: number | string, status: string) => {
+    if (count && count !== "-" && Number(count) > 0) {
+      setSelectedDraftApp({ appType, status });
+      setIsDraftModalOpen(true);
+    }
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -339,12 +591,12 @@ export default function UserDashboardPage() {
                   <select
                     value={selectedProject}
                     onChange={(e) => setSelectedProject(e.target.value)}
-                    className="border border-gray-300 rounded px-3 py-2 text-sm bg-white"
+                    className="border border-black rounded px-3 py-2 text-sm text-black bg-white"
                   >
                     <option>All</option>
                     <option>Select Project</option>
                   </select>
-                  <select className="border border-gray-300 rounded px-3 py-2 text-sm bg-white">
+                  <select className="border border-black rounded px-3 py-2 text-sm text-black bg-white">
                     <option>Select Project</option>
                   </select>
                 </div>
@@ -383,30 +635,45 @@ export default function UserDashboardPage() {
                   </button>
                 </div>
 
-                {/* Right Dropdown and Buttons */}
-                <div className="flex items-center gap-2">
+                {/* Dropdown and Buttons Row */}
+                <div className="flex items-center justify-between w-full">
+                  {/* Left - Department Dropdown */}
                   <select
                     value={selectedApplicationType}
                     onChange={(e) => setSelectedApplicationType(e.target.value)}
-                    className="border border-gray-300 rounded px-3 py-2 text-sm bg-white"
+                    className="border border-black rounded px-3 py-2 text-sm text-black bg-white"
                   >
-                    <option>Building Permission</option>
+                    {departments.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
                   </select>
-                  <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
-                    Go
-                  </button>
-                  <button
-                    onClick={() => setIsProjectModalOpen(true)}
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-                  >
-                    + Projects
-                  </button>
-                  <button
-                    onClick={() => setIsApplicationModalOpen(true)}
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-                  >
-                    + Applications
-                  </button>
+
+                  {/* Right - 4 Buttons */}
+                  <div className="flex items-center gap-2">
+                    <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
+                      Go
+                    </button>
+                    <button
+                      onClick={() => setIsProjectModalOpen(true)}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
+                    >
+                      + Projects
+                    </button>
+                    <button
+                      onClick={() => setIsApplicationModalOpen(true)}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
+                    >
+                      + Applications
+                    </button>
+                    <button
+                      onClick={() => router.push("/template")}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
+                    >
+                      Template
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -414,9 +681,9 @@ export default function UserDashboardPage() {
             {/* Main Data Table */}
             {activeTab === "tile-view" && (
               <div className="bg-white rounded-lg border border-gray-300 overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-96">
                   <table className="w-full text-sm border-collapse">
-                    <thead>
+                    <thead className="sticky top-0 z-10">
                       <tr>
                         <th className="bg-green-100 border border-gray-300 px-4 py-3 text-left font-semibold text-black">
                           Application Type
@@ -448,33 +715,61 @@ export default function UserDashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {APPLICATION_DATA.map((app, index) => (
+                      {(selectedApplicationType === "General" 
+                        ? GENERAL_APPLICATION_DATA 
+                        : selectedApplicationType === "Development Plan" 
+                        ? DEVELOPMENT_PLAN_APPLICATION_DATA 
+                        : APPLICATION_DATA).map((app, index) => (
                         <tr key={index} className="hover:bg-gray-50">
                           <td className="border border-gray-300 px-4 py-3 text-left font-medium text-black">
                             {app.name}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.draft && app.draft !== "-" && Number(app.draft) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.draft, "Draft")}
+                          >
                             {app.draft}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.duePayment && app.duePayment !== "-" && Number(app.duePayment) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.duePayment, "Due Payment")}
+                          >
                             {app.duePayment}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.inProcess && app.inProcess !== "-" && Number(app.inProcess) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.inProcess, "In Process")}
+                          >
                             {app.inProcess}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.needClarification && app.needClarification !== "-" && Number(app.needClarification) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.needClarification, "Need Clarification")}
+                          >
                             {app.needClarification}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.withdrawn && app.withdrawn !== "-" && Number(app.withdrawn) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.withdrawn, "Withdrawn")}
+                          >
                             {app.withdrawn}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.rejectedOrCancelled && app.rejectedOrCancelled !== "-" && Number(app.rejectedOrCancelled) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.rejectedOrCancelled, "Rejected or Cancelled")}
+                          >
                             {app.rejectedOrCancelled}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.approvedOrVerified && app.approvedOrVerified !== "-" && Number(app.approvedOrVerified) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.approvedOrVerified, "Approved or Verified")}
+                          >
                             {app.approvedOrVerified}
                           </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black">
+                          <td 
+                            className={`border border-gray-300 px-4 py-3 text-center ${app.systemApproved && app.systemApproved !== "-" && Number(app.systemApproved) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
+                            onClick={() => handleCellClick(app.name, app.systemApproved, "System Approved")}
+                          >
                             {app.systemApproved}
                           </td>
                         </tr>
@@ -535,6 +830,20 @@ export default function UserDashboardPage() {
         items={PROJECT_MENU_ITEMS}
         title="Projects"
       />
+
+      {/* Draft Applications Modal */}
+      {selectedDraftApp && (
+        <DraftApplicationsModal
+          open={isDraftModalOpen}
+          onClose={() => {
+            setIsDraftModalOpen(false);
+            setSelectedDraftApp(null);
+          }}
+          appType={selectedDraftApp.appType}
+          status={selectedDraftApp.status}
+          applications={DRAFT_APPLICATIONS[selectedDraftApp.appType] || []}
+        />
+      )}
     </div>
   );
 }
