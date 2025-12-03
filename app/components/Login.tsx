@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useRouter } from "next/navigation";
 import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
 
@@ -17,6 +18,7 @@ type LoginForm = {
 };
 
 const HeroSection = ({ slides }: HeroSectionProps) => {
+  const router = useRouter();
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -30,9 +32,31 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
     reset
   } = useForm<LoginForm>();
 
+  // Dummy credentials for login
+  const DUMMY_CREDENTIALS = {
+    username: "admin",
+    password: "admin123",
+    captcha: "9822" // The captcha shown is "98•22" but user should enter "9822"
+  };
+
+  const [loginError, setLoginError] = useState<string>("");
+
   const onSubmit = (data: LoginForm) => {
     console.log("Login Data:", data);
-    reset();
+    setLoginError("");
+    
+    // Validate credentials
+    if (
+      data.username === DUMMY_CREDENTIALS.username &&
+      data.password === DUMMY_CREDENTIALS.password &&
+      data.captcha === DUMMY_CREDENTIALS.captcha
+    ) {
+      // Navigate to dashboard on successful login
+      router.push("/userdashboard");
+      reset();
+    } else {
+      setLoginError("Invalid username, password, or captcha. Please try again.");
+    }
   };
 
   const goToPrev = () => {
@@ -171,6 +195,11 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                 </div>
                 {errors.captcha && (
                   <p className="text-red-600 text-sm">{errors.captcha.message}</p>
+                )}
+
+                {/* Login Error Message */}
+                {loginError && (
+                  <p className="text-red-600 text-sm">{loginError}</p>
                 )}
 
                 {/* Buttons */}
