@@ -89,7 +89,7 @@ type FormValues = {
   designation: string;
   mobile: string;
   email: string;
-  loginId: string;
+  userId: string;
   password: string;
   confirmPassword: string;
   
@@ -1034,14 +1034,14 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ title = "Registrati
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block font-medium text-black mb-1">
-                Preferred Login ID <span className="text-red-500">*</span>
+                Preferred User ID <span className="text-red-500">*</span>
               </label>
               <input
-                {...register("loginId", { required: "Login ID is required" })}
+                {...register("userId", { required: "User ID is required" })}
                 className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="e.g. xyz.developer01"
               />
-              {errors.loginId && <p className="text-red-600 text-sm mt-1">{errors.loginId.message}</p>}
+              {errors.userId && <p className="text-red-600 text-sm mt-1">{errors.userId.message}</p>}
             </div>
 
             <div>

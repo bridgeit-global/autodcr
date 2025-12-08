@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardHeader from "../components/DashboardHeader";
@@ -524,7 +524,7 @@ const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
   ],
 };
 
-export default function UserDashboardPage() {
+function UserDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("tile-view");
@@ -848,3 +848,17 @@ export default function UserDashboardPage() {
   );
 }
 
+export default function UserDashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <UserDashboardContent />
+    </Suspense>
+  );
+}

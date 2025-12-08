@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
+import { supabase } from "../utils/supabase";
 
 type HeroSectionProps = {
   slides: string[];
@@ -17,12 +18,25 @@ type LoginForm = {
   captcha: string;
 };
 
+// Generate random captcha code
+const generateCaptcha = () => {
+  const num1 = Math.floor(Math.random() * 90 + 10); // 2-digit number
+  const num2 = Math.floor(Math.random() * 90 + 10); // 2-digit number
+  return {
+    display: `${num1}•${num2}`,
+    value: `${num1}${num2}`
+  };
+};
+
 const HeroSection = ({ slides }: HeroSectionProps) => {
   const router = useRouter();
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const [forgotOpen, setForgotOpen] = useState(false);
   const [userforgotOpen, setUserForgotOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [captcha, setCaptcha] = useState({ display: "98•22", value: "9822" });
+  const [showPassword, setShowPassword] = useState(false);
 
   // ⭐ React Hook Form
   const {
@@ -32,30 +46,93 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
     reset
   } = useForm<LoginForm>();
 
-  // Dummy credentials for login
-  const DUMMY_CREDENTIALS = {
-    username: "admin",
-    password: "admin123",
-    captcha: "9822" // The captcha shown is "98•22" but user should enter "9822"
-  };
-
   const [loginError, setLoginError] = useState<string>("");
 
-  const onSubmit = (data: LoginForm) => {
+  // Generate captcha on mount
+  useEffect(() => {
+    setCaptcha(generateCaptcha());
+  }, []);
+
+  const regenerateCaptcha = () => {
+    setCaptcha(generateCaptcha());
+  };
+
+  const onSubmit = async (data: LoginForm) => {
     console.log("Login Data:", data);
     setLoginError("");
-    
-    // Validate credentials
-    if (
-      data.username === DUMMY_CREDENTIALS.username &&
-      data.password === DUMMY_CREDENTIALS.password &&
-      data.captcha === DUMMY_CREDENTIALS.captcha
-    ) {
-      // Navigate to dashboard on successful login
-      router.push("/userdashboard");
-      reset();
-    } else {
-      setLoginError("Invalid username, password, or captcha. Please try again.");
+    setIsLoading(true);
+
+    // Validate captcha first
+    if (data.captcha !== captcha.value) {
+      setLoginError("Invalid captcha. Please try again.");
+      regenerateCaptcha();
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      // Step 1: Look up user by user_id from raw_user_meta_data to get their email
+      // Use API route to query auth.users (which requires admin access)
+      const response = await fetch('/api/get-user-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: data.username }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("User lookup error:", errorData);
+        setLoginError("Invalid username or password. Please try again.");
+        regenerateCaptcha();
+        setIsLoading(false);
+        return;
+      }
+
+      const userData = await response.json();
+
+      if (!userData.email) {
+        setLoginError("Invalid username or password. Please try again.");
+        regenerateCaptcha();
+        setIsLoading(false);
+        return;
+      }
+
+      const userEmail = userData.email;
+      const userId = userData.user_id;
+      const consultantType = userData.consultant_type;
+
+      // Step 2: Use the user's email to authenticate with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: data.password,
+      });
+
+      if (authError) {
+        console.error("Supabase auth error:", authError);
+        setLoginError("Invalid username or password. Please try again.");
+        regenerateCaptcha();
+        setIsLoading(false);
+        return;
+      }
+
+      if (authData.user) {
+        console.log("Login successful:", authData.user);
+        // Store user info in localStorage for later use
+        localStorage.setItem('consultantId', authData.user.id);
+        localStorage.setItem('consultantUserId', userId || data.username);
+        localStorage.setItem('consultantType', consultantType || '');
+        // Navigate to dashboard on successful login
+        router.push("/userdashboard");
+        reset();
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      setLoginError("An error occurred during login. Please try again.");
+      regenerateCaptcha();
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -141,16 +218,16 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 p-4">
-                {/* Username */}
+                {/* User ID */}
                 <label className="block text-sm">
-                  <span className="mb-1 block text-zinc-700">Username</span>
+                  <span className="mb-1 block text-zinc-700">User ID</span>
                   <input
                     {...register("username", {
-                      required: "Username is required"
+                      required: "User ID is required"
                     })}
                     type="text"
                     className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
-                    placeholder="Enter username"
+                    placeholder="Enter your User ID"
                   />
                 </label>
                 {errors.username && (
@@ -160,14 +237,60 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                 {/* Password */}
                 <label className="block text-sm">
                   <span className="mb-1 block text-zinc-700">Password</span>
-                  <input
-                    {...register("password", {
-                      required: "Password is required"
-                    })}
-                    type="password"
-                    className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
-                    placeholder="Enter password"
-                  />
+                  <div className="relative">
+                    <input
+                      {...register("password", {
+                        required: "Password is required"
+                      })}
+                      type={showPassword ? "text" : "password"}
+                      className="w-full rounded border border-zinc-300 px-3 py-2 pr-10 text-sm outline-none focus:border-sky-500 text-black"
+                      placeholder="Enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-700 focus:outline-none"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                          />
+                        </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </label>
                 {errors.password && (
                   <p className="text-red-600 text-sm">{errors.password.message}</p>
@@ -177,9 +300,13 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="h-12 w-40 select-none rounded border border-zinc-300 bg-zinc-50 p-2 text-center font-mono text-lg tracking-widest text-zinc-700">
-                      98•22
+                      {captcha.display}
                     </div>
-                    <button type="button" className="text-sm text-sky-700 underline">
+                    <button 
+                      type="button" 
+                      className="text-sm text-sky-700 underline"
+                      onClick={regenerateCaptcha}
+                    >
                       Generate New Image
                     </button>
                   </div>
@@ -204,8 +331,12 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
                 {/* Buttons */}
                 <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
-                  <button className="w-full rounded bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 sm:w-auto">
-                    Login
+                  <button 
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full rounded bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:bg-sky-400 disabled:cursor-not-allowed sm:w-auto"
+                  >
+                    {isLoading ? "Logging in..." : "Login"}
                   </button>
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:gap-0">
