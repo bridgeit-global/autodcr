@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/app/utils/supabase';
 
-// This uses the service role key (server-side only) to update user role
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
+// Uses database function with SECURITY DEFINER - no service role key needed
 export async function POST(request: NextRequest) {
   try {
     const { user_id, role, metadata } = await request.json();
@@ -18,55 +13,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update user metadata and role in a single call
-    const updatePayload: any = {
-      app_metadata: { role: role }
-    };
+    // Prepare metadata payloads
+    const appMetadata = { role: role };
+    const userMetadata = metadata || null;
 
-    // If metadata is provided, include it in user_metadata
-    if (metadata) {
-      updatePayload.user_metadata = metadata;
-    }
+    // Call database function to update user metadata, app_metadata, and role
+    const { data, error } = await supabase.rpc('update_user_metadata_and_role', {
+      user_uuid: user_id,
+      new_role: role,
+      user_metadata: userMetadata,
+      app_metadata: appMetadata
+    });
 
-    // Update user using Admin API (metadata and role)
-    const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-      user_id,
-      updatePayload
-    );
-
-    if (updateError) {
-      console.error('Error updating user:', updateError);
+    if (error) {
+      console.error('Error updating user:', error);
       return NextResponse.json(
-        { error: 'Failed to update user', details: updateError.message },
+        { error: 'Failed to update user', details: error.message },
         { status: 500 }
       );
     }
 
-    // Update role column directly in auth.users table using database function
-    // Try calling with named parameters first
-    let functionError = null;
-    try {
-      const { error } = await supabaseAdmin.rpc('update_auth_user_role', {
-        user_uuid: user_id,
-        new_role: role
-      });
-      functionError = error;
-    } catch (err) {
-      // If named parameters fail, try positional parameters
-      console.warn('Named parameter call failed, trying alternative approach');
-      functionError = err as any;
-    }
-
-    if (functionError) {
-      console.error('Error updating user role column via RPC:', functionError);
-      // Warn but don't fail since app_metadata.role is set
-      console.warn('Role set in app_metadata but role column update failed. The role is still set in app_metadata.');
-      console.warn('Note: PostgREST schema cache may need to refresh. Wait 30-60 seconds and try again.');
-    }
-
     return NextResponse.json({
       success: true,
-      user: updateData.user,
+      user: data,
       message: 'User metadata and role updated successfully'
     });
   } catch (err) {
