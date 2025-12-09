@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/app/utils/supabase';
 
-// This uses the service role key (server-side only) to query auth.users
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Make sure this is in your .env.local
-);
-
+// Uses database function with SECURITY DEFINER - no service role key needed
 export async function POST(request: NextRequest) {
   try {
     const { user_id } = await request.json();
@@ -18,33 +13,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Query auth.users using admin client
-    const { data: users, error } = await supabaseAdmin.auth.admin.listUsers();
+    // Call database function - uses SECURITY DEFINER so it can access auth.users
+    const { data, error } = await supabase.rpc('get_user_email_by_user_id', {
+      lookup_user_id: user_id
+    });
 
     if (error) {
-      console.error('Error fetching users:', error);
+      console.error('Error fetching user:', error);
       return NextResponse.json(
         { error: 'Failed to lookup user' },
         { status: 500 }
       );
     }
 
-    // Find user by user_id in raw_user_meta_data
-    const user = users.users.find(
-      (u) => u.user_metadata?.user_id === user_id
-    );
-
-    if (!user) {
+    if (!data || data.length === 0) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
     }
 
+    const user = data[0];
     return NextResponse.json({
       email: user.email,
-      user_id: user.user_metadata?.user_id,
-      consultant_type: user.user_metadata?.consultant_type,
+      user_id: user.user_id,
+      consultant_type: user.consultant_type,
     });
   } catch (err) {
     console.error('API error:', err);
