@@ -131,6 +131,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   const [formData, setFormData] = useState({
     // Profile (Common)
     consultantType: "",
+    firstName: "",
+    middleName: "",
+    lastName: "",
     city: "",
     pincode: "",
     email: "",
@@ -337,6 +340,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
   const profileFields: readonly string[] = [
     "consultantType",
+    "firstName",
+    "lastName",
     "email",
     "city",
     "pincode",
@@ -397,6 +402,16 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     switch (field) {
       case "consultantType":
         if (!value) error = "Select a consultant type";
+        break;
+      case "firstName":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "First name is required";
+        }
+        break;
+      case "lastName":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Last name is required";
+        }
         break;
       case "email":
         if (!value) error = "Email is required";
@@ -836,6 +851,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         options: {
           data: {
             consultant_type: formData.consultantType,
+            first_name: formData.firstName,
+            middle_name: formData.middleName || null,
+            last_name: formData.lastName,
             user_id: formData.userId,
             status: 'pending'
           }
@@ -1003,6 +1021,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       const buildUserMetadata = () => {
         const baseData: any = {
             consultant_type: formData.consultantType,
+            first_name: formData.firstName,
+            middle_name: formData.middleName || null,
+            last_name: formData.lastName,
           user_id: formData.userId,
           role: 'Consultant',
             email: formData.email,
@@ -1246,7 +1267,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 {/* Row 1 */}
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Consultant Type *
+                    Consultant Type <span className="text-red-600 font-bold">*</span>
                   </label>
                   <select 
                     value={formData.consultantType}
@@ -1273,7 +1294,53 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Email *
+                    First Name <span className="text-red-600 font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.firstName}
+                    onChange={(e) => handleInputChange("firstName", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Enter First Name"
+                  />
+                  {errors.firstName && (
+                    <p className="text-xs text-red-600 mt-1">{errors.firstName}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Middle Name
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.middleName}
+                    onChange={(e) => handleInputChange("middleName", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Enter Middle Name"
+                  />
+                </div>
+
+                {/* Row 2 */}
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Last Name <span className="text-red-600 font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.lastName}
+                    onChange={(e) => handleInputChange("lastName", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Enter Last Name"
+                  />
+                  {errors.lastName && (
+                    <p className="text-xs text-red-600 mt-1">{errors.lastName}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Email <span className="text-red-600 font-bold">*</span>
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -1295,10 +1362,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
                 </div>
 
-                {/* Row 2 */}
+                {/* Row 3 */}
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    City *
+                    City <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     value={formData.city}
@@ -1313,7 +1380,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Phone Number <span className="text-red-500">*</span>
+                    Phone Number <span className="text-red-600 font-bold">*</span>
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -1334,10 +1401,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
                 </div>
 
-                {/* Row 3 */}
+                {/* Row 4 */}
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Pincode *
+                    Pincode <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     value={formData.pincode}
@@ -1352,7 +1419,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    PAN <span className="text-red-500">*</span>
+                    PAN <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     value={formData.pan}
@@ -1365,10 +1432,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
                 </div>
 
-                {/* Row 4 */}
+                {/* Row 5 */}
                 <div className="md:col-span-2">
                   <label className="block font-medium text-black mb-1">
-                    Address *
+                    Address <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     value={formData.address}
@@ -1412,7 +1479,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Architect" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">COA Registration No. *</label>
+                    <label className="block font-medium text-black mb-1">COA Registration No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.coaRegNo}
                       onChange={(e) => handleInputChange("coaRegNo", e.target.value)}
@@ -1424,7 +1491,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                 <div>
-                    <label className="block font-medium text-black mb-1">Validity / Expiry Date *</label>
+                    <label className="block font-medium text-black mb-1">Validity / Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.coaExpiryDate}
@@ -1442,7 +1509,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Structural Engineer" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Structural Engineer License No. (MCGM/UDD) *</label>
+                    <label className="block font-medium text-black mb-1">Structural Engineer License No. (MCGM/UDD) <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.structuralLicenseNo}
                       onChange={(e) => handleInputChange("structuralLicenseNo", e.target.value)}
@@ -1454,7 +1521,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Validity Date *</label>
+                    <label className="block font-medium text-black mb-1">Validity Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.structuralValidity}
@@ -1486,7 +1553,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Licensed Surveyor" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">LBS License Number *</label>
+                    <label className="block font-medium text-black mb-1">LBS License Number <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.lbsLicenseNo}
                       onChange={(e) => handleInputChange("lbsLicenseNo", e.target.value)}
@@ -1498,7 +1565,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
                 </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Competency Class *</label>
+                    <label className="block font-medium text-black mb-1">Competency Class <span className="text-red-600 font-bold">*</span></label>
                     <select
                       value={formData.competencyClass}
                       onChange={(e) => handleInputChange("competencyClass", e.target.value)}
@@ -1513,7 +1580,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                 </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Expiry Date *</label>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.lbsExpiryDate}
@@ -1531,7 +1598,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "MEP Consultant" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Electrical License No. *</label>
+                    <label className="block font-medium text-black mb-1">Electrical License No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.electricalLicenseNo}
                       onChange={(e) => handleInputChange("electricalLicenseNo", e.target.value)}
@@ -1558,7 +1625,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Plumber" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Plumber License No. *</label>
+                    <label className="block font-medium text-black mb-1">Plumber License No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.plumberLicenseNo}
                       onChange={(e) => handleInputChange("plumberLicenseNo", e.target.value)}
@@ -1576,7 +1643,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Fire Consultant" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Fire License / CFO Accreditation No. *</label>
+                    <label className="block font-medium text-black mb-1">Fire License / CFO Accreditation No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.fireLicenseNo}
                       onChange={(e) => handleInputChange("fireLicenseNo", e.target.value)}
@@ -1588,7 +1655,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Validity Date *</label>
+                    <label className="block font-medium text-black mb-1">Validity Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.fireValidityDate}
@@ -1606,7 +1673,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Landscape Consultant" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Landscape License No. *</label>
+                    <label className="block font-medium text-black mb-1">Landscape License No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.landscapeLicenseNo}
                       onChange={(e) => handleInputChange("landscapeLicenseNo", e.target.value)}
@@ -1618,7 +1685,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Expiry Date *</label>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.landscapeExpiryDate}
@@ -1636,7 +1703,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "PMC / Project Manager" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">PMC Registration No. *</label>
+                    <label className="block font-medium text-black mb-1">PMC Registration No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.pmcRegistrationNo}
                       onChange={(e) => handleInputChange("pmcRegistrationNo", e.target.value)}
@@ -1648,7 +1715,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Expiry Date *</label>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.pmcExpiryDate}
@@ -1666,7 +1733,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Geotechnical Consultant" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">NABL Accreditation No. *</label>
+                    <label className="block font-medium text-black mb-1">NABL Accreditation No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.nablAccreditationNo}
                       onChange={(e) => handleInputChange("nablAccreditationNo", e.target.value)}
@@ -1693,7 +1760,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Environmental Consultant" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Environmental License No. *</label>
+                    <label className="block font-medium text-black mb-1">Environmental License No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.envLicenseNo}
                       onChange={(e) => handleInputChange("envLicenseNo", e.target.value)}
@@ -1705,7 +1772,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Expiry Date *</label>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.envExpiryDate}
@@ -1723,7 +1790,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType === "Town Planner" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-medium text-black mb-1">Town Planner License No. *</label>
+                    <label className="block font-medium text-black mb-1">Town Planner License No. <span className="text-red-600 font-bold">*</span></label>
                     <input
                       value={formData.townPlannerLicenseNo}
                       onChange={(e) => handleInputChange("townPlannerLicenseNo", e.target.value)}
@@ -1735,7 +1802,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Expiry Date *</label>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.townPlannerExpiryDate}
@@ -1778,7 +1845,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {formData.consultantType && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div>
-                    <label className="block font-medium text-black mb-1">Authorized Signatory Photograph *</label>
+                    <label className="block font-medium text-black mb-1">Authorized Signatory Photograph <span className="text-red-600 font-bold">*</span></label>
                   <input
                     type="file"
                     accept=".gif,.jpg,.jpeg,.png,.bmp"
@@ -1794,7 +1861,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
                 </div>
                 <div>
-                    <label className="block font-medium text-black mb-1">Authorized Signatory Signature *</label>
+                    <label className="block font-medium text-black mb-1">Authorized Signatory Signature <span className="text-red-600 font-bold">*</span></label>
                   <input
                     type="file"
                     accept=".gif,.jpg,.jpeg,.png,.bmp"
@@ -1810,7 +1877,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">PAN Card (Image) *</label>
+                    <label className="block font-medium text-black mb-1">PAN Card (Image) <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="file"
                       accept=".gif,.jpg,.jpeg,.png,.bmp"
@@ -1829,7 +1896,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Architect - COA Certificate in same row as PAN Card */}
                   {formData.consultantType === "Architect" && (
                 <div>
-                      <label className="block font-medium text-black mb-1">COA Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">COA Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                   <input
                     type="file"
                     accept=".pdf"
@@ -1848,7 +1915,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Structural Engineer - License in same row as PAN Card */}
                   {formData.consultantType === "Structural Engineer" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Structural License (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Structural License (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1867,7 +1934,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Licensed Surveyor - Certificate in same row as PAN Card */}
                   {formData.consultantType === "Licensed Surveyor" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Municipal LBS Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Municipal LBS Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1886,7 +1953,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* MEP Consultant - in same row as PAN Card */}
                   {formData.consultantType === "MEP Consultant" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">MEP Experience Documents (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">MEP Experience Documents (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1905,7 +1972,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* PHE / Plumbing - in same row as PAN Card */}
                   {formData.consultantType === "Plumber" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">PHE Accreditation Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">PHE Accreditation Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1924,7 +1991,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Fire Consultant - in same row as PAN Card */}
                   {formData.consultantType === "Fire Consultant" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Fire NOC / Accreditation (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Fire NOC / Accreditation (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1943,7 +2010,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Landscape Consultant - in same row as PAN Card */}
                   {formData.consultantType === "Landscape Consultant" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Landscape Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Landscape Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1962,7 +2029,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* PMC - in same row as PAN Card */}
                   {formData.consultantType === "PMC / Project Manager" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">PMC Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">PMC Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -1981,7 +2048,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Geotechnical - in same row as PAN Card */}
                   {formData.consultantType === "Geotechnical Consultant" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Lab Registration Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Lab Registration Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -2000,7 +2067,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Environmental - in same row as PAN Card */}
                   {formData.consultantType === "Environmental Consultant" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Environmental Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Environmental Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -2019,7 +2086,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {/* Town Planner - in same row as PAN Card */}
                   {formData.consultantType === "Town Planner" && (
                     <div>
-                      <label className="block font-medium text-black mb-1">Town Planner Certificate (PDF) *</label>
+                      <label className="block font-medium text-black mb-1">Town Planner Certificate (PDF) <span className="text-red-600 font-bold">*</span></label>
                       <input
                         type="file"
                         accept=".pdf"
@@ -2064,7 +2131,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label className="block font-medium text-black mb-1">Letterhead PDF *</label>
+                  <label className="block font-medium text-black mb-1">Letterhead PDF <span className="text-red-600 font-bold">*</span></label>
                   <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
                     formData.letterheadFile 
                       ? hasViewedLetterhead 
@@ -2188,7 +2255,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    User ID *
+                    User ID <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     type="text"
@@ -2204,7 +2271,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Password *
+                    Password <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     type="password"
@@ -2345,7 +2412,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Confirm Password *
+                    Confirm Password <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     type="password"
