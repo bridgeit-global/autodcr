@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/app/utils/supabase";
 
 interface DashboardHeaderProps {
   sessionTime: string;
@@ -10,6 +12,29 @@ interface DashboardHeaderProps {
 
 const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      // Sign out from Supabase
+      await supabase.auth.signOut();
+      
+      // Clear localStorage items
+      localStorage.removeItem('consultantId');
+      localStorage.removeItem('consultantUserId');
+      localStorage.removeItem('consultantType');
+      
+      // Close the dropdown menu
+      setUserMenuOpen(false);
+      
+      // Navigate to landing page
+      router.push('/');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Still navigate to landing page even if logout fails
+      router.push('/');
+    }
+  };
 
   return (
     <header className="w-full bg-sky-700 text-white shadow-md">
@@ -110,12 +135,12 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
                 >
                   Settings
                 </a>
-                <a
-                  href="#"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                <button
+                  onClick={handleLogout}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Logout
-                </a>
+                </button>
               </div>
             )}
           </div>
