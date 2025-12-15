@@ -205,7 +205,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     // Pvt. Ltd. / Ltd. Company
     cin: "",
     rocRegistrationDate: "",
-    registeredOfficeAddress: "",
     moaAoaFile: null as File | null,
     boardResolutionFile: null as File | null,
     numberOfDirectors: "",
@@ -228,7 +227,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     // Govt. / PSU / Local Body
     departmentName: "",
     officeOrderRef: "",
-    officeAddress: "",
     officeOrderFile: null as File | null,
     
     // Common documents
@@ -333,13 +331,39 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setHasViewedLetterhead(false);
   };
 
-  // Upload file to Supabase Storage and return both URL and path (for rollback)
+  // Upload file to Supabase Storage using idempotent method (hash-based)
+  // For letterhead and photos, use idempotent upload
+  // For other documents, use timestamp-based (backward compatibility)
   const uploadFileToStorageWithPath = async (
     file: File, 
     userId: string, 
     fileType: string
   ): Promise<{ url: string; path: string } | null> => {
     try {
+      // Use idempotent upload for letterhead and photos
+      if (fileType === 'letterhead' || fileType === 'signatory_photo') {
+        const { uploadFileIdempotent } = await import('@/app/utils/fileUtils');
+        
+        // Map fileType to the format expected by uploadFileIdempotent
+        const uploadFileType = fileType === 'letterhead' ? 'letterhead' : 'photo';
+        
+        try {
+          const result = await uploadFileIdempotent(file, userId, uploadFileType, supabase);
+          
+          if (result) {
+            return {
+              url: result.url,
+              path: result.path
+            };
+          }
+        } catch (err: any) {
+          console.error(`Error in idempotent upload for ${fileType}:`, err);
+          // Fall back to timestamp-based upload if idempotent fails
+        }
+        // If idempotent upload fails, continue to timestamp-based upload below
+      }
+      
+      // For other files, use timestamp-based naming (backward compatibility)
       const fileExt = file.name.split('.').pop();
       const fileName = `${userId}/${fileType}_${Date.now()}.${fileExt}`;
       
@@ -930,10 +954,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           error = "Department Name is required";
         }
         break;
-      case "officeAddress":
-        if (!value || (typeof value === "string" && value.trim() === "")) {
-          error = "Office Address is required";
-        }
         break;
       default:
         // Handle entity document fields
@@ -955,6 +975,42 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     return !error;
   };
 
+  // Check if userId already exists
+  const checkUserIdUniqueness = async (userId: string): Promise<boolean> => {
+    if (!userId || userId.trim() === "") {
+      return false;
+    }
+    
+    const trimmedUserId = userId.trim();
+    
+    try {
+      const response = await fetch('/api/get-user-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: trimmedUserId }),
+      });
+
+      // If user exists (200), userId is not unique
+      // If user doesn't exist (404), userId is unique
+      if (response.ok) {
+        return true; // User exists, userId is taken
+      } else if (response.status === 404) {
+        return false; // User doesn't exist, userId is available
+      } else {
+        // Other errors - allow registration (database will enforce uniqueness)
+        // This prevents blocking valid registrations due to API issues
+        console.warn('Error checking userId uniqueness, allowing registration:', response.status);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error checking userId uniqueness:', error);
+      // On network error, allow registration (database will enforce uniqueness)
+      return false;
+    }
+  };
+
   const validateFields = (fields: readonly string[]) => {
     let valid = true;
     fields.forEach((field) => {
@@ -967,6 +1023,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         value = (formData as Record<string, unknown>)[field];
       }
       if (!validateField(field, value)) {
+        console.log('Validation failed for field:', field);
         valid = false;
       }
     });
@@ -988,6 +1045,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "alternatePhone",
         "pan",
         "gstNo",
+        "authorizedSignatoryPhotoFile",
+        "authorizedSignatorySignatureFile",
         "panCardFile",
         "letterheadFile",
         "userId",
@@ -1033,7 +1092,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         ],
         "Govt. / PSU / Local Body": [
           "departmentName",
-          "officeAddress",
           "entityDocuments.govOrder",
         ],
       };
@@ -1076,6 +1134,24 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setIsSubmitting(true);
 
     try {
+      // Check if userId already exists before proceeding
+      if (!formData.userId || formData.userId.trim() === "") {
+        console.error('ERROR: userId is empty!');
+        setFormError("User ID is required.");
+        setIsSubmitting(false);
+        return;
+      }
+      
+      const userIdExists = await checkUserIdUniqueness(formData.userId);
+      
+      if (userIdExists) {
+        setFormError("This User ID is already taken. Please choose a different one.");
+        setFieldError("userId", "This User ID is already taken");
+        setIsSubmitting(false);
+        scrollToSection("section-login");
+        return;
+      }
+
       // Step 1: Sign up user first to get user ID
       // Note: Role cannot be set during signUp - it must be set via Admin API after signup
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -1136,11 +1212,40 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       };
 
       // Step 2: Upload all files to Supabase Storage
+      let authorizedSignatoryPhotoUrl: string | null = null;
+      let authorizedSignatorySignatureUrl: string | null = null;
       let panCardUrl: string | null = null;
       let letterheadUrl: string | null = null;
       const entityDocumentUrls: Record<string, string> = {};
 
       try {
+        // Upload Signatory Photo
+        if (formData.authorizedSignatoryPhotoFile) {
+          const result = await uploadFileToStorageWithPath(
+            formData.authorizedSignatoryPhotoFile,
+            userId,
+            'signatory_photo'
+          );
+          if (!result) {
+            throw new Error('Failed to upload Authorized Signatory Photograph');
+          }
+          authorizedSignatoryPhotoUrl = result.url;
+          uploadedFilePaths.push(result.path);
+        }
+
+        // Upload Signatory Signature
+        if (formData.authorizedSignatorySignatureFile) {
+          const result = await uploadFileToStorageWithPath(
+            formData.authorizedSignatorySignatureFile,
+            userId,
+            'signatory_signature'
+          );
+          if (!result) {
+            throw new Error('Failed to upload Authorized Signatory Signature');
+          }
+          authorizedSignatorySignatureUrl = result.url;
+          uploadedFilePaths.push(result.path);
+        }
 
         // Upload PAN Card
         if (formData.panCardFile) {
@@ -1287,6 +1392,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           gst_no: formData.gstNo || null,
             alternate_phone: formData.alternatePhone || null,
             pan: formData.pan || null,
+            authorized_signatory_photo_url: authorizedSignatoryPhotoUrl,
+            authorized_signatory_signature_url: authorizedSignatorySignatureUrl,
           pan_card_url: panCardUrl,
           letterhead_url: letterheadUrl,
             declaration_accepted: formData.acceptDeclaration,
@@ -1332,7 +1439,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             break;
           case "Govt. / PSU / Local Body":
             baseData.department_name = formData.departmentName;
-            baseData.office_address = formData.officeAddress;
             baseData.gov_order_url = entityDocumentUrls.govOrder || null;
             break;
         }
@@ -2092,6 +2198,38 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               {/* Common Documents - PAN Card for all entity types */}
               {formData.entityType && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block font-medium text-black mb-1">Authorized Signatory Photograph <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="file"
+                      accept=".gif,.jpg,.jpeg,.png,.bmp"
+                      onChange={(e) => handleFileChange("authorizedSignatoryPhotoFile", e.target.files?.[0] || null)}
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
+                    {formData.authorizedSignatoryPhotoFile && (
+                      <p className="text-xs text-green-600 mt-1">✓ {formData.authorizedSignatoryPhotoFile.name}</p>
+                    )}
+                    {errors.authorizedSignatoryPhotoFile && (
+                      <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatoryPhotoFile}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Authorized Signatory Signature <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="file"
+                      accept=".gif,.jpg,.jpeg,.png,.bmp"
+                      onChange={(e) => handleFileChange("authorizedSignatorySignatureFile", e.target.files?.[0] || null)}
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
+                    {formData.authorizedSignatorySignatureFile && (
+                      <p className="text-xs text-green-600 mt-1">✓ {formData.authorizedSignatorySignatureFile.name}</p>
+                    )}
+                    {errors.authorizedSignatorySignatureFile && (
+                      <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatorySignatureFile}</p>
+                    )}
+                  </div>
                   <div>
                     <label className="block font-medium text-black mb-1">PAN Card (Image) <span className="text-red-600 font-bold">*</span></label>
                     <input

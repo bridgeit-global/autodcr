@@ -14,13 +14,25 @@ export async function POST(request: NextRequest) {
     }
 
     // Prepare metadata payloads
-    const appMetadata = { role: role };
-    const userMetadata = metadata || null;
+    // IMPORTANT: Don't set app_metadata.role to application roles like "Consultant" or "Owner"
+    // because Supabase Storage tries to use it as a PostgreSQL role, which will fail.
+    // Store the application role in user_metadata.role instead, and set app_metadata.role to "authenticated"
+    // which is a valid PostgreSQL role that Supabase recognizes.
+    
+    // Ensure the role is stored in user_metadata, not app_metadata
+    let userMetadata = metadata || {};
+    if (!userMetadata.role) {
+      userMetadata = { ...userMetadata, role: role };
+    }
+    
+    // Set app_metadata.role to "authenticated" (valid PostgreSQL role) instead of application roles
+    // This prevents the "role does not exist" error when uploading files to storage
+    const appMetadata = { role: 'authenticated' };
 
     // Call database function to update user metadata, app_metadata, and role
     const { data, error } = await supabase.rpc('update_user_metadata_and_role', {
       user_uuid: user_id,
-      new_role: role,
+      new_role: 'authenticated',
       user_metadata: userMetadata,
       app_metadata: appMetadata
     });

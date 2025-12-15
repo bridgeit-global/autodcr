@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
+import ChangePasswordModal from "./ChangePasswordModal";
+import ProfileModal from "./ProfileModal";
+import { useUserMetadata } from "@/app/contexts/UserContext";
 
 interface DashboardHeaderProps {
   sessionTime: string;
@@ -12,17 +15,67 @@ interface DashboardHeaderProps {
 
 const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const router = useRouter();
+  const { clearUserMetadata, userMetadata, fetchUserMetadata, loading } = useUserMetadata();
+
+  // Fetch metadata if it's not loaded or is empty
+  useEffect(() => {
+    const consultantUserId = localStorage.getItem("consultantUserId");
+    // Check if metadata is null or empty object
+    const isEmpty = !userMetadata || (typeof userMetadata === 'object' && Object.keys(userMetadata).length === 0);
+    if (consultantUserId && isEmpty && !loading) {
+      fetchUserMetadata();
+    }
+  }, [userMetadata, loading, fetchUserMetadata]);
+
+  // Format name as last_name first_name middle_name
+  const formatUserName = () => {
+    if (!userMetadata || Object.keys(userMetadata).length === 0) {
+      return "User";
+    }
+    
+    const lastName = userMetadata.last_name || "";
+    const firstName = userMetadata.first_name || "";
+    const middleName = userMetadata.middle_name || "";
+    
+    const nameParts = [lastName, firstName, middleName].filter(Boolean);
+    return nameParts.length > 0 ? nameParts.join(" ") : "User";
+  };
+
+  // Get user role/consultant type
+  const getUserRole = () => {
+    if (!userMetadata || Object.keys(userMetadata).length === 0) {
+      return "";
+    }
+    
+    // Check for consultant_type first (for consultants)
+    if (userMetadata.consultant_type) {
+      return userMetadata.consultant_type;
+    }
+    
+    // Check for role (for owners/developers)
+    if (userMetadata.role) {
+      return userMetadata.role;
+    }
+    
+    return "";
+  };
 
   const handleLogout = async () => {
     try {
       // Sign out from Supabase
       await supabase.auth.signOut();
       
+      // Clear user metadata from context
+      clearUserMetadata();
+      
       // Clear localStorage items
       localStorage.removeItem('consultantId');
       localStorage.removeItem('consultantUserId');
       localStorage.removeItem('consultantType');
+      localStorage.removeItem('userMetadata');
       
       // Close the dropdown menu
       setUserMenuOpen(false);
@@ -101,8 +154,8 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
               className="flex items-center gap-2 hover:bg-sky-800 px-3 py-2 rounded transition-colors"
             >
               <div className="text-right">
-                <div className="text-sm font-medium">Ansari Munib Naeemuddin</div>
-                <div className="text-xs text-gray-300">Architect</div>
+                <div className="text-sm font-medium">{formatUserName()}</div>
+                <div className="text-xs text-gray-300">{getUserRole() || "User"}</div>
               </div>
               <svg
                 className={`w-4 h-4 transition-transform ${
@@ -123,18 +176,24 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
 
             {userMenuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
-                <a
-                  href="#"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                <button
+                  onClick={() => {
+                    setIsProfileOpen(true);
+                    setUserMenuOpen(false);
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Profile
-                </a>
-                <a
-                  href="#"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                </button>
+                <button
+                  onClick={() => {
+                    setIsChangePasswordOpen(true);
+                    setUserMenuOpen(false);
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
-                  Settings
-                </a>
+                  Change Password
+                </button>
                 <button
                   onClick={handleLogout}
                   className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -149,6 +208,18 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
           <div className="text-sm text-gray-300">Help Desk</div>
         </div>
       </div>
+      
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        open={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
+      
+      {/* Profile Modal */}
+      <ProfileModal
+        open={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+      />
     </header>
   );
 };
