@@ -292,13 +292,39 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setHasViewedLetterhead(false);
   };
 
-  // Upload file to Supabase Storage and return both URL and path (for rollback)
+  // Upload file to Supabase Storage using idempotent method (hash-based)
+  // For letterhead and photos, use idempotent upload
+  // For other documents, use timestamp-based (backward compatibility)
   const uploadFileToStorageWithPath = async (
     file: File, 
     userId: string, 
     fileType: string
   ): Promise<{ url: string; path: string } | null> => {
     try {
+      // Use idempotent upload for letterhead and photos
+      if (fileType === 'letterhead' || fileType === 'signatory_photo') {
+        const { uploadFileIdempotent } = await import('@/app/utils/fileUtils');
+        
+        // Map fileType to the format expected by uploadFileIdempotent
+        const uploadFileType = fileType === 'letterhead' ? 'letterhead' : 'photo';
+        
+        try {
+          const result = await uploadFileIdempotent(file, userId, uploadFileType, supabase);
+          
+          if (result) {
+            return {
+              url: result.url,
+              path: result.path
+            };
+          }
+        } catch (err: any) {
+          console.error(`Error in idempotent upload for ${fileType}:`, err);
+          // Fall back to timestamp-based upload if idempotent fails
+        }
+        // If idempotent upload fails, continue to timestamp-based upload below
+      }
+      
+      // For other files, use timestamp-based naming (backward compatibility)
       const fileExt = file.name.split('.').pop();
       const fileName = `${userId}/${fileType}_${Date.now()}.${fileExt}`;
       
@@ -392,6 +418,42 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     });
   };
 
+
+    // Check if userId already exists
+    const checkUserIdUniqueness = async (userId: string): Promise<boolean> => {
+      if (!userId || userId.trim() === "") {
+        return false;
+      }
+      
+      const trimmedUserId = userId.trim();
+      
+      try {
+        const response = await fetch('/api/get-user-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ user_id: trimmedUserId }),
+        });
+  
+        // If user exists (200), userId is not unique
+        // If user doesn't exist (404), userId is unique
+        if (response.ok) {
+          return true; // User exists, userId is taken
+        } else if (response.status === 404) {
+          return false; // User doesn't exist, userId is available
+        } else {
+          // Other errors - allow registration (database will enforce uniqueness)
+          // This prevents blocking valid registrations due to API issues
+          console.warn('Error checking userId uniqueness, allowing registration:', response.status);
+          return false;
+        }
+      } catch (error) {
+        console.error('Error checking userId uniqueness:', error);
+        // On network error, allow registration (database will enforce uniqueness)
+        return false;
+      }
+    };
   const validateField = (
     field: string,
     value: unknown,
@@ -765,6 +827,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       const value = (formData as Record<string, unknown>)[field];
       if (!validateField(field, value)) {
         valid = false;
+        console.log('Validation failed for field:', field, 'with value:', value);
       }
     });
     return valid;
@@ -843,6 +906,29 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setIsSubmitting(true);
 
     try {
+       // Step 0: Check if userId already exists
+       console.log('=== USER ID UNIQUENESS CHECK START ===');
+       console.log('Checking userId uniqueness for:', formData.userId);
+       
+       if (!formData.userId || formData.userId.trim() === "") {
+         console.error('ERROR: userId is empty!');
+         setFormError("User ID is required.");
+         setIsSubmitting(false);
+         return;
+       }
+       
+       const userIdExists = await checkUserIdUniqueness(formData.userId);
+       
+       if (userIdExists) {
+         setFormError("This User ID is already taken. Please choose a different one.");
+         setFieldError("userId", "This User ID is already taken");
+         setIsSubmitting(false);
+         scrollToSection("section-login");
+         return;
+       }
+
+
+
       // Step 1: Sign up user first to get user ID
       // Note: Role cannot be set during signUp - it must be set via Admin API after signup
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({

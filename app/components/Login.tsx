@@ -58,7 +58,6 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
   };
 
   const onSubmit = async (data: LoginForm) => {
-    console.log("Login Data:", data);
     setLoginError("");
     setIsLoading(true);
 
@@ -82,8 +81,6 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error("User lookup error:", errorData);
         setLoginError("Invalid username or password. Please try again.");
         regenerateCaptcha();
         setIsLoading(false);
@@ -110,7 +107,6 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
       });
 
       if (authError) {
-        console.error("Supabase auth error:", authError);
         setLoginError("Invalid username or password. Please try again.");
         regenerateCaptcha();
         setIsLoading(false);
@@ -118,17 +114,22 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
       }
 
       if (authData.user) {
-        console.log("Login successful:", authData.user);
-        // Store user info in localStorage for later use
+        // Store user info in localStorage
         localStorage.setItem('consultantId', authData.user.id);
         localStorage.setItem('consultantUserId', userId || data.username);
         localStorage.setItem('consultantType', consultantType || '');
+        
+        // Store metadata from Supabase auth user_metadata (primary source)
+        const metadataToStore = authData.user.user_metadata || userData.metadata;
+        if (metadataToStore && typeof metadataToStore === 'object' && Object.keys(metadataToStore).length > 0) {
+          localStorage.setItem('userMetadata', JSON.stringify(metadataToStore));
+        }
+        
         // Navigate to dashboard on successful login
         router.push("/userdashboard");
         reset();
       }
     } catch (err) {
-      console.error("Login error:", err);
       setLoginError("An error occurred during login. Please try again.");
       regenerateCaptcha();
     } finally {
