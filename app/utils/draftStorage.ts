@@ -29,4 +29,52 @@ export function saveDraft<T>(key: string, value: T) {
   }
 }
 
+// Clear all project-related drafts and "saved" flags.
+// Call this when a project is submitted successfully or when leaving the dashboard.
+export function clearProjectDrafts() {
+  if (typeof window === "undefined") return;
+
+  const keysToClear = [
+    // Project details
+    "draft-project-details-project",
+    "draft-project-details-save-plot",
+    "saved-project-details",
+    "saved-project-info",
+    "saved-save-plot-details",
+
+    // Applicant
+    "draft-applicant-details-form",
+    "draft-applicant-details-applicants",
+    "saved-applicant-details",
+
+    // Building
+    "draft-building-details-form",
+    "saved-building-details",
+
+    // Area
+    "draft-area-details-plots",
+    "draft-area-details-totals",
+    "saved-area-details",
+
+    // Project library
+    "draft-project-library-uploads",
+    "saved-project-library",
+
+    // BG details
+    "draft-bg-details-form",
+    "draft-bg-details-entries",
+    "draft-bg-details-active-tab",
+    "saved-bg-details",
+  ];
+
+  try {
+    keysToClear.forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
+  } catch {
+    // ignore errors
+  }
+}
+
+
 

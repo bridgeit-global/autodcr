@@ -57,6 +57,7 @@ export default function BGDetailsPage() {
   const [activeTab, setActiveTab] = useState<"bg-details" | "bg-refund">(
     loadDraft<"bg-details" | "bg-refund">("draft-bg-details-active-tab", "bg-details")
   );
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-bg-details"));
 
   const {
     register,
@@ -85,6 +86,7 @@ export default function BGDetailsPage() {
     setEntries((prev) => [newEntry, ...prev]);
     reset();
     markPageSaved("saved-bg-details");
+    setIsSaved(true);
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -165,10 +167,10 @@ export default function BGDetailsPage() {
                   <button
                     type="button"
                     onClick={() => router.push(page.path)}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:border-sky-500 hover:bg-sky-50"
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-800 hover:border-emerald-300 hover:bg-emerald-50"
                   >
                     <span>{page.label}</span>
-                    <span className="text-xs text-sky-700 font-medium">Go to page</span>
+                    <span className="text-xs text-emerald-700 font-medium">Go to page</span>
                   </button>
                 </li>
               ))}
@@ -185,10 +187,10 @@ export default function BGDetailsPage() {
           </div>
         </div>
       )}
-      <section className="border border-black rounded-lg bg-white flex flex-col max-h-[70vh] overflow-hidden">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-black px-6 py-4 sticky top-0 bg-white z-10">
+      <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 px-6 py-4 bg-white rounded-t-2xl">
           <div>
-            <h2 className="text-xl font-bold text-black">Bank Guarantee Details</h2>
+            <h2 className="text-xl font-bold text-gray-900">Bank Guarantee Details</h2>
             <p className="text-sm text-gray-700 mt-1">
               Capture bank guarantee information and keep track of issued BGs for this project.
             </p>
@@ -196,22 +198,19 @@ export default function BGDetailsPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              className="px-4 py-2 rounded-lg bg-sky-700 text-white font-semibold shadow hover:bg-sky-800"
+              className={`px-4 py-2 rounded-lg font-semibold shadow transition-colors ${
+                isSaved
+                  ? "bg-green-600 hover:bg-green-700 text-white"
+                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+              }`}
               onClick={handleSubmit(onSubmit)}
             >
-              Save
-            </button>
-            <button
-              type="button"
-              className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold shadow hover:bg-emerald-700"
-              onClick={handleSubmitAll}
-            >
-              Submit
+              {isSaved ? "Saved" : "Save"}
             </button>
           </div>
         </div>
 
-        <form className="space-y-6 px-6 py-4 overflow-y-auto" onSubmit={handleSubmit(onSubmit)}>
+        <form className="space-y-6 px-6 py-4" onSubmit={handleSubmit(onSubmit)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block font-medium text-black mb-1">
@@ -219,7 +218,7 @@ export default function BGDetailsPage() {
               </label>
               <select
                 {...register("zone", { required: "Zone is required" })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Select Zone</option>
                 {zoneOptions.map((zone) => (
@@ -236,7 +235,7 @@ export default function BGDetailsPage() {
               </label>
               <select
                 {...register("fileNo", { required: "File number is required" })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Select File</option>
                 {fileOptions.map((file) => (
@@ -256,7 +255,7 @@ export default function BGDetailsPage() {
               </label>
               <input
                 {...register("bgNumber", { required: "BG number is required" })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="Enter BG number"
               />
               {errors.bgNumber && <p className="text-sm text-red-600 mt-1">{errors.bgNumber.message}</p>}
@@ -269,7 +268,7 @@ export default function BGDetailsPage() {
                 <input
                   type="date"
                   {...register("bgDate", { required: "BG date is required" })}
-                  className="border border-black rounded-lg px-3 py-2 pr-10 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="border border-gray-200 rounded-xl px-3 py-2 pr-10 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
                 <svg
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
@@ -296,7 +295,7 @@ export default function BGDetailsPage() {
               </label>
               <input
                 {...register("bankName", { required: "Bank name is required" })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="Enter bank name"
               />
               {errors.bankName && <p className="text-sm text-red-600 mt-1">{errors.bankName.message}</p>}
@@ -307,7 +306,7 @@ export default function BGDetailsPage() {
               </label>
               <input
                 {...register("branchName", { required: "Branch name is required" })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="Enter branch name"
               />
               {errors.branchName && <p className="text-sm text-red-600 mt-1">{errors.branchName.message}</p>}
@@ -322,7 +321,7 @@ export default function BGDetailsPage() {
               <input
                 type="number"
                 {...register("amount", { required: "Amount is required" })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="Enter amount"
                 min={0}
               />
@@ -336,7 +335,7 @@ export default function BGDetailsPage() {
                 <input
                   type="date"
                   {...register("bgValidDate", { required: "BG valid date is required" })}
-                  className="border border-black rounded-lg px-3 py-2 pr-10 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="border border-gray-200 rounded-xl px-3 py-2 pr-10 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
                 <svg
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
@@ -366,7 +365,7 @@ export default function BGDetailsPage() {
                   required: "Bank email is required",
                   pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: "Enter a valid email" },
                 })}
-                className="border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="bank@email.com"
               />
               {errors.bgBankEmail && <p className="text-sm text-red-600 mt-1">{errors.bgBankEmail.message}</p>}
@@ -379,19 +378,24 @@ export default function BGDetailsPage() {
                 type="file"
                 accept=".pdf,.png,.jpg,.jpeg"
                 onChange={handleFileChange}
-                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100"
+                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
               />
               <input type="hidden" {...register("scanCopyName", { required: "Upload the BG scanned copy" })} />
               {errors.scanCopyName && <p className="text-sm text-red-600 mt-1">{errors.scanCopyName.message}</p>}
             </div>
           </div>
         </form>
+      </section>
 
-        <div>
+      {/* BG Details / Refund Details listing box */}
+      <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
+        <div className="px-6 py-4">
           <div className="flex gap-6 border-b border-gray-200">
             <button
               className={`px-4 py-2 text-sm font-medium ${
-                activeTab === "bg-details" ? "text-sky-700 border-b-2 border-sky-700" : "text-gray-500 hover:text-gray-700"
+                activeTab === "bg-details"
+                  ? "text-emerald-700 border-b-2 border-emerald-600"
+                  : "text-gray-500 hover:text-gray-700"
               }`}
               onClick={() => setActiveTab("bg-details")}
             >
@@ -399,7 +403,9 @@ export default function BGDetailsPage() {
             </button>
             <button
               className={`px-4 py-2 text-sm font-medium ${
-                activeTab === "bg-refund" ? "text-sky-700 border-b-2 border-sky-700" : "text-gray-500 hover:text-gray-700"
+                activeTab === "bg-refund"
+                  ? "text-emerald-700 border-b-2 border-emerald-600"
+                  : "text-gray-500 hover:text-gray-700"
               }`}
               onClick={() => setActiveTab("bg-refund")}
             >

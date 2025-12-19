@@ -2,43 +2,59 @@
 
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { loadDraft, saveDraft, markPageSaved } from "@/app/utils/draftStorage";
+import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
+import { useUserMetadata } from "@/app/contexts/UserContext";
+import { supabase } from "@/app/utils/supabase";
 
 type ApplicantFormData = {
   applicantType: string;
   plumbingConsultant?: string;
   name: string;
-  officeAddress: string;
   residentialAddress: string;
   contactNumber: string;
   emailAddress: string;
   registrationNumber: string;
+  panNo: string;
   licenseIssueDate: string;
-  licenseExpiryDate: string;
 };
 
-const SAMPLE_APPLICANTS = [
-  {
-    id: 1,
-    applicantType: "Licensed Site Supervisor",
-    name: "Adani Electricity Mumbai Ltd.",
-    contactNumber: "9967180886",
-    email: "enquiry@dadamiya.com",
-    registrationNo: "REG/MCGM/TEMP",
-    licenseIssueDate: "-",
-    licenseExpiryDate: "-",
-    residentialAddress:
-      "CTS 407/A (New), 408 Old Village Eksar Devidas Lane, Off SVP Road, Borivali (W), Mumbai 400103.",
-    officeAddress:
-      "CTS 407/A (New), 408 Old Village Eksar Devidas Lane, Off SVP Road, Borivali (W), Mumbai 400103.",
-  }
-];
+type ApplicantRow = {
+  id: number;
+  user_id?: string; // Supabase auth user id (owner / consultant)
+  applicantType: string;
+  name: string;
+  contactNumber: string;
+  email: string;
+  registrationNo: string;
+  panNo?: string;
+  licenseIssueDate: string;
+  residentialAddress: string;
+  officeAddress: string;
+};
+
+type ConsultantDirectoryEntry = {
+  id: string;
+  fullName: string;
+  email: string;
+  contactNumber: string;
+  pan: string;
+  address: string;
+  registrationNumber: string;
+  licenseIssueDate: string;
+};
 
 const APPLICANT_TYPE_OPTIONS = [
-  "Licensed Site Supervisor",
-  "Licensed Plumber",
-  "Others (Consultants/Third Party Agencies for Clearances)",
-  "Registered Licensed Fire Agency",
+  "Architect",
+  "Structural Engineer",
+  "Licensed Surveyor",
+  "MEP Consultant",
+  "Plumber",
+  "Fire Consultant",
+  "Landscape Consultant",
+  "PMC / Project Manager",
+  "Geotechnical Consultant",
+  "Environmental Consultant",
+  "Town Planner",
 ];
 
 type ApplicantDirectoryEntry = {
@@ -152,46 +168,24 @@ const CONSULTANTS: ApplicantDirectoryEntry[] = [
   },
 ];
 
-const FIRE_AGENCIES: ApplicantDirectoryEntry[] = [
-  {
-    id: "fire-1",
-    name: "Fire Safety Solutions Mumbai",
-    contactNumber: "9988776655",
-    emailAddress: "safety@firesolutionsmumbai.com",
-    registrationNumber: "REG/FIRE/2023/089",
-    licenseIssueDate: "2023-05-12",
-    licenseExpiryDate: "2026-05-12",
-    residentialAddress: "C-15, Sunrise Apartments, Goregaon West, Mumbai 400104",
-    officeAddress: "Unit 401, Industrial Estate, Goregaon East, Mumbai 400063",
-  },
-  {
-    id: "fire-2",
-    name: "Metro Fire Compliance Agency",
-    contactNumber: "9812345678",
-    emailAddress: "hello@metrofireagency.com",
-    registrationNumber: "REG/FIRE/2023/120",
-    licenseIssueDate: "2023-07-01",
-    licenseExpiryDate: "2026-07-01",
-    residentialAddress: "D-602, Ocean Heights, Versova, Mumbai 400061",
-    officeAddress: "Suite 1204, Business Bay, Andheri East, Mumbai 400059",
-  },
-];
-
-const APPLICANT_DIRECTORIES: Record<string, ApplicantDirectoryEntry[]> = {
-  "Licensed Site Supervisor": LICENSED_SITE_SUPERVISORS,
-  "Licensed Plumber": PLUMBERS,
-  "Others (Consultants/Third Party Agencies for Clearances)": CONSULTANTS,
-  "Registered Licensed Fire Agency": FIRE_AGENCIES,
-};
-
+// Legacy static directories retained for reference but no longer used for the Name dropdown
+const FIRE_AGENCIES: ApplicantDirectoryEntry[] = [];
 export default function ApplicantDetailsPage() {
-  const [applicants, setApplicants] = useState(SAMPLE_APPLICANTS);
+  const { userMetadata } = useUserMetadata();
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+
+  const [applicants, setApplicants] = useState<ApplicantRow[]>(() =>
+    loadDraft<ApplicantRow[]>("draft-applicant-details-applicants", [])
+  );
+  const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
   const {
     register,
     handleSubmit,
     watch,
     setValue,
+    clearErrors,
     formState: { errors },
     reset,
   } = useForm<ApplicantFormData>({
@@ -199,39 +193,162 @@ export default function ApplicantDetailsPage() {
       applicantType: "",
       plumbingConsultant: "",
       name: "",
-      officeAddress: "",
       residentialAddress: "",
       contactNumber: "",
       emailAddress: "",
       registrationNumber: "",
+      panNo: "",
       licenseIssueDate: "",
-      licenseExpiryDate: "",
     }),
   });
 
   const inputClasses =
-    "border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none";
+    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
   const textareaClasses =
-    "border border-black rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none resize-none";
+    "border border-gray-200 rounded-xl px-3 py-2 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none";
   const disabledClasses = "bg-gray-100 cursor-not-allowed";
 
   const selectedApplicantType = watch("applicantType");
   const selectedDirectoryId = watch("plumbingConsultant");
-  const directoryOptions = selectedApplicantType ? APPLICANT_DIRECTORIES[selectedApplicantType] ?? [] : [];
-  const showDirectoryDropdown = selectedApplicantType ? directoryOptions.length > 0 : false;
+  // In this flow, users should not type manually; values come only from directory selection.
+  // Show the directory dropdown as soon as applicant type is selected.
+  const showDirectoryDropdown = !!selectedApplicantType;
+  const isLocked = showDirectoryDropdown && Boolean(selectedDirectoryId);
+  const isReadOnlyForm = true;
+
+  // Capture logged-in Supabase auth user id (used to store `user_id` in applicant rows)
+  useEffect(() => {
+    const loadAuthUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error("Error fetching auth user:", error);
+        return;
+      }
+      setAuthUserId(data.user?.id ?? null);
+    };
+    loadAuthUser();
+  }, []);
+
+  // If the form was previously saved (green button) and the user starts editing/adding
+  // another applicant, move the button back to blue "Save"
+  useEffect(() => {
+    const subscription = watch(() => {
+      if (isSaved) {
+        setIsSaved(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [watch, isSaved]);
+
+  // Load consultants for the selected type from Supabase auth via RPC
+  useEffect(() => {
+    const loadConsultants = async () => {
+      if (!selectedApplicantType) {
+        setDirectoryOptions([]);
+        return;
+      }
+
+      const { data, error } = await supabase.rpc("get_consultants_by_type", {
+        p_type: selectedApplicantType,
+      });
+
+      if (error) {
+        console.error("Error loading consultants by type:", error);
+        setDirectoryOptions([]);
+        return;
+      }
+
+      const mapped: ConsultantDirectoryEntry[] =
+        data?.map((row: any) => ({
+          id: row.user_id,
+          fullName: [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(" "),
+          email: row.email || "",
+          contactNumber: row.contact_number || "",
+          pan: row.pan || "",
+          address: row.address || "",
+          registrationNumber: row.registration_number || "",
+          licenseIssueDate: row.license_issue_date || "",
+        })) ?? [];
+
+      setDirectoryOptions(mapped);
+    };
+
+    loadConsultants();
+  }, [selectedApplicantType]);
+
+  // Ensure logged-in owner is always part of the applicants list (first row)
+  useEffect(() => {
+    if (!userMetadata) return;
+
+    setApplicants((prev) => {
+      // If an Owner row already exists, keep as-is
+      const hasOwner = prev.some((a) => a.applicantType === "Owner");
+      if (hasOwner) return prev;
+
+      const ownerName =
+        userMetadata.first_name + " " + userMetadata.last_name 
+        + " " + userMetadata.middle_name ||
+        "-";
+
+      const ownerContact = userMetadata.alternate_phone || userMetadata.mobile || "-";
+      const ownerEmail = userMetadata.email || "-";
+      const ownerAddress = userMetadata.address || "-";
+
+      // Derive registration number and date based on entity_type (same logic as ProfileModal / RegistrationForm)
+      let ownerRegistrationNo = "";
+      let ownerLicenseIssueDate = "";
+      const entityType = userMetadata.entity_type;
+      if (entityType === "Pvt. Ltd. / Ltd. Company") {
+        ownerRegistrationNo = userMetadata.cin || "";
+        ownerLicenseIssueDate = userMetadata.roc_registration_date || "";
+      } else if (entityType === "LLP") {
+        ownerRegistrationNo = userMetadata.llpin || "";
+        ownerLicenseIssueDate = userMetadata.llp_incorporation_date || "";
+      } else if (entityType === "Partnership Firm") {
+        ownerRegistrationNo = userMetadata.firm_registration_no || "";
+        ownerLicenseIssueDate = userMetadata.partnership_registration_date || "";
+      } else if (entityType === "Trust / Society") {
+        ownerRegistrationNo = userMetadata.trust_registration_no || "";
+        ownerLicenseIssueDate = userMetadata.trust_registration_date || "";
+      } else if (entityType === "Govt. / PSU / Local Body") {
+        ownerRegistrationNo = userMetadata.trust_reg_no || "";
+        // No explicit date field in registration form; leave empty
+      }
+      const ownerPanNo = userMetadata.pan_no || userMetadata.pan || "-";
+
+      const ownerRow: ApplicantRow = {
+        id: 1,
+        user_id: authUserId ?? undefined,
+        applicantType: "Owner",
+        name: ownerName,
+        contactNumber: ownerContact,
+        email: ownerEmail,
+        registrationNo: ownerRegistrationNo,
+        panNo: ownerPanNo,
+        licenseIssueDate: ownerLicenseIssueDate || "-",
+        residentialAddress: ownerAddress,
+        officeAddress: ownerAddress,
+      };
+
+      // Shift existing IDs so Owner stays first with id 1
+      const reindexed = prev.map((a, idx) => ({ ...a, id: idx + 2 }));
+      return [ownerRow, ...reindexed];
+    });
+  }, [userMetadata, authUserId]);
 
   const resetApplicantFields = () => {
     const fieldsToClear: (keyof ApplicantFormData)[] = [
       "name",
-      "officeAddress",
       "residentialAddress",
       "contactNumber",
       "emailAddress",
       "registrationNumber",
+      "panNo",
       "licenseIssueDate",
-      "licenseExpiryDate",
     ];
     fieldsToClear.forEach((field) => setValue(field, ""));
+    clearErrors(fieldsToClear);
   };
 
   useEffect(() => {
@@ -243,33 +360,37 @@ export default function ApplicantDetailsPage() {
     setIsFormAutofilled(false);
   }, [selectedApplicantType, setValue]);
 
+  // When a consultant is selected from the dropdown, auto-fill all form fields
   useEffect(() => {
-    if (!selectedApplicantType || !selectedDirectoryId) {
+    if (!selectedDirectoryId || !showDirectoryDropdown) {
       setIsFormAutofilled(false);
       return;
     }
 
-    const directory = APPLICANT_DIRECTORIES[selectedApplicantType];
-    if (!directory) {
-      setIsFormAutofilled(false);
-      return;
-    }
-
-    const selectedEntry = directory.find((entry) => entry.id === selectedDirectoryId);
-    if (selectedEntry) {
-      setValue("name", selectedEntry.name);
-      setValue("contactNumber", selectedEntry.contactNumber);
-      setValue("emailAddress", selectedEntry.emailAddress);
-      setValue("registrationNumber", selectedEntry.registrationNumber);
-      setValue("licenseIssueDate", selectedEntry.licenseIssueDate);
-      setValue("licenseExpiryDate", selectedEntry.licenseExpiryDate);
-      setValue("residentialAddress", selectedEntry.residentialAddress);
-      setValue("officeAddress", selectedEntry.officeAddress);
+    const selectedConsultant = directoryOptions.find((entry) => entry.id === selectedDirectoryId);
+    if (selectedConsultant) {
+      const opts = { shouldValidate: true, shouldDirty: true, shouldTouch: true } as const;
+      setValue("name", selectedConsultant.fullName, opts);
+      setValue("contactNumber", selectedConsultant.contactNumber, opts);
+      setValue("emailAddress", selectedConsultant.email, opts);
+      setValue("residentialAddress", selectedConsultant.address, opts);
+      setValue("registrationNumber", selectedConsultant.registrationNumber, opts);
+      setValue("panNo", selectedConsultant.pan, opts);
+      setValue("licenseIssueDate", selectedConsultant.licenseIssueDate, opts);
+      clearErrors([
+        "name",
+        "contactNumber",
+        "emailAddress",
+        "residentialAddress",
+        "registrationNumber",
+        "panNo",
+        "licenseIssueDate",
+      ]);
       setIsFormAutofilled(true);
     } else {
       setIsFormAutofilled(false);
     }
-  }, [selectedApplicantType, selectedDirectoryId, setValue]);
+  }, [selectedDirectoryId, directoryOptions, showDirectoryDropdown, setValue, clearErrors]);
 
   // Get applicant types that are already added
   const addedApplicantTypes = applicants.map((applicant) => applicant.applicantType);
@@ -284,15 +405,18 @@ export default function ApplicantDetailsPage() {
       const nextId = prev.length ? Math.max(...prev.map((item) => item.id)) + 1 : 1;
       const newApplicant = {
         id: nextId,
+        // If user picked from directory dropdown, this is the consultant's auth user id.
+        // Otherwise, store the creator (logged-in owner) id.
+        user_id: (showDirectoryDropdown ? selectedDirectoryId : authUserId) || undefined,
         applicantType: data.applicantType,
         name: data.name || "-",
         contactNumber: data.contactNumber || "-",
         email: data.emailAddress || "-",
         registrationNo: data.registrationNumber || "-",
+        panNo: data.panNo || "-",
         licenseIssueDate: data.licenseIssueDate || "-",
-        licenseExpiryDate: data.licenseExpiryDate || "-",
         residentialAddress: data.residentialAddress || "-",
-        officeAddress: data.officeAddress || "-",
+        officeAddress: "-", // Not collected from form anymore
       };
 
       return [...prev, newApplicant];
@@ -301,6 +425,7 @@ export default function ApplicantDetailsPage() {
     reset();
     setIsFormAutofilled(false);
     markPageSaved("saved-applicant-details");
+    setIsSaved(true);
   };
 
   // Persist draft as user types
@@ -311,57 +436,64 @@ export default function ApplicantDetailsPage() {
     return () => subscription.unsubscribe();
   }, [watch]);
 
+  // Persist applicants array whenever it changes
+  useEffect(() => {
+    saveDraft("draft-applicant-details-applicants", applicants);
+  }, [applicants]);
+
   const handleRemoveApplicant = (id: number) => {
     setApplicants((prev) => prev.filter((applicant) => applicant.id !== id));
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-6 space-y-6 ">
+    <div className="max-w-6xl mx-auto px-6 space-y-6">
         <div className="space-y-6">
-          <div className="border border-black rounded-lg bg-white flex flex-col max-h-[70vh] overflow-hidden">
-            <div className="sticky top-0 z-10 bg-white border-b border-black px-6 py-4">
-              <h2 className="text-xl font-bold text-black">Applicants</h2>
+        <div className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
+          <div className="bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+            <h2 className="text-xl font-bold text-gray-900">Applicants</h2>
             </div>
-            <div className="overflow-x-auto overflow-y-auto">
-              <table className="min-w-full text-sm text-black border-collapse">
-                <thead className="bg-white uppercase text-xs sticky top-0 z-10">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm text-gray-900 border-collapse">
+                <thead className="bg-white uppercase text-xs">
                   <tr>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">#</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">Applicant</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">Name / Contact No.</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">Registration No.</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">License Issue Date</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">License Expiry Date</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">Residential Address</th>
-                    <th className="border-r border-b border-black px-4 py-3 text-left bg-white">Office Address</th>
-                    <th className="border-b border-black px-4 py-3 text-left bg-white">Actions</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">#</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Applicant</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Name / Contact No.</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Registration No.</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">License Issue Date</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">PAN No.</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Residential Address</th>
+                    <th className="border-b border-gray-200 px-4 py-3 text-left bg-white">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {applicants.map((applicant, index) => (
                     <tr key={applicant.id}>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3 text-center`}>{applicant.id}</td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>{applicant.applicantType}</td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>
-                        <p className="font-semibold text-black">{applicant.name}</p>
-                        <p className="text-xs text-black">Ph: {applicant.contactNumber}</p>
-                        <p className="text-xs text-black">Email: {applicant.email}</p>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3 text-center`}>{applicant.id}</td>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.applicantType}</td>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>
+                        <p className="font-semibold text-gray-900">{applicant.name}</p>
+                        <p className="text-xs text-gray-600">Ph: {applicant.contactNumber}</p>
+                        <p className="text-xs text-gray-600">Email: {applicant.email}</p>
                       </td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>{applicant.registrationNo}</td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>{applicant.licenseIssueDate || "-"}</td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>{applicant.licenseExpiryDate || "-"}</td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>{applicant.residentialAddress}</td>
-                      <td className={`border-r ${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>{applicant.officeAddress}</td>
-                      <td className={`${index !== applicants.length - 1 ? 'border-b' : ''} border-black px-4 py-3`}>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.registrationNo}</td>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.licenseIssueDate || "-"}</td>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.panNo || "-"}</td>
+                      <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.residentialAddress}</td>
+                      <td className={`${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>
                         <button
                           type="button"
                           className={`text-sm ${
-                            applicant.applicantType === "Licensed Site Supervisor"
+                            applicant.applicantType === "Licensed Site Supervisor" ||
+                            applicant.applicantType === "Owner"
                               ? "text-gray-400 cursor-not-allowed"
                               : "text-red-600 hover:underline"
                           }`}
                           onClick={() => handleRemoveApplicant(applicant.id)}
-                          disabled={applicant.applicantType === "Licensed Site Supervisor"}
+                          disabled={
+                            applicant.applicantType === "Licensed Site Supervisor" ||
+                            applicant.applicantType === "Owner"
+                          }
                         >
                           Delete
                         </button>
@@ -373,27 +505,47 @@ export default function ApplicantDetailsPage() {
             </div>
           </div>
 
-          <form
-            onSubmit={handleSubmit(onSubmit)}
-            className="border border-black rounded-lg bg-white flex flex-col max-h-[70vh] overflow-hidden"
-          >
-            {/* Sticky header */}
-            <div className="sticky top-0 z-10 bg-white border-b border-black px-6 py-4 flex flex-wrap items-start justify-between gap-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
+            {/* Header */}
+            <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
               <div>
-                <h2 className="text-xl font-bold text-black">Applicant / Authorized Person Details</h2>
-                <p className="text-sm text-black mt-1">
+                <h2 className="text-xl font-bold text-gray-900">Applicant / Authorized Person Details</h2>
+                <p className="text-sm text-gray-600 mt-1">
                   Provide applicant/authorized person information. Ensure the details match the submitted documents.
                 </p>
               </div>
               <button
                 type="submit"
-                className="bg-sky-700 hover:bg-sky-800 text-white px-6 py-2 rounded-lg font-semibold shadow transition-colors"
+                className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
+                  isSaved
+                    ? "bg-green-600 hover:bg-green-700 text-white"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                }`}
               >
-                Save
+                {isSaved ? "Saved" : "Save"}
               </button>
             </div>
 
-            <div className="pt-6 space-y-6 overflow-y-auto px-6 pb-6">
+            <div className="pt-6 space-y-6 px-6 pb-6">
+            {isLocked && (
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                <svg
+                  className="h-4 w-4 text-emerald-700"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm6 10H6a2 2 0 01-2-2v-5a4 4 0 014-4h8a4 4 0 014 4v5a2 2 0 01-2 2z"
+                  />
+                </svg>
+                <span>Fields are locked because this applicant was selected from the directory.</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -414,59 +566,34 @@ export default function ApplicantDetailsPage() {
                 {errors.applicantType && <p className="text-red-600 text-sm mt-1">{errors.applicantType.message}</p>}
               </div>
 
-              {showDirectoryDropdown && (
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Select Others (Consultants/Third Party Agencies for Clearances){" "}
-                    <span className="text-red-500">*</span>
+                  Name <span className="text-red-500">*</span>
                   </label>
+                <>
                   <select
                     {...register("plumbingConsultant", {
                       required: `Please select a ${selectedApplicantType?.toLowerCase() || "record"}`,
                     })}
-                    className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                    disabled={isFormAutofilled}
+                    className={`${inputClasses} ${directoryOptions.length === 0 ? disabledClasses : ""}`}
+                    disabled={directoryOptions.length === 0}
                   >
-                    <option value="">Select {selectedApplicantType}</option>
+                    <option value="">
+                      {directoryOptions.length === 0
+                        ? `No ${selectedApplicantType} found`
+                        : `Select ${selectedApplicantType}`}
+                    </option>
                     {directoryOptions.map((entry) => (
                       <option key={entry.id} value={entry.id}>
-                        {entry.name}
+                        {entry.fullName}
                       </option>
                     ))}
                   </select>
                   {errors.plumbingConsultant && (
                     <p className="text-red-600 text-sm mt-1">{errors.plumbingConsultant.message}</p>
                   )}
-                </div>
-              )}
-
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  {...register("name", { required: "Name is required" })}
-                  className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  placeholder="Enter name"
-                  disabled={isFormAutofilled}
-                />
-                {errors.name && <p className="text-red-600 text-sm mt-1">{errors.name.message}</p>}
+                </>
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  Office Address (Other than site office) <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  {...register("officeAddress", { required: "Office address is required" })}
-                  className={`${textareaClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  style={{ minHeight: "120px" }}
-                  placeholder="Enter office address"
-                  disabled={isFormAutofilled}
-                />
-                {errors.officeAddress && <p className="text-red-600 text-sm mt-1">{errors.officeAddress.message}</p>}
               </div>
 
               <div>
@@ -475,15 +602,13 @@ export default function ApplicantDetailsPage() {
                 </label>
                 <textarea
                   {...register("residentialAddress", { required: "Residential address is required" })}
-                  className={`${textareaClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  style={{ minHeight: "120px" }}
-                  placeholder="Enter residential address"
-                  disabled={isFormAutofilled}
+                className={`${textareaClasses} h-10 ${disabledClasses}`}
+                placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
+                readOnly={isReadOnlyForm}
                 />
                 {errors.residentialAddress && (
                   <p className="text-red-600 text-sm mt-1">{errors.residentialAddress.message}</p>
                 )}
-              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -499,9 +624,9 @@ export default function ApplicantDetailsPage() {
                       message: "Enter a valid 10-digit number",
                     },
                   })}
-                  className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  placeholder="Enter contact number"
-                  disabled={isFormAutofilled}
+                  className={`${inputClasses} ${disabledClasses}`}
+                  placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
+                  readOnly={isReadOnlyForm}
                 />
                 {errors.contactNumber && <p className="text-red-600 text-sm mt-1">{errors.contactNumber.message}</p>}
               </div>
@@ -518,9 +643,9 @@ export default function ApplicantDetailsPage() {
                       message: "Enter a valid email",
                     },
                   })}
-                  className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  placeholder="Enter email address"
-                  disabled={isFormAutofilled}
+                  className={`${inputClasses} ${disabledClasses}`}
+                  placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
+                  readOnly={isReadOnlyForm}
                 />
                 {errors.emailAddress && <p className="text-red-600 text-sm mt-1">{errors.emailAddress.message}</p>}
               </div>
@@ -533,9 +658,9 @@ export default function ApplicantDetailsPage() {
                 </label>
                 <input
                   {...register("registrationNumber", { required: "Registration number is required" })}
-                  className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  placeholder="Enter registration number"
-                  disabled={isFormAutofilled}
+                  className={`${inputClasses} ${disabledClasses}`}
+                  placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
+                  readOnly={isReadOnlyForm}
                 />
                 {errors.registrationNumber && (
                   <p className="text-red-600 text-sm mt-1">{errors.registrationNumber.message}</p>
@@ -544,16 +669,23 @@ export default function ApplicantDetailsPage() {
 
               <div>
                 <label className="block font-medium text-black mb-1">
-                  License Issue Date <span className="text-red-500">*</span>
+                  PAN No. <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="date"
-                  {...register("licenseIssueDate", { required: "License issue date is required" })}
-                  className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  disabled={isFormAutofilled}
+                  {...register("panNo", { 
+                    required: "PAN No. is required",
+                    pattern: {
+                      value: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
+                      message: "Enter a valid PAN (e.g., ABCDE1234F)",
+                    },
+                  })}
+                  className={`${inputClasses} ${disabledClasses}`}
+                  placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
+                  readOnly={isReadOnlyForm}
+                  style={{ textTransform: "uppercase" }}
                 />
-                {errors.licenseIssueDate && (
-                  <p className="text-red-600 text-sm mt-1">{errors.licenseIssueDate.message}</p>
+                {errors.panNo && (
+                  <p className="text-red-600 text-sm mt-1">{errors.panNo.message}</p>
                 )}
               </div>
             </div>
@@ -561,17 +693,14 @@ export default function ApplicantDetailsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block font-medium text-black mb-1">
-                  License Expiry Date <span className="text-red-500">*</span>
+                  License Issue Date
                 </label>
                 <input
                   type="date"
-                  {...register("licenseExpiryDate", { required: "License expiry date is required" })}
-                  className={`${inputClasses} ${isFormAutofilled ? disabledClasses : ''}`}
-                  disabled={isFormAutofilled}
+                  {...register("licenseIssueDate")}
+                  className={`${inputClasses} ${disabledClasses}`}
+                  readOnly={isReadOnlyForm}
                 />
-                {errors.licenseExpiryDate && (
-                  <p className="text-red-600 text-sm mt-1">{errors.licenseExpiryDate.message}</p>
-                )}
               </div>
             </div>
             </div>

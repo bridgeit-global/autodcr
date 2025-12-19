@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import ChangePasswordModal from "./ChangePasswordModal";
@@ -17,6 +17,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const { clearUserMetadata, userMetadata, fetchUserMetadata, loading } = useUserMetadata();
 
@@ -89,31 +90,63 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
     }
   };
 
+  // Close dropdown on outside click / Escape
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [userMenuOpen]);
+
   return (
-    <header className="w-full bg-sky-700 text-white shadow-md">
-      <div className="mx-auto flex max-w-full items-center justify-between gap-4 px-6 py-3">
-        {/* Left: Session Timer */}
-        <div className="text-sm font-medium">
-          Session Ends In: <span className="font-bold">{sessionTime}</span>
+    <header className="w-full text-gray-900">
+      {/* Rounded navbar container (matches dashboard styling) */}
+      <div className="w-full">
+        <div className="bg-white border border-gray-200 rounded-3xl shadow-sm">
+          <div className="flex max-w-full items-center justify-between gap-4 px-6 py-4">
+        {/* Left: Branding */}
+        <div className="flex items-center gap-3 min-w-[180px]">
+          <div className="h-9 w-9 rounded-xl bg-emerald-600 flex items-center justify-center shadow-sm">
+            <span className="text-sm text-white font-bold">DD</span>
         </div>
-
-        {/* Center: Branding */}
-        <div className="flex items-center gap-3">
-          <span className="text-lg font-semibold">AutoDCR</span>
-          <span className="text-gray-300">|</span>
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full bg-white flex items-center justify-center">
-              <span className="text-xs text-sky-700 font-bold">BMC</span>
-            </div>
-            <span className="text-sm">Brihanmumbai Municipal Corporation</span>
+          <div className="leading-tight">
+            <div className="text-base font-semibold">Draft Desk</div>
+            <div className="text-xs text-gray-500">Create Project Dashboard</div>
           </div>
-          <span className="text-sm font-semibold">BMC</span>
         </div>
 
-        {/* Right: User Info & Actions */}
-        <div className="flex items-center gap-4">
+        {/* Center: (Search removed as requested) */}
+        <div className="hidden md:flex flex-1 justify-center" />
+
+        {/* Right: Session + actions + user */}
+        <div className="flex items-center gap-3 min-w-[220px] justify-end">
+          {/* Session Timer */}
+          <div className="hidden lg:block text-xs text-gray-500">
+            Session: <span className="font-semibold text-gray-700">{sessionTime}</span>
+          </div>
+
           {/* Calendar Icon */}
-          <button className="p-2 hover:bg-sky-800 rounded transition-colors">
+          <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" aria-label="Calendar">
             <svg
               className="w-5 h-5"
               fill="none"
@@ -130,7 +163,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
           </button>
 
           {/* Bell Icon */}
-          <button className="p-2 hover:bg-sky-800 rounded transition-colors relative">
+          <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative" aria-label="Notifications">
             <svg
               className="w-5 h-5"
               fill="none"
@@ -148,14 +181,17 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
           </button>
 
           {/* User Dropdown */}
-          <div className="relative">
+          <div className="relative" ref={userMenuRef}>
             <button
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-2 hover:bg-sky-800 px-3 py-2 rounded transition-colors"
+              className="flex items-center gap-3 hover:bg-gray-100 px-3 py-2 rounded-xl transition-colors"
             >
-              <div className="text-right">
-                <div className="text-sm font-medium">{formatUserName()}</div>
-                <div className="text-xs text-gray-300">{getUserRole() || "User"}</div>
+              <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-semibold text-gray-700">
+                {formatUserName().slice(0, 1).toUpperCase()}
+              </div>
+              <div className="text-left leading-tight">
+                <div className="text-sm font-medium text-gray-900">{formatUserName()}</div>
+                <div className="text-xs text-gray-500">{getUserRole() || "User"}</div>
               </div>
               <svg
                 className={`w-4 h-4 transition-transform ${
@@ -176,6 +212,15 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
 
             {userMenuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    router.push("/userdashboard");
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Go to Dashboard
+                </button>
                 <button
                   onClick={() => {
                     setIsProfileOpen(true);
@@ -205,7 +250,9 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
           </div>
 
           {/* Help Desk */}
-          <div className="text-sm text-gray-300">Help Desk</div>
+          <div className="hidden lg:block text-sm text-gray-500">Help Desk</div>
+        </div>
+          </div>
         </div>
       </div>
       

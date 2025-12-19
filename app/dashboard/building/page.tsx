@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { loadDraft, saveDraft, markPageSaved } from "@/app/utils/draftStorage";
+import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 
 type BuildingFormData = {
   buildingType: string;
@@ -20,6 +20,8 @@ const BUILDING_TYPES = [
 ];
 
 export default function BuildingDetailsPage() {
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-building-details"));
+
   const {
     register,
     handleSubmit,
@@ -35,13 +37,14 @@ export default function BuildingDetailsPage() {
   });
 
   const inputClasses =
-    "border border-black rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none";
+    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
 
   const onSubmit = (data: BuildingFormData) => {
     console.log("Building Details:", data);
     alert("Building details saved successfully!");
     saveDraft("draft-building-details-form", data);
     markPageSaved("saved-building-details");
+    setIsSaved(true);
   };
 
   // Persist draft as user types
@@ -55,25 +58,29 @@ export default function BuildingDetailsPage() {
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       <form onSubmit={handleSubmit(onSubmit)}>
-        <section className="border border-black rounded-lg bg-white flex flex-col max-h-[70vh] overflow-hidden">
-          {/* Sticky header */}
-          <div className="sticky top-0 z-10 bg-white border-b border-black px-6 py-4 flex flex-wrap items-start justify-between gap-4">
+        <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
+          {/* Header */}
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
             <div>
-              <h2 className="text-xl font-bold text-black">Building Details</h2>
-              <p className="text-sm text-black mt-1">
+              <h2 className="text-xl font-bold text-gray-900">Building Details</h2>
+              <p className="text-sm text-gray-600 mt-1">
                 Provide the core parameters for the proposed building.
               </p>
             </div>
 
             <button
               type="submit"
-              className="bg-sky-700 hover:bg-sky-800 text-white px-6 py-2 rounded-lg font-semibold shadow transition-colors"
+              className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
+                isSaved
+                  ? "bg-green-600 hover:bg-green-700 text-white"
+                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+              }`}
             >
-              Save
+              {isSaved ? "Saved" : "Save"}
             </button>
           </div>
 
-          <div className="p-6 space-y-6 overflow-y-auto pb-6">
+          <div className="p-6 space-y-6 pb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block font-medium text-black mb-1">

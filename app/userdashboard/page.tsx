@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
 import DraftApplicationsModal, { DraftApplication } from "../components/DraftApplicationsModal";
+import { supabase } from "@/app/utils/supabase";
 
 type ApplicationType = {
   name: string;
@@ -528,7 +529,10 @@ function UserDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("tile-view");
-  const [selectedProject, setSelectedProject] = useState("All");
+  // Project filter: "ALL" means don't filter
+  const [selectedProject, setSelectedProject] = useState("ALL");
+  const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [selectedApplicationType, setSelectedApplicationType] = useState("Building Permission");
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
   const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
@@ -543,6 +547,44 @@ function UserDashboardContent() {
       setSelectedApplicationType(departmentParam);
     }
   }, [searchParams]);
+
+  // Load projects for logged-in user (populate "Select Project" dropdown)
+  useEffect(() => {
+    const loadProjects = async () => {
+      setProjectsLoading(true);
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) {
+          console.error("Error fetching auth user:", authError);
+          setProjects([]);
+          return;
+        }
+        const userId = authData.user?.id;
+        if (!userId) {
+          setProjects([]);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("projects")
+          .select("id,title")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("Error loading projects:", error);
+          setProjects([]);
+          return;
+        }
+
+        setProjects((data ?? []).map((row: any) => ({ id: row.id, title: row.title })));
+      } finally {
+        setProjectsLoading(false);
+      }
+    };
+
+    loadProjects();
+  }, []);
 
   const handleCellClick = (appType: string, count: number | string, status: string) => {
     if (count && count !== "-" && Number(count) > 0) {
@@ -588,17 +630,27 @@ function UserDashboardContent() {
               <div className="flex flex-wrap items-center gap-4">
                 {/* Left Dropdowns */}
                 <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <select
                     value={selectedProject}
                     onChange={(e) => setSelectedProject(e.target.value)}
                     className="border border-black rounded px-3 py-2 text-sm text-black bg-white"
                   >
-                    <option>All</option>
-                    <option>Select Project</option>
+                      <option value="ALL">All Projects</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
                   </select>
-                  <select className="border border-black rounded px-3 py-2 text-sm text-black bg-white">
-                    <option>Select Project</option>
-                  </select>
+
+                    {projectsLoading && (
+                      <span className="text-xs text-gray-600">Loading projects…</span>
+                    )}
+                    {!projectsLoading && projects.length === 0 && (
+                      <span className="text-xs text-gray-600">No projects found</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Center Tabs */}
