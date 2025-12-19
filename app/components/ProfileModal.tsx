@@ -35,6 +35,7 @@ type FormValues = {
 
 const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   const { userMetadata, fetchUserMetadata } = useUserMetadata();
+  const [userId, setUserId] = useState<string | null>(null);
   
   // Get registration label and value based on role and type
   const getRegistrationInfo = (): { label: string; value: string } => {
@@ -97,8 +98,29 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     handleSubmit,
     formState: { errors },
     reset,
-    setValue
+    setValue,
+    watch
   } = useForm<FormValues>();
+
+  // Fetch user_id from raw_user_meta_data
+  useEffect(() => {
+    const fetchUserId = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // user_id is stored in raw_user_meta_data, accessible via user.user_metadata.user_id
+          const userIdFromMeta = user.user_metadata?.user_id || null;
+          setUserId(userIdFromMeta);
+        }
+      } catch (error) {
+        console.error('Error fetching user_id:', error);
+      }
+    };
+    
+    if (open) {
+      fetchUserId();
+    }
+  }, [open]);
 
   // Populate form with user metadata when modal opens or metadata loads
   useEffect(() => {
@@ -659,268 +681,209 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                 </div>
               )}
 
-              {/* General Information Section */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-black">General Information</h3>
-                  <button
-                    onClick={handleCloseAttempt}
-                    className="text-2xl font-bold text-gray-700 hover:text-black"
-                  >
-                    ×
-                  </button>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      Name:
-                    </label>
-                    <input
-                      {...register("name", { required: "Name is required" })}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      disabled={true}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      Console:
-                    </label>
-                    <input
-                      {...register("console")}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      disabled={true}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      PAN No.:
-                    </label>
-                    <input
-                      {...register("panNo", {
-                        pattern: {
-                          value: /^[A-Z]{5}[0-9]{4}[A-Z]$/,
-                          message: "PAN must be 5 letters, 4 digits, 1 letter (e.g., ABCDE1234F)"
-                        }
-                      })}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed uppercase"
-                      placeholder="ABCDE1234F"
-                      disabled={true}
-                    />
-                    {errors.panNo && (
-                      <p className="text-red-600 text-sm mt-1">{errors.panNo.message}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Profile Photo and Letterhead */}
-                <div className="flex items-center gap-4 mt-4">
-                  {/* Profile Photo */}
-                  <div className="flex items-center gap-4">
-                    <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+              {/* Profile Header Section */}
+              <div className="flex items-start justify-between mb-6">
+                <div className="flex items-start gap-6 flex-1">
+                  {/* Profile Photo with Camera Icon */}
+                  <div className="relative">
+                    <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
                       {profilePhoto ? (
                         <img src={profilePhoto} alt="Profile" className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-2xl font-bold">
-                          {userMetadata?.first_name?.[0] || "U"}
+                        <div className="w-full h-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-4xl font-bold">
+                          {userMetadata?.first_name?.[0] || userMetadata?.last_name?.[0] || "U"}
                         </div>
                       )}
                     </div>
-                    <div>
-                      <label className={`inline-block px-4 py-2 bg-blue-600 text-white rounded-lg font-medium transition cursor-pointer ${
-                        isSubmitting 
-                          ? 'opacity-50 cursor-not-allowed' 
-                          : 'hover:bg-blue-700'
-                      }`}>
-                        Upload Photo
-                        <input
-                          ref={photoInputRef}
-                          type="file"
-                          accept="image/*"
-                          onChange={handlePhotoUpload}
-                          className="hidden"
-                          disabled={isSubmitting}
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Letterhead PDF */}
-                  <div className="flex items-center gap-4 ml-4 pl-4 border-l border-gray-300">
-                    <div 
-                      className={`w-24 h-24 rounded-lg bg-gray-200 flex items-center justify-center overflow-hidden transition ${
-                        (letterheadPreviewUrl || letterheadUrl) 
-                          ? 'cursor-pointer hover:bg-gray-300' 
-                          : 'cursor-default'
-                      }`}
-                      onClick={handleLetterheadThumbnailClick}
-                      title={(letterheadPreviewUrl || letterheadUrl) ? "Click to view letterhead" : "No letterhead uploaded"}
-                    >
-                      {(letterheadPreviewUrl || letterheadUrl) ? (
-                        letterheadThumbnail ? (
-                          <img 
-                            src={letterheadThumbnail} 
-                            alt="Letterhead Preview" 
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center bg-red-50">
-                            <svg className="w-12 h-12 text-red-600 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                            <span className="text-xs text-red-600 font-medium">PDF</span>
-                          </div>
-                        )
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                          <svg className="w-12 h-12 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                          </svg>
-                          <span className="text-xs">PDF</span>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <button
-                        type="button"
-                        onClick={handleUploadPDFClick}
-                        disabled={isSubmitting}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Upload PDF
-                      </button>
+                    {/* Camera Icon Overlay */}
+                    <label className="absolute bottom-0 right-0 w-10 h-10 bg-emerald-600 rounded-full flex items-center justify-center cursor-pointer hover:bg-emerald-700 transition shadow-lg border-4 border-white">
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
                       <input
-                        ref={letterheadInputRef}
+                        ref={photoInputRef}
                         type="file"
-                        accept=".pdf"
-                        onChange={handleLetterheadChange}
+                        accept="image/*"
+                        onChange={handlePhotoUpload}
                         className="hidden"
                         disabled={isSubmitting}
                       />
+                    </label>
+                  </div>
+
+                  {/* User Details */}
+                  <div className="flex-1">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                      {watch("name") || (userMetadata && userMetadata.first_name && userMetadata.last_name 
+                        ? `${userMetadata.first_name} ${userMetadata.last_name}`.trim()
+                        : "User Name")}
+                    </h2>
+                    <div className="flex items-center gap-2 text-sm text-emerald-600 mb-3">
+                      <span>{watch("console") || userMetadata?.role || "Role"}</span>
+                      <span>|</span>
+                      <span>{userId || "User ID"}</span>
+                    </div>
+                    
+                    {/* Letterhead Preview and Upload */}
+                    <div className="flex items-center gap-3 mt-3">
+                      {/* Letterhead Thumbnail */}
+                      <div 
+                        className={`w-20 h-20 rounded-lg bg-gray-200 flex items-center justify-center overflow-hidden transition ${
+                          (letterheadPreviewUrl || letterheadUrl) 
+                            ? 'cursor-pointer hover:bg-gray-300 border-2 border-emerald-500' 
+                            : 'cursor-default border-2 border-gray-300'
+                        }`}
+                        onClick={handleLetterheadThumbnailClick}
+                        title={(letterheadPreviewUrl || letterheadUrl) ? "Click to view letterhead" : "No letterhead uploaded"}
+                      >
+                        {(letterheadPreviewUrl || letterheadUrl) ? (
+                          letterheadThumbnail ? (
+                            <img 
+                              src={letterheadThumbnail} 
+                              alt="Letterhead Preview" 
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-red-50">
+                              <svg className="w-8 h-8 text-red-600 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                              </svg>
+                              <span className="text-xs text-red-600 font-medium">PDF</span>
+                            </div>
+                          )
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                            <svg className="w-8 h-8 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="text-xs">PDF</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Upload Button */}
+                      <div>
+                        <button
+                          type="button"
+                          onClick={handleUploadPDFClick}
+                          disabled={isSubmitting}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-700 transition cursor-pointer disabled:bg-emerald-300 disabled:cursor-not-allowed"
+                        >
+                          Update Letterhead
+                        </button>
+                        <input
+                          ref={letterheadInputRef}
+                          type="file"
+                          accept=".pdf"
+                          onChange={handleLetterheadChange}
+                          className="hidden"
+                          disabled={isSubmitting}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Close Button */}
+                <button
+                  onClick={handleCloseAttempt}
+                  className="text-2xl font-bold text-gray-700 hover:text-black ml-4"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Personal Information Section */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Personal Information</h3>
+                
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">First name</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {userMetadata?.first_name || "-"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">Last name</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {userMetadata?.last_name || "-"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">Phone</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("mobile") || userMetadata?.alternate_phone || userMetadata?.mobile || "-"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">Title</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("console") || userMetadata?.role || "-"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">PAN No.</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("panNo") || userMetadata?.pan || "-"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">{getRegistrationInfo().label}</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("nmaRegNumber") || getRegistrationInfo().value || "-"}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Contact Information Section */}
-              <div className="space-y-4 pt-4 border-t">
-                <h3 className="text-lg font-semibold text-black mb-4">Contact Information</h3>
+              {/* Address Section */}
+              <div className="space-y-4 pt-4 border-t border-gray-200">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Address</h3>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
-                    <label className="block font-medium text-black mb-1">
-                      Address:
-                    </label>
-                    <input
-                      {...register("address")}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      disabled={true}
-                    />
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm text-gray-500 mb-1">Country</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      India
+                    </div>
                   </div>
 
                   <div>
-                    <label className="block font-medium text-black mb-1">
-                      City:
-                    </label>
-                    <input
-                      {...register("city")}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      disabled={true}
-                    />
+                    <label className="block text-sm text-gray-500 mb-1">City/State</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("city") || userMetadata?.city || "-"}
+                    </div>
                   </div>
 
                   <div>
-                    <label className="block font-medium text-black mb-1">
-                      Zip Code:
-                    </label>
-                    <input
-                      {...register("zip", {
-                        pattern: {
-                          value: /^\d{6}$/,
-                          message: "Zip code must be 6 digits"
-                        }
-                      })}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      placeholder="123456"
-                      maxLength={6}
-                      disabled={true}
-                    />
-                    {errors.zip && (
-                      <p className="text-red-600 text-sm mt-1">{errors.zip.message}</p>
-                    )}
+                    <label className="block text-sm text-gray-500 mb-1">Zip Code</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("zip") || userMetadata?.pincode || "-"}
+                    </div>
                   </div>
 
                   <div>
-                    <label className="block font-medium text-black mb-1">
-                      Email:
-                    </label>
-                    <input
-                      {...register("email", {
-                        required: "Email is required",
-                        pattern: {
-                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                          message: "Invalid email address"
-                        }
-                      })}
-                      type="email"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      disabled={true}
-                    />
-                    {errors.email && (
-                      <p className="text-red-600 text-sm mt-1">{errors.email.message}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      Mobile:
-                    </label>
-                    <input
-                      {...register("mobile", {
-                        pattern: {
-                          value: /^\d{10}$/,
-                          message: "Mobile number must be exactly 10 digits"
-                        }
-                      })}
-                      type="tel"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      placeholder="9876543210"
-                      maxLength={10}
-                      disabled={true}
-                    />
-                    {errors.mobile && (
-                      <p className="text-red-600 text-sm mt-1">{errors.mobile.message}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-black mb-1">
-                      {getRegistrationInfo().label}
-                    </label>
-                    <input
-                      {...register("nmaRegNumber")}
-                      type="text"
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      disabled={true}
-                    />
+                    <label className="block text-sm text-gray-500 mb-1">Address</label>
+                    <div className="text-base font-semibold text-gray-900">
+                      {watch("address") || userMetadata?.address || "-"}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Action Buttons */}
               {(profilePhotoFile || letterheadFile) && (
-                <div className="flex justify-end gap-3 pt-4 border-t">
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                   <button
                     type="submit"
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium shadow hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="px-5 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-700 transition disabled:bg-emerald-300 disabled:cursor-not-allowed flex items-center gap-2"
                     disabled={isSubmitting || submitSuccess}
                   >
                     {isSubmitting ? (
@@ -984,7 +947,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                 <div>
                   <h2 className="text-2xl font-bold text-black">Letterhead Preview - Assigned Placement Demo</h2>
                   <p className="text-sm text-gray-600 mt-1">
-                    This is a demo showing where your letterhead will be placed in the system.
+                    This content area should be blank.
                   </p>
                 </div>
                 <button
