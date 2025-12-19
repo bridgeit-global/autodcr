@@ -395,10 +395,30 @@ export default function ApplicantDetailsPage() {
   // Get applicant types that are already added
   const addedApplicantTypes = applicants.map((applicant) => applicant.applicantType);
   
+  // Check if Architect or Licensed Surveyor is already added
+  const hasArchitect = addedApplicantTypes.includes("Architect");
+  const hasLicensedSurveyor = addedApplicantTypes.includes("Licensed Surveyor");
+  
   // Filter out already added applicant types from dropdown options
-  const availableApplicantTypes = APPLICANT_TYPE_OPTIONS.filter(
-    (type) => !addedApplicantTypes.includes(type)
-  );
+  // Also enforce mutual exclusivity: if Architect is added, exclude Licensed Surveyor and vice versa
+  const availableApplicantTypes = APPLICANT_TYPE_OPTIONS.filter((type) => {
+    // Don't show if already added
+    if (addedApplicantTypes.includes(type)) {
+      return false;
+    }
+    
+    // Mutual exclusivity: if Architect is added, don't show Licensed Surveyor
+    if (hasArchitect && type === "Licensed Surveyor") {
+      return false;
+    }
+    
+    // Mutual exclusivity: if Licensed Surveyor is added, don't show Architect
+    if (hasLicensedSurveyor && type === "Architect") {
+      return false;
+    }
+    
+    return true;
+  });
 
   const onSubmit = (data: ApplicantFormData) => {
     setApplicants((prev) => {

@@ -817,6 +817,18 @@ export default function ProjectDetailsClient() {
                   }}
                   render={({ field, fieldState }) => {
                     const options = getSurveyNumbersForAddress(selectedAddress as string);
+                    // Sort survey numbers in descending order
+                    // Handle both numeric and alphanumeric survey numbers
+                    const sortedOptions = [...options].sort((a, b) => {
+                      // Extract numeric parts for comparison
+                      const numA = parseInt(a.match(/\d+/)?.[0] || "0", 10);
+                      const numB = parseInt(b.match(/\d+/)?.[0] || "0", 10);
+                      if (numA !== numB) {
+                        return numB - numA; // Descending order
+                      }
+                      // If numeric parts are equal, compare as strings (descending)
+                      return b.localeCompare(a);
+                    });
                     const current = Array.isArray(field.value) ? field.value : [];
 
                     const addSurveyNo = (surveyNo: string) => {
@@ -841,7 +853,7 @@ export default function ProjectDetailsClient() {
                           }}
                         >
                           <option value="">----- Select Survey No -----</option>
-                          {options.map((surveyNo) => (
+                          {sortedOptions.map((surveyNo) => (
                             <option key={surveyNo} value={surveyNo}>
                               {surveyNo}
                             </option>
