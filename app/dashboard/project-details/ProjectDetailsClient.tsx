@@ -206,7 +206,35 @@ export default function ProjectDetailsClient() {
     setSavePlotValue("villageName", "");
     setSavePlotValue("proposedCtsNumber", []);
     setSavePlotValue("addressRateDetails", null);
+    // Reset plotBelongsTo when zone changes
+    setSavePlotValue("plotBelongsTo", "");
   }, [selectedZone, setSavePlotValue]);
+
+  // Auto-select plotBelongsTo based on zone and ward
+  useEffect(() => {
+    // Only set if both zone and ward are selected (for City), or zone is selected (for non-City)
+    if (!selectedZone) {
+      return;
+    }
+
+    if (selectedZone === "City") {
+      // For City, wait for ward to be selected
+      if (selectedWard) {
+        if (selectedWard === "G/N Ward" || selectedWard === "G/S Ward") {
+          setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
+        } else {
+          // City with any other ward (not G/N or G/S)
+          setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
+        }
+      } else {
+        // City selected but no ward yet - clear plotBelongsTo
+        setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+      }
+    } else {
+      // Any zone other than City - set immediately
+      setSavePlotValue("plotBelongsTo", "CTS No.", { shouldValidate: false });
+    }
+  }, [selectedZone, selectedWard, setSavePlotValue]);
 
   useEffect(() => {
     setSavePlotValue("villageName", "");
@@ -649,11 +677,30 @@ export default function ProjectDetailsClient() {
               </div>
 
               <div className="pt-6 space-y-8 px-4 pb-4">
-              <div className="border border-gray-200 rounded-2xl bg-emerald-50 px-4 py-3">
-                <p className="text-sm font-semibold text-black">Selection order (required):</p>
-                <p className="text-sm text-black mt-1">
-                  1) Zone (City / Suburb) → 2) Ward → 3) Village → 4) Address → 5) Survey No
-                </p>
+              <div className="space-y-4">
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Planning Authority for the project? <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex flex-wrap gap-4">
+                    {planningAuthorityOptions.map((option) => (
+                      <label key={option} className="flex items-center gap-2 text-sm text-black">
+                        <input
+                          {...registerSavePlot("planningAuthority", {
+                            required: "Please select a planning authority",
+                          })}
+                          type="radio"
+                          value={option}
+                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        {option}
+                      </label>
+                    ))}
+                  </div>
+                  {savePlotErrors.planningAuthority && (
+                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.planningAuthority.message}</p>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -831,111 +878,6 @@ export default function ProjectDetailsClient() {
                 />
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block font-medium text-black mb-1">
-                    Planning Authority for the project? <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex flex-wrap gap-4">
-                    {planningAuthorityOptions.map((option) => (
-                      <label key={option} className="flex items-center gap-2 text-sm text-black">
-                        <input
-                          {...registerSavePlot("planningAuthority", {
-                            required: "Please select a planning authority",
-                          })}
-                          type="radio"
-                          value={option}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        {option}
-                      </label>
-                    ))}
-                  </div>
-                  {savePlotErrors.planningAuthority && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.planningAuthority.message}</p>
-                  )}
-                  <p className="text-xs text-black mt-2">
-                    Note: This is used for enabling construction permit application. Outside BMC vicinity plot will not
-                    have option of building permission department.
-                  </p>
-                  <p className="text-xs text-red-600">
-                    This option is not for TDR Generation and Utilisation Process. Please create separate NEW TDR
-                    (SRA/MMRDA) Project.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block font-medium text-black mb-1">
-                    Project Proponent <span className="text-red-500">*</span>
-                  </label>
-                  <div className="space-y-2">
-                    {projectProponentOptions.map((option) => (
-                      <label key={option} className="flex items-center gap-2 text-sm text-black">
-                        <input
-                          {...registerSavePlot("projectProponent", {
-                            required: "Please select a project proponent",
-                          })}
-                          type="radio"
-                          value={option}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        {option}
-                      </label>
-                    ))}
-                  </div>
-                  {savePlotErrors.projectProponent && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.projectProponent.message}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="border border-gray-300 rounded-lg overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-black border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100 uppercase text-xs text-gray-600">
-                        <th className="px-4 py-2 text-left border-b border-gray-300">CTS/CS/FP No&apos;s</th>
-                        <th className="px-4 py-2 text-left border-b border-gray-300">Verify Property Tax</th>
-                        <th className="px-4 py-2 text-left border-b border-gray-300">PR Card</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {plotFields.map((field, index) => (
-                        <tr key={field.id} className="border-b border-gray-200 last:border-b-0 hover:bg-gray-50">
-                          <td className="px-4 py-3 align-top">
-                            <input
-                              {...registerSavePlot(`plotEntries.${index}.ctsNumber` as const, {
-                                required: "CTS/CS/FP Number is required",
-                              })}
-                              className={inputClasses}
-                              placeholder="CTS/CS/FP Number"
-                            />
-                            {savePlotErrors.plotEntries?.[index]?.ctsNumber && (
-                              <p className="text-red-600 text-sm mt-1">
-                                {savePlotErrors.plotEntries[index]?.ctsNumber?.message}
-                              </p>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <input
-                              {...registerSavePlot(`plotEntries.${index}.verifyPropertyTax` as const)}
-                              className={inputClasses}
-                              placeholder="Verification Details"
-                            />
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <input
-                              {...registerSavePlot(`plotEntries.${index}.prCard` as const)}
-                              className={inputClasses}
-                              placeholder="PR Card"
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

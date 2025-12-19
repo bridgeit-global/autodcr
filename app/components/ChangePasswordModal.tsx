@@ -154,8 +154,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
             transition={{ duration: 0.25 }}
           >
             {/* Header */}
-            <div className="flex justify-between items-center mb-6 pb-3 border-b">
-              <h2 className="text-xl font-bold text-black">Change Password</h2>
+            <div className="flex justify-between items-center mb-6 pb-3 border-b border-gray-200">
+              <h2 className="text-sm font-semibold text-gray-900">Change Password</h2>
               <button
                 onClick={onClose}
                 className="text-2xl font-bold text-gray-700 hover:text-black"
@@ -181,8 +181,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
               )}
 
               {/* Current Password */}
-              <div>
-                <label className="block font-medium text-black mb-1">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-gray-900">
                   Current Password:
                 </label>
                 <div className="relative">
@@ -191,7 +191,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                       required: "Current password is required"
                     })}
                     type={showCurrentPassword ? "text" : "password"}
-                    className="border rounded-lg px-3 py-2 pr-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Enter current password"
                     disabled={isSubmitting || submitSuccess}
                   />
@@ -245,8 +245,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
               </div>
 
               {/* New Password */}
-              <div>
-                <label className="block font-medium text-black mb-1">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-gray-900">
                   New Password:
                 </label>
                 <div className="relative">
@@ -265,7 +265,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                       }
                     })}
                     type={showNewPassword ? "text" : "password"}
-                    className="border rounded-lg px-3 py-2 pr-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Enter new password"
                     disabled={isSubmitting || submitSuccess}
                   />
@@ -445,8 +445,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
               </div>
 
               {/* Confirm Password */}
-              <div>
-                <label className="block font-medium text-black mb-1">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-gray-900">
                   Confirm Password:
                 </label>
                 <div className="relative">
@@ -457,7 +457,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                         value === newPassword || "Passwords do not match"
                     })}
                     type={showConfirmPassword ? "text" : "password"}
-                    className="border rounded-lg px-3 py-2 pr-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Confirm new password"
                     disabled={isSubmitting || submitSuccess}
                   />
@@ -506,7 +506,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                   </button>
                 </div>
                 {confirmPassword && newPassword === confirmPassword && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                  <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
@@ -519,18 +519,18 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
               </div>
 
               {/* Buttons */}
-              <div className="flex justify-end gap-3 pt-4 border-t">
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
                   onClick={handleClear}
-                  className="px-6 py-2 bg-white text-blue-600 border border-blue-600 rounded-lg font-medium hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-md text-sm font-medium hover:bg-white transition disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={isSubmitting || submitSuccess}
                 >
                   Clear
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium shadow hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-5 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-700 transition disabled:bg-emerald-300 disabled:cursor-not-allowed flex items-center gap-2"
                   disabled={isSubmitting || submitSuccess}
                 >
                   {isSubmitting ? (
