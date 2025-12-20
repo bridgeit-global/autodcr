@@ -102,23 +102,20 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     watch
   } = useForm<FormValues>();
 
-  // Fetch user_id from raw_user_meta_data
+  // Fetch user_id from localStorage
   useEffect(() => {
-    const fetchUserId = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          // user_id is stored in raw_user_meta_data, accessible via user.user_metadata.user_id
-          const userIdFromMeta = user.user_metadata?.user_id || null;
-          setUserId(userIdFromMeta);
-        }
-      } catch (error) {
-        console.error('Error fetching user_id:', error);
-      }
-    };
-    
     if (open) {
-      fetchUserId();
+      const storedMetadata = localStorage.getItem("userMetadata");
+      if (storedMetadata) {
+        try {
+          const parsed = JSON.parse(storedMetadata);
+          if (parsed?.user_id) {
+            setUserId(parsed.user_id);
+          }
+        } catch (e) {
+          console.error('Error parsing userMetadata from localStorage:', e);
+        }
+      }
     }
   }, [open]);
 

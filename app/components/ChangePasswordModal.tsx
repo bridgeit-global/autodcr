@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { supabase } from "@/app/utils/supabase";
+import OTPVerificationModal from "./OTPVerificationModal";
 
 interface Props {
   open: boolean;
@@ -32,6 +33,12 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // OTP verification states
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [isOTPVerified, setIsOTPVerified] = useState(false);
+  const [userPhone, setUserPhone] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -53,6 +60,61 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
       setShowCurrentPassword(false);
       setShowNewPassword(false);
       setShowConfirmPassword(false);
+      setIsOTPVerified(false);
+      
+      // Load user phone and email from metadata
+      const loadUserData = async () => {
+        try {
+          // Helper to extract phone from metadata object
+          const getPhoneFromMetadata = (metadata: any): string | null => {
+            if (!metadata) return null;
+            // Try different possible field names
+            return metadata.alternate_phone || 
+                   metadata.mobile || 
+                   metadata.phone || 
+                   metadata.phone_number ||
+                   metadata.mobileNo ||
+                   null;
+          };
+          
+          // Try from localStorage first
+          const storedMetadata = localStorage.getItem("userMetadata");
+          if (storedMetadata) {
+            const metadata = JSON.parse(storedMetadata);
+            const phone = getPhoneFromMetadata(metadata);
+            if (phone) {
+              setUserPhone(phone);
+              console.log("Loaded phone from localStorage:", phone);
+            }
+            // Also get email from localStorage metadata
+            if (metadata.email) {
+              setUserEmail(metadata.email);
+              console.log("Loaded email from localStorage:", metadata.email);
+              return;
+            }
+          }
+          
+          // Fallback to Supabase user metadata
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            // Store email before any OTP operations
+            if (user.email) {
+              setUserEmail(user.email);
+              console.log("Loaded email from Supabase:", user.email);
+            }
+            
+            const phone = getPhoneFromMetadata(user?.user_metadata);
+            if (phone && !userPhone) {
+              setUserPhone(phone);
+              console.log("Loaded phone from Supabase:", phone);
+            }
+          }
+        } catch (err) {
+          console.error("Error loading user data:", err);
+        }
+      };
+      
+      loadUserData();
     } else {
       document.body.style.overflow = "auto";
       reset(); // clear fields when modal closes
@@ -61,6 +123,10 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
       setShowCurrentPassword(false);
       setShowNewPassword(false);
       setShowConfirmPassword(false);
+      setIsOTPVerified(false);
+      setShowOTPModal(false);
+      setUserEmail('');
+      setUserPhone('');
     }
 
     return () => {
@@ -72,23 +138,27 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const confirmPassword = watch("confirmPassword");
 
   const onSubmit = async (data: FormValues) => {
+    // Step 0: Require OTP verification first
+    if (!isOTPVerified) {
+      setShowOTPModal(true);
+      return;
+    }
+    
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(false);
 
     try {
-      // Step 1: Get current user's email
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user || !user.email) {
-        setSubmitError("User not found. Please log in again.");
+      // Step 1: Use stored email (saved before OTP verification)
+      if (!userEmail) {
+        setSubmitError("User email not found. Please close and reopen this modal.");
         setIsSubmitting(false);
         return;
       }
 
       // Step 2: Verify current password by attempting to sign in
       const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: user.email,
+        email: userEmail,
         password: data.currentPassword,
       });
 
@@ -124,16 +194,24 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
       setIsSubmitting(false);
     }
   };
+  
+  const handleOTPVerified = () => {
+    setIsOTPVerified(true);
+    setShowOTPModal(false);
+    setSubmitError(null);
+  };
 
   const handleClear = () => {
     reset();
     setSubmitError(null);
     setSubmitSuccess(false);
+    setIsOTPVerified(false);
   };
 
   if (!open) return null;
 
   return (
+    <>
     <AnimatePresence>
       {open && (
         <motion.div
@@ -166,6 +244,35 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
 
             {/* Body */}
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+              {/* OTP Verification Status */}
+              {!isOTPVerified ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-emerald-800">OTP Verification Required</p>
+                      <p className="text-xs text-emerald-600 mt-0.5">Please verify your identity before changing password</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowOTPModal(true)}
+                    className="mt-3 w-full px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition"
+                  >
+                    Verify with OTP
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-sm text-green-800 font-medium">Identity verified! You can now change your password.</span>
+                </div>
+              )}
+              
               {/* Success Message */}
               {submitSuccess && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-800 text-sm">
@@ -193,14 +300,14 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     type={showCurrentPassword ? "text" : "password"}
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Enter current password"
-                    disabled={isSubmitting || submitSuccess}
+                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
                   />
                   <button
                     type="button"
                     onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
                     tabIndex={-1}
-                    disabled={isSubmitting || submitSuccess}
+                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
                   >
                     {showCurrentPassword ? (
                       <svg
@@ -267,14 +374,14 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     type={showNewPassword ? "text" : "password"}
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Enter new password"
-                    disabled={isSubmitting || submitSuccess}
+                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
                   />
                   <button
                     type="button"
                     onClick={() => setShowNewPassword(!showNewPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
                     tabIndex={-1}
-                    disabled={isSubmitting || submitSuccess}
+                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
                   >
                     {showNewPassword ? (
                       <svg
@@ -459,14 +566,14 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     type={showConfirmPassword ? "text" : "password"}
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Confirm new password"
-                    disabled={isSubmitting || submitSuccess}
+                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
                     tabIndex={-1}
-                    disabled={isSubmitting || submitSuccess}
+                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
                   >
                     {showConfirmPassword ? (
                       <svg
@@ -531,7 +638,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                 <button
                   type="submit"
                   className="px-5 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-700 transition disabled:bg-emerald-300 disabled:cursor-not-allowed flex items-center gap-2"
-                  disabled={isSubmitting || submitSuccess}
+                  disabled={isSubmitting || submitSuccess || !isOTPVerified}
                 >
                   {isSubmitting ? (
                     <>
@@ -552,7 +659,18 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
           </motion.div>
         </motion.div>
       )}
+      
     </AnimatePresence>
+    
+    {/* OTP Verification Modal - Outside AnimatePresence to avoid key conflicts */}
+    <OTPVerificationModal
+      open={showOTPModal}
+      onClose={() => setShowOTPModal(false)}
+      onVerified={handleOTPVerified}
+      phoneNumber={userPhone}
+      title="Verify Identity for Password Change"
+    />
+  </>
   );
 };
 
