@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import PDFModal from "./PDFModal";
+import OTPVerificationModal from "./OTPVerificationModal";
 
 interface ConsultantRegistrationFormProps {
   title?: string;
@@ -23,6 +24,10 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState<string | null>(null);
   const [isPDFModalOpen, setIsPDFModalOpen] = useState(false);
   const [hasViewedLetterhead, setHasViewedLetterhead] = useState(false);
+  
+  // Phone OTP verification state
+  const [showPhoneOTPModal, setShowPhoneOTPModal] = useState(false);
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   
   // Cleanup object URL on unmount
   useEffect(() => {
@@ -1471,16 +1476,38 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <div className="flex gap-2">
                     <input
                       value={formData.alternatePhone}
-                      onChange={(e) => handleInputChange("alternatePhone", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      onChange={(e) => {
+                        handleInputChange("alternatePhone", e.target.value);
+                        // Reset verification if phone number changes
+                        if (isPhoneVerified) setIsPhoneVerified(false);
+                      }}
+                      className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none ${isPhoneVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="Enter 10-digit phone number"
+                      disabled={isPhoneVerified}
                     />
-                    <button
-                      type="button"
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition whitespace-nowrap"
-                    >
-                      Verify
-                    </button>
+                    {isPhoneVerified ? (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-medium">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        Verified
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (formData.alternatePhone.length === 10) {
+                            setShowPhoneOTPModal(true);
+                          } else {
+                            setErrors(prev => ({ ...prev, alternatePhone: "Please enter a valid 10-digit phone number" }));
+                          }
+                        }}
+                        className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition whitespace-nowrap"
+                        disabled={formData.alternatePhone.length !== 10}
+                      >
+                        Verify
+                      </button>
+                    )}
                   </div>
                   {errors.alternatePhone && (
                     <p className="text-xs text-red-600 mt-1">{errors.alternatePhone}</p>
@@ -2630,6 +2657,25 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           }
         }}
         fileUrl={letterheadPreviewUrl}
+      />
+
+      {/* Phone OTP Verification Modal */}
+      <OTPVerificationModal
+        open={showPhoneOTPModal}
+        onClose={() => setShowPhoneOTPModal(false)}
+        onVerified={() => {
+          setIsPhoneVerified(true);
+          setShowPhoneOTPModal(false);
+          // Scroll to Basic Details section after verification
+          setTimeout(() => {
+            const basicDetailsSection = document.getElementById('section-basic-details');
+            if (basicDetailsSection) {
+              basicDetailsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+        }}
+        phoneNumber={formData.alternatePhone}
+        title="Verify Phone Number"
       />
     </div>
   );
