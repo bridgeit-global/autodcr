@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import PDFModal from "./PDFModal";
 import OTPVerificationModal from "./OTPVerificationModal";
+import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 
 interface ConsultantRegistrationFormProps {
   title?: string;
@@ -28,6 +29,15 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   // Phone OTP verification state
   const [showPhoneOTPModal, setShowPhoneOTPModal] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  
+  // Email OTP verification state
+  const [showEmailOTPModal, setShowEmailOTPModal] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
+  const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
+  
+  // Password visibility state
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Cleanup object URL on unmount
   useEffect(() => {
@@ -885,6 +895,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     console.log('Validation result:', isValid);
     console.log('Current errors:', errors);
     
+    // Check if email and phone are verified
+    if (!isEmailVerified) {
+      setFormError("Please verify your email address before submitting");
+      scrollToSection("section-basic-details");
+      return;
+    }
+    
+    if (!isPhoneVerified) {
+      setFormError("Please verify your phone number before submitting");
+      scrollToSection("section-basic-details");
+      return;
+    }
+    
     if (!isValid) {
       setFormError("Please fill all the necessary fields");
       
@@ -934,13 +957,23 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
 
 
-      // Step 1: Sign up user first to get user ID
-      // Note: Role cannot be set during signUp - it must be set via Admin API after signup
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
+      // User was created during email OTP verification - set their password
+      if (!verifiedUserId) {
+        setFormError('Email verification is required. Please verify your email address first.');
+        setIsSubmitting(false);
+        scrollToSection("section-basic-details");
+        return;
+      }
+      
+      console.log('Using verified user ID from email OTP:', verifiedUserId);
+      const userId = verifiedUserId;
+      
+      // Update the user's password using edge function
+      const { data: updateData, error: updateError } = await supabase.functions.invoke('update-user-password', {
+        body: {
+          userId: verifiedUserId,
+          password: formData.password,
+          metadata: {
             consultant_type: formData.consultantType,
             first_name: formData.firstName,
             middle_name: formData.middleName || null,
@@ -950,25 +983,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           }
         }
       });
-
-      if (signUpError) {
-        console.error('Auth signUp error:', signUpError);
-        if (signUpError.message.toLowerCase().includes('already registered')) {
-          setFormError("An account with this email already exists. Please login instead or reset your password.");
-        } else {
-          setFormError(`Registration failed: ${signUpError.message}`);
-        }
-        setIsSubmitting(false);
-          return;
-      }
-
-      if (!signUpData.user) {
-        setFormError("Registration failed. Please try again.");
+      
+      if (updateError) {
+        console.error('Failed to update user password:', updateError);
+        setFormError('Failed to set password. Please try again.');
         setIsSubmitting(false);
         return;
       }
-
-      const userId = signUpData.user.id;
+      console.log('Password set successfully for verified user');
 
       // Track uploaded file paths for rollback if needed
       const uploadedFilePaths: string[] = [];
@@ -1277,57 +1299,118 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   const expiryStatus = getExpiryStatus();
 
   return (
-    <div className="max-w-4xl mx-auto p-8">
-      {/* Header */}
-      <div className="mb-6 pb-3 border-b">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
-          <h2 className="text-2xl font-bold text-black">{title}</h2>
-          <button
-            onClick={() => router.push("/")}
-            className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors self-start sm:self-auto"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            <span className="font-medium">Back to Home</span>
-          </button>
-        </div>
-        {/* Breadcrumb */}
-        <nav className="text-sm text-gray-600">
-          <span>Dashboard</span>
-          <span className="mx-2">›</span>
-          <span>Registrations</span>
-          <span className="mx-2">›</span>
-          <span className="text-black font-medium">Consultant</span>
-        </nav>
-      </div>
-
-      {/* Navigation Menu */}
-      <div className="sticky top-0 z-50 bg-white border-b shadow-sm mb-6">
-        <div className="flex flex-wrap gap-2 p-4">
-          {sections.map((section) => {
-            const isActive = activeSection === section.id;
-            return (
+    <>
+    <div className="flex gap-6 max-w-6xl mx-auto p-6">
+      {/* Sidebar Navigation */}
+      <div className="w-72 flex-shrink-0">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sticky top-6">
+          {/* Title */}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-gray-900 uppercase tracking-wide">{title.toUpperCase()}</h2>
             <button
-              key={section.id}
-              type="button"
-              onClick={() => scrollToSection(section.id)}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  isActive
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "text-gray-700 hover:text-blue-600 hover:bg-blue-50"
-                }`}
+              onClick={() => router.push("/")}
+              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              title="Back to Home"
             >
-              {section.label}
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
-            );
-          })}
+          </div>
+          
+          {/* Submit Button */}
+          <button
+            type="button"
+            onClick={handleSubmitForm}
+            disabled={isSubmitting}
+            className="w-full mb-6 py-3 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isSubmitting ? (
+              <>
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Submitting...
+              </>
+            ) : (
+              'Submit Registration'
+            )}
+          </button>
+
+          {/* Navigation Items */}
+          <nav className="space-y-1">
+            {sections.map((section) => {
+              const isActive = activeSection === section.id;
+              const sectionIcons: Record<string, React.ReactNode> = {
+                "section-basic-details": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                ),
+                "section-registration": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                ),
+                "section-documents": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                ),
+                "section-letterhead": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+                  </svg>
+                ),
+                "section-login": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                ),
+                "section-declaration": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ),
+              };
+
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => scrollToSection(section.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200 ${
+                    isActive
+                      ? "bg-emerald-50 text-emerald-700 border-l-4 border-emerald-600 font-medium"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  }`}
+                >
+                  <span className={isActive ? "text-emerald-600" : "text-gray-400"}>
+                    {sectionIcons[section.id]}
+                  </span>
+                  <span className="text-sm">{section.label}</span>
+                  <svg className={`w-4 h-4 ml-auto transition-transform ${isActive ? "text-emerald-600" : "text-gray-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              );
+            })}
+          </nav>
         </div>
       </div>
 
-      <div className="space-y-6">
+      {/* Main Content */}
+      <div className="flex-1 min-w-0">
+        {/* Note Banner */}
+        <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
+          <p className="text-red-700 text-sm">
+            <span className="font-semibold">Note:</span> Please fill all required fields marked with <span className="text-red-600 font-bold">*</span> before submitting the registration form.
+          </p>
+        </div>
+
         {formError && (
-          <div className="p-4 border-2 border-red-300 bg-red-50 rounded-lg shadow-md flex items-center gap-3">
+          <div className="mb-6 p-4 border border-red-200 bg-red-50 rounded-lg flex items-center gap-3">
             <svg className="w-5 h-5 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
             </svg>
@@ -1335,24 +1418,15 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
         )}
 
-            {/* Basic Details Section */}
-            <div id="section-basic-details" className={`scroll-mt-24 border rounded-lg p-4 bg-white transition-shadow duration-300 ${activeSection === "section-basic-details" ? "shadow-lg shadow-blue-200 border-blue-300" : ""}`}>
-              <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-blue-600 transition-colors"
-                onClick={() => scrollToSection("section-basic-details")}
-              >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-black">
-                  Basic Details
-                </h3>
+        <div className="space-y-6">
+          {/* Basic Details Section */}
+          <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Basic Details</h3>
+                <p className="text-sm text-gray-500 mt-1">Tell us who you are</p>
               </div>
-              <p className="text-sm text-gray-600 mb-4 ml-11">
-                Tell us who you are
-              </p>
+            </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Row 1 */}
@@ -1363,7 +1437,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <select 
                     value={formData.consultantType}
                     onChange={(e) => handleInputChange("consultantType", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     <option value="">Select Consultant Type</option>
                     <option value="Architect">Architect</option>
@@ -1391,7 +1465,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="text"
                     value={formData.firstName}
                     onChange={(e) => handleInputChange("firstName", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter First Name"
                   />
                   {errors.firstName && (
@@ -1407,7 +1481,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="text"
                     value={formData.middleName}
                     onChange={(e) => handleInputChange("middleName", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter Middle Name"
                   />
                 </div>
@@ -1421,7 +1495,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="text"
                     value={formData.lastName}
                     onChange={(e) => handleInputChange("lastName", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter Last Name"
                   />
                   {errors.lastName && (
@@ -1437,16 +1511,42 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       type="email"
                       value={formData.email}
-                      onChange={(e) => handleInputChange("email", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      onChange={(e) => {
+                        handleInputChange("email", e.target.value);
+                        // Reset verification if email changes
+                        if (isEmailVerified) setIsEmailVerified(false);
+                      }}
+                      className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-emerald-500 outline-none ${isEmailVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="name@example.com"
+                      disabled={isEmailVerified}
                     />
-                    <button
-                      type="button"
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition whitespace-nowrap"
-                    >
-                      Verify
-                    </button>
+                    {isEmailVerified ? (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 text-blue-700 rounded-lg font-medium">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        Verified
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!formData.email || formData.email.trim() === '') {
+                            setErrors(prev => ({ ...prev, email: "Email is required" }));
+                            return;
+                          }
+                          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                          if (emailRegex.test(formData.email)) {
+                            setShowEmailOTPModal(true);
+                          } else {
+                            setErrors(prev => ({ ...prev, email: "Please enter a valid email address" }));
+                          }
+                        }}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition whitespace-nowrap"
+                      >
+                        Verify
+                      </button>
+                    )}
                   </div>
                   {errors.email && (
                     <p className="text-xs text-red-600 mt-1">{errors.email}</p>
@@ -1461,7 +1561,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <input
                     value={formData.city}
                     onChange={(e) => handleInputChange("city", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter City"
                   />
                   {errors.city && (
@@ -1481,7 +1581,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         // Reset verification if phone number changes
                         if (isPhoneVerified) setIsPhoneVerified(false);
                       }}
-                      className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-blue-500 outline-none ${isPhoneVerified ? 'bg-green-50 border-green-300' : ''}`}
+                      className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-emerald-500 outline-none ${isPhoneVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="Enter 10-digit phone number"
                       disabled={isPhoneVerified}
                     />
@@ -1496,6 +1596,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       <button
                         type="button"
                         onClick={() => {
+                          if (!formData.alternatePhone || formData.alternatePhone.trim() === '') {
+                            setErrors(prev => ({ ...prev, alternatePhone: "Phone number is required" }));
+                            return;
+                          }
                           if (formData.alternatePhone.length === 10) {
                             setShowPhoneOTPModal(true);
                           } else {
@@ -1503,7 +1607,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                           }
                         }}
                         className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition whitespace-nowrap"
-                        disabled={formData.alternatePhone.length !== 10}
                       >
                         Verify
                       </button>
@@ -1522,7 +1625,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <input
                     value={formData.pincode}
                     onChange={(e) => handleInputChange("pincode", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter Pincode"
                   />
                   {errors.pincode && (
@@ -1537,7 +1640,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <input
                     value={formData.pan}
                     onChange={(e) => handleInputChange("pan", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="ABCDE1234F"
                   />
                   {errors.pan && (
@@ -1553,7 +1656,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <input
                     value={formData.address}
                     onChange={(e) => handleInputChange("address", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Office address"
                   />
                   {errors.address && (
@@ -1564,13 +1667,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
 
         {/* Registration Numbers Section - Dynamic based on Consultant Type */}
-            <div id="section-registration" className={`scroll-mt-24 border rounded-lg p-4 bg-white transition-shadow duration-300 ${activeSection === "section-registration" ? "shadow-lg shadow-blue-200 border-blue-300" : ""}`}>
+            <div id="section-registration" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-registration" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-blue-600 transition-colors"
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
                 onClick={() => scrollToSection("section-registration")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
@@ -1596,7 +1699,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.coaRegNo}
                       onChange={(e) => handleInputChange("coaRegNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="e.g., CA/2020/12345"
                     />
                     {errors.coaRegNo && (
@@ -1609,7 +1712,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.coaExpiryDate}
                       onChange={(e) => handleInputChange("coaExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.coaExpiryDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.coaExpiryDate}</p>
@@ -1626,7 +1729,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.structuralLicenseNo}
                       onChange={(e) => handleInputChange("structuralLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
                     {errors.structuralLicenseNo && (
@@ -1639,7 +1742,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.structuralValidity}
                       onChange={(e) => handleInputChange("structuralValidity", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.structuralValidity && (
                       <p className="text-xs text-red-600 mt-1">{errors.structuralValidity}</p>
@@ -1650,7 +1753,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <select
                       value={formData.qualification}
                       onChange={(e) => handleInputChange("qualification", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     >
                       <option value="">Select</option>
                       <option value="BE Civil">BE Civil</option>
@@ -1670,7 +1773,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.lbsLicenseNo}
                       onChange={(e) => handleInputChange("lbsLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter LBS license number"
                     />
                     {errors.lbsLicenseNo && (
@@ -1682,7 +1785,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <select
                       value={formData.competencyClass}
                       onChange={(e) => handleInputChange("competencyClass", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     >
                       <option value="">Select Class</option>
                       <option value="Class A">Class A</option>
@@ -1698,7 +1801,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.lbsExpiryDate}
                       onChange={(e) => handleInputChange("lbsExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.lbsExpiryDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.lbsExpiryDate}</p>
@@ -1715,7 +1818,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.electricalLicenseNo}
                       onChange={(e) => handleInputChange("electricalLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter electrical license number"
                     />
                     {errors.electricalLicenseNo && (
@@ -1727,7 +1830,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.pwdAccreditation}
                       onChange={(e) => handleInputChange("pwdAccreditation", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Accreditation number"
                     />
                 </div>
@@ -1742,7 +1845,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.plumberLicenseNo}
                       onChange={(e) => handleInputChange("plumberLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter plumber license number"
                     />
                     {errors.plumberLicenseNo && (
@@ -1760,7 +1863,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.fireLicenseNo}
                       onChange={(e) => handleInputChange("fireLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter fire license number"
                     />
                     {errors.fireLicenseNo && (
@@ -1773,7 +1876,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.fireValidityDate}
                       onChange={(e) => handleInputChange("fireValidityDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.fireValidityDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.fireValidityDate}</p>
@@ -1790,7 +1893,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.landscapeLicenseNo}
                       onChange={(e) => handleInputChange("landscapeLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
                     {errors.landscapeLicenseNo && (
@@ -1803,7 +1906,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.landscapeExpiryDate}
                       onChange={(e) => handleInputChange("landscapeExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.landscapeExpiryDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.landscapeExpiryDate}</p>
@@ -1820,7 +1923,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.pmcRegistrationNo}
                       onChange={(e) => handleInputChange("pmcRegistrationNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter PMC registration number"
                     />
                     {errors.pmcRegistrationNo && (
@@ -1833,7 +1936,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.pmcExpiryDate}
                       onChange={(e) => handleInputChange("pmcExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.pmcExpiryDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.pmcExpiryDate}</p>
@@ -1850,7 +1953,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.nablAccreditationNo}
                       onChange={(e) => handleInputChange("nablAccreditationNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter NABL accreditation number"
                     />
                     {errors.nablAccreditationNo && (
@@ -1862,7 +1965,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.geotechQualification}
                       onChange={(e) => handleInputChange("geotechQualification", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="e.g., M.Tech Geotechnical"
                     />
                   </div>
@@ -1877,7 +1980,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.envLicenseNo}
                       onChange={(e) => handleInputChange("envLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
                     {errors.envLicenseNo && (
@@ -1890,7 +1993,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.envExpiryDate}
                       onChange={(e) => handleInputChange("envExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.envExpiryDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.envExpiryDate}</p>
@@ -1907,7 +2010,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.townPlannerLicenseNo}
                       onChange={(e) => handleInputChange("townPlannerLicenseNo", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
                     {errors.townPlannerLicenseNo && (
@@ -1920,7 +2023,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="date"
                       value={formData.townPlannerExpiryDate}
                       onChange={(e) => handleInputChange("townPlannerExpiryDate", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     {errors.townPlannerExpiryDate && (
                       <p className="text-xs text-red-600 mt-1">{errors.townPlannerExpiryDate}</p>
@@ -1932,13 +2035,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
         {/* Documents Upload Section - Dynamic based on Consultant Type */}
-            <div id="section-documents" className={`scroll-mt-24 border rounded-lg p-4 bg-white transition-shadow duration-300 ${activeSection === "section-documents" ? "shadow-lg shadow-blue-200 border-blue-300" : ""}`}>
+            <div id="section-documents" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-documents" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-blue-600 transition-colors"
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
                 onClick={() => scrollToSection("section-documents")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 </div>
@@ -1963,7 +2066,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="file"
                     accept=".gif,.jpg,.jpeg,.png,.bmp"
                       onChange={(e) => handleFileChange("authorizedSignatoryPhotoFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                     <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
                   {formData.authorizedSignatoryPhotoFile && (
@@ -1979,7 +2082,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="file"
                     accept=".gif,.jpg,.jpeg,.png,.bmp"
                       onChange={(e) => handleFileChange("authorizedSignatorySignatureFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                     <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
                   {formData.authorizedSignatorySignatureFile && (
@@ -1995,7 +2098,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type="file"
                       accept=".gif,.jpg,.jpeg,.png,.bmp"
                       onChange={(e) => handleFileChange("panCardFile", e.target.files?.[0] || null)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                     <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP</p>
                     {formData.panCardFile && (
@@ -2014,7 +2117,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="file"
                     accept=".pdf"
                     onChange={(e) => handleFileChange("coaCertificateFile", e.target.files?.[0] || null)}
-                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                   {formData.coaCertificateFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.coaCertificateFile.name}</p>
@@ -2033,7 +2136,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("structuralLicenseFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.structuralLicenseFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.structuralLicenseFile.name}</p>
@@ -2052,7 +2155,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("lbsCertificateFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.lbsCertificateFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.lbsCertificateFile.name}</p>
@@ -2071,7 +2174,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("mepExperienceFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.mepExperienceFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.mepExperienceFile.name}</p>
@@ -2090,7 +2193,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("pheAccreditationFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.pheAccreditationFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.pheAccreditationFile.name}</p>
@@ -2109,7 +2212,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("pastNocFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.pastNocFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.pastNocFile.name}</p>
@@ -2128,7 +2231,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("landscapeCertificateFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.landscapeCertificateFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.landscapeCertificateFile.name}</p>
@@ -2147,7 +2250,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("pmcCertificateFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.pmcCertificateFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.pmcCertificateFile.name}</p>
@@ -2166,7 +2269,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("labRegistrationFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.labRegistrationFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.labRegistrationFile.name}</p>
@@ -2185,7 +2288,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("envCertificateFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.envCertificateFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.envCertificateFile.name}</p>
@@ -2204,7 +2307,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         type="file"
                         accept=".pdf"
                         onChange={(e) => handleFileChange("townPlannerCertificateFile", e.target.files?.[0] || null)}
-                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       />
                       {formData.townPlannerCertificateFile && (
                         <p className="text-xs text-green-600 mt-1">✓ {formData.townPlannerCertificateFile.name}</p>
@@ -2226,13 +2329,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
             {/* Letterhead Upload Section */}
-            <div id="section-letterhead" className={`scroll-mt-24 border rounded-lg p-6 bg-white transition-shadow duration-300 ${activeSection === "section-letterhead" ? "shadow-lg shadow-blue-200 border-blue-300" : ""}`}>
+            <div id="section-letterhead" className={`scroll-mt-24 border rounded-lg p-6 bg-white transition-shadow duration-300 ${activeSection === "section-letterhead" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-blue-600 transition-colors"
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
                 onClick={() => scrollToSection("section-letterhead")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
           </div>
@@ -2269,7 +2372,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                             <span className="text-green-600 font-medium">✓ {formData.letterheadFile.name}</span>
                           ) : (
                             <>
-                              <span className="text-blue-600 font-medium">Click to upload</span> or drag and drop
+                              <span className="text-emerald-600 font-medium">Click to upload</span> or drag and drop
                             </>
                           )}
                         </span>
@@ -2347,13 +2450,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
             {/* Login Setup Section */}
-            <div id="section-login" className={`scroll-mt-24 border rounded-lg p-4 bg-white transition-shadow duration-300 ${activeSection === "section-login" ? "shadow-lg shadow-blue-200 border-blue-300" : ""}`}>
+            <div id="section-login" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-login" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-blue-600 transition-colors"
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
                 onClick={() => scrollToSection("section-login")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                 </div>
@@ -2374,7 +2477,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     type="text"
                     value={formData.userId}
                     onChange={(e) => handleInputChange("userId", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter User ID"
                   />
                   {errors.userId && (
@@ -2386,13 +2489,32 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <label className="block font-medium text-black mb-1">
                     Password <span className="text-red-600 font-bold">*</span>
                   </label>
-                  <input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => handleInputChange("password", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Create a strong password"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={formData.password}
+                      onChange={(e) => handleInputChange("password", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full pr-10 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                      placeholder="Create a strong password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                   
                   {/* Password Strength Indicator */}
                   {formData.password && (
@@ -2527,13 +2649,32 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <label className="block font-medium text-black mb-1">
                     Confirm Password <span className="text-red-600 font-bold">*</span>
                   </label>
-                  <input
-                    type="password"
-                    value={formData.confirmPassword}
-                    onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Re-enter password"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={formData.confirmPassword}
+                      onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full pr-10 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                      placeholder="Re-enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                    >
+                      {showConfirmPassword ? (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                   {formData.confirmPassword && formData.password === formData.confirmPassword && (
                     <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
                       <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -2550,13 +2691,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               </div>
 
             {/* Declaration Section */}
-            <div id="section-declaration" className={`scroll-mt-24 border rounded-lg p-4 bg-white transition-shadow duration-300 ${activeSection === "section-declaration" ? "shadow-lg shadow-blue-200 border-blue-300" : ""}`}>
+            <div id="section-declaration" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-declaration" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-4 cursor-pointer hover:text-blue-600 transition-colors"
+                className="flex items-center gap-3 mb-4 cursor-pointer hover:text-emerald-600 transition-colors"
                 onClick={() => scrollToSection("section-declaration")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-100 rounded-lg">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
@@ -2646,6 +2787,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </button>
           </div>
         </div>
+        </div>
+      </div>
 
       {/* PDF Modal - Shows user's uploaded letterhead PDF */}
       <PDFModal
@@ -2677,9 +2820,23 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         phoneNumber={formData.alternatePhone}
         title="Verify Phone Number"
       />
-    </div>
+
+      {/* Email OTP Verification Modal */}
+      <EmailOTPVerificationModal
+        open={showEmailOTPModal}
+        onClose={() => setShowEmailOTPModal(false)}
+        onVerified={(userId?: string) => {
+          setIsEmailVerified(true);
+          if (userId) setVerifiedUserId(userId);
+          setShowEmailOTPModal(false);
+        }}
+        email={formData.email}
+        title="Verify Email Address"
+      />
+    </>
   );
 };
 
 export default ConsultantRegistrationForm;
+
 

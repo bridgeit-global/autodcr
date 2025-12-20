@@ -113,6 +113,7 @@ const OTPVerificationModal: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
+      window.scrollTo({ top: 0, behavior: 'instant' });
       setError(null);
       setSuccess(null);
     } else {
@@ -298,18 +299,18 @@ const OTPVerificationModal: React.FC<Props> = ({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[9999] flex justify-center items-center bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-[9999] flex justify-center items-start pt-24 bg-black/40 backdrop-blur-sm overflow-y-auto"
           onClick={onClose}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-white w-[90%] max-w-md rounded-xl shadow-2xl p-6 relative"
+            className="bg-white w-[90%] max-w-md rounded-xl shadow-2xl p-6 relative mb-10"
             onClick={(e) => e.stopPropagation()}
-            initial={{ y: -40, opacity: 0, scale: 0.95 }}
+            initial={{ y: -20, opacity: 0, scale: 0.95 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: -40, opacity: 0, scale: 0.95 }}
+            exit={{ y: -20, opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.25 }}
           >
             {/* Header */}
@@ -398,41 +399,64 @@ const OTPVerificationModal: React.FC<Props> = ({
                       onChange={(e) => handleOTPChange(index, e.target.value)}
                       onKeyDown={(e) => handleOTPKeyDown(index, e)}
                       onPaste={index === 0 ? handleOTPPaste : undefined}
-                      className="w-11 h-12 text-center text-lg font-semibold border border-gray-300 rounded-lg focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-gray-900"
+                      className={`w-11 h-12 text-center text-lg font-semibold border-2 rounded-lg transition-all duration-200
+                        ${digit ? 'border-emerald-500 bg-emerald-50' : 'border-gray-300 bg-white'}
+                        focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-gray-900`}
                       disabled={isLoading}
                     />
                   ))}
                 </div>
-
-                {/* Verifying indicator */}
-                {isLoading && (
-                  <div className="flex items-center justify-center gap-2 text-emerald-600">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    <span className="text-sm font-medium">Verifying...</span>
-                  </div>
-                )}
 
                 {/* Resend OTP */}
                 {!isLoading && (
                   <div className="text-center">
                     {countdown > 0 ? (
                       <p className="text-sm text-gray-500">
-                        Resend OTP in <span className="font-semibold">{countdown}s</span>
+                        Didn&apos;t get a code? <span className="text-gray-600">Resend in {countdown}s</span>
                       </p>
                     ) : (
-                      <button
-                        onClick={handleResendOTP}
-                        disabled={isLoading}
-                        className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-                      >
-                        Resend OTP
-                      </button>
+                      <p className="text-sm text-gray-500">
+                        Didn&apos;t get a code?{' '}
+                        <button
+                          onClick={handleResendOTP}
+                          disabled={isLoading}
+                          className="text-emerald-600 hover:text-emerald-700 font-medium hover:underline"
+                        >
+                          resend
+                        </button>
+                      </p>
                     )}
                   </div>
                 )}
+
+                {/* Verify Button */}
+                <button
+                  onClick={() => {
+                    if (otp.join('').length !== 6) {
+                      setError('Please enter all 6 digits');
+                      return;
+                    }
+                    handleVerifyOTP();
+                  }}
+                  disabled={isLoading}
+                  className={`w-full py-3 rounded-lg font-semibold text-white transition-all duration-200
+                    ${otp.join('').length === 6 && !isLoading
+                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200'
+                      : 'bg-gray-300 cursor-not-allowed'
+                    }`}
+                >
+                  {isLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Verifying...
+                    </span>
+                  ) : (
+                    'Verify OTP'
+                  )}
+                </button>
               </div>
             )}
           </motion.div>
