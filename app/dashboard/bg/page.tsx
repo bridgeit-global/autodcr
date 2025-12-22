@@ -200,12 +200,12 @@ export default function BGDetailsPage() {
               type="button"
               className={`px-4 py-2 rounded-lg font-semibold shadow transition-colors ${
                 isSaved
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
               onClick={handleSubmit(onSubmit)}
             >
-              {isSaved ? "Saved" : "Save"}
+              {isSaved ? "Added" : "Add"}
             </button>
           </div>
         </div>
@@ -435,7 +435,7 @@ export default function BGDetailsPage() {
                   {entries.length === 0 ? (
                     <tr>
                       <td colSpan={11} className="px-3 py-4 text-center text-gray-500">
-                        No BG records yet. Fill the form above and click Save to list entries here.
+                        No BG records yet. Fill the form above and click Add to list entries here.
                       </td>
                     </tr>
                   ) : (
