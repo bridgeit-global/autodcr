@@ -24,7 +24,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
     formState: { errors },
     reset,
     watch,
-    setError
+    setError,
+    setValue
   } = useForm<FormValues>();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,6 +34,44 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // Password generator function
+  const generateStrongPassword = () => {
+    // Generate a strong password with at least 12 characters
+    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lowercase = "abcdefghijklmnopqrstuvwxyz";
+    const numbers = "0123456789";
+    const special = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+    
+    // Ensure at least one of each type
+    let password = "";
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += special[Math.floor(Math.random() * special.length)];
+    
+    // Fill the rest randomly from all character sets
+    const allChars = uppercase + lowercase + numbers + special;
+    const length = 16; // Total length
+    for (let i = password.length; i < length; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    // Shuffle the password
+    password = password.split('').sort(() => Math.random() - 0.5).join('');
+    
+    // Set the generated password
+    setValue("newPassword", password);
+    setValue("confirmPassword", ""); // Clear confirm password - user must type it manually
+    
+    // Show the password temporarily so user can see it
+    setShowNewPassword(true);
+  };
+  
+  // Password validation states
+  const [isCurrentPasswordVerified, setIsCurrentPasswordVerified] = useState(false);
+  const [isVerifyingCurrentPassword, setIsVerifyingCurrentPassword] = useState(false);
+  const [currentPasswordError, setCurrentPasswordError] = useState<string | null>(null);
   
   // OTP verification states
   const [showOTPModal, setShowOTPModal] = useState(false);
@@ -127,6 +166,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
       setShowOTPModal(false);
       setUserEmail('');
       setUserPhone('');
+      setIsCurrentPasswordVerified(false);
+      setCurrentPasswordError(null);
     }
 
     return () => {
@@ -136,6 +177,67 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
 
   const newPassword = watch("newPassword");
   const confirmPassword = watch("confirmPassword");
+  const currentPassword = watch("currentPassword");
+
+  // Validate new password meets all requirements
+  const isNewPasswordValid = () => {
+    if (!newPassword) return false;
+    const pwd = newPassword as string;
+    return (
+      pwd.length >= 8 &&
+      /[A-Z]/.test(pwd) &&
+      /[a-z]/.test(pwd) &&
+      /[0-9]/.test(pwd) &&
+      /[!@#$%^&*(),.?":{}|<>]/.test(pwd) &&
+      newPassword === confirmPassword
+    );
+  };
+
+  // Verify current password
+  const verifyCurrentPassword = async (password: string) => {
+    if (!password || !userEmail) {
+      setIsCurrentPasswordVerified(false);
+      return;
+    }
+
+    setIsVerifyingCurrentPassword(true);
+    setCurrentPasswordError(null);
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: password,
+      });
+
+      if (error) {
+        setIsCurrentPasswordVerified(false);
+        setCurrentPasswordError("Current password is incorrect");
+      } else {
+        setIsCurrentPasswordVerified(true);
+        setCurrentPasswordError(null);
+      }
+    } catch (err) {
+      setIsCurrentPasswordVerified(false);
+      setCurrentPasswordError("Error verifying password");
+    } finally {
+      setIsVerifyingCurrentPassword(false);
+    }
+  };
+
+  // Debounced current password verification
+  useEffect(() => {
+    if (!currentPassword || !userEmail) {
+      setIsCurrentPasswordVerified(false);
+      setCurrentPasswordError(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      verifyCurrentPassword(currentPassword);
+    }, 1000); // Wait 1 second after user stops typing
+
+    return () => clearTimeout(timer);
+  }, [currentPassword, userEmail]);
 
   const onSubmit = async (data: FormValues) => {
     // Step 0: Require OTP verification first
@@ -206,6 +308,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
     setSubmitError(null);
     setSubmitSuccess(false);
     setIsOTPVerified(false);
+    setIsCurrentPasswordVerified(false);
+    setCurrentPasswordError(null);
   };
 
   if (!open) return null;
@@ -244,35 +348,6 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
 
             {/* Body */}
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-              {/* OTP Verification Status */}
-              {!isOTPVerified ? (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-emerald-800">OTP Verification Required</p>
-                      <p className="text-xs text-emerald-600 mt-0.5">Please verify your identity before changing password</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowOTPModal(true)}
-                    className="mt-3 w-full px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition"
-                  >
-                    Verify with OTP
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">
-                  <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-green-800 font-medium">Identity verified! You can now change your password.</span>
-                </div>
-              )}
-              
               {/* Success Message */}
               {submitSuccess && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-800 text-sm">
@@ -298,16 +373,37 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                       required: "Current password is required"
                     })}
                     type={showCurrentPassword ? "text" : "password"}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    className={`rounded-md border px-3 py-2 pr-10 text-sm text-gray-900 focus:outline-none focus:ring-1 disabled:bg-gray-100 disabled:cursor-not-allowed ${
+                      isCurrentPasswordVerified 
+                        ? "border-green-500 focus:border-green-500 focus:ring-green-500 bg-white" 
+                        : currentPasswordError
+                        ? "border-red-500 focus:border-red-500 focus:ring-red-500 bg-white"
+                        : "border-gray-300 focus:border-emerald-500 focus:ring-emerald-500 bg-white"
+                    }`}
                     placeholder="Enter current password"
-                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
+                    disabled={isSubmitting || submitSuccess}
                   />
+                  {isVerifyingCurrentPassword && (
+                    <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                      <svg className="animate-spin h-4 w-4 text-gray-400" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    </div>
+                  )}
+                  {isCurrentPasswordVerified && !isVerifyingCurrentPassword && (
+                    <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                      <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
                     tabIndex={-1}
-                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
+                    disabled={isSubmitting || submitSuccess}
                   >
                     {showCurrentPassword ? (
                       <svg
@@ -346,8 +442,19 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     )}
                   </button>
                 </div>
-                {errors.currentPassword && (
+                {currentPasswordError && (
+                  <p className="text-red-600 text-sm mt-1">{currentPasswordError}</p>
+                )}
+                {errors.currentPassword && !currentPasswordError && (
                   <p className="text-red-600 text-sm mt-1">{errors.currentPassword.message}</p>
+                )}
+                {isCurrentPasswordVerified && (
+                  <p className="text-green-600 text-sm mt-1 flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    Current password verified
+                  </p>
                 )}
               </div>
 
@@ -372,17 +479,27 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                       }
                     })}
                     type={showNewPassword ? "text" : "password"}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-24 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Enter new password"
-                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
+                    disabled={isSubmitting || submitSuccess}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowNewPassword(!showNewPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
-                    tabIndex={-1}
-                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
-                  >
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={generateStrongPassword}
+                      className="text-xs text-emerald-600 hover:text-emerald-700 font-medium px-2 py-1 rounded hover:bg-emerald-50 transition-colors focus:outline-none"
+                      title="Generate strong password"
+                      disabled={isSubmitting || submitSuccess}
+                    >
+                      Generate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
+                      tabIndex={-1}
+                      disabled={isSubmitting || submitSuccess}
+                    >
                     {showNewPassword ? (
                       <svg
                         className="w-5 h-5"
@@ -419,6 +536,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                       </svg>
                     )}
                   </button>
+                  </div>
                 </div>
                 
                 {/* Password Strength Indicator */}
@@ -566,14 +684,14 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     type={showConfirmPassword ? "text" : "password"}
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     placeholder="Confirm new password"
-                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
+                    disabled={isSubmitting || submitSuccess}
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none disabled:opacity-50"
                     tabIndex={-1}
-                    disabled={!isOTPVerified || isSubmitting || submitSuccess}
+                    disabled={isSubmitting || submitSuccess}
                   >
                     {showConfirmPassword ? (
                       <svg
@@ -624,6 +742,60 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                   <p className="text-red-600 text-sm mt-1">{errors.confirmPassword.message}</p>
                 )}
               </div>
+
+              {/* OTP Verification Status - After password fields */}
+              {!isOTPVerified ? (
+                <div className={`border rounded-lg p-3 ${
+                  isCurrentPasswordVerified && isNewPasswordValid()
+                    ? "bg-emerald-50 border-emerald-200"
+                    : "bg-gray-50 border-gray-200"
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <svg className={`w-5 h-5 ${
+                      isCurrentPasswordVerified && isNewPasswordValid()
+                        ? "text-emerald-600"
+                        : "text-gray-400"
+                    }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <div>
+                      <p className={`text-sm font-medium ${
+                        isCurrentPasswordVerified && isNewPasswordValid()
+                          ? "text-emerald-800"
+                          : "text-gray-600"
+                      }`}>OTP Verification Required</p>
+                      <p className={`text-xs mt-0.5 ${
+                        isCurrentPasswordVerified && isNewPasswordValid()
+                          ? "text-emerald-600"
+                          : "text-gray-500"
+                      }`}>
+                        {!isCurrentPasswordVerified || !isNewPasswordValid()
+                          ? "Please verify current password and enter a valid new password first"
+                          : "Please verify your identity before changing password"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowOTPModal(true)}
+                    disabled={!isCurrentPasswordVerified || !isNewPasswordValid()}
+                    className={`mt-3 w-full px-4 py-2 rounded-md text-sm font-medium transition ${
+                      isCurrentPasswordVerified && isNewPasswordValid()
+                        ? "bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    }`}
+                  >
+                    Verify with OTP
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-sm text-green-800 font-medium">Identity verified! You can now change your password.</span>
+                </div>
+              )}
 
               {/* Buttons */}
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">

@@ -456,11 +456,11 @@ export default function ProjectDetailsClient() {
               type="submit"
               className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
                 isProjectInfoSaved
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isProjectInfoSaved ? "Saved" : "Save"}
+              {isProjectInfoSaved ? "Added" : "Add"}
             </button>
           </div>
 
@@ -668,11 +668,11 @@ export default function ProjectDetailsClient() {
                   type="submit"
               className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
                 isSavePlotSaved
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSavePlotSaved ? "Saved" : "Save"}
+              {isSavePlotSaved ? "Added" : "Add"}
                 </button>
               </div>
 

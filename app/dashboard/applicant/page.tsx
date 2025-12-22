@@ -229,8 +229,8 @@ export default function ApplicantDetailsPage() {
     loadAuthUser();
   }, []);
 
-  // If the form was previously saved (green button) and the user starts editing/adding
-  // another applicant, move the button back to blue "Save"
+  // If the form was previously added (green button) and the user starts editing/adding
+  // another applicant, move the button back to blue "Add"
   useEffect(() => {
     const subscription = watch(() => {
       if (isSaved) {
@@ -287,8 +287,9 @@ export default function ApplicantDetailsPage() {
       if (hasOwner) return prev;
 
       const ownerName =
-        userMetadata.first_name + " " + userMetadata.last_name 
-        + " " + userMetadata.middle_name ||
+        (userMetadata.first_name || "") + 
+        (userMetadata.middle_name ? " " + userMetadata.middle_name : "") + 
+        (userMetadata.last_name ? " " + userMetadata.last_name : "") ||
         "-";
 
       const ownerContact = userMetadata.alternate_phone || userMetadata.mobile || "-";
@@ -482,7 +483,7 @@ export default function ApplicantDetailsPage() {
                     <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Registration No.</th>
                     <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">License Issue Date</th>
                     <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">PAN No.</th>
-                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Residential Address</th>
+                    <th className="border-r border-b border-gray-200 px-4 py-3 text-left bg-white">Address</th>
                     <th className="border-b border-gray-200 px-4 py-3 text-left bg-white">Actions</th>
                   </tr>
                 </thead>
@@ -538,11 +539,11 @@ export default function ApplicantDetailsPage() {
                 type="submit"
                 className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
                   isSaved
-                    ? "bg-green-600 hover:bg-green-700 text-white"
-                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                    ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                    : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
                 }`}
               >
-                {isSaved ? "Saved" : "Save"}
+                {isSaved ? "Added" : "Add"}
               </button>
             </div>
 

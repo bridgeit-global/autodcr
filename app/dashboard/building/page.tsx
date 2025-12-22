@@ -34,7 +34,12 @@ export default function BuildingDetailsPage() {
       fsiBuiltUpArea: "",
       grossConstructionArea: "",
     }),
+    mode: "onChange", // Enable validation on change
   });
+
+  // Watch both area fields for cross-validation
+  const fsiBuiltUpArea = watch("fsiBuiltUpArea");
+  const grossConstructionArea = watch("grossConstructionArea");
 
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
@@ -72,11 +77,11 @@ export default function BuildingDetailsPage() {
               type="submit"
               className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
                 isSaved
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSaved ? "Saved" : "Save"}
+              {isSaved ? "Added" : "Add"}
             </button>
           </div>
 
@@ -125,8 +130,18 @@ export default function BuildingDetailsPage() {
                   FSI Built-up Area (sq. m) <span className="text-red-500">*</span>
                 </label>
                 <input
+                  type="number"
+                  step="0.01"
                   {...register("fsiBuiltUpArea", {
                     required: "FSI built-up area is required",
+                    validate: (value) => {
+                      const grossArea = parseFloat(grossConstructionArea || "0");
+                      const fsiArea = parseFloat(value || "0");
+                      if (grossArea > 0 && fsiArea >= grossArea) {
+                        return "FSI Built-up Area must be less than Gross Construction Area";
+                      }
+                      return true;
+                    },
                   })}
                   className={inputClasses}
                   placeholder="Enter FSI built-up area"
@@ -141,8 +156,18 @@ export default function BuildingDetailsPage() {
                   Gross Construction Area (sq. m) <span className="text-red-500">*</span>
                 </label>
                 <input
+                  type="number"
+                  step="0.01"
                   {...register("grossConstructionArea", {
                     required: "Gross construction area is required",
+                    validate: (value) => {
+                      const grossArea = parseFloat(value || "0");
+                      const fsiArea = parseFloat(fsiBuiltUpArea || "0");
+                      if (fsiArea > 0 && grossArea <= fsiArea) {
+                        return "Gross Construction Area must be greater than FSI Built-up Area";
+                      }
+                      return true;
+                    },
                   })}
                   className={inputClasses}
                   placeholder="Enter gross construction area"

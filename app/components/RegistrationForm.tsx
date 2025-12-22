@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
-import PDFModal from "./PDFModal";
+import { motion, AnimatePresence } from "framer-motion";
+import { createPortal } from "react-dom";
 import OTPVerificationModal from "./OTPVerificationModal";
 import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 
@@ -81,6 +82,47 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Generate a strong random password (similar to browser suggestions)
+  const generateStrongPassword = () => {
+    const length = 16;
+    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lowercase = "abcdefghijklmnopqrstuvwxyz";
+    const numbers = "0123456789";
+    const special = "!@#$%^&*(),.?\":{}|<>";
+    const allChars = uppercase + lowercase + numbers + special;
+    
+    // Ensure at least one character from each required category
+    let pwd = "";
+    pwd += uppercase[Math.floor(Math.random() * uppercase.length)];
+    pwd += lowercase[Math.floor(Math.random() * lowercase.length)];
+    pwd += numbers[Math.floor(Math.random() * numbers.length)];
+    pwd += special[Math.floor(Math.random() * special.length)];
+    
+    // Fill the rest randomly from all character sets
+    for (let i = pwd.length; i < length; i++) {
+      pwd += allChars.charAt(Math.floor(Math.random() * allChars.length));
+    }
+    
+    // Shuffle the password to randomize the order
+    pwd = pwd.split('').sort(() => Math.random() - 0.5).join('');
+
+    // Update password & confirm password, and revalidate both
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        password: pwd,
+        confirmPassword: pwd,
+      };
+      validateField("password", updated.password, updated);
+      validateField("confirmPassword", updated.confirmPassword, updated);
+      return updated;
+    });
+
+    // Show both fields so user can see the generated password
+    setShowPassword(true);
+    setShowConfirmPassword(true);
+  };
   
   // Cleanup object URL on unmount
   useEffect(() => {
@@ -90,6 +132,26 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
       }
     };
   }, [letterheadPreviewUrl]);
+
+  // Lock body scroll when letterhead modal is open
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isPDFModalOpen) {
+      const scrollY = window.scrollY;
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = "100%";
+      document.body.style.overflow = "hidden";
+
+      return () => {
+        document.body.style.position = "";
+        document.body.style.top = "";
+        document.body.style.width = "";
+        document.body.style.overflow = "";
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isPDFModalOpen]);
 
   // Track active section using Intersection Observer
   useEffect(() => {
@@ -306,7 +368,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     });
   };
 
-  // Handler for letterhead file change - creates preview URL and opens modal
+  // Handler for letterhead file change - creates preview URL and opens modal (image, A4 only)
   const handleLetterheadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) {
@@ -314,26 +376,88 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     }
 
     const file = files[0];
-    
-    // Validate it's a PDF
-    if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
-      setFormError("Please upload a PDF file for letterhead");
+
+    // Validate it's an image (JPG, PNG)
+    const validImageTypes = ["image/jpeg", "image/jpg", "image/png"];
+    const validExtensions = [".jpg", ".jpeg", ".png"];
+    const isValidImage =
+      validImageTypes.includes(file.type) ||
+      validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext));
+
+    if (!isValidImage) {
+      setFormError("Please upload a JPG or PNG image file for letterhead");
+      setErrors((prev) => ({
+        ...prev,
+        letterheadFile: "Please upload a JPG or PNG image file",
+      }));
       return;
     }
 
-    // Update form data
+    // Optimistically set file so UI updates immediately
     handleFileChange("letterheadFile", file);
+    setErrors((prev) => ({ ...prev, letterheadFile: "" }));
 
-    // Create preview URL
-    if (letterheadPreviewUrl) {
-      URL.revokeObjectURL(letterheadPreviewUrl);
-    }
-    const fileUrl = URL.createObjectURL(file);
-    setLetterheadPreviewUrl(fileUrl);
+    // Validate A4 size by checking image dimensions
+    const img = document.createElement('img');
+    const objectUrl = URL.createObjectURL(file);
 
-    // Reset viewed state and open modal
-    setHasViewedLetterhead(false);
-    setTimeout(() => setIsPDFModalOpen(true), 0);
+    img.onload = () => {
+      // A4 aspect ratio: 210mm x 297mm ≈ 0.707 (width/height)
+      const aspectRatio = img.width / img.height;
+      const a4Ratio = 210 / 297;
+      const tolerance = 0.02; // ±2%
+
+      if (aspectRatio < a4Ratio - tolerance || aspectRatio > a4Ratio + tolerance) {
+        setFormError(
+          "Letterhead image must be of A4 size (210mm x 297mm aspect ratio)"
+        );
+        setErrors((prev) => ({
+          ...prev,
+          letterheadFile: "Letterhead image must be of A4 size (210mm x 297mm aspect ratio)",
+        }));
+        // Remove file & preview if validation fails (without re-validating the field)
+        setFormData((prev) => ({
+          ...prev,
+          letterheadFile: null,
+        }));
+        if (letterheadPreviewUrl) {
+          URL.revokeObjectURL(letterheadPreviewUrl);
+          setLetterheadPreviewUrl(null);
+        }
+        URL.revokeObjectURL(objectUrl);
+        e.target.value = "";
+        setHasViewedLetterhead(false);
+        return;
+      }
+
+      // Validation passed - create preview URL
+      if (letterheadPreviewUrl) {
+        URL.revokeObjectURL(letterheadPreviewUrl);
+      }
+      setLetterheadPreviewUrl(objectUrl);
+
+      // Reset viewed state and open modal
+      setHasViewedLetterhead(false);
+      setIsPDFModalOpen(true);
+    };
+
+    img.onerror = () => {
+      setFormError("Failed to load image. Please try again.");
+      setErrors((prev) => ({
+        ...prev,
+        letterheadFile: "Failed to load image",
+      }));
+      handleFileChange("letterheadFile", null);
+      if (letterheadPreviewUrl) {
+        URL.revokeObjectURL(letterheadPreviewUrl);
+        setLetterheadPreviewUrl(null);
+      }
+      URL.revokeObjectURL(objectUrl);
+      e.target.value = "";
+      setHasViewedLetterhead(false);
+    };
+
+    img.src = objectUrl;
   };
 
   // Remove letterhead handler
@@ -426,7 +550,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     "address",
     "gstNo",
     "alternatePhone",
-    "pan",
   ];
 
   const credentialFields: readonly string[] = [
@@ -522,10 +645,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         }
         break;
       case "pan":
-        if (!value) {
-          error = "PAN is required";
-        } else if (!panRegex.test(value as string)) {
-          error = "Enter valid PAN: first 5 letters, 4 digits, last letter";
+        // PAN is optional; validate only if user enters a value
+        if (value && typeof value === "string" && value.trim() !== "") {
+          if (!panRegex.test(value as string)) {
+            error = "Enter valid PAN: first 5 letters, 4 digits, last letter";
+          }
         }
         break;
       case "authorizedSignatoryPhotoFile":
@@ -1950,7 +2074,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 ),
                 "section-documents": (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 ),
                 "section-letterhead": (
@@ -2016,12 +2140,22 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         <div className="space-y-6">
             {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Basic Details</h3>
-                <p className="text-sm text-gray-500 mt-1">Tell us who you are</p>
-                </div>
+            <div 
+              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+              onClick={() => scrollToSection("section-basic-details")}
+            >
+              <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
               </div>
+              <h3 className="text-lg font-semibold text-black">
+                Basic Details
+              </h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-4 ml-11">
+              Tell us who you are
+            </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Row 1 */}
@@ -2129,7 +2263,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       disabled={isEmailVerified}
                     />
                     {isEmailVerified ? (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 text-blue-700 rounded-lg font-medium">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                         </svg>
@@ -2150,7 +2284,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                             setErrors(prev => ({ ...prev, email: "Please enter a valid email address" }));
                           }
                         }}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition whitespace-nowrap"
+                      className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg font-medium hover:bg-emerald-100 transition whitespace-nowrap"
                     >
                       Verify
                     </button>
@@ -2169,13 +2303,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <input
                     value={formData.city}
                     onChange={(e) => handleInputChange("city", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                     placeholder="Enter City"
-              />
+                  />
                   {errors.city && (
                     <p className="text-xs text-red-600 mt-1">{errors.city}</p>
                   )}
-            </div>
+                </div>
 
                 <div>
                   <label className="block font-medium text-black mb-1">
@@ -2194,7 +2328,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       disabled={isPhoneVerified}
                     />
                     {isPhoneVerified ? (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-medium">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                         </svg>
@@ -2214,7 +2348,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                             setErrors(prev => ({ ...prev, alternatePhone: "Please enter a valid 10-digit phone number" }));
                           }
                         }}
-                        className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition whitespace-nowrap"
+                        className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg font-medium hover:bg-emerald-100 transition whitespace-nowrap"
                       >
                         Verify
                       </button>
@@ -2243,11 +2377,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
             <div>
               <label className="block font-medium text-black mb-1">
-                    PAN <span className="text-red-600 font-bold">*</span>
+                PAN
               </label>
               <input
-                    value={formData.pan}
-                    onChange={(e) => handleInputChange("pan", e.target.value)}
+                value={formData.pan}
+                onChange={(e) => handleInputChange("pan", e.target.value)}
                 className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="ABCDE1234F"
               />
@@ -2294,7 +2428,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               </p>
 
               {!formData.entityType && (
-                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-sm">
                   ⚠️ Please select an Entity Type in Basic Details to see the required registration fields.
     </div>
               )}
@@ -2320,7 +2454,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               </p>
 
               {!formData.entityType && (
-                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-sm">
                   ⚠️ Please select an Entity Type in Basic Details to see the required documents.
                 </div>
               )}
@@ -2423,7 +2557,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           >
             <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
               <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
               </svg>
             </div>
             <h3 className="text-lg font-semibold text-black">Letterhead</h3>
@@ -2436,22 +2570,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             <div>
               <label className="block font-medium text-black mb-1">Letterhead PDF <span className="text-red-600 font-bold">*</span></label>
               <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-                    formData.letterheadFile 
-                  ? hasViewedLetterhead 
-                    ? 'border-green-300 bg-green-50' 
-                    : 'border-blue-300 bg-blue-50'
-                  : 'border-gray-300 hover:border-blue-400'
+                    errors.letterheadFile
+                      ? 'border-red-300 bg-red-50'
+                      : formData.letterheadFile 
+                        ? hasViewedLetterhead 
+                          ? 'border-green-300 bg-green-50' 
+                          : 'border-blue-300 bg-blue-50'
+                        : 'border-gray-300 hover:border-blue-400'
               }`}>
             <input
               type="file"
-              accept=".pdf"
+              accept=".jpg,.jpeg,.png,image/jpeg,image/png"
               onChange={handleLetterheadChange}
-                  className="hidden"
-                  id="letterhead-upload"
-                />
+              className="hidden"
+              id="letterhead-upload"
+            />
                 <label htmlFor="letterhead-upload" className="cursor-pointer">
                   <div className="flex flex-col items-center gap-2">
-                        <svg className={`w-10 h-10 ${formData.letterheadFile ? 'text-green-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className={`w-10 h-10 ${
+                          errors.letterheadFile 
+                            ? 'text-red-500' 
+                            : formData.letterheadFile 
+                              ? 'text-green-500' 
+                              : 'text-gray-400'
+                        }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                     <span className="text-sm text-gray-600">
@@ -2463,7 +2605,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         </>
                       )}
                     </span>
-                    <span className="text-xs text-gray-500">PDF only (max 10MB)</span>
+                    <span className="text-xs text-gray-500">JPG, PNG only (max 10MB)</span>
                   </div>
                 </label>
               </div>
@@ -2544,7 +2686,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           >
             <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
               <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
               </svg>
             </div>
             <h3 className="text-lg font-semibold text-black">
@@ -2581,26 +2723,36 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   type={showPassword ? "text" : "password"}
                   value={formData.password}
                   onChange={(e) => handleInputChange("password", e.target.value)}
-                  className="border rounded-lg px-3 py-2 h-10 w-full pr-10 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="border rounded-lg px-3 py-2 h-10 w-full pr-24 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                   placeholder="Create a strong password"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
-                </button>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={generateStrongPassword}
+                    className="text-xs text-emerald-600 hover:text-emerald-700 font-medium px-2 py-1 rounded hover:bg-emerald-50 transition-colors focus:outline-none"
+                    title="Generate strong password"
+                  >
+                    Generate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-gray-500 hover:text-gray-700 focus:outline-none"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
               
               {/* Password Strength Indicator */}
@@ -2877,17 +3029,86 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       </div>
     </div>
 
-      {/* PDF Modal - Shows user's uploaded letterhead PDF */}
-      <PDFModal
-        open={isPDFModalOpen}
-        onClose={() => {
-          setIsPDFModalOpen(false);
-          if (letterheadPreviewUrl) {
-            setHasViewedLetterhead(true);
-          }
-        }}
-        fileUrl={letterheadPreviewUrl}
-      />
+  {/* Image Modal - rendered via portal, same positioning as previous PDF modal */}
+      {typeof window !== "undefined" &&
+        isPDFModalOpen &&
+        letterheadPreviewUrl &&
+        createPortal(
+          <AnimatePresence>
+            {isPDFModalOpen && (
+              <motion.div
+                className="fixed inset-0 z-[9999] flex justify-center items-start bg-black/50 backdrop-blur-sm p-4 pt-10"
+                onClick={() => {
+                  setIsPDFModalOpen(false);
+                  if (letterheadPreviewUrl) {
+                    setHasViewedLetterhead(true);
+                  }
+                }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <motion.div
+                  id="letterhead-modal"
+                  className="bg-white w-full max-w-5xl rounded-xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                  initial={{ y: -40, opacity: 0, scale: 0.95 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: -40, opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <div className="flex justify-between items-center p-6 border-b">
+                    <div>
+                      <h2 className="text-2xl font-bold text-black">
+                        Letterhead Preview - Assigned Placement Demo
+                      </h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        This is a demo showing where your letterhead will be placed in the system.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsPDFModalOpen(false);
+                        if (letterheadPreviewUrl) {
+                          setHasViewedLetterhead(true);
+                        }
+                      }}
+                      className="text-2xl font-bold text-gray-700 hover:text-black transition-colors"
+                      aria-label="Close modal"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-auto p-6 space-y-4">
+                    <div
+                      className="border rounded-lg bg-white flex items-center justify-center"
+                      style={{ minHeight: "600px" }}
+                    >
+                      <div
+                        className="relative w-full max-w-3xl mx-auto"
+                        style={{ aspectRatio: "210 / 297" }}
+                      >
+                        {/* Letterhead image as background */}
+                        <img
+                          src={letterheadPreviewUrl}
+                          alt="Letterhead Preview"
+                          className="absolute inset-0 w-full h-full object-contain"
+                        />
+                        {/* Blue content area overlay (simulating where content will appear) */}
+                        <div
+                          className="absolute rounded-xl border-2 border-blue-400 bg-blue-50/40"
+                          style={{ top: "14%", bottom: "14%", left: "8%", right: "8%" }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
 
       {/* Phone OTP Verification Modal */}
       <OTPVerificationModal

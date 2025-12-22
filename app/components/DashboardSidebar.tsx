@@ -119,11 +119,11 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
 
   return (
     <aside
-      className={`${sidebarWidthClass} bg-white overflow-y-auto transition-all duration-200`}
+      className={`${sidebarWidthClass} bg-white transition-all duration-200 flex flex-col h-full`}
     >
-      <div className="p-4">
+      <div className="p-4 flex flex-col h-full">
         {/* Title + toggle */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 shrink-0">
           {!collapsed && <h2 className="hidden md:block text-lg font-bold text-gray-900">CREATE PROJECT</h2>}
           <button
             type="button"
@@ -151,14 +151,14 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
           <button
             type="button"
             onClick={onSubmitProjectClick}
-            className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm"
+            className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
           >
             Submit Project
           </button>
         )}
 
-        {/* Navigation Items */}
-        <nav className="space-y-1">
+        {/* Navigation Items - Scrollable */}
+        <nav className="space-y-1 flex-1 overflow-y-auto min-h-0">
           {menuItems.map((item) => {
             // Normalize paths by removing trailing slashes for comparison
             const normalizedPathname = pathname.replace(/\/$/, "");
@@ -173,7 +173,7 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
                 key={item.id}
                 onClick={() => router.push(item.path)}
                 className={`relative w-full flex items-center ${justifyClass} px-4 py-3 rounded-xl transition-colors ${
-                  isActive ? "bg-emerald-50 text-emerald-900" : "text-gray-700 hover:bg-gray-100"
+                  isActive ? "bg-emerald-100 text-emerald-800" : "text-gray-700 hover:bg-gray-100"
                 }`}
               >
                 {/* Active indicator bar */}

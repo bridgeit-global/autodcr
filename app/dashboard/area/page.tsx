@@ -285,11 +285,11 @@ const removePlot = (plotId: string) => {
               onClick={handleSave}
               className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
                 isSaved
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSaved ? "Saved" : "Save"}
+              {isSaved ? "Added" : "Add"}
             </button>
           </div>
         </div>

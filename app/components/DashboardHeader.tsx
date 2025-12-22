@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import ChangePasswordModal from "./ChangePasswordModal";
 import ProfileModal from "./ProfileModal";
@@ -17,9 +17,14 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [showBackWarning, setShowBackWarning] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
   const { clearUserMetadata, userMetadata, fetchUserMetadata, loading } = useUserMetadata();
+  
+  // Check if we're on a dashboard page
+  const isDashboardPage = pathname?.startsWith("/dashboard");
 
   // Fetch metadata if it's not loaded or is empty
   useEffect(() => {
@@ -31,17 +36,17 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
     }
   }, [userMetadata, loading, fetchUserMetadata]);
 
-  // Format name as last_name first_name middle_name
+  // Format name as first_name middle_name last_name
   const formatUserName = () => {
     if (!userMetadata || Object.keys(userMetadata).length === 0) {
       return "User";
     }
     
-    const lastName = userMetadata.last_name || "";
     const firstName = userMetadata.first_name || "";
     const middleName = userMetadata.middle_name || "";
+    const lastName = userMetadata.last_name || "";
     
-    const nameParts = [lastName, firstName, middleName].filter(Boolean);
+    const nameParts = [firstName, middleName, lastName].filter(Boolean);
     return nameParts.length > 0 ? nameParts.join(" ") : "User";
   };
 
@@ -251,11 +256,57 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
 
           {/* Help Desk */}
           <div className="hidden lg:block text-sm text-gray-500">Help Desk</div>
+          
+          {/* Back Button - Only show on dashboard pages, positioned on the right */}
+          {isDashboardPage && (
+            <button
+              onClick={() => setShowBackWarning(true)}
+              className="p-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-xl shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105"
+              aria-label="Back to Dashboard"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+            </button>
+          )}
         </div>
           </div>
         </div>
       </div>
       
+      {/* Back navigation warning modal */}
+      {showBackWarning && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white w-[90%] max-w-md rounded-xl shadow-2xl p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">
+              Leave Create Project?
+            </h2>
+            <p className="text-sm text-gray-600 mb-4">
+              You have not submitted your project. Any unsaved information on this page will not be saved if you go back to the dashboard.
+            </p>
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                onClick={() => setShowBackWarning(false)}
+              >
+                Stay on this page
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                onClick={() => {
+                  setShowBackWarning(false);
+                  router.push("/userdashboard");
+                }}
+              >
+                Go to dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Change Password Modal */}
       <ChangePasswordModal
         open={isChangePasswordOpen}
