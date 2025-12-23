@@ -271,6 +271,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     fullNameProprietor: "",
     aadhaarNo: "",
     residentialAddress: "",
+    proprietorshipRegistrationNo: "",
+    proprietorshipRegistrationDate: "",
     
     // Partnership Firm
     firmRegistrationNo: "",
@@ -305,6 +307,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     departmentName: "",
     officeOrderRef: "",
     officeOrderFile: null as File | null,
+    govtRegistrationNo: "",
+    govtRegistrationDate: "",
     
     // Common documents
     authorizedSignatoryPhotoFile: null as File | null,
@@ -1019,6 +1023,24 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           error = "Full Name of Proprietor is required";
         }
         break;
+      case "proprietorshipRegistrationNo":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Registration Number is required";
+        }
+        break;
+      case "proprietorshipRegistrationDate":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Registration Date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected > today) {
+            error = "Date cannot be in the future";
+          }
+        }
+        break;
       case "cin":
         if (!value || (typeof value === "string" && value.trim() === "")) {
           error = "CIN is required";
@@ -1059,7 +1081,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         break;
       case "llpIncorporationDate":
         if (!value || (typeof value === "string" && value.trim() === "")) {
-          error = "LLP Incorporation Date is required";
+          error = "Date of Registration is required";
         } else {
           const selected = new Date(value as string);
           selected.setHours(0, 0, 0, 0);
@@ -1091,6 +1113,24 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       case "departmentName":
         if (!value || (typeof value === "string" && value.trim() === "")) {
           error = "Department Name is required";
+        }
+        break;
+      case "govtRegistrationNo":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Registration Number is required";
+        }
+        break;
+      case "govtRegistrationDate":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Registration Date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected > today) {
+            error = "Date cannot be in the future";
+          }
         }
         break;
         break;
@@ -1197,6 +1237,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       const typeSpecificFields: Record<string, string[]> = {
         "Proprietorship / Individual": [
           "fullNameProprietor",
+          "proprietorshipRegistrationNo",
+          "proprietorshipRegistrationDate",
           "entityDocuments.individualUtility",
         ],
         "Partnership Firm": [
@@ -1231,6 +1273,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         ],
         "Govt. / PSU / Local Body": [
           "departmentName",
+          "govtRegistrationNo",
+          "govtRegistrationDate",
           "entityDocuments.govOrder",
         ],
       };
@@ -1556,6 +1600,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           case "Proprietorship / Individual":
             baseData.full_name_proprietor = formData.fullNameProprietor;
             baseData.residential_address = formData.residentialAddress;
+            baseData.proprietorship_registration_no = formData.proprietorshipRegistrationNo;
+            baseData.proprietorship_registration_date = formData.proprietorshipRegistrationDate;
             baseData.individual_utility_url = entityDocumentUrls.individualUtility || null;
             break;
           case "Partnership Firm":
@@ -1590,6 +1636,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             break;
           case "Govt. / PSU / Local Body":
             baseData.department_name = formData.departmentName;
+            baseData.govt_registration_no = formData.govtRegistrationNo;
+            baseData.govt_registration_date = formData.govtRegistrationDate;
             baseData.gov_order_url = entityDocumentUrls.govOrder || null;
             break;
         }
@@ -1670,6 +1718,39 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 <p className="text-red-600 text-sm mt-1">{errors.fullNameProprietor}</p>
               )}
             </div>
+              <div>
+                <label className="block font-medium text-black mb-1">
+                  Registration Number <span className="text-red-600 font-bold">*</span>
+                </label>
+                <input
+                value={formData.proprietorshipRegistrationNo}
+                onChange={(e) => handleInputChange("proprietorshipRegistrationNo", e.target.value)}
+                onBlur={(e) => validateField("proprietorshipRegistrationNo", e.target.value.trim() || "")}
+                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  placeholder="Registration Number"
+                />
+                {errors.proprietorshipRegistrationNo && (
+                <p className="text-red-600 text-sm mt-1">{errors.proprietorshipRegistrationNo}</p>
+                )}
+              </div>
+              <div>
+              <label className="block font-medium text-black mb-1">
+                Registration Date <span className="text-red-600 font-bold">*</span>
+              </label>
+                <input
+                  type="date"
+                value={formData.proprietorshipRegistrationDate}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  handleInputChange("proprietorshipRegistrationDate", value);
+                }}
+                onBlur={(e) => validateField("proprietorshipRegistrationDate", e.target.value.trim() || "")}
+                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                {errors.proprietorshipRegistrationDate && (
+                <p className="text-red-600 text-sm mt-1">{errors.proprietorshipRegistrationDate}</p>
+                )}
+              </div>
           </div>
         );
 
@@ -1863,7 +1944,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               </div>
               <div>
                 <label className="block font-medium text-black mb-1">
-                  Date of Incorporation <span className="text-red-600 font-bold">*</span>
+                  Date of Registration <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                   type="date"
@@ -2009,6 +2090,39 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 <p className="text-red-600 text-sm mt-1">{errors.departmentName}</p>
               )}
             </div>
+              <div>
+                <label className="block font-medium text-black mb-1">
+                  Registration Number <span className="text-red-600 font-bold">*</span>
+                </label>
+                <input
+                value={formData.govtRegistrationNo}
+                onChange={(e) => handleInputChange("govtRegistrationNo", e.target.value)}
+                onBlur={(e) => validateField("govtRegistrationNo", e.target.value.trim() || "")}
+                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  placeholder="Registration Number"
+                />
+                {errors.govtRegistrationNo && (
+                <p className="text-red-600 text-sm mt-1">{errors.govtRegistrationNo}</p>
+                )}
+              </div>
+              <div>
+              <label className="block font-medium text-black mb-1">
+                Registration Date <span className="text-red-600 font-bold">*</span>
+              </label>
+                <input
+                  type="date"
+                value={formData.govtRegistrationDate}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  handleInputChange("govtRegistrationDate", value);
+                }}
+                onBlur={(e) => validateField("govtRegistrationDate", e.target.value.trim() || "")}
+                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                {errors.govtRegistrationDate && (
+                <p className="text-red-600 text-sm mt-1">{errors.govtRegistrationDate}</p>
+                )}
+              </div>
           </div>
         );
 

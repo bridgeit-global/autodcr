@@ -57,6 +57,15 @@ const APPLICANT_TYPE_OPTIONS = [
   "Town Planner",
 ];
 
+const ENTITY_TYPES = [
+  "Proprietorship / Individual",
+  "Partnership Firm",
+  "Pvt. Ltd. / Ltd. Company",
+  "LLP",
+  "Trust / Society",
+  "Govt. / PSU / Local Body",
+];
+
 type ApplicantDirectoryEntry = {
   id: string;
   name: string;
@@ -214,7 +223,6 @@ export default function ApplicantDetailsPage() {
   // Show the directory dropdown as soon as applicant type is selected.
   const showDirectoryDropdown = !!selectedApplicantType;
   const isLocked = showDirectoryDropdown && Boolean(selectedDirectoryId);
-  const isReadOnlyForm = true;
 
   // Capture logged-in Supabase auth user id (used to store `user_id` in applicant rows)
   useEffect(() => {
@@ -241,20 +249,34 @@ export default function ApplicantDetailsPage() {
     return () => subscription.unsubscribe();
   }, [watch, isSaved]);
 
-  // Load consultants for the selected type from Supabase auth via RPC
+  // Load applicants (consultants or owners) for the selected type from Supabase auth via RPC
   useEffect(() => {
-    const loadConsultants = async () => {
+    const loadDirectoryOptions = async () => {
       if (!selectedApplicantType) {
         setDirectoryOptions([]);
         return;
       }
 
-      const { data, error } = await supabase.rpc("get_consultants_by_type", {
-        p_type: selectedApplicantType,
-      });
+      // For Owner type, use get_owners() to fetch all owners
+      // For other types, use the standard get_consultants_by_type function
+      let data, error;
+      
+      if (selectedApplicantType === "Owner") {
+        // Use function to get all owners (no entity type filter)
+        const result = await supabase.rpc("get_owners");
+        data = result.data;
+        error = result.error;
+      } else {
+        // Use dedicated function for consultants (single parameter to avoid PostgREST schema cache issues)
+        const result = await supabase.rpc("get_consultants_by_type", {
+          p_type: selectedApplicantType,
+        });
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) {
-        console.error("Error loading consultants by type:", error);
+        console.error("Error loading applicants by type:", error);
         setDirectoryOptions([]);
         return;
       }
@@ -274,67 +296,129 @@ export default function ApplicantDetailsPage() {
       setDirectoryOptions(mapped);
     };
 
-    loadConsultants();
+    loadDirectoryOptions();
   }, [selectedApplicantType]);
 
-  // Ensure logged-in owner is always part of the applicants list (first row)
+  // Ensure logged-in user (owner or consultant) is always part of the applicants list (first row)
   useEffect(() => {
     if (!userMetadata) return;
 
     setApplicants((prev) => {
-      // If an Owner row already exists, keep as-is
-      const hasOwner = prev.some((a) => a.applicantType === "Owner");
-      if (hasOwner) return prev;
+      const userRole = userMetadata.role;
+      const isConsultant = userRole === "Consultant";
+      const applicantType = isConsultant ? (userMetadata.consultant_type || "") : "Owner";
 
-      const ownerName =
+      // If a row with this applicantType already exists, keep as-is
+      const hasExistingRow = prev.some((a) => a.applicantType === applicantType);
+      if (hasExistingRow) return prev;
+
+      const userName =
         (userMetadata.first_name || "") + 
         (userMetadata.middle_name ? " " + userMetadata.middle_name : "") + 
         (userMetadata.last_name ? " " + userMetadata.last_name : "") ||
         "-";
 
-      const ownerContact = userMetadata.alternate_phone || userMetadata.mobile || "-";
-      const ownerEmail = userMetadata.email || "-";
-      const ownerAddress = userMetadata.address || "-";
+      const userContact = userMetadata.alternate_phone || userMetadata.mobile || "-";
+      const userEmail = userMetadata.email || "-";
+      const userAddress = userMetadata.address || "-";
+      const userPanNo = userMetadata.pan_no || userMetadata.pan || "-";
 
-      // Derive registration number and date based on entity_type (same logic as ProfileModal / RegistrationForm)
-      let ownerRegistrationNo = "";
-      let ownerLicenseIssueDate = "";
-      const entityType = userMetadata.entity_type;
-      if (entityType === "Pvt. Ltd. / Ltd. Company") {
-        ownerRegistrationNo = userMetadata.cin || "";
-        ownerLicenseIssueDate = userMetadata.roc_registration_date || "";
-      } else if (entityType === "LLP") {
-        ownerRegistrationNo = userMetadata.llpin || "";
-        ownerLicenseIssueDate = userMetadata.llp_incorporation_date || "";
-      } else if (entityType === "Partnership Firm") {
-        ownerRegistrationNo = userMetadata.firm_registration_no || "";
-        ownerLicenseIssueDate = userMetadata.partnership_registration_date || "";
-      } else if (entityType === "Trust / Society") {
-        ownerRegistrationNo = userMetadata.trust_registration_no || "";
-        ownerLicenseIssueDate = userMetadata.trust_registration_date || "";
-      } else if (entityType === "Govt. / PSU / Local Body") {
-        ownerRegistrationNo = userMetadata.trust_reg_no || "";
-        // No explicit date field in registration form; leave empty
+      let registrationNo = "";
+      let licenseIssueDate = "";
+
+      if (isConsultant) {
+        // Derive registration number and date based on consultant_type (same logic as RPC function)
+        const consultantType = userMetadata.consultant_type;
+        switch (consultantType) {
+          case "Architect":
+            registrationNo = userMetadata.coa_reg_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Structural Engineer":
+            registrationNo = userMetadata.structural_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Licensed Surveyor":
+            registrationNo = userMetadata.lbs_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "MEP Consultant":
+            registrationNo = userMetadata.electrical_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Plumber":
+            registrationNo = userMetadata.plumber_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Fire Consultant":
+            registrationNo = userMetadata.fire_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Landscape Consultant":
+            registrationNo = userMetadata.landscape_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "PMC / Project Manager":
+            registrationNo = userMetadata.pmc_registration_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Geotechnical Consultant":
+            registrationNo = userMetadata.nabl_accreditation_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Environmental Consultant":
+            registrationNo = userMetadata.env_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          case "Town Planner":
+            registrationNo = userMetadata.town_planner_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
+          default:
+            registrationNo = "";
+            licenseIssueDate = "";
+        }
+      } else {
+        // Derive registration number and date based on entity_type (same logic as ProfileModal / RegistrationForm)
+        const entityType = userMetadata.entity_type;
+        if (entityType === "Proprietorship / Individual") {
+          registrationNo = userMetadata.proprietorship_registration_no || "";
+          licenseIssueDate = userMetadata.proprietorship_registration_date || "";
+        } else if (entityType === "Pvt. Ltd. / Ltd. Company") {
+          registrationNo = userMetadata.cin || "";
+          licenseIssueDate = userMetadata.roc_registration_date || "";
+        } else if (entityType === "LLP") {
+          registrationNo = userMetadata.llpin || "";
+          licenseIssueDate = userMetadata.llp_incorporation_date || "";
+        } else if (entityType === "Partnership Firm") {
+          registrationNo = userMetadata.firm_registration_no || "";
+          licenseIssueDate = userMetadata.partnership_registration_date || "";
+        } else if (entityType === "Trust / Society") {
+          registrationNo = userMetadata.trust_registration_no || "";
+          licenseIssueDate = userMetadata.trust_registration_date || "";
+        } else if (entityType === "Govt. / PSU / Local Body") {
+          registrationNo = userMetadata.govt_registration_no || "";
+          licenseIssueDate = userMetadata.govt_registration_date || "";
+        }
       }
-      const ownerPanNo = userMetadata.pan_no || userMetadata.pan || "-";
 
-      const ownerRow: ApplicantRow = {
+      const userRow: ApplicantRow = {
         id: 1,
         user_id: authUserId ?? undefined,
-        applicantType: "Owner",
-        name: ownerName,
-        contactNumber: ownerContact,
-        email: ownerEmail,
-        registrationNo: ownerRegistrationNo,
-        panNo: ownerPanNo,
-        licenseIssueDate: ownerLicenseIssueDate || "-",
-        residentialAddress: ownerAddress,
-        officeAddress: ownerAddress,
+        applicantType: applicantType,
+        name: userName,
+        contactNumber: userContact,
+        email: userEmail,
+        registrationNo: registrationNo,
+        panNo: userPanNo,
+        licenseIssueDate: licenseIssueDate || "-",
+        residentialAddress: userAddress,
+        officeAddress: userAddress,
       };
 
-      // Shift existing IDs so Owner stays first with id 1
+      // Shift existing IDs so logged-in user stays first with id 1
       const reindexed = prev.map((a, idx) => ({ ...a, id: idx + 2 }));
-      return [ownerRow, ...reindexed];
+      return [userRow, ...reindexed];
     });
   }, [userMetadata, authUserId]);
 
@@ -361,23 +445,32 @@ export default function ApplicantDetailsPage() {
     setIsFormAutofilled(false);
   }, [selectedApplicantType, setValue]);
 
-  // When a consultant is selected from the dropdown, auto-fill all form fields
+  // Reset directory selection and fields when applicant type changes to Owner
+  useEffect(() => {
+    if (selectedApplicantType === "Owner") {
+      setValue("plumbingConsultant", "");
+      resetApplicantFields();
+      setIsFormAutofilled(false);
+    }
+  }, [selectedApplicantType, setValue]);
+
+  // When a consultant or owner is selected from the dropdown, auto-fill all form fields
   useEffect(() => {
     if (!selectedDirectoryId || !showDirectoryDropdown) {
       setIsFormAutofilled(false);
       return;
     }
 
-    const selectedConsultant = directoryOptions.find((entry) => entry.id === selectedDirectoryId);
-    if (selectedConsultant) {
+    const selectedEntry = directoryOptions.find((entry) => entry.id === selectedDirectoryId);
+    if (selectedEntry) {
       const opts = { shouldValidate: true, shouldDirty: true, shouldTouch: true } as const;
-      setValue("name", selectedConsultant.fullName, opts);
-      setValue("contactNumber", selectedConsultant.contactNumber, opts);
-      setValue("emailAddress", selectedConsultant.email, opts);
-      setValue("residentialAddress", selectedConsultant.address, opts);
-      setValue("registrationNumber", selectedConsultant.registrationNumber, opts);
-      setValue("panNo", selectedConsultant.pan, opts);
-      setValue("licenseIssueDate", selectedConsultant.licenseIssueDate, opts);
+      setValue("name", selectedEntry.fullName, opts);
+      setValue("contactNumber", selectedEntry.contactNumber, opts);
+      setValue("emailAddress", selectedEntry.email, opts);
+      setValue("residentialAddress", selectedEntry.address, opts);
+      setValue("registrationNumber", selectedEntry.registrationNumber, opts);
+      setValue("panNo", selectedEntry.pan, opts);
+      setValue("licenseIssueDate", selectedEntry.licenseIssueDate, opts);
       clearErrors([
         "name",
         "contactNumber",
@@ -402,7 +495,7 @@ export default function ApplicantDetailsPage() {
   
   // Filter out already added applicant types from dropdown options
   // Also enforce mutual exclusivity: if Architect is added, exclude Licensed Surveyor and vice versa
-  const availableApplicantTypes = APPLICANT_TYPE_OPTIONS.filter((type) => {
+  let availableApplicantTypes = APPLICANT_TYPE_OPTIONS.filter((type) => {
     // Don't show if already added
     if (addedApplicantTypes.includes(type)) {
       return false;
@@ -421,14 +514,21 @@ export default function ApplicantDetailsPage() {
     return true;
   });
 
+  // If logged-in user is a consultant, add "Owner" option (unless already added)
+  const isConsultant = userMetadata?.role === "Consultant";
+  if (isConsultant && !addedApplicantTypes.includes("Owner")) {
+    availableApplicantTypes = ["Owner", ...availableApplicantTypes];
+  }
+
   const onSubmit = (data: ApplicantFormData) => {
     setApplicants((prev) => {
       const nextId = prev.length ? Math.max(...prev.map((item) => item.id)) + 1 : 1;
+      // All entries come from directory dropdown (consultants or owners), use their auth user id
+      const userId = (showDirectoryDropdown && selectedDirectoryId) ? selectedDirectoryId : undefined;
+
       const newApplicant = {
         id: nextId,
-        // If user picked from directory dropdown, this is the consultant's auth user id.
-        // Otherwise, store the creator (logged-in owner) id.
-        user_id: (showDirectoryDropdown ? selectedDirectoryId : authUserId) || undefined,
+        user_id: userId,
         applicantType: data.applicantType,
         name: data.name || "-",
         contactNumber: data.contactNumber || "-",
@@ -506,14 +606,14 @@ export default function ApplicantDetailsPage() {
                           type="button"
                           className={`text-sm ${
                             applicant.applicantType === "Licensed Site Supervisor" ||
-                            applicant.applicantType === "Owner"
+                            applicant.user_id === authUserId
                               ? "text-gray-400 cursor-not-allowed"
                               : "text-red-600 hover:underline"
                           }`}
                           onClick={() => handleRemoveApplicant(applicant.id)}
                           disabled={
                             applicant.applicantType === "Licensed Site Supervisor" ||
-                            applicant.applicantType === "Owner"
+                            applicant.user_id === authUserId
                           }
                         >
                           Delete
@@ -587,11 +687,11 @@ export default function ApplicantDetailsPage() {
                 {errors.applicantType && <p className="text-red-600 text-sm mt-1">{errors.applicantType.message}</p>}
               </div>
 
+
                 <div>
                   <label className="block font-medium text-black mb-1">
                   Name <span className="text-red-500">*</span>
                   </label>
-                <>
                   <select
                     {...register("plumbingConsultant", {
                       required: `Please select a ${selectedApplicantType?.toLowerCase() || "record"}`,
@@ -613,7 +713,6 @@ export default function ApplicantDetailsPage() {
                   {errors.plumbingConsultant && (
                     <p className="text-red-600 text-sm mt-1">{errors.plumbingConsultant.message}</p>
                   )}
-                </>
               </div>
               </div>
 
@@ -625,7 +724,7 @@ export default function ApplicantDetailsPage() {
                   {...register("residentialAddress", { required: "Residential address is required" })}
                 className={`${textareaClasses} h-10 ${disabledClasses}`}
                 placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
-                readOnly={isReadOnlyForm}
+                readOnly={true}
                 />
                 {errors.residentialAddress && (
                   <p className="text-red-600 text-sm mt-1">{errors.residentialAddress.message}</p>
@@ -647,7 +746,7 @@ export default function ApplicantDetailsPage() {
                   })}
                   className={`${inputClasses} ${disabledClasses}`}
                   placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
-                  readOnly={isReadOnlyForm}
+                  readOnly={true}
                 />
                 {errors.contactNumber && <p className="text-red-600 text-sm mt-1">{errors.contactNumber.message}</p>}
               </div>
@@ -666,7 +765,7 @@ export default function ApplicantDetailsPage() {
                   })}
                   className={`${inputClasses} ${disabledClasses}`}
                   placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
-                  readOnly={isReadOnlyForm}
+                  readOnly={true}
                 />
                 {errors.emailAddress && <p className="text-red-600 text-sm mt-1">{errors.emailAddress.message}</p>}
               </div>
@@ -681,7 +780,7 @@ export default function ApplicantDetailsPage() {
                   {...register("registrationNumber", { required: "Registration number is required" })}
                   className={`${inputClasses} ${disabledClasses}`}
                   placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
-                  readOnly={isReadOnlyForm}
+                  readOnly={true}
                 />
                 {errors.registrationNumber && (
                   <p className="text-red-600 text-sm mt-1">{errors.registrationNumber.message}</p>
@@ -702,7 +801,7 @@ export default function ApplicantDetailsPage() {
                   })}
                   className={`${inputClasses} ${disabledClasses}`}
                   placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
-                  readOnly={isReadOnlyForm}
+                  readOnly={true}
                   style={{ textTransform: "uppercase" }}
                 />
                 {errors.panNo && (
@@ -720,7 +819,7 @@ export default function ApplicantDetailsPage() {
                   type="date"
                   {...register("licenseIssueDate")}
                   className={`${inputClasses} ${disabledClasses}`}
-                  readOnly={isReadOnlyForm}
+                  readOnly={true}
                 />
               </div>
             </div>
