@@ -224,6 +224,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     panCardFile: null as File | null,
     letterheadFile: null as File | null,
     
+    // Common registration date for all consultant types
+    registrationDate: "",
+    
     // Architect fields
     coaRegNo: "",
     coaExpiryDate: "",
@@ -256,18 +259,21 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     
     // MEP Consultant fields
     electricalLicenseNo: "",
+    electricalExpiryDate: "",
     pwdAccreditation: "",
     mepExperienceFile: null as File | null,
     dscTokenId: "",
     
     // Plumber fields
     plumberLicenseNo: "",
+    plumberExpiryDate: "",
     pheAccreditationFile: null as File | null,
     plumbingExperience: "",
     plumberIdFile: null as File | null,
     
     // Geotechnical / Soil Testing fields
     nablAccreditationNo: "",
+    nablExpiryDate: "",
     labRegistrationFile: null as File | null,
     equipmentListFile: null as File | null,
     geotechQualification: "",
@@ -670,6 +676,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           }
         }
         break;
+      case "registrationDate":
+        if (!value) {
+          error = "Registration date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected > today) {
+            error = "Registration date cannot be in the future";
+          }
+        }
+        break;
       case "coaExpiryDate":
         if (!value) {
           error = "Select expiry date";
@@ -700,14 +719,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         break;
       case "structuralValidity":
         if (!value) {
-          error = "Validity date is required";
+          error = "License issue date is required";
         } else {
           const selected = new Date(value as string);
           selected.setHours(0, 0, 0, 0);
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           if (selected < today) {
-            error = "Validity date cannot be in the past";
+            error = "License issue date cannot be in the past";
           }
         }
         break;
@@ -757,6 +776,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           }
         }
         break;
+      case "electricalExpiryDate":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Expiry date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected < today) {
+            error = "Expiry date cannot be in the past";
+          }
+        }
+        break;
       case "mepExperienceFile":
         if (!value) error = "Upload MEP Experience Documents";
         break;
@@ -769,6 +801,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           const plumberRegex = /^[A-Z0-9]{5,20}$/i;
           if (!plumberRegex.test(value as string)) {
             error = "Enter valid Plumber License No (5-20 alphanumeric characters)";
+          }
+        }
+        break;
+      case "plumberExpiryDate":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Expiry date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected < today) {
+            error = "Expiry date cannot be in the past";
           }
         }
         break;
@@ -868,6 +913,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           const nablRegex = /^NABL\/[A-Z0-9]{2,10}\/[A-Z0-9]{4,10}$|^[A-Z0-9]{8,25}$/i;
           if (!nablRegex.test(value as string)) {
             error = "Enter valid NABL Accreditation No (e.g., NABL/XXXX/XXXX or alphanumeric 8-25 chars)";
+          }
+        }
+        break;
+      case "nablExpiryDate":
+        if (!value || (typeof value === "string" && value.trim() === "")) {
+          error = "Expiry date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected < today) {
+            error = "Expiry date cannot be in the past";
           }
         }
         break;
@@ -986,6 +1044,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "authorizedSignatorySignatureFile",
         "panCardFile",
         "letterheadFile",
+        "registrationDate",
         "userId",
         "password",
         "confirmPassword",
@@ -996,12 +1055,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "Architect": ["coaRegNo", "coaExpiryDate", "coaCertificateFile"],
         "Structural Engineer": ["structuralLicenseNo", "structuralValidity", "structuralLicenseFile"],
         "Licensed Surveyor": ["lbsLicenseNo", "competencyClass", "lbsExpiryDate", "lbsCertificateFile"],
-        "MEP Consultant": ["electricalLicenseNo", "mepExperienceFile"],
-        "Plumber": ["plumberLicenseNo", "pheAccreditationFile"],
+        "MEP Consultant": ["electricalLicenseNo", "electricalExpiryDate", "mepExperienceFile"],
+        "Plumber": ["plumberLicenseNo", "plumberExpiryDate", "pheAccreditationFile"],
         "Fire Consultant": ["fireLicenseNo", "fireValidityDate", "pastNocFile"],
         "Landscape Consultant": ["landscapeLicenseNo", "landscapeExpiryDate", "landscapeCertificateFile"],
         "PMC / Project Manager": ["pmcRegistrationNo", "pmcExpiryDate", "pmcCertificateFile"],
-        "Geotechnical Consultant": ["nablAccreditationNo", "labRegistrationFile"],
+        "Geotechnical Consultant": ["nablAccreditationNo", "nablExpiryDate", "labRegistrationFile"],
         "Environmental Consultant": ["envLicenseNo", "envExpiryDate", "envCertificateFile"],
         "Town Planner": ["townPlannerLicenseNo", "townPlannerExpiryDate", "townPlannerCertificateFile"],
       };
@@ -1273,6 +1332,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             authorized_signatory_signature_url: authorizedSignatorySignatureUrl,
           pan_card_url: panCardUrl,
           letterhead_url: letterheadUrl,
+            registration_date: formData.registrationDate,
             declaration_accepted: formData.acceptDeclaration,
             status: 'pending'
         };
@@ -1298,11 +1358,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             break;
           case "MEP Consultant":
             baseData.electrical_license_no = formData.electricalLicenseNo;
+            baseData.electrical_expiry_date = formData.electricalExpiryDate;
             baseData.pwd_accreditation = formData.pwdAccreditation;
             baseData.mep_experience_url = certificateUrl;
             break;
           case "Plumber":
             baseData.plumber_license_no = formData.plumberLicenseNo;
+            baseData.plumber_expiry_date = formData.plumberExpiryDate;
             baseData.phe_accreditation_url = certificateUrl;
             break;
           case "Fire Consultant":
@@ -1322,6 +1384,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             break;
           case "Geotechnical Consultant":
             baseData.nabl_accreditation_no = formData.nablAccreditationNo;
+            baseData.nabl_expiry_date = formData.nablExpiryDate;
             baseData.geotech_qualification = formData.geotechQualification;
             baseData.lab_registration_url = certificateUrl;
             break;
@@ -1839,6 +1902,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       <p className="text-xs text-red-600 mt-1">{errors.coaRegNo}</p>
                     )}
                   </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
                 <div>
                     <label className="block font-medium text-black mb-1">Validity / Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
@@ -1870,7 +1945,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Validity Date <span className="text-red-600 font-bold">*</span></label>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">License Issue Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
                       value={formData.structuralValidity}
@@ -1913,6 +2000,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       <p className="text-xs text-red-600 mt-1">{errors.lbsLicenseNo}</p>
                   )}
                 </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
                   <div>
                     <label className="block font-medium text-black mb-1">Competency Class <span className="text-red-600 font-bold">*</span></label>
                     <select
@@ -1959,6 +2058,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                 </div>
                   <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.electricalExpiryDate}
+                      onChange={(e) => handleInputChange("electricalExpiryDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.electricalExpiryDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.electricalExpiryDate}</p>
+                    )}
+                  </div>
+                  <div>
                     <label className="block font-medium text-black mb-1">PWD/Chief Electrical Inspector Accreditation</label>
                     <input
                       value={formData.pwdAccreditation}
@@ -1984,7 +2107,31 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     {errors.plumberLicenseNo && (
                       <p className="text-xs text-red-600 mt-1">{errors.plumberLicenseNo}</p>
                     )}
-            </div>
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.plumberExpiryDate}
+                      onChange={(e) => handleInputChange("plumberExpiryDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.plumberExpiryDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.plumberExpiryDate}</p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2001,6 +2148,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     />
                     {errors.fireLicenseNo && (
                       <p className="text-xs text-red-600 mt-1">{errors.fireLicenseNo}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
                     )}
                   </div>
                   <div>
@@ -2034,6 +2193,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
+                  <div>
                     <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="date"
@@ -2061,6 +2232,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     />
                     {errors.pmcRegistrationNo && (
                       <p className="text-xs text-red-600 mt-1">{errors.pmcRegistrationNo}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
                     )}
                   </div>
                   <div>
@@ -2094,6 +2277,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Expiry Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.nablExpiryDate}
+                      onChange={(e) => handleInputChange("nablExpiryDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.nablExpiryDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.nablExpiryDate}</p>
+                    )}
+                  </div>
+                  <div>
                     <label className="block font-medium text-black mb-1">Geotech Engineer Qualification</label>
                     <input
                       value={formData.geotechQualification}
@@ -2118,6 +2325,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     />
                     {errors.envLicenseNo && (
                       <p className="text-xs text-red-600 mt-1">{errors.envLicenseNo}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
                     )}
                   </div>
                   <div>
@@ -2148,6 +2367,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     />
                     {errors.townPlannerLicenseNo && (
                       <p className="text-xs text-red-600 mt-1">{errors.townPlannerLicenseNo}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-medium text-black mb-1">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
                     )}
                   </div>
                   <div>

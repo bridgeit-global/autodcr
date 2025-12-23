@@ -60,6 +60,19 @@ html {
   animation-play-state: paused;
 }
 
+/* Make calendar icon black for all date inputs - ensures visibility */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 1 !important;
+  filter: brightness(0);
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 0.7 !important;
+  filter: brightness(0);
+}
+
+
 
 
 
