@@ -28,6 +28,28 @@ const REQUIRED_PAGES: RequiredPage[] = [
 
 const PROJECT_LIBRARY_MAX_FILES = 5;
 
+type BGEntry = {
+  id: string;
+  zone: string;
+  fileNo?: string;
+  file_no?: string;
+  bgNumber: string;
+  bgDate: string;
+  bankName: string;
+  branchName: string;
+  amount: string;
+  bgValidDate: string;
+  bgBankEmail: string;
+  scanCopyName: string;
+};
+
+type ProjectLibraryUpload = {
+  name?: string;
+  path?: string;
+  url?: string;
+  uploadedAt?: string;
+};
+
 function extractProjectIdFromRpc(data: any): string | null {
   if (!data) return null;
   if (typeof data === "string") return data;
@@ -170,10 +192,10 @@ function DashboardLayoutContent({
             }
           : null;
       const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
-      const bgEntries = loadDraft("draft-bg-details-entries", []);
+      const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
       // Get file number from BG Details
-      const firstBgEntry = Array.isArray(bgEntries) && bgEntries.length > 0 ? bgEntries[0] : null;
+      const firstBgEntry: BGEntry | null = Array.isArray(bgEntries) && bgEntries.length > 0 ? bgEntries[0] : null;
       const fileNo = firstBgEntry?.fileNo || firstBgEntry?.file_no || "";
       
       // Extract base title (remove file number if it was already appended in edit mode)
@@ -281,12 +303,12 @@ function DashboardLayoutContent({
 
       // Compare and include project_library only if modified
       if (projectLibraryUploads && Array.isArray(projectLibraryUploads)) {
-        const filteredUploads = projectLibraryUploads.filter(u => u !== null && u !== undefined && u !== "");
+        const filteredUploads = projectLibraryUploads.filter((u: any) => u !== null && u !== undefined && u !== "") as ProjectLibraryUpload[];
         if (filteredUploads.length > 0) {
           const existingLibrary = existingData?.project_library || {};
           const existingUploads = existingLibrary.uploads || [];
           // Compare uploads by their essential properties (name, path, url)
-          const normalizedNew = filteredUploads.map(u => ({
+          const normalizedNew = filteredUploads.map((u) => ({
             name: u?.name,
             path: u?.path,
             url: u?.url,

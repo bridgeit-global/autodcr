@@ -180,8 +180,24 @@ export async function GET(
       );
     }
 
-    // Get user_id from request body (sent from client)
-    const userId = body.user_id;
+    // Get auth token from Authorization header
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader?.replace("Bearer ", "");
+
+    // Get user_id from query parameter or from auth token
+    const url = new URL(request.url);
+    let userId = url.searchParams.get("user_id");
+
+    // If user_id not in query, try to get from auth token
+    if (!userId && token) {
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      });
+      const { data: { user } } = await supabaseAuth.auth.getUser();
+      userId = user?.id || null;
+    }
     
     if (!userId) {
       return NextResponse.json(
@@ -190,8 +206,12 @@ export async function GET(
       );
     }
 
-    // Create Supabase client for database operations
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    // Create Supabase client with auth token if available
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    });
 
     // Fetch the project
     const { data, error } = await supabase
