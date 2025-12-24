@@ -4,6 +4,8 @@ import { useMemo, useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
+import { useProjectData } from "@/app/hooks/useProjectData";
+import { supabase } from "@/app/utils/supabase";
 
 type BGFormData = {
   zone: string;
@@ -46,6 +48,7 @@ const REQUIRED_PAGES: RequiredPage[] = [
 
 export default function BGDetailsPage() {
   const router = useRouter();
+  const { isEditMode, isLoading, projectData } = useProjectData();
   const [entry, setEntry] = useState<BGEntry | null>(() => {
     const savedEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
     return savedEntries.length > 0 ? savedEntries[0] : null;
@@ -53,7 +56,8 @@ export default function BGDetailsPage() {
   const [activeTab, setActiveTab] = useState<"bg-details" | "bg-refund">(
     loadDraft<"bg-details" | "bg-refund">("draft-bg-details-active-tab", "bg-details")
   );
-  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-bg-details"));
+  // Start as "not saved" so the button shows Add/Update until user explicitly saves.
+  const [isSaved, setIsSaved] = useState(false);
 
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
@@ -99,15 +103,61 @@ export default function BGDetailsPage() {
     })(),
   });
 
-  const onSubmit = (data: BGFormData) => {
-    // Only one entry allowed - replace existing or create new
-    const newEntry: BGEntry = { 
-      ...data, 
-      id: entry?.id || createId() 
-    };
-    setEntry(newEntry);
-    markPageSaved("saved-bg-details");
-    setIsSaved(true);
+  const onSubmit = async (data: BGFormData) => {
+    try {
+      // Only one entry allowed - replace existing or create new
+      const newEntry: BGEntry = { 
+        ...data, 
+        id: entry?.id || createId() 
+      };
+      setEntry(newEntry);
+      saveDraft("draft-bg-details-entries", [newEntry]);
+
+      if (isEditMode && projectData?.id) {
+        // Get user_id from localStorage
+        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+        if (!userId) {
+          alert("User not found in session. Please log in again.");
+          return;
+        }
+
+        // Get auth token for authenticated request
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        // Update existing project
+        const response = await fetch(`/api/projects/${projectData.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            user_id: userId,
+            bg_details: {
+              entries: [newEntry],
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to update project");
+        }
+
+        alert("BG details updated successfully!");
+      } else {
+        alert("BG details saved successfully!");
+      }
+
+      markPageSaved("saved-bg-details");
+      setIsSaved(true);
+    } catch (error: any) {
+      console.error("Error saving BG details:", error);
+      alert(error.message || "Failed to save BG details. Please try again.");
+    }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,6 +188,36 @@ export default function BGDetailsPage() {
       ) : null,
     [entry]
   );
+
+  // Fetch and populate data when in edit mode
+  useEffect(() => {
+    if (isEditMode && projectData && !isLoading) {
+      const bgDetails = projectData.bg_details || {};
+      const entries = bgDetails.entries || [];
+      
+      if (entries.length > 0) {
+        const firstEntry = entries[0];
+        const bgEntry: BGEntry = {
+          id: firstEntry.id || createId(),
+          zone: firstEntry.zone || "",
+          fileNo: firstEntry.fileNo || firstEntry.file_no || "",
+          bgNumber: firstEntry.bgNumber || firstEntry.bg_number || "",
+          bgDate: firstEntry.bgDate || firstEntry.bg_date || "",
+          bankName: firstEntry.bankName || firstEntry.bank_name || "",
+          branchName: firstEntry.branchName || firstEntry.branch_name || "",
+          amount: firstEntry.amount || "",
+          bgValidDate: firstEntry.bgValidDate || firstEntry.bg_valid_date || "",
+          bgBankEmail: firstEntry.bgBankEmail || firstEntry.bg_bank_email || "",
+          scanCopyName: firstEntry.scanCopyName || firstEntry.scan_copy_name || "",
+        };
+        
+        setEntry(bgEntry);
+        reset(bgEntry);
+        saveDraft("draft-bg-details-entries", [bgEntry]);
+        saveDraft("draft-bg-details-form", bgEntry);
+      }
+    }
+  }, [isEditMode, projectData, isLoading, reset]);
 
   // Persist drafts
   useEffect(() => {
@@ -227,7 +307,10 @@ export default function BGDetailsPage() {
               }`}
               onClick={handleSubmit(onSubmit)}
             >
-              {isSaved ? "Added" : "Add"}
+              {isEditMode 
+                ? (isSaved ? "Updated" : "Update")
+                : (isSaved ? "Added" : "Add")
+              }
             </button>
           </div>
         </div>

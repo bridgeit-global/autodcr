@@ -2,6 +2,8 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
+import { useProjectData } from "@/app/hooks/useProjectData";
+import { supabase } from "@/app/utils/supabase";
 
 type ExtractRow = {
   id: string;
@@ -136,9 +138,11 @@ const getPortalFieldTotals = (plots: PlotRow[]) => {
 };
 
 export default function AreaDetailsPage() {
+  const { isEditMode, isLoading, projectData } = useProjectData();
   // Start with Plot No. 1 by default
   const [plots, setPlots] = useState<PlotRow[]>([createPlot(1)]);
-  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-area-details"));
+  // Start as "not saved" so the button shows Add/Update until user explicitly saves.
+  const [isSaved, setIsSaved] = useState(false);
   const portalTotals = useMemo(() => getPortalFieldTotals(plots), [plots]);
   const plotTotalsSummary = useMemo(
     () =>
@@ -155,11 +159,29 @@ export default function AreaDetailsPage() {
     );
   };
 
-  // Load saved plots from localStorage after initial render to avoid hydration mismatch
+  // Load saved plots from localStorage or project data
   useEffect(() => {
-    const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
-    setPlots(saved);
-  }, []);
+    if (isEditMode && projectData && !isLoading) {
+      const areaDetails = projectData.area_details || {};
+      const plotsData = areaDetails.plots || [];
+      
+      if (plotsData.length > 0) {
+        setPlots(plotsData);
+        saveDraft("draft-area-details-plots", plotsData);
+        
+        // Save totals if available
+        if (areaDetails.totals) {
+          saveDraft("draft-area-details-totals", areaDetails.totals);
+        }
+      } else {
+        const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
+        setPlots(saved);
+      }
+    } else {
+      const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
+      setPlots(saved);
+    }
+  }, [isEditMode, projectData, isLoading]);
 
   const handleExtractChange = (
     plotId: string,
@@ -232,7 +254,7 @@ const removePlot = (plotId: string) => {
     }, 0);
   }, [plots]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Basic validation: ensure each plot has Name, Owner Name, and Type selected
     const invalidPlots = plots.filter(
       (plot) =>
@@ -246,8 +268,54 @@ const removePlot = (plotId: string) => {
       return;
     }
 
-    console.log("Area Details:", plots);
-    alert("Area details saved successfully!");
+    try {
+      if (isEditMode && projectData?.id) {
+        // Get user_id from localStorage
+        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+        if (!userId) {
+          alert("User not found in session. Please log in again.");
+          return;
+        }
+
+        // Get auth token for authenticated request
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        // Update existing project
+        const areaTotals = loadDraft<any>("draft-area-details-totals", null);
+        const response = await fetch(`/api/projects/${projectData.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            user_id: userId,
+            area_details: {
+              plots: plots,
+              totals: areaTotals,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to update project");
+        }
+
+        alert("Area details updated successfully!");
+      } else {
+        console.log("Area Details:", plots);
+        alert("Area details saved successfully!");
+      }
+    } catch (error: any) {
+      console.error("Error saving area details:", error);
+      alert(error.message || "Failed to save area details. Please try again.");
+      return;
+    }
+
     markPageSaved("saved-area-details");
     setIsSaved(true);
   };
@@ -269,6 +337,19 @@ const removePlot = (plotId: string) => {
     saveDraft("draft-area-details-totals", totalsDraft);
   }, [portalTotals, totalLeaseArea]);
 
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading project data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
@@ -289,7 +370,10 @@ const removePlot = (plotId: string) => {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSaved ? "Added" : "Add"}
+              {isEditMode 
+                ? (isSaved ? "Updated" : "Update")
+                : (isSaved ? "Added" : "Add")
+              }
             </button>
           </div>
         </div>

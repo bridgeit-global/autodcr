@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import ChangePasswordModal from "./ChangePasswordModal";
 import ProfileModal from "./ProfileModal";
@@ -21,10 +21,14 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { clearUserMetadata, userMetadata, fetchUserMetadata, loading } = useUserMetadata();
   
   // Check if we're on a dashboard page
   const isDashboardPage = pathname?.startsWith("/dashboard");
+  
+  // Check if we're in edit mode (has projectId in URL)
+  const isEditMode = !!searchParams?.get("projectId");
 
   // Fetch metadata if it's not loaded or is empty
   useEffect(() => {
@@ -219,15 +223,6 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
                 <button
                   onClick={() => {
-                    setUserMenuOpen(false);
-                    router.push("/userdashboard");
-                  }}
-                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                >
-                  Go to Dashboard
-                </button>
-                <button
-                  onClick={() => {
                     setIsProfileOpen(true);
                     setUserMenuOpen(false);
                   }}
@@ -279,10 +274,13 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white w-[90%] max-w-md rounded-xl shadow-2xl p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">
-              Leave Create Project?
+              {isEditMode ? "Leave Edit Project?" : "Leave Create Project?"}
             </h2>
             <p className="text-sm text-gray-600 mb-4">
-              You have not submitted your project. Any unsaved information on this page will not be saved if you go back to the dashboard.
+              {isEditMode 
+                ? "You have unsaved changes. Any unsaved information on this page will not be saved if you go back to the dashboard."
+                : "You have not submitted your project. Any unsaved information on this page will not be saved if you go back to the dashboard."
+              }
             </p>
             <div className="flex justify-end gap-3 mt-4">
               <button

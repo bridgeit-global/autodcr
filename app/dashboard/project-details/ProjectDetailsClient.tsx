@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams, usePathname } from "next/navigation";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { addressOptionsByVillage } from "@/app/utils/villageAddresses";
 import { addressToSurveyNumbers } from "@/app/utils/addressToSurveyNumbers";
 import { addressToRateDetails, type AddressRateDetails } from "@/app/utils/addressToRateDetails";
+import { supabase } from "@/app/utils/supabase";
 
 // Helper function to normalize address for lookup (removes trailing periods and normalizes whitespace)
 function normalizeAddressForLookup(address: string): string {
@@ -55,7 +57,7 @@ function getRateDetailsForAddress(address: string): AddressRateDetails | null {
 }
 
 type ProjectFormData = {
-  proposalAsPer: "DCR 1991" | "DCPR 2034" | "";
+  proposalAsPer: "DCPR 2034";
   title: string;
   propertyAddress: string;
   landmark: string;
@@ -97,9 +99,21 @@ type SavePlotFormData = {
 };
 
 export default function ProjectDetailsClient() {
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const projectId = searchParams.get("projectId");
+  
+  // Only enable edit mode if we're on the project-details page and have a projectId
+  const isProjectDetailsPage = pathname === "/dashboard/project-details";
+  const isEditMode = isProjectDetailsPage && !!projectId;
+  const [isLoadingProject, setIsLoadingProject] = useState(isEditMode);
+  const [projectData, setProjectData] = useState<any>(null);
+  
   const [activeTab, setActiveTab] = useState("save-plot");
-  const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(() => isPageSaved("saved-project-info"));
-  const [isSavePlotSaved, setIsSavePlotSaved] = useState(() => isPageSaved("saved-save-plot-details"));
+  // Start as "not saved" so the buttons show Add/Update until user explicitly saves each tab.
+  const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(false);
+  const [isSavePlotSaved, setIsSavePlotSaved] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(false);
 
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
@@ -112,9 +126,10 @@ export default function ProjectDetailsClient() {
     formState: { errors: projectErrors },
     watch: watchProject,
     reset: resetProject,
+    setValue: setProjectValue,
   } = useForm<ProjectFormData>({
     defaultValues: loadDraft<ProjectFormData>("draft-project-details-project", {
-      proposalAsPer: "",
+      proposalAsPer: "DCPR 2034",
       title: "",
       propertyAddress: "",
       landmark: "",
@@ -125,6 +140,11 @@ export default function ProjectDetailsClient() {
       hasPaidLatestPropertyTax: "",
     }),
   });
+
+  // Ensure "DCPR 2034" is selected by default
+  useEffect(() => {
+    setProjectValue("proposalAsPer", "DCPR 2034");
+  }, [setProjectValue]);
 
   const {
     register: registerSavePlot,
@@ -186,6 +206,102 @@ export default function ProjectDetailsClient() {
   const selectedAddress = watchSavePlot("address");
   const selectedSurveyNos = watchSavePlot("proposedCtsNumber");
 
+  // Fetch project data when in edit mode
+  useEffect(() => {
+    if (!isEditMode || !projectId) return;
+
+    const fetchProject = async () => {
+      setIsLoadingProject(true);
+      try {
+        const { data, error } = await supabase
+          .from("projects")
+          .select("*")
+          .eq("id", projectId)
+          .single();
+
+        if (error) {
+          console.error("Error fetching project:", error);
+          alert("Failed to load project data. Please try again.");
+          return;
+        }
+
+        if (data) {
+          setProjectData(data);
+          
+          // Map backend data to ProjectFormData structure
+          const projectInfo = data.project_info || {};
+          const projectFormData: ProjectFormData = {
+            proposalAsPer: projectInfo.proposalAsPer === "DCR 1991" ? "DCPR 2034" : (projectInfo.proposalAsPer || "DCPR 2034"),
+            title: data.title || "",
+            propertyAddress: projectInfo.propertyAddress || "",
+            landmark: projectInfo.landmark || "",
+            earlierBuildingProposalFileNo: projectInfo.earlierBuildingProposalFileNo || "",
+            pincode: projectInfo.pincode || "",
+            fullNameOfApplicant: projectInfo.fullNameOfApplicant || "",
+            addressOfApplicant: projectInfo.addressOfApplicant || "",
+            hasPaidLatestPropertyTax: projectInfo.hasPaidLatestPropertyTax || "",
+          };
+
+          // Map backend data to SavePlotFormData structure
+          const savePlotDetails = data.save_plot_details || {};
+          const savePlotFormData: SavePlotFormData = {
+            planningAuthority: savePlotDetails.planningAuthority || "",
+            projectProponent: savePlotDetails.projectProponent || "",
+            zone: savePlotDetails.zone || "",
+            ward: savePlotDetails.ward || "",
+            proposedCtsNumber: Array.isArray(savePlotDetails.proposedCtsNumber) 
+              ? savePlotDetails.proposedCtsNumber.map(String)
+              : typeof savePlotDetails.proposedCtsNumber === "string" && savePlotDetails.proposedCtsNumber
+              ? [savePlotDetails.proposedCtsNumber]
+              : [],
+            villageName: savePlotDetails.villageName || "",
+            address: savePlotDetails.address || "",
+            addressRateDetails: savePlotDetails.addressRateDetails || null,
+            plotBelongsTo: savePlotDetails.plotBelongsTo || "",
+            grossPlotArea: savePlotDetails.grossPlotArea || "",
+            sacNo: savePlotDetails.sacNo || "",
+            roadName: savePlotDetails.roadName || "",
+            dpZone: savePlotDetails.dpZone || "",
+            latitude: savePlotDetails.latitude || "",
+            longitude: savePlotDetails.longitude || "",
+            majorUseOfPlot: savePlotDetails.majorUseOfPlot || "",
+            plotSubUse: savePlotDetails.plotSubUse || "",
+            plotNo: savePlotDetails.plotNo || "",
+            isInternalRoadPresent: savePlotDetails.isInternalRoadPresent || "",
+            plotType: savePlotDetails.plotType || "",
+            plotEntries: Array.isArray(savePlotDetails.plotEntries) && savePlotDetails.plotEntries.length > 0
+              ? savePlotDetails.plotEntries
+              : [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
+          };
+
+          // Set flag to prevent clearing effects during initial load
+          setIsInitialLoad(true);
+          
+          // Populate forms with fetched data
+          resetProject(projectFormData);
+          resetSavePlot(savePlotFormData);
+          
+          // Save to localStorage drafts for consistency
+          saveDraft("draft-project-details-project", projectFormData);
+          saveDraft("draft-project-details-save-plot", savePlotFormData);
+          
+          // Data is loaded into the form, but treat it as "unsaved" until user explicitly saves.
+          // Reset flag after a short delay to allow form values to settle
+          setTimeout(() => {
+            setIsInitialLoad(false);
+          }, 100);
+        }
+      } catch (err) {
+        console.error("Error fetching project:", err);
+        alert("Failed to load project data. Please try again.");
+      } finally {
+        setIsLoadingProject(false);
+      }
+    };
+
+    fetchProject();
+  }, [projectId, isEditMode, resetProject, resetSavePlot]);
+
   // Persist drafts whenever forms change
   useEffect(() => {
     const subscription = watchProject((value) => {
@@ -202,13 +318,16 @@ export default function ProjectDetailsClient() {
   }, [watchSavePlot]);
 
   useEffect(() => {
+    // Skip clearing during initial data load
+    if (isInitialLoad) return;
+    
     setSavePlotValue("ward", "");
     setSavePlotValue("villageName", "");
     setSavePlotValue("proposedCtsNumber", []);
     setSavePlotValue("addressRateDetails", null);
     // Reset plotBelongsTo when zone changes
     setSavePlotValue("plotBelongsTo", "");
-  }, [selectedZone, setSavePlotValue]);
+  }, [selectedZone, setSavePlotValue, isInitialLoad]);
 
   // Auto-select plotBelongsTo based on zone and ward
   useEffect(() => {
@@ -237,20 +356,30 @@ export default function ProjectDetailsClient() {
   }, [selectedZone, selectedWard, setSavePlotValue]);
 
   useEffect(() => {
+    // Skip clearing during initial data load
+    if (isInitialLoad) return;
+    
     setSavePlotValue("villageName", "");
     setSavePlotValue("proposedCtsNumber", []);
     setSavePlotValue("address", "");
     setSavePlotValue("addressRateDetails", null);
-  }, [selectedWard, setSavePlotValue]);
+  }, [selectedWard, setSavePlotValue, isInitialLoad]);
 
   useEffect(() => {
+    // Skip clearing during initial data load
+    if (isInitialLoad) return;
+    
     setSavePlotValue("address", "");
     setSavePlotValue("proposedCtsNumber", []);
     setSavePlotValue("addressRateDetails", null);
-  }, [selectedVillage, setSavePlotValue]);
+  }, [selectedVillage, setSavePlotValue, isInitialLoad]);
 
   useEffect(() => {
-    setSavePlotValue("proposedCtsNumber", []);
+    // Skip clearing during initial data load, but still update addressRateDetails if address is set
+    if (!isInitialLoad) {
+      setSavePlotValue("proposedCtsNumber", []);
+    }
+    
     const details = getRateDetailsForAddress(selectedAddress as string);
     setSavePlotValue(
       "addressRateDetails",
@@ -267,18 +396,100 @@ export default function ProjectDetailsClient() {
     }
   }, [selectedAddress, setSavePlotValue]);
 
-  const onProjectSubmit = (data: ProjectFormData) => {
-    console.log("Project Data:", data);
-    alert("Project details saved successfully!");
-    markPageSaved("saved-project-info");
-    setIsProjectInfoSaved(true);
+  const onProjectSubmit = async (data: ProjectFormData) => {
+    try {
+      if (isEditMode && projectId) {
+        // Get user_id from localStorage
+        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+        if (!userId) {
+          alert("User not found in session. Please log in again.");
+          return;
+        }
+
+        // Get auth token for authenticated request
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        // Update existing project
+        const response = await fetch(`/api/projects/${projectId}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            user_id: userId,
+            project_info: data,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to update project");
+        }
+
+        alert("Project details updated successfully!");
+      } else {
+        // Create mode - just save to localStorage (existing behavior)
+        console.log("Project Data:", data);
+        alert("Project details saved successfully!");
+      }
+      markPageSaved("saved-project-info");
+      setIsProjectInfoSaved(true);
+    } catch (error: any) {
+      console.error("Error saving project:", error);
+      alert(error.message || "Failed to save project details. Please try again.");
+    }
   };
 
-  const onSavePlotSubmit = (data: SavePlotFormData) => {
-    console.log("Save Plot Data:", data);
-    alert("Save plot details saved successfully!");
-    markPageSaved("saved-save-plot-details");
-    setIsSavePlotSaved(true);
+  const onSavePlotSubmit = async (data: SavePlotFormData) => {
+    try {
+      if (isEditMode && projectId) {
+        // Get user_id from localStorage
+        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+        if (!userId) {
+          alert("User not found in session. Please log in again.");
+          return;
+        }
+
+        // Get auth token for authenticated request
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        // Update existing project
+        const response = await fetch(`/api/projects/${projectId}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            user_id: userId,
+            save_plot_details: data,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to update project");
+        }
+
+        alert("Save plot details updated successfully!");
+      } else {
+        // Create mode - just save to localStorage (existing behavior)
+        console.log("Save Plot Data:", data);
+        alert("Save plot details saved successfully!");
+      }
+      markPageSaved("saved-save-plot-details");
+      setIsSavePlotSaved(true);
+    } catch (error: any) {
+      console.error("Error saving plot details:", error);
+      alert(error.message || "Failed to save plot details. Please try again.");
+    }
   };
 
   const tabs = [
@@ -405,6 +616,20 @@ export default function ProjectDetailsClient() {
   const plotSubUseOptions = ["Select SubUse", "Residential Low Rise", "Residential High Rise", "Commercial Retail"];
   const plotTypeOptions = ["Select", "Corner Plot", "Regular Plot", "Narrow Plot"];
 
+  // Show loading state while fetching project data
+  if (isLoadingProject) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading project data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       {/* Warning Message */}
@@ -460,7 +685,10 @@ export default function ProjectDetailsClient() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isProjectInfoSaved ? "Added" : "Add"}
+              {isEditMode 
+                ? (isProjectInfoSaved ? "Updated" : "Update")
+                : (isProjectInfoSaved ? "Added" : "Add")
+              }
             </button>
           </div>
 
@@ -471,28 +699,15 @@ export default function ProjectDetailsClient() {
               <div className="flex gap-6">
                   <label className="flex items-center gap-2 text-sm text-black">
                   <input
-                      {...registerProject("proposalAsPer", {
-                      required: "Please select an option",
-                    })}
-                    type="radio"
-                    value="DCR 1991"
-                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  DCR 1991
-                </label>
-                  <label className="flex items-center gap-2 text-sm text-black">
-                  <input
                       {...registerProject("proposalAsPer")}
                     type="radio"
                     value="DCPR 2034"
+                    defaultChecked
                     className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
                   />
                   DCPR 2034
                 </label>
               </div>
-                {projectErrors.proposalAsPer && (
-                  <p className="text-red-600 text-sm mt-1">{projectErrors.proposalAsPer.message}</p>
-                )}
             </div>
 
             {/* Title */}
@@ -672,7 +887,10 @@ export default function ProjectDetailsClient() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSavePlotSaved ? "Added" : "Add"}
+              {isEditMode 
+                ? (isSavePlotSaved ? "Updated" : "Update")
+                : (isSavePlotSaved ? "Added" : "Add")
+              }
                 </button>
               </div>
 
