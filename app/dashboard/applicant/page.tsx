@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
+import { motion, AnimatePresence } from "framer-motion";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
@@ -189,6 +190,12 @@ export default function ApplicantDetailsPage() {
   const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ open: boolean; applicantId: number | null; applicantName: string; applicantType: string }>({
+    open: false,
+    applicantId: null,
+    applicantName: "",
+    applicantType: "",
+  });
   const {
     register,
     handleSubmit,
@@ -562,11 +569,71 @@ export default function ApplicantDetailsPage() {
     saveDraft("draft-applicant-details-applicants", applicants);
   }, [applicants]);
 
+  const handleDeleteClick = (id: number, name: string, applicantType: string) => {
+    const applicantToRemove = applicants.find((applicant) => applicant.id === id);
+    if (!applicantToRemove) return;
+    
+    // Check if this is the logged-in user's entry
+    const isLoggedInUserEntry = 
+      authUserId !== null && 
+      authUserId !== undefined &&
+      (String(applicantToRemove.user_id) === String(authUserId) || 
+       (applicantToRemove.id === 1 && userMetadata !== null));
+    
+    // Don't show confirmation for logged-in user's entry or Licensed Site Supervisor
+    if (
+      applicantToRemove.applicantType === "Licensed Site Supervisor" ||
+      isLoggedInUserEntry
+    ) {
+      return;
+    }
+    
+    // Show confirmation modal
+    setDeleteConfirmation({
+      open: true,
+      applicantId: id,
+      applicantName: name,
+      applicantType: applicantType,
+    });
+  };
+
+  const handleConfirmDelete = () => {
+    if (deleteConfirmation.applicantId !== null) {
+      handleRemoveApplicant(deleteConfirmation.applicantId);
+      setDeleteConfirmation({ open: false, applicantId: null, applicantName: "", applicantType: "" });
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteConfirmation({ open: false, applicantId: null, applicantName: "", applicantType: "" });
+  };
+
   const handleRemoveApplicant = (id: number) => {
-    setApplicants((prev) => prev.filter((applicant) => applicant.id !== id));
+    setApplicants((prev) => {
+      const applicantToRemove = prev.find((applicant) => applicant.id === id);
+      // Prevent deletion if applicant belongs to logged-in user or is Licensed Site Supervisor
+      if (!applicantToRemove) return prev;
+      
+      // Check if this is the logged-in user's entry
+      // Compare by user_id (exact match) or by id === 1 (logged-in user is always first)
+      const isLoggedInUserEntry = 
+        authUserId !== null && 
+        authUserId !== undefined &&
+        (String(applicantToRemove.user_id) === String(authUserId) || 
+         (applicantToRemove.id === 1 && userMetadata !== null));
+      
+      if (
+        applicantToRemove.applicantType === "Licensed Site Supervisor" ||
+        isLoggedInUserEntry
+      ) {
+        return prev;
+      }
+      return prev.filter((applicant) => applicant.id !== id);
+    });
   };
 
   return (
+    <>
     <div className="max-w-6xl mx-auto px-6 space-y-6">
         <div className="space-y-6">
         <div className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
@@ -602,22 +669,42 @@ export default function ApplicantDetailsPage() {
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.panNo || "-"}</td>
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.residentialAddress}</td>
                       <td className={`${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>
-                        <button
-                          type="button"
-                          className={`text-sm ${
+                        {(() => {
+                          // Check if this is the logged-in user's entry
+                          // Compare by user_id (exact match) or by id === 1 (logged-in user is always first)
+                          const isLoggedInUserEntry = 
+                            authUserId !== null && 
+                            authUserId !== undefined &&
+                            (String(applicant.user_id) === String(authUserId) || 
+                             (applicant.id === 1 && userMetadata !== null));
+                          
+                          const isDisabled = 
                             applicant.applicantType === "Licensed Site Supervisor" ||
-                            applicant.user_id === authUserId
-                              ? "text-gray-400 cursor-not-allowed"
-                              : "text-red-600 hover:underline"
-                          }`}
-                          onClick={() => handleRemoveApplicant(applicant.id)}
-                          disabled={
-                            applicant.applicantType === "Licensed Site Supervisor" ||
-                            applicant.user_id === authUserId
-                          }
-                        >
-                          Delete
-                        </button>
+                            isLoggedInUserEntry;
+                          
+                          return (
+                            <button
+                              type="button"
+                              className={`text-sm ${
+                                isDisabled
+                                  ? "text-gray-400 cursor-not-allowed pointer-events-none"
+                                  : "text-red-600 hover:underline"
+                              }`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (isDisabled) {
+                                  return;
+                                }
+                                handleDeleteClick(applicant.id, applicant.name, applicant.applicantType);
+                              }}
+                              disabled={isDisabled}
+                              aria-disabled={isDisabled}
+                            >
+                              Delete
+                            </button>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -789,13 +876,12 @@ export default function ApplicantDetailsPage() {
 
               <div>
                 <label className="block font-medium text-black mb-1">
-                  PAN No. <span className="text-red-500">*</span>
+                  PAN No.
                 </label>
                 <input
                   {...register("panNo", { 
-                    required: "PAN No. is required",
                     pattern: {
-                      value: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
+                      value: /^$|^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
                       message: "Enter a valid PAN (e.g., ABCDE1234F)",
                     },
                   })}
@@ -813,19 +899,106 @@ export default function ApplicantDetailsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block font-medium text-black mb-1">
-                  License Issue Date
+                  License Issue Date <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="date"
-                  {...register("licenseIssueDate")}
+                  {...register("licenseIssueDate", { 
+                    required: "License issue date is required",
+                    validate: (value) => {
+                      if (!value || value.trim() === "") {
+                        return "License issue date is required";
+                      }
+                      const selected = new Date(value);
+                      selected.setHours(0, 0, 0, 0);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      if (selected > today) {
+                        return "License issue date cannot be in the future";
+                      }
+                      return true;
+                    }
+                  })}
                   className={`${inputClasses} ${disabledClasses}`}
                   readOnly={true}
                 />
+                {errors.licenseIssueDate && (
+                  <p className="text-red-600 text-sm mt-1">{errors.licenseIssueDate.message}</p>
+                )}
               </div>
             </div>
             </div>
           </form>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirmation.open && (
+          <motion.div
+            className="fixed inset-0 z-[10000] flex justify-center items-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={handleCancelDelete}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="bg-white w-full max-w-md rounded-xl shadow-2xl p-6 relative"
+              onClick={(e) => e.stopPropagation()}
+              initial={{ y: -40, opacity: 0, scale: 0.95 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: -40, opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.25 }}
+            >
+              {/* Close Button */}
+              <button
+                onClick={handleCancelDelete}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
+                aria-label="Close modal"
+              >
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
+              {/* Icon */}
+              <div className="flex justify-center mb-4">
+                <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
+                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Title */}
+              <h3 className="text-xl font-bold text-gray-900 text-center mb-2">
+                Confirm Deletion
+              </h3>
+
+              {/* Message */}
+              <p className="text-gray-700 text-center mb-6">
+                Are you sure you want to delete <span className="font-semibold text-gray-900">{deleteConfirmation.applicantName}</span> ({deleteConfirmation.applicantType})? This action cannot be undone.
+              </p>
+
+              {/* Buttons */}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={handleCancelDelete}
+                  className="px-6 py-2.5 bg-white text-gray-700 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  className="px-6 py-2.5 bg-red-600 text-white rounded-lg font-medium shadow hover:bg-red-700 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

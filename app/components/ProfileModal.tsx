@@ -6,15 +6,6 @@ import { useForm } from "react-hook-form";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { uploadFileIdempotent, cleanupOldFile } from "@/app/utils/fileUtils";
-import dynamic from "next/dynamic";
-
-const PDFViewer = dynamic(() => import("./PDFViewer"), {
-  ssr: false,
-}) as React.ComponentType<{ fileUrl: string }>;
-
-const PDFViewerWithErrorHandling = dynamic(() => import("./PDFViewerWithErrorHandling"), {
-  ssr: false,
-}) as React.ComponentType<{ fileUrl: string }>;
 
 interface Props {
   open: boolean;
@@ -149,21 +140,9 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
           if (exists) {
             setLetterheadUrl(existingLetterheadUrl);
             setOriginalLetterheadUrl(existingLetterheadUrl);
-            
-            // Try to generate thumbnail for existing letterhead
-            generatePDFThumbnail(existingLetterheadUrl).then((thumbnail) => {
-              if (thumbnail) {
-                setLetterheadThumbnail(thumbnail);
-                setOriginalLetterheadThumbnail(thumbnail);
-              } else {
-                setLetterheadThumbnail(null);
-                setOriginalLetterheadThumbnail(null);
-              }
-            }).catch((error) => {
-              console.warn('Failed to generate letterhead thumbnail:', error);
-              setLetterheadThumbnail(null);
-              setOriginalLetterheadThumbnail(null);
-            });
+            // For images, use the URL directly as thumbnail
+            setLetterheadThumbnail(existingLetterheadUrl);
+            setOriginalLetterheadThumbnail(existingLetterheadUrl);
           } else {
             // File doesn't exist at that URL - try to find it by extracting path and reconstructing URL
             // URL format: https://...supabase.co/storage/v1/object/public/consultant-documents/...path
@@ -370,8 +349,10 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
             throw new Error("Failed to upload letterhead. Upload returned no result.");
           }
           
-          // Verify the URL is valid
-          if (!letterheadUploadResult.url || !letterheadUploadResult.url.endsWith('.pdf')) {
+          // Verify the URL is valid (should end with .jpg, .jpeg, or .png)
+          const validExtensions = ['.jpg', '.jpeg', '.png'];
+          const hasValidExtension = validExtensions.some(ext => letterheadUploadResult.url?.toLowerCase().endsWith(ext));
+          if (!letterheadUploadResult.url || !hasValidExtension) {
             console.error('Invalid letterhead URL returned:', letterheadUploadResult.url);
             throw new Error("Invalid letterhead URL returned from upload. Please try again.");
           }
@@ -513,39 +494,6 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     }
   };
 
-  // Generate thumbnail from PDF
-  const generatePDFThumbnail = async (pdfUrl: string): Promise<string | null> => {
-    if (typeof window === 'undefined') return null;
-    
-    try {
-      // Dynamically import pdfjs-dist
-      const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
-
-      const loadingTask = pdfjs.getDocument(pdfUrl);
-      const pdf = await loadingTask.promise;
-      const page = await pdf.getPage(1); // Get first page
-
-      const viewport = page.getViewport({ scale: 0.5 });
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      
-      if (!context) return null;
-
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-
-      await page.render({
-        canvasContext: context,
-        viewport: viewport,
-      }).promise;
-
-      return canvas.toDataURL('image/png');
-    } catch (error) {
-      console.error('Error generating PDF thumbnail:', error);
-      return null;
-    }
-  };
 
   const handleLetterheadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -555,9 +503,13 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
 
     const file = files[0];
     
-    // Validate it's a PDF
-    if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
-      setSubmitError("Please upload a PDF file for letterhead");
+    // Validate it's an image (JPG or PNG)
+    const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    const validExtensions = ['.jpg', '.jpeg', '.png'];
+    const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+    
+    if (!validImageTypes.includes(file.type) && !validExtensions.includes(fileExtension)) {
+      setSubmitError("Please upload a JPG or PNG image file for letterhead");
       if (letterheadInputRef.current) {
         letterheadInputRef.current.value = "";
       }
@@ -574,15 +526,8 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     const fileUrl = URL.createObjectURL(file);
     setLetterheadPreviewUrl(fileUrl);
 
-    // Generate thumbnail
-    const thumbnail = await generatePDFThumbnail(fileUrl);
-    if (thumbnail) {
-      if (letterheadThumbnail && letterheadThumbnail.startsWith('data:image')) {
-        // Clean up old thumbnail if it was a data URL
-        URL.revokeObjectURL(letterheadThumbnail);
-      }
-      setLetterheadThumbnail(thumbnail);
-    }
+    // For images, use the preview URL directly as thumbnail
+    setLetterheadThumbnail(fileUrl);
 
     // Always open preview modal when new file is selected
     setTimeout(() => setIsLetterheadModalOpen(true), 0);
@@ -742,19 +687,19 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                               className="w-full h-full object-cover"
                             />
                           ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-red-50">
-                              <svg className="w-8 h-8 text-red-600 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
+                              <svg className="w-8 h-8 text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                               </svg>
-                              <span className="text-xs text-red-600 font-medium">PDF</span>
+                              <span className="text-xs text-gray-500 font-medium">Image</span>
                             </div>
                           )
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
                             <svg className="w-8 h-8 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
-                            <span className="text-xs">PDF</span>
+                            <span className="text-xs">Image</span>
                           </div>
                         )}
                       </div>
@@ -772,7 +717,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                         <input
                           ref={letterheadInputRef}
                           type="file"
-                          accept=".pdf"
+                          accept="image/jpeg,image/jpg,image/png,.jpg,.jpeg,.png"
                           onChange={handleLetterheadChange}
                           className="hidden"
                           disabled={isSubmitting}
@@ -957,14 +902,16 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
               </div>
 
               <div className="flex-1 overflow-auto p-6 space-y-4">
-                <div className="border rounded-lg bg-white" style={{ minHeight: "600px" }}>
-                  {previewUrl.startsWith('blob:') ? (
-                    // Blob URL - always valid (local file)
-                    <PDFViewer fileUrl={previewUrl} />
-                  ) : (
-                    // Supabase URL - wrap in error boundary/fallback
-                    <PDFViewerWithErrorHandling fileUrl={previewUrl} />
-                  )}
+                <div className="border rounded-lg bg-white flex items-center justify-center" style={{ minHeight: "600px" }}>
+                  <img 
+                    src={previewUrl} 
+                    alt="Letterhead" 
+                    className="max-w-full max-h-full object-contain"
+                    onError={(e) => {
+                      console.error('Error loading letterhead image:', previewUrl);
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
                 </div>
               </div>
             </motion.div>
