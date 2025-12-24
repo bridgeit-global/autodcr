@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
+import { useProjectData } from "@/app/hooks/useProjectData";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -182,13 +184,18 @@ const CONSULTANTS: ApplicantDirectoryEntry[] = [
 const FIRE_AGENCIES: ApplicantDirectoryEntry[] = [];
 export default function ApplicantDetailsPage() {
   const { userMetadata } = useUserMetadata();
+  const { isEditMode, isLoading, projectData } = useProjectData();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId");
   const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   const [applicants, setApplicants] = useState<ApplicantRow[]>(() =>
     loadDraft<ApplicantRow[]>("draft-applicant-details-applicants", [])
   );
   const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
-  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
+  // Track whether the current form entry has been saved in this session.
+  // Start as "not saved" so the button shows "Add" / "Update" instead of "Added" / "Updated".
+  const [isSaved, setIsSaved] = useState(false);
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ open: boolean; applicantId: number | null; applicantName: string; applicantType: string }>({
     open: false,
@@ -243,6 +250,41 @@ export default function ApplicantDetailsPage() {
     };
     loadAuthUser();
   }, []);
+
+  // Fetch and populate data when in edit mode
+  useEffect(() => {
+    if (isEditMode && projectData && !isLoading) {
+      console.log("[Applicant Details] Loading project data:", projectData);
+      const applicantDetails = projectData.applicant_details || {};
+      const applicantsList = applicantDetails.applicants || [];
+      
+      console.log("[Applicant Details] Applicants list from backend:", applicantsList);
+      
+      if (applicantsList.length > 0) {
+        // Map backend applicants to ApplicantRow format
+        const mappedApplicants: ApplicantRow[] = applicantsList.map((app: any, index: number) => ({
+          id: app.id || index + 1,
+          user_id: app.user_id || app.userId || undefined,
+          applicantType: app.applicantType || app.applicant_type || "",
+          name: app.name || "",
+          contactNumber: app.contactNumber || app.contact_number || "",
+          email: app.email || app.emailAddress || app.email_address || "",
+          registrationNo: app.registrationNumber || app.registration_number || app.registrationNo || "",
+          panNo: app.panNo || app.pan_no || app.pan || "",
+          licenseIssueDate: app.licenseIssueDate || app.license_issue_date || "",
+          residentialAddress: app.residentialAddress || app.residential_address || "",
+          officeAddress: app.officeAddress || app.office_address || "",
+        }));
+        
+        console.log("[Applicant Details] Mapped applicants:", mappedApplicants);
+        setApplicants(mappedApplicants);
+        saveDraft("draft-applicant-details-applicants", mappedApplicants);
+        // Don't set isSaved=true here - only set it after user actually submits the form
+      } else {
+        console.log("[Applicant Details] No applicants found in project data");
+      }
+    }
+  }, [isEditMode, projectData, isLoading]);
 
   // If the form was previously added (green button) and the user starts editing/adding
   // another applicant, move the button back to blue "Add"
@@ -307,8 +349,11 @@ export default function ApplicantDetailsPage() {
   }, [selectedApplicantType]);
 
   // Ensure logged-in user (owner or consultant) is always part of the applicants list (first row)
+  // Skip this in edit mode if we already have applicants loaded from project data
   useEffect(() => {
     if (!userMetadata) return;
+    // Don't auto-add user if we're in edit mode and have loaded project data
+    if (isEditMode && projectData && applicants.length > 0) return;
 
     setApplicants((prev) => {
       const userRole = userMetadata.role;
@@ -427,7 +472,7 @@ export default function ApplicantDetailsPage() {
       const reindexed = prev.map((a, idx) => ({ ...a, id: idx + 2 }));
       return [userRow, ...reindexed];
     });
-  }, [userMetadata, authUserId]);
+  }, [userMetadata, authUserId, isEditMode, projectData, applicants.length]);
 
   const resetApplicantFields = () => {
     const fieldsToClear: (keyof ApplicantFormData)[] = [
@@ -608,34 +653,98 @@ export default function ApplicantDetailsPage() {
     setDeleteConfirmation({ open: false, applicantId: null, applicantName: "", applicantType: "" });
   };
 
-  const handleRemoveApplicant = (id: number) => {
-    setApplicants((prev) => {
-      const applicantToRemove = prev.find((applicant) => applicant.id === id);
-      // Prevent deletion if applicant belongs to logged-in user or is Licensed Site Supervisor
-      if (!applicantToRemove) return prev;
-      
-      // Check if this is the logged-in user's entry
-      // Compare by user_id (exact match) or by id === 1 (logged-in user is always first)
-      const isLoggedInUserEntry = 
-        authUserId !== null && 
-        authUserId !== undefined &&
-        (String(applicantToRemove.user_id) === String(authUserId) || 
-         (applicantToRemove.id === 1 && userMetadata !== null));
-      
-      if (
-        applicantToRemove.applicantType === "Licensed Site Supervisor" ||
-        isLoggedInUserEntry
-      ) {
-        return prev;
+  const handleRemoveApplicant = async (id: number) => {
+    const applicantToRemove = applicants.find((applicant) => applicant.id === id);
+    // Prevent deletion if applicant belongs to logged-in user or is Licensed Site Supervisor
+    if (!applicantToRemove) return;
+    
+    // Check if this is the logged-in user's entry
+    // Compare by user_id (exact match) or by id === 1 (logged-in user is always first)
+    const isLoggedInUserEntry = 
+      authUserId !== null && 
+      authUserId !== undefined &&
+      (String(applicantToRemove.user_id) === String(authUserId) || 
+       (applicantToRemove.id === 1 && userMetadata !== null));
+    
+    if (
+      applicantToRemove.applicantType === "Licensed Site Supervisor" ||
+      isLoggedInUserEntry
+    ) {
+      return;
+    }
+
+    // Update local state
+    const updatedApplicants = applicants.filter((applicant) => applicant.id !== id);
+    setApplicants(updatedApplicants);
+    saveDraft("draft-applicant-details-applicants", updatedApplicants);
+
+    // If in edit mode, immediately update Supabase
+    if (isEditMode && projectId) {
+      try {
+        // Get user_id from localStorage
+        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+        if (!userId) {
+          console.error("User not found in session");
+          return;
+        }
+
+        // Get auth token for authenticated request
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        // Update project with new applicants list
+        const response = await fetch(`/api/projects/${projectId}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            user_id: userId,
+            applicant_details: { applicants: updatedApplicants },
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          console.error("Error updating applicants after deletion:", error);
+          alert(`Failed to delete applicant: ${error.error || "Unknown error"}`);
+          // Revert local state on error
+          setApplicants(applicants);
+          saveDraft("draft-applicant-details-applicants", applicants);
+          return;
+        }
+
+        console.log("Applicant deleted successfully from Supabase");
+      } catch (error: any) {
+        console.error("Error deleting applicant:", error);
+        alert(`Failed to delete applicant: ${error.message || "Unknown error"}`);
+        // Revert local state on error
+        setApplicants(applicants);
+        saveDraft("draft-applicant-details-applicants", applicants);
       }
-      return prev.filter((applicant) => applicant.id !== id);
-    });
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading project data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
     <div className="max-w-6xl mx-auto px-6 space-y-6">
-        <div className="space-y-6">
+        <div className="space-y-6 pt-8">
         <div className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
           <div className="bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
             <h2 className="text-xl font-bold text-gray-900">Applicants</h2>
@@ -730,7 +839,10 @@ export default function ApplicantDetailsPage() {
                     : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
                 }`}
               >
-                {isSaved ? "Added" : "Add"}
+                {isEditMode 
+                  ? (isSaved ? "Updated" : "Update")
+                  : (isSaved ? "Added" : "Add")
+                }
               </button>
             </div>
 

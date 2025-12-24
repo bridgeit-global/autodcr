@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
+import { useProjectData } from "@/app/hooks/useProjectData";
+import { supabase } from "@/app/utils/supabase";
 
 type BuildingFormData = {
   buildingType: string;
@@ -20,13 +22,16 @@ const BUILDING_TYPES = [
 ];
 
 export default function BuildingDetailsPage() {
-  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-building-details"));
+  const { isEditMode, isLoading, projectData } = useProjectData();
+  // Start as "not saved" so the button shows Add/Update until user actively saves.
+  const [isSaved, setIsSaved] = useState(false);
 
   const {
     register,
     handleSubmit,
     formState: { errors },
     watch,
+    reset,
   } = useForm<BuildingFormData>({
     defaultValues: loadDraft<BuildingFormData>("draft-building-details-form", {
       buildingType: "",
@@ -37,6 +42,22 @@ export default function BuildingDetailsPage() {
     mode: "onChange", // Enable validation on change
   });
 
+  // Fetch and populate data when in edit mode
+  useEffect(() => {
+    if (isEditMode && projectData && !isLoading) {
+      const buildingDetails = projectData.building_details || {};
+      const formData: BuildingFormData = {
+        buildingType: buildingDetails.buildingType || "",
+        height: buildingDetails.height || "",
+        fsiBuiltUpArea: buildingDetails.fsiBuiltUpArea || "",
+        grossConstructionArea: buildingDetails.grossConstructionArea || "",
+      };
+      reset(formData);
+      saveDraft("draft-building-details-form", formData);
+      // Do not mark as saved here; only mark after the user explicitly submits.
+    }
+  }, [isEditMode, projectData, isLoading, reset]);
+
   // Watch both area fields for cross-validation
   const fsiBuiltUpArea = watch("fsiBuiltUpArea");
   const grossConstructionArea = watch("grossConstructionArea");
@@ -44,12 +65,53 @@ export default function BuildingDetailsPage() {
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
 
-  const onSubmit = (data: BuildingFormData) => {
-    console.log("Building Details:", data);
-    alert("Building details saved successfully!");
-    saveDraft("draft-building-details-form", data);
-    markPageSaved("saved-building-details");
-    setIsSaved(true);
+  const onSubmit = async (data: BuildingFormData) => {
+    try {
+      if (isEditMode && projectData?.id) {
+        // Get user_id from localStorage
+        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+        if (!userId) {
+          alert("User not found in session. Please log in again.");
+          return;
+        }
+
+        // Get auth token for authenticated request
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        // Update existing project
+        const response = await fetch(`/api/projects/${projectData.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            user_id: userId,
+            building_details: data,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to update project");
+        }
+
+        alert("Building details updated successfully!");
+      } else {
+        // Create mode
+        console.log("Building Details:", data);
+        alert("Building details saved successfully!");
+      }
+      saveDraft("draft-building-details-form", data);
+      markPageSaved("saved-building-details");
+      setIsSaved(true);
+    } catch (error: any) {
+      console.error("Error saving building details:", error);
+      alert(error.message || "Failed to save building details. Please try again.");
+    }
   };
 
   // Persist draft as user types
@@ -59,6 +121,19 @@ export default function BuildingDetailsPage() {
     });
     return () => subscription.unsubscribe();
   }, [watch]);
+
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading project data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
@@ -81,7 +156,10 @@ export default function BuildingDetailsPage() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSaved ? "Added" : "Add"}
+              {isEditMode 
+                ? (isSaved ? "Updated" : "Update")
+                : (isSaved ? "Added" : "Add")
+              }
             </button>
           </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 
 type DashboardSidebarProps = {
@@ -12,6 +12,17 @@ type DashboardSidebarProps = {
 const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: DashboardSidebarProps) => {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  // Get projectId from URL to preserve it when navigating
+  const projectId = searchParams.get("projectId");
+  const isEditMode = !!projectId;
+  
+  // Helper function to navigate while preserving projectId
+  const handleNavigation = (path: string) => {
+    const url = projectId ? `${path}?projectId=${projectId}` : path;
+    router.push(url);
+  };
 
   const menuItems = [
     {
@@ -124,7 +135,7 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
       <div className="p-4 flex flex-col h-full">
         {/* Title + toggle */}
         <div className="flex items-center justify-between mb-4 shrink-0">
-          {!collapsed && <h2 className="hidden md:block text-lg font-bold text-gray-900">CREATE PROJECT</h2>}
+          {!collapsed && <h2 className="hidden md:block text-lg font-bold text-gray-900">{isEditMode ? "EDIT PROJECT" : "CREATE PROJECT"}</h2>}
           <button
             type="button"
             onClick={onToggleSidebar}
@@ -153,7 +164,7 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
             onClick={onSubmitProjectClick}
             className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
           >
-            Submit Project
+            {isEditMode ? "Update Project" : "Submit Project"}
           </button>
         )}
 
@@ -171,7 +182,7 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
             return (
               <button
                 key={item.id}
-                onClick={() => router.push(item.path)}
+                onClick={() => handleNavigation(item.path)}
                 className={`relative w-full flex items-center ${justifyClass} px-4 py-3 rounded-xl transition-colors ${
                   isActive ? "bg-emerald-100 text-emerald-800" : "text-gray-700 hover:bg-gray-100"
                 }`}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { Viewer, Worker } from "@react-pdf-viewer/core";
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
@@ -527,7 +527,9 @@ export default function TemplatePage() {
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-      <DashboardHeader sessionTime={formatTime(sessionTime)} />
+      <Suspense fallback={<div className="h-16 bg-white border border-gray-200 rounded-3xl"></div>}>
+        <DashboardHeader sessionTime={formatTime(sessionTime)} />
+      </Suspense>
 
       <div className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-50">
         <div className="max-w-[95rem] mx-auto px-6 pt-8 pb-12">

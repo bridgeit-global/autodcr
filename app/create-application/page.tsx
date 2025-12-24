@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
@@ -601,7 +601,9 @@ export default function CreateApplicationPage() {
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-      <DashboardHeader sessionTime={formatTime(sessionTime)} />
+      <Suspense fallback={<div className="h-16 bg-white border border-gray-200 rounded-3xl"></div>}>
+        <DashboardHeader sessionTime={formatTime(sessionTime)} />
+      </Suspense>
 
       <div className="flex-1 overflow-y-auto bg-gray-100">
         <div className="max-w-5xl mx-auto px-6 pt-8 pb-12 space-y-6">

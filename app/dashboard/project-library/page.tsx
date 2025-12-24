@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect } from "react";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { supabase } from "@/app/utils/supabase";
+import { useProjectData } from "@/app/hooks/useProjectData";
 import {
   deleteProjectLibraryFile,
   getProjectLibraryFile,
@@ -35,6 +36,7 @@ const createId = () =>
     : Math.random().toString(36).slice(2);
 
 export default function ProjectLibraryPage() {
+  const { isEditMode, isLoading, projectData } = useProjectData();
   const [uploads, setUploads] = useState<(UploadRecord | undefined)[]>(() => {
     const saved = loadDraft<(UploadRecord | undefined)[]>(
       "draft-project-library-uploads",
@@ -50,7 +52,8 @@ export default function ProjectLibraryPage() {
     }
     return saved;
   });
-  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-project-library"));
+  // Start as "not saved" so the button shows Add until the user explicitly saves.
+  const [isSaved, setIsSaved] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -127,6 +130,24 @@ export default function ProjectLibraryPage() {
 
   const filteredUploads = uploads.filter((upload): upload is UploadRecord => Boolean(upload));
 
+  // Fetch and populate data when in edit mode
+  useEffect(() => {
+    if (isEditMode && projectData && !isLoading) {
+      const projectLibrary = projectData.project_library || {};
+      const uploadsData = projectLibrary.uploads || [];
+      
+      if (uploadsData.length > 0) {
+        // Ensure we have exactly MAX_FILES slots
+        const paddedUploads = [...uploadsData];
+        while (paddedUploads.length < MAX_FILES) {
+          paddedUploads.push(undefined);
+        }
+        setUploads(paddedUploads.slice(0, MAX_FILES));
+        saveDraft("draft-project-library-uploads", paddedUploads.slice(0, MAX_FILES));
+      }
+    }
+  }, [isEditMode, projectData, isLoading]);
+
   // Persist uploads draft whenever they change
   useEffect(() => {
     saveDraft("draft-project-library-uploads", uploads);
@@ -145,6 +166,19 @@ export default function ProjectLibraryPage() {
     markPageSaved("saved-project-library");
     setIsSaved(true);
   };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading project data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
@@ -180,7 +214,10 @@ export default function ProjectLibraryPage() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isSaved ? "Added" : "Add"}
+              {isEditMode 
+                ? (isSaved ? "Updated" : "Update")
+                : (isSaved ? "Added" : "Add")
+              }
             </button>
           </div>
         </div>

@@ -374,6 +374,7 @@ type MenuItem = {
   header?: string;
   action: string;
   route?: string;
+  showProjectDropdown?: boolean;
 };
 
 const APPLICATION_MENU_ITEMS: MenuItem[] = [
@@ -411,7 +412,12 @@ const PROJECT_MENU_ITEMS: MenuItem[] = [
   },
   {
     header: "Existing Projects",
-    action: "Add existing Project",
+    action: "Edit existing Project",
+    showProjectDropdown: true,
+  },
+  {
+    header: "Existing Application (Old Application)",
+    action: "Add Existing Application",
     route: "/dashboard/project-details",
   },
 ];
@@ -421,10 +427,13 @@ interface ApplicationModalProps {
   onClose: () => void;
   items: MenuItem[];
   title: string;
+  projects?: { id: string; title: string }[];
 }
 
-const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, items, title }) => {
+const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, items, title, projects = [] }) => {
   const router = useRouter();
+  const [showProjectDropdownIndex, setShowProjectDropdownIndex] = useState<number | null>(null);
+  const [selectedProjectForEdit, setSelectedProjectForEdit] = useState<string>("");
 
   useEffect(() => {
     if (open) {
@@ -435,14 +444,25 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
 
     return () => {
       document.body.style.overflow = "auto";
+      setShowProjectDropdownIndex(null);
+      setSelectedProjectForEdit("");
     };
   }, [open]);
 
-  const handleItemClick = (item: MenuItem) => {
-    if (item.route) {
+  const handleItemClick = (item: MenuItem, index: number) => {
+    if (item.showProjectDropdown) {
+      setShowProjectDropdownIndex(index);
+    } else if (item.route) {
       router.push(item.route);
+      onClose();
     }
-    onClose();
+  };
+
+  const handleProjectSelect = (projectId: string) => {
+    if (projectId) {
+      router.push(`/dashboard/project-details?projectId=${projectId}`);
+      onClose();
+    }
   };
 
   if (!open) return null;
@@ -483,12 +503,40 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
                       {item.header && (
                         <div className="text-sm text-gray-500 mb-1">{item.header}</div>
                       )}
-                      <button
-                        onClick={() => handleItemClick(item)}
-                        className="text-base font-bold text-black hover:text-blue-600 transition-colors w-full text-left"
-                      >
-                        {item.action}
-                      </button>
+                      {item.showProjectDropdown && showProjectDropdownIndex === index ? (
+                        <div className="space-y-2">
+                          <label className="text-sm text-gray-700 font-medium block">
+                            Select a project to edit:
+                          </label>
+                          <select
+                            value={selectedProjectForEdit}
+                            onChange={(e) => {
+                              setSelectedProjectForEdit(e.target.value);
+                              if (e.target.value) {
+                                handleProjectSelect(e.target.value);
+                              }
+                            }}
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">-- Select Project --</option>
+                            {projects.map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.title}
+                              </option>
+                            ))}
+                          </select>
+                          {projects.length === 0 && (
+                            <p className="text-xs text-gray-500 mt-1">No projects available</p>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleItemClick(item, index)}
+                          className="text-base font-bold text-black hover:text-blue-600 transition-colors w-full text-left"
+                        >
+                          {item.action}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -881,6 +929,7 @@ function UserDashboardContent() {
         onClose={() => setIsProjectModalOpen(false)}
         items={PROJECT_MENU_ITEMS}
         title="Projects"
+        projects={projects}
       />
 
       {/* Draft Applications Modal */}
