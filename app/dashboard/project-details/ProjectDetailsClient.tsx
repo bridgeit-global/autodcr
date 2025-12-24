@@ -403,7 +403,7 @@ export default function ProjectDetailsClient() {
   };
   const majorUseOptions = ["General Category", "Residential", "Commercial", "Industrial"];
   const plotSubUseOptions = ["Select SubUse", "Residential Low Rise", "Residential High Rise", "Commercial Retail"];
-  const plotTypeOptions = ["Select", "Corner Plot", "Through Plot", "Irregular Plot"];
+  const plotTypeOptions = ["Select", "Corner Plot", "Regular Plot", "Narrow Plot"];
 
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">

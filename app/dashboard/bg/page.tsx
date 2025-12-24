@@ -23,11 +23,6 @@ type BGEntry = BGFormData & {
 };
 
 const zoneOptions = ["City", "Eastern Suburb", "Western Suburb I", "Western Suburb II", "BP Special Cell"];
-const fileOptions = [
-  "P-28357/2025/(258)/P/S Ward/AAREY-P/S",
-  "P-17821/2025/(147)/E Ward/WADALA-E",
-  "P-30045/2025/(098)/N Ward/GHATKOPAR-N",
-];
 
 const createId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -51,13 +46,17 @@ const REQUIRED_PAGES: RequiredPage[] = [
 
 export default function BGDetailsPage() {
   const router = useRouter();
-  const [entries, setEntries] = useState<BGEntry[]>(() =>
-    loadDraft<BGEntry[]>("draft-bg-details-entries", [])
-  );
+  const [entry, setEntry] = useState<BGEntry | null>(() => {
+    const savedEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
+    return savedEntries.length > 0 ? savedEntries[0] : null;
+  });
   const [activeTab, setActiveTab] = useState<"bg-details" | "bg-refund">(
     loadDraft<"bg-details" | "bg-refund">("draft-bg-details-active-tab", "bg-details")
   );
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-bg-details"));
+
+  const inputClasses =
+    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
 
   const {
     register,
@@ -67,24 +66,46 @@ export default function BGDetailsPage() {
     formState: { errors },
     watch,
   } = useForm<BGFormData>({
-    defaultValues: loadDraft<BGFormData>("draft-bg-details-form", {
-      zone: "",
-      fileNo: "",
-      bgNumber: "",
-      bgDate: "",
-      bankName: "",
-      branchName: "",
-      amount: "",
-      bgValidDate: "",
-      bgBankEmail: "",
-      scanCopyName: "",
-    }),
+    defaultValues: (() => {
+      const savedEntry = loadDraft<BGEntry[]>("draft-bg-details-entries", [])[0];
+      const draftForm = loadDraft<BGFormData>("draft-bg-details-form", {
+        zone: "",
+        fileNo: "",
+        bgNumber: "",
+        bgDate: "",
+        bankName: "",
+        branchName: "",
+        amount: "",
+        bgValidDate: "",
+        bgBankEmail: "",
+        scanCopyName: "",
+      });
+      // Pre-fill form with existing entry if available
+      if (savedEntry) {
+        return {
+          zone: savedEntry.zone || "",
+          fileNo: savedEntry.fileNo || "",
+          bgNumber: savedEntry.bgNumber || "",
+          bgDate: savedEntry.bgDate || "",
+          bankName: savedEntry.bankName || "",
+          branchName: savedEntry.branchName || "",
+          amount: savedEntry.amount || "",
+          bgValidDate: savedEntry.bgValidDate || "",
+          bgBankEmail: savedEntry.bgBankEmail || "",
+          scanCopyName: savedEntry.scanCopyName || "",
+        };
+      }
+      return draftForm;
+    })(),
   });
 
   const onSubmit = (data: BGFormData) => {
-    const newEntry: BGEntry = { ...data, id: createId() };
-    setEntries((prev) => [newEntry, ...prev]);
-    reset();
+    // Only one entry allowed - replace existing or create new
+    const newEntry: BGEntry = { 
+      ...data, 
+      id: entry?.id || createId() 
+    };
+    setEntry(newEntry);
     markPageSaved("saved-bg-details");
     setIsSaved(true);
   };
@@ -98,11 +119,11 @@ export default function BGDetailsPage() {
     }
   };
 
-  const tableRows = useMemo(
+  const tableRow = useMemo(
     () =>
-      entries.map((entry, index) => (
+      entry ? (
         <tr key={entry.id}>
-          <td className="border px-3 py-2">{index + 1}</td>
+          <td className="border px-3 py-2">1</td>
           <td className="border px-3 py-2">{entry.zone}</td>
           <td className="border px-3 py-2">{entry.fileNo}</td>
           <td className="border px-3 py-2">{entry.bgNumber}</td>
@@ -114,8 +135,8 @@ export default function BGDetailsPage() {
           <td className="border px-3 py-2">{entry.bgBankEmail}</td>
           <td className="border px-3 py-2">{entry.scanCopyName || "-"}</td>
         </tr>
-      )),
-    [entries]
+      ) : null,
+    [entry]
   );
 
   // Persist drafts
@@ -127,8 +148,9 @@ export default function BGDetailsPage() {
   }, [watch]);
 
   useEffect(() => {
-    saveDraft("draft-bg-details-entries", entries);
-  }, [entries]);
+    // Save as array for backward compatibility, but only store one entry
+    saveDraft("draft-bg-details-entries", entry ? [entry] : []);
+  }, [entry]);
 
   useEffect(() => {
     saveDraft("draft-bg-details-active-tab", activeTab);
@@ -192,7 +214,7 @@ export default function BGDetailsPage() {
           <div>
             <h2 className="text-xl font-bold text-gray-900">Bank Guarantee Details</h2>
             <p className="text-sm text-gray-700 mt-1">
-              Capture bank guarantee information and keep track of issued BGs for this project.
+              Capture bank guarantee information for this project. Only one BG entry is allowed per project.
             </p>
           </div>
           <div className="flex gap-2">
@@ -218,7 +240,7 @@ export default function BGDetailsPage() {
               </label>
               <select
                 {...register("zone", { required: "Zone is required" })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                className={inputClasses}
               >
                 <option value="">Select Zone</option>
                 {zoneOptions.map((zone) => (
@@ -233,17 +255,12 @@ export default function BGDetailsPage() {
               <label className="block font-medium text-black mb-1">
                 File No <span className="text-red-500">*</span>
               </label>
-              <select
+              <input
+                type="text"
                 {...register("fileNo", { required: "File number is required" })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
-              >
-                <option value="">Select File</option>
-                {fileOptions.map((file) => (
-                  <option key={file} value={file}>
-                    {file}
-                  </option>
-                ))}
-              </select>
+                className={inputClasses}
+                placeholder="Enter file number"
+              />
               {errors.fileNo && <p className="text-sm text-red-600 mt-1">{errors.fileNo.message}</p>}
             </div>
           </div>
@@ -255,7 +272,7 @@ export default function BGDetailsPage() {
               </label>
               <input
                 {...register("bgNumber", { required: "BG number is required" })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                className={inputClasses}
                 placeholder="Enter BG number"
               />
               {errors.bgNumber && <p className="text-sm text-red-600 mt-1">{errors.bgNumber.message}</p>}
@@ -268,7 +285,7 @@ export default function BGDetailsPage() {
                 <input
                   type="date"
                   {...register("bgDate", { required: "BG date is required" })}
-                  className="border border-gray-200 rounded-xl px-3 py-2 pr-10 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className={`${inputClasses} pr-10`}
                 />
                 <svg
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
@@ -295,7 +312,7 @@ export default function BGDetailsPage() {
               </label>
               <input
                 {...register("bankName", { required: "Bank name is required" })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                className={inputClasses}
                 placeholder="Enter bank name"
               />
               {errors.bankName && <p className="text-sm text-red-600 mt-1">{errors.bankName.message}</p>}
@@ -306,7 +323,7 @@ export default function BGDetailsPage() {
               </label>
               <input
                 {...register("branchName", { required: "Branch name is required" })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                className={inputClasses}
                 placeholder="Enter branch name"
               />
               {errors.branchName && <p className="text-sm text-red-600 mt-1">{errors.branchName.message}</p>}
@@ -321,7 +338,7 @@ export default function BGDetailsPage() {
               <input
                 type="number"
                 {...register("amount", { required: "Amount is required" })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                className={inputClasses}
                 placeholder="Enter amount"
                 min={0}
               />
@@ -335,7 +352,7 @@ export default function BGDetailsPage() {
                 <input
                   type="date"
                   {...register("bgValidDate", { required: "BG valid date is required" })}
-                  className="border border-gray-200 rounded-xl px-3 py-2 pr-10 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className={`${inputClasses} pr-10`}
                 />
                 <svg
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
@@ -365,7 +382,7 @@ export default function BGDetailsPage() {
                   required: "Bank email is required",
                   pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: "Enter a valid email" },
                 })}
-                className="border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                className={inputClasses}
                 placeholder="bank@email.com"
               />
               {errors.bgBankEmail && <p className="text-sm text-red-600 mt-1">{errors.bgBankEmail.message}</p>}
@@ -432,14 +449,14 @@ export default function BGDetailsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.length === 0 ? (
+                  {!entry ? (
                     <tr>
                       <td colSpan={11} className="px-3 py-4 text-center text-gray-500">
-                        No BG records yet. Fill the form above and click Add to list entries here.
+                        No BG record yet. Fill the form above and click Add to save the entry here.
                       </td>
                     </tr>
                   ) : (
-                    tableRows
+                    tableRow
                   )}
                 </tbody>
               </table>
