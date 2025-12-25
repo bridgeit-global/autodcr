@@ -1402,19 +1402,40 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     SAC No <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    {...registerSavePlot("sacNo", {
+                  <Controller
+                    name="sacNo"
+                    control={savePlotControl}
+                    rules={{
                       required: "SAC number is required",
-                      minLength: { value: 15, message: "SAC number must be exactly 15 digits" },
-                      maxLength: { value: 15, message: "SAC number must be exactly 15 digits" },
+                      minLength: { value: 15, message: "SAC number must be exactly 15 characters" },
+                      maxLength: { value: 15, message: "SAC number must be exactly 15 characters" },
                       pattern: {
-                        value: /^\d{15}$/,
-                        message: "SAC number must contain exactly 15 digits",
+                        value: /^[A-Z]{2}\d{13}$/,
+                        message: "SAC number must start with 2 capital letters followed by 13 digits (e.g., AB1234567890123)",
                       },
-                    })}
-                    type="text"
-                    className={inputClasses}
-                    placeholder="Enter SAC number"
+                    }}
+                    render={({ field }) => (
+                      <input
+                        {...field}
+                        type="text"
+                        className={inputClasses}
+                        placeholder="e.g., AB1234567890123"
+                        onChange={(e) => {
+                          let value = e.target.value;
+                          // Convert first 2 characters to uppercase and only allow letters
+                          if (value.length > 0) {
+                            const firstPart = value.substring(0, 2).replace(/[^A-Za-z]/g, '').toUpperCase();
+                            // For characters after position 2, only allow digits
+                            const secondPart = value.substring(2).replace(/[^\d]/g, '');
+                            // Limit to 15 characters total
+                            value = (firstPart + secondPart).substring(0, 15);
+                            field.onChange(value);
+                          } else {
+                            field.onChange(value);
+                          }
+                        }}
+                      />
+                    )}
                   />
                   {savePlotErrors.sacNo && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.sacNo.message}</p>
