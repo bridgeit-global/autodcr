@@ -1390,6 +1390,7 @@ export default function ProjectDetailsClient() {
                 <input
                     {...registerSavePlot("grossPlotArea", { required: "Gross plot area is required" })}
                   type="number"
+                    step="any"
                     className={inputClasses}
                     placeholder="Enter area"
                 />
@@ -1404,8 +1405,12 @@ export default function ProjectDetailsClient() {
                   <input
                     {...registerSavePlot("sacNo", {
                       required: "SAC number is required",
-                      minLength: { value: 6, message: "SAC number must be 6 characters" },
-                      maxLength: { value: 6, message: "SAC number must be 6 characters" },
+                      minLength: { value: 15, message: "SAC number must be exactly 15 digits" },
+                      maxLength: { value: 15, message: "SAC number must be exactly 15 digits" },
+                      pattern: {
+                        value: /^\d{15}$/,
+                        message: "SAC number must contain exactly 15 digits",
+                      },
                     })}
                     type="text"
                     className={inputClasses}
@@ -1457,18 +1462,15 @@ export default function ProjectDetailsClient() {
                     {...registerSavePlot("latitude", {
                       required: "Latitude is required",
                       pattern: {
-                        value: /^-?([1-8]?[0-9](\.[0-9]{1,6})?|90(\.0{1,6})?)$/,
-                        message: "Latitude must be between -90 and 90 degrees",
+                        value: /^\d{1,2}\s+\d{1,2}\s+\d{1,2}(\.\d{1,2})?[NS]$/i,
+                        message: "Latitude must be in DMS format: DD MM SS.ssN (e.g., 19 04 38.24N)",
                       },
                     })}
-                    type="number"
-                    step="any"
-                    min="-90"
-                    max="90"
+                    type="text"
                     className={inputClasses}
-                    placeholder="e.g., 19.0760"
+                    placeholder="e.g., 19 04 38.24N"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Range: -90 to 90 degrees</p>
+                  <p className="text-xs text-gray-500 mt-1">Format: Degrees Minutes Seconds.ddN/S</p>
                   {savePlotErrors.latitude && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.latitude.message}</p>
                   )}
@@ -1481,18 +1483,15 @@ export default function ProjectDetailsClient() {
                     {...registerSavePlot("longitude", {
                       required: "Longitude is required",
                       pattern: {
-                        value: /^-?([1]?[0-7]?[0-9](\.[0-9]{1,6})?|180(\.0{1,6})?)$/,
-                        message: "Longitude must be between -180 and 180 degrees",
+                        value: /^\d{1,3}\s+\d{1,2}\s+\d{1,2}(\.\d{1,2})?[EW]$/i,
+                        message: "Longitude must be in DMS format: DDD MM SS.ssE (e.g., 72 52 56.84E)",
                       },
                     })}
-                    type="number"
-                    step="any"
-                    min="-180"
-                    max="180"
+                    type="text"
                     className={inputClasses}
-                    placeholder="e.g., 72.8777"
+                    placeholder="e.g., 72 52 56.84E"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Range: -180 to 180 degrees</p>
+                  <p className="text-xs text-gray-500 mt-1">Format: Degrees Minutes Seconds.ddE/W</p>
                   {savePlotErrors.longitude && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.longitude.message}</p>
                   )}
