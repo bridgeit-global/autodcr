@@ -1,60 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
-import { addressOptionsByVillage } from "@/app/utils/villageAddresses";
-import { addressToSurveyNumbers } from "@/app/utils/addressToSurveyNumbers";
-import { addressToRateDetails, type AddressRateDetails } from "@/app/utils/addressToRateDetails";
+import { getSurveyNumbersForVillageSync } from "@/app/utils/villageToSurveyNumbers";
 import { supabase } from "@/app/utils/supabase";
 
-// Helper function to normalize address for lookup (removes trailing periods and normalizes whitespace)
-function normalizeAddressForLookup(address: string): string {
-  return address.trim().replace(/\.+$/, "").replace(/\s+/g, " ");
-}
-
-// Helper function to get survey numbers for an address, handling normalization
-function getSurveyNumbersForAddress(address: string): string[] {
-  if (!address) return [];
-  
-  // Try exact match first
-  if (addressToSurveyNumbers[address]) {
-    return addressToSurveyNumbers[address];
-  }
-  
-  // Try normalized match (without trailing period)
-  const normalized = normalizeAddressForLookup(address);
-  if (addressToSurveyNumbers[normalized]) {
-    return addressToSurveyNumbers[normalized];
-  }
-  
-  // Try with trailing period added
-  if (addressToSurveyNumbers[normalized + "."]) {
-    return addressToSurveyNumbers[normalized + "."];
-  }
-  
-  return [];
-}
-
-function getRateDetailsForAddress(address: string): AddressRateDetails | null {
-  if (!address) return null;
-
-  if (addressToRateDetails[address]) {
-    return addressToRateDetails[address];
-  }
-
-  const normalized = normalizeAddressForLookup(address);
-  if (addressToRateDetails[normalized]) {
-    return addressToRateDetails[normalized];
-  }
-
-  if (addressToRateDetails[normalized + "."]) {
-    return addressToRateDetails[normalized + "."];
-  }
-
-  return null;
-}
 
 type ProjectFormData = {
   proposalAsPer: "DCPR 2034";
@@ -75,9 +27,6 @@ type SavePlotFormData = {
   ward: string;
   proposedCtsNumber: string[]; // Survey Nos (multi-select)
   villageName: string;
-  address: string;
-  // Derived from `mumbai_main.csv` for the selected Address
-  addressRateDetails: (AddressRateDetails & { address: string }) | null;
   plotBelongsTo: "CTS No." | "CS No." | "F.P.No" | "";
   grossPlotArea: string;
   sacNo: string;
@@ -113,7 +62,8 @@ export default function ProjectDetailsClient() {
   // Start as "not saved" so the buttons show Add/Update until user explicitly saves each tab.
   const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(false);
   const [isSavePlotSaved, setIsSavePlotSaved] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(false);
+  // Track initial load to prevent clearing fields during form initialization
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
@@ -151,6 +101,7 @@ export default function ProjectDetailsClient() {
     handleSubmit: handleSavePlotSubmit,
     control: savePlotControl,
     watch: watchSavePlot,
+    getValues: getSavePlotValues,
     setValue: setSavePlotValue,
     formState: { errors: savePlotErrors },
     reset: resetSavePlot,
@@ -163,8 +114,6 @@ export default function ProjectDetailsClient() {
         zone: "",
         ward: "",
         villageName: "",
-        address: "",
-        addressRateDetails: null,
         proposedCtsNumber: [],
         grossPlotArea: "",
         sacNo: "",
@@ -203,8 +152,10 @@ export default function ProjectDetailsClient() {
   const selectedZone = watchSavePlot("zone");
   const selectedWard = watchSavePlot("ward");
   const selectedVillage = watchSavePlot("villageName");
-  const selectedAddress = watchSavePlot("address");
   const selectedSurveyNos = watchSavePlot("proposedCtsNumber");
+  
+  // State to store CTS numbers from local mapping
+  const [ctsNumbers, setCtsNumbers] = useState<string[]>([]);
 
   // Fetch project data when in edit mode
   useEffect(() => {
@@ -244,6 +195,10 @@ export default function ProjectDetailsClient() {
 
           // Map backend data to SavePlotFormData structure
           const savePlotDetails = data.save_plot_details || {};
+          
+          // Debug: Log the raw data to see what we're getting
+          console.log("[Edit Mode] Raw save_plot_details:", savePlotDetails);
+          
           const savePlotFormData: SavePlotFormData = {
             planningAuthority: savePlotDetails.planningAuthority || "",
             projectProponent: savePlotDetails.projectProponent || "",
@@ -255,8 +210,6 @@ export default function ProjectDetailsClient() {
               ? [savePlotDetails.proposedCtsNumber]
               : [],
             villageName: savePlotDetails.villageName || "",
-            address: savePlotDetails.address || "",
-            addressRateDetails: savePlotDetails.addressRateDetails || null,
             plotBelongsTo: savePlotDetails.plotBelongsTo || "",
             grossPlotArea: savePlotDetails.grossPlotArea || "",
             sacNo: savePlotDetails.sacNo || "",
@@ -274,10 +227,19 @@ export default function ProjectDetailsClient() {
               : [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
           };
 
-          // Set flag to prevent clearing effects during initial load
+          // Debug: Log the form data we're about to set
+          console.log("[Edit Mode] Setting form data:", {
+            zone: savePlotFormData.zone,
+            ward: savePlotFormData.ward,
+            villageName: savePlotFormData.villageName,
+            proposedCtsNumber: savePlotFormData.proposedCtsNumber,
+            plotBelongsTo: savePlotFormData.plotBelongsTo,
+          });
+          
+          // Set flag to prevent clearing effects during initial load - MUST be set before reset
           setIsInitialLoad(true);
           
-          // Populate forms with fetched data
+          // Populate forms with fetched data using reset
           resetProject(projectFormData);
           resetSavePlot(savePlotFormData);
           
@@ -285,11 +247,73 @@ export default function ProjectDetailsClient() {
           saveDraft("draft-project-details-project", projectFormData);
           saveDraft("draft-project-details-save-plot", savePlotFormData);
           
-          // Data is loaded into the form, but treat it as "unsaved" until user explicitly saves.
-          // Reset flag after a short delay to allow form values to settle
-          setTimeout(() => {
-            setIsInitialLoad(false);
-          }, 100);
+          // Use requestAnimationFrame and setTimeout to ensure reset has completed
+          // Then set values explicitly to ensure watched values update and dropdowns show correct selections
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              // Verify reset worked, then set values explicitly
+              const currentValues = getSavePlotValues();
+              console.log("[Edit Mode] Current form values after reset:", currentValues);
+              
+              // Set values explicitly to ensure watched values update
+              // This is critical for dropdowns to show the selected values
+              console.log("[Edit Mode] Setting zone:", savePlotFormData.zone);
+              if (savePlotFormData.zone) {
+                setSavePlotValue("zone", savePlotFormData.zone, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+              }
+              
+              // Set ward after a small delay to ensure zone is set first
+              setTimeout(() => {
+                console.log("[Edit Mode] Setting ward:", savePlotFormData.ward);
+                if (savePlotFormData.ward) {
+                  setSavePlotValue("ward", savePlotFormData.ward, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+                }
+                
+                // Set village after ward is set
+                setTimeout(() => {
+                  console.log("[Edit Mode] Setting village:", savePlotFormData.villageName);
+                  if (savePlotFormData.villageName) {
+                    setSavePlotValue("villageName", savePlotFormData.villageName, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+                  }
+                  if (savePlotFormData.proposedCtsNumber && savePlotFormData.proposedCtsNumber.length > 0) {
+                    console.log("[Edit Mode] Setting CTS numbers:", savePlotFormData.proposedCtsNumber);
+                    setSavePlotValue("proposedCtsNumber", savePlotFormData.proposedCtsNumber, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+                  }
+                  if (savePlotFormData.plotBelongsTo) {
+                    setSavePlotValue("plotBelongsTo", savePlotFormData.plotBelongsTo, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+                  }
+                  
+                  // Verify values are set
+                  setTimeout(() => {
+                    const finalValues = getSavePlotValues();
+                    console.log("[Edit Mode] Final form values:", {
+                      zone: finalValues.zone,
+                      ward: finalValues.ward,
+                      villageName: finalValues.villageName,
+                      proposedCtsNumber: finalValues.proposedCtsNumber,
+                    });
+                  }, 100);
+                  
+                  // Get CTS numbers for the loaded village and ward from local mapping
+                  if (savePlotFormData.villageName && savePlotFormData.ward) {
+                    console.log("[Edit Mode] Getting CTS numbers for:", savePlotFormData.villageName, savePlotFormData.ward);
+                    const numbers = getSurveyNumbersForVillageSync(
+                      savePlotFormData.villageName,
+                      savePlotFormData.ward
+                    );
+                    console.log("[Edit Mode] Got CTS numbers:", numbers);
+                    setCtsNumbers(numbers);
+                  }
+                  
+                  // Reset flag after all values are set
+                  setTimeout(() => {
+                    console.log("[Edit Mode] Clearing isInitialLoad flag");
+                    setIsInitialLoad(false);
+                  }, 300);
+                }, 100);
+              }, 100);
+            }, 100);
+          });
         }
       } catch (err) {
         console.error("Error fetching project:", err);
@@ -301,6 +325,17 @@ export default function ProjectDetailsClient() {
 
     fetchProject();
   }, [projectId, isEditMode, resetProject, resetSavePlot]);
+
+  // Set isInitialLoad to false after component mounts and form is ready
+  // This allows initial values to display, but enables clearing when user changes fields
+  useEffect(() => {
+    // Give form time to initialize with default values or draft data
+    const timer = setTimeout(() => {
+      setIsInitialLoad(false);
+    }, 500); // Small delay to ensure form values are set
+    
+    return () => clearTimeout(timer);
+  }, []); // Only run once on mount
 
   // Persist drafts whenever forms change
   useEffect(() => {
@@ -317,84 +352,133 @@ export default function ProjectDetailsClient() {
     return () => subscription.unsubscribe();
   }, [watchSavePlot]);
 
+  // Track previous zone value to detect actual changes (not just initial render)
+  const prevZoneRef = useRef<string | undefined>(undefined);
+  
+  // When zone changes: clear ward, village, survey no, and CTS numbers
   useEffect(() => {
-    // Skip clearing during initial data load
-    if (isInitialLoad) return;
+    // Skip clearing during initial data load or if zone hasn't actually changed
+    if (isInitialLoad) {
+      prevZoneRef.current = selectedZone;
+      return;
+    }
     
-    setSavePlotValue("ward", "");
-    setSavePlotValue("villageName", "");
-    setSavePlotValue("proposedCtsNumber", []);
-    setSavePlotValue("addressRateDetails", null);
-    // Reset plotBelongsTo when zone changes
-    setSavePlotValue("plotBelongsTo", "");
+    // Only clear if zone actually changed (not just on initial render)
+    if (prevZoneRef.current !== undefined && prevZoneRef.current !== selectedZone) {
+      // Clear all dependent fields when zone changes
+      setSavePlotValue("ward", "", { shouldValidate: false });
+      setSavePlotValue("villageName", "", { shouldValidate: false });
+      setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
+      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+      setCtsNumbers([]); // Clear CTS numbers state
+    }
+    
+    prevZoneRef.current = selectedZone;
   }, [selectedZone, setSavePlotValue, isInitialLoad]);
 
   // Auto-select plotBelongsTo based on zone and ward
   useEffect(() => {
-    // Only set if both zone and ward are selected (for City), or zone is selected (for non-City)
+    // Skip during initial data load
+    if (isInitialLoad) return;
+    
+    // Only set if both zone and ward are selected (for City/Central Mumbai), or zone is selected (for non-City/Central Mumbai)
     if (!selectedZone) {
       return;
     }
 
     if (selectedZone === "City") {
-      // For City, wait for ward to be selected
+      // For City, wait for ward to be selected (City only has A, B, C, D, E wards)
       if (selectedWard) {
-        if (selectedWard === "G/N Ward" || selectedWard === "G/S Ward") {
-          setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
-        } else {
-          // City with any other ward (not G/N or G/S)
-          setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
-        }
+        setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
       } else {
         // City selected but no ward yet - clear plotBelongsTo
         setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
       }
+    } else if (selectedZone === "Central Mumbai") {
+      // For Central Mumbai, wait for ward to be selected
+      if (selectedWard) {
+        if (selectedWard === "G/N Ward" || selectedWard === "G/S Ward") {
+          setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
+        } else {
+          // Central Mumbai with F/N or F/S ward
+          setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
+        }
+      } else {
+        // Central Mumbai selected but no ward yet - clear plotBelongsTo
+        setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+      }
     } else {
-      // Any zone other than City - set immediately
+      // Any zone other than City or Central Mumbai - set immediately
       setSavePlotValue("plotBelongsTo", "CTS No.", { shouldValidate: false });
     }
-  }, [selectedZone, selectedWard, setSavePlotValue]);
+  }, [selectedZone, selectedWard, setSavePlotValue, isInitialLoad]);
 
+  // Track previous ward value to detect actual changes
+  const prevWardRef = useRef<string | undefined>(undefined);
+  
+  // When ward changes: clear village, survey no, and CTS numbers
   useEffect(() => {
-    // Skip clearing during initial data load
-    if (isInitialLoad) return;
+    // Skip clearing during initial data load or if ward hasn't actually changed
+    if (isInitialLoad) {
+      prevWardRef.current = selectedWard;
+      return;
+    }
     
-    setSavePlotValue("villageName", "");
-    setSavePlotValue("proposedCtsNumber", []);
-    setSavePlotValue("address", "");
-    setSavePlotValue("addressRateDetails", null);
+    // Only clear if ward actually changed (not just on initial render)
+    if (prevWardRef.current !== undefined && prevWardRef.current !== selectedWard) {
+      // Clear dependent fields when ward changes
+      setSavePlotValue("villageName", "", { shouldValidate: false });
+      setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
+      setCtsNumbers([]); // Clear CTS numbers state
+    }
+    
+    prevWardRef.current = selectedWard;
   }, [selectedWard, setSavePlotValue, isInitialLoad]);
 
+  // Track previous village value to detect actual changes
+  const prevVillageRef = useRef<string | undefined>(undefined);
+  
+  // When village changes: clear survey no and CTS numbers
   useEffect(() => {
-    // Skip clearing during initial data load
-    if (isInitialLoad) return;
+    // Skip clearing during initial data load or if village hasn't actually changed
+    if (isInitialLoad) {
+      prevVillageRef.current = selectedVillage;
+      return;
+    }
     
-    setSavePlotValue("address", "");
-    setSavePlotValue("proposedCtsNumber", []);
-    setSavePlotValue("addressRateDetails", null);
+    // Only clear if village actually changed (not just on initial render)
+    if (prevVillageRef.current !== undefined && prevVillageRef.current !== selectedVillage) {
+      // Clear survey numbers when village changes
+      setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
+      setCtsNumbers([]); // Clear CTS numbers state
+    }
+    
+    prevVillageRef.current = selectedVillage;
   }, [selectedVillage, setSavePlotValue, isInitialLoad]);
 
+  // Get CTS numbers from local mapping when village and ward are selected
   useEffect(() => {
-    // Skip clearing during initial data load, but still update addressRateDetails if address is set
-    if (!isInitialLoad) {
-      setSavePlotValue("proposedCtsNumber", []);
+    // Skip during initial load in edit mode (handled separately in fetchProject)
+    if (isInitialLoad && isEditMode) {
+      return;
     }
-    
-    const details = getRateDetailsForAddress(selectedAddress as string);
-    setSavePlotValue(
-      "addressRateDetails",
-      details ? { address: (selectedAddress as string) || "", ...details } : null
-    );
 
-    // Debug log for testing: confirm rate details are being picked up from CSV mapping
-    if (selectedAddress) {
-      if (details) {
-        console.log("[Save Plot] Address selected:", selectedAddress, "Rate details:", details);
-      } else {
-        console.warn("[Save Plot] Address selected but no rate details found:", selectedAddress);
-      }
+    if (!selectedVillage || !selectedWard) {
+      setCtsNumbers([]);
+      return;
     }
-  }, [selectedAddress, setSavePlotValue]);
+
+    // Get CTS numbers synchronously from local mapping
+    const numbers = getSurveyNumbersForVillageSync(selectedVillage as string, selectedWard as string);
+    
+    // Only set if we got valid numbers (safety check)
+    if (numbers && numbers.length > 0) {
+      setCtsNumbers(numbers);
+    } else {
+      // Clear if no numbers found (village/ward combination might be invalid)
+      setCtsNumbers([]);
+    }
+  }, [selectedVillage, selectedWard, isInitialLoad, isEditMode]);
 
   const onProjectSubmit = async (data: ProjectFormData) => {
     try {
@@ -510,8 +594,8 @@ export default function ProjectDetailsClient() {
   ];
 
   const plotBelongsOptions: SavePlotFormData["plotBelongsTo"][] = ["CTS No.", "CS No.", "F.P.No"];
-  const zoneOptions = ["City", "Eastern Suburb", "Western Suburb I", "Western Suburb II"];
-  // Ward options based on reference screenshots from the official system
+  const zoneOptions = ["City", "Central Mumbai", "Western South", "Eastern Suburbs", "Western North", "Northern Suburbs"];
+  // Ward options based on zone mapping
   const wardOptionsMap: Record<string, string[]> = {
     City: [
       "A Ward",
@@ -519,70 +603,285 @@ export default function ProjectDetailsClient() {
       "C Ward",
       "D Ward",
       "E Ward",
+    ],
+    "Central Mumbai": [
       "F/N Ward",
       "F/S Ward",
       "G/N Ward",
       "G/S Ward",
     ],
-    "Eastern Suburb": ["L Ward", "M/E Ward", "M/W Ward", "N Ward", "S Ward", "T Ward"],
-    "Western Suburb I": ["H/E Ward", "H/W Ward", "K/E Ward", "K/W Ward"],
-    "Western Suburb II": ["P/N Ward", "P/S Ward", "R/C Ward", "R/N Ward", "R/S Ward"],
+    "Western South": [
+      "H/E Ward",
+      "H/W Ward",
+      "K/E Ward",
+      "K/W Ward",
+    ],
+    "Eastern Suburbs": [
+      "L Ward",
+      "M/E Ward",
+      "M/W Ward",
+      "N Ward",
+    ],
+    "Western North": [
+      "P/N Ward",
+      "P/S Ward",
+      "R/N Ward",
+      "R/C Ward",
+      "R/S Ward",
+    ],
+    "Northern Suburbs": [
+      "S Ward",
+      "T Ward",
+    ],
   };
-  // Village options per ward (Division names shown in English + Marathi)
+  // Village options per ward (mapped from DP2034 API)
   const villageOptionsByWard: Record<string, string[]> = {
     "A Ward": [
-      "Colaba Division (कुलाबा डिव्हीजन)",
-      "Fort Division (फोर्ट डिव्हीजन)",
+      "COLABA",
+      "FORT",
     ],
     "B Ward": [
-      "Princess Dock Division (प्रिन्सेस डॉक डिव्हीजन)",
-      "Mandvi Division (मांडवी डिव्हीजन)",
+      "MANDVI",
+      "PRINCESS DOCK",
     ],
     "C Ward": [
-      "Bhuleshwar Division (भुलेश्वर डिव्हीजन)",
-      "Girgaon Division (गिरगांव डिव्हीजन)",
+      "BHULESHWAR",
+      "FORT",
+      "GIRGAUM",
     ],
     "D Ward": [
-      "Malabar Hill & Khambala Hill Division (मलबार व खंबाला हिल डिव्हीजन)",
-      "Tardeo Division (ताडदेव डिव्हीजन)",
+      "GIRGAUM",
+      "MALABAR HILL",
+      "TARDEO",
     ],
     "E Ward": [
-      "Byculla Division (भायखळा डिव्हीजन)",
-      "Mazgaon Division (माझगाव डिव्हीजन)",
+      "BYCULLA",
+      "MAZAGAON",
     ],
     "F/N Ward": [
-      "Dadar–Naigaon Division (दादर–नायगाव डिव्हीजन)",
-      "Salt Pan Division (सॉल्ट पॅन डिव्हीजन)",
-      "Matunga Division (माटुंगा डिव्हीजन)",
+      "DADAR-NAIGAON",
+      "MATUNGA",
+      "SALT PAN",
+      "SION",
     ],
     "F/S Ward": [
-      "Parel & Sewri Division (परळ, शिवडी डिव्हीजन)",
-      "Lower Parel Division (लोअर परळ डिव्हीजन)",
+      "DADAR-NAIGAON",
+      "PAREL-SEWERI",
     ],
     "G/N Ward": [
-      "Mahim Division (माहीम डिव्हीजन)",
-      "Dharavi Division (धारावी डिव्हीजन)",
-      "Sion Division (सायन डिव्हीजन)",
+      "DHARAVI",
+      "MAHIM",
+      "PARIGHIKARI",
     ],
     "G/S Ward": [
-      "Worli Division (वरळी डिव्हीजन)",
+      "LOWER PAREL",
+      "MAHIM",
+      "MALABAR HILL",
+      "WORLI",
     ],
-    // For other wards (not covered in the shared mapping), keep simple placeholders for now
-    "L Ward": ["Village L1", "Village L2"],
-    "M/E Ward": ["Village ME1", "Village ME2"],
-    "M/W Ward": ["Village MW1", "Village MW2"],
-    "N Ward": ["Village N1", "Village N2"],
-    "S Ward": ["Village S1", "Village S2"],
-    "T Ward": ["Village T1", "Village T2"],
-    "H/E Ward": ["Village HE1", "Village HE2"],
-    "H/W Ward": ["Village HW1", "Village HW2"],
-    "K/E Ward": ["Village KE1", "Village KE2"],
-    "K/W Ward": ["Village KW1", "Village KW2"],
-    "P/N Ward": ["Village PN1", "Village PN2"],
-    "P/S Ward": ["Village PS1", "Village PS2"],
-    "R/C Ward": ["Village RC1", "Village RC2"],
-    "R/N Ward": ["Village RN1", "Village RN2"],
-    "R/S Ward": ["Village RS1", "Village RS2"],
+    "H/E Ward": [
+      "BANDRA-A",
+      "BANDRA-EAST",
+      "BANDRA-I",
+      "KOLEKALYAN",
+      "KOLEKALYAN UNIVERSITY",
+      "PARIGHIKARI",
+      "VILE PARLE",
+    ],
+    "H/W Ward": [
+      "BANDRA-A",
+      "BANDRA-B",
+      "BANDRA-C",
+      "BANDRA-D",
+      "BANDRA-E",
+      "BANDRA-F",
+      "BANDRA-G",
+      "BANDRA-H",
+      "JUHU",
+      "VILE PARLE",
+    ],
+    "K/E Ward": [
+      "ANDHERI",
+      "BANDIVALI",
+      "BAPNALA",
+      "BRAMHANWADA",
+      "CHAKALA",
+      "GUNDAVALI",
+      "ISMALIA",
+      "KOLEKALYAN",
+      "KONDIVATE",
+      "MAJAS",
+      "MAROL",
+      "MOGRA",
+      "MULGAON",
+      "PRAJAPUR",
+      "SAHAR",
+      "TUNGWE",
+      "VILE PARLE",
+      "VYARAVLI",
+    ],
+    "K/W Ward": [
+      "AMBIVALI",
+      "ANDHERI",
+      "BANDIVALI",
+      "BANDRA-G",
+      "JUHU",
+      "MADH",
+      "MAJAS",
+      "MOGRA",
+      "OSHIWARA",
+      "VERSOVA",
+      "VILE PARLE",
+    ],
+    "L Ward": [
+      "ASALPE",
+      "CHANDIVALI",
+      "CHEMBUR",
+      "KIROL",
+      "KOLEKALYAN",
+      "KURLA - 1",
+      "KURLA - 2",
+      "KURLA - 3",
+      "KURLA - 4",
+      "MAROL",
+      "MOHILI",
+      "PARIGHIKARI",
+      "PASPOLI",
+      "SAKI",
+      "TUNGWE",
+    ],
+    "M/E Ward": [
+      "ANIK",
+      "BORLA",
+      "DEONAR",
+      "MAHUL",
+      "MANDALE",
+      "MANKHURD",
+      "MARAVALI",
+      "TURBHE",
+      "WADHAVALI",
+    ],
+    "M/W Ward": [
+      "ANIK",
+      "BORLA",
+      "CHEMBUR",
+      "KIROL",
+      "MAHUL",
+      "MARAVALI",
+      "WADHAVALI",
+    ],
+    "N Ward": [
+      "ASALPE",
+      "CHANDIVALI",
+      "CHEMBUR",
+      "GHATKOPAR",
+      "GHATKOPAR KIROL",
+      "HARIYALI-E",
+      "HARIYALI-W",
+      "KIROL",
+      "POWAI",
+      "VIKHROLI",
+    ],
+    "P/N Ward": [
+      "AAKSE",
+      "AAREY",
+      "AKURLI",
+      "CHARKOP",
+      "CHINCHAVALI",
+      "DARAVALI",
+      "DINDOSHI",
+      "ERANGAL",
+      "KURAR",
+      "MADH",
+      "MALAD",
+      "MALAD-E",
+      "MALAD-NORTH",
+      "MALAD-SOUTH",
+      "MALVANI",
+      "MANORI",
+      "MARVE",
+      "PAHADI GOREGAON-E",
+      "PAHADI GOREGAON-W",
+      "VALNAI",
+      "WADHWAN",
+    ],
+    "P/S Ward": [
+      "AAREY",
+      "CHINCHAVALI",
+      "DINDOSHI",
+      "GOREGAON",
+      "MALAD-E",
+      "MALAD-SOUTH",
+      "MAROL MAROSHI",
+      "PAHADI EKSAR",
+      "PAHADI GOREGAON-E",
+      "PAHADI GOREGAON-W",
+      "SAAI",
+    ],
+    "R/N Ward": [
+      "BORIVALI",
+      "DAHISAR",
+      "EKSAR",
+      "MANDPESHWAR-M",
+      "MANDPESHWAR-N",
+      "MANDPESHWAR-S",
+    ],
+    "R/C Ward": [
+      "BORIVALI",
+      "CHARKOP",
+      "DAHISAR",
+      "EKSAR",
+      "GORAI",
+      "KANDIVALI",
+      "KANHERI",
+      "MAGATHANE",
+      "MANDPESHWAR-S",
+      "MANORI",
+      "POISAR",
+      "SHIMPAWALI",
+    ],
+    "R/S Ward": [
+      "AKURLI",
+      "CHARKOP",
+      "KANDIVALI",
+      "MAGATHANE",
+      "MALAD",
+      "MALAD-E",
+      "MALAD-NORTH",
+      "MALVANI",
+      "POISAR",
+      "VALNAI",
+      "WADHWAN",
+    ],
+    "S Ward": [
+      "BHANDUP-E",
+      "BHANDUP-W",
+      "CHANDIVALI",
+      "GHATKOPAR",
+      "HARIYALI-E",
+      "HARIYALI-W",
+      "KANJUR-E",
+      "KANJUR-W",
+      "KOPRI",
+      "MULUND-E",
+      "NAHUR",
+      "PASPOLI",
+      "POWAI",
+      "TIRANDAZ",
+      "TUNGWE",
+      "VIKHROLI",
+    ],
+    "T Ward": [
+      "BHANDUP-E",
+      "BHANDUP-W",
+      "GUNDHGAON",
+      "KLERABAD",
+      "MULUND-E",
+      "MULUND-W",
+      "NAHUR",
+      "SAAI",
+      "TULSI",
+    ],
   };
 
   // Simple placeholder CTS lists for each ward so the CTS dropdown is never empty
@@ -984,7 +1283,7 @@ export default function ProjectDetailsClient() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Village (Village Name-CTS and Division-CS) <span className="text-red-500">*</span>
+                    Village/Division <span className="text-red-500">*</span>
                   </label>
                   <select
                     {...registerSavePlot("villageName", { required: "Village name is required" })}
@@ -1004,108 +1303,82 @@ export default function ProjectDetailsClient() {
                 </div>
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Address <span className="text-red-500">*</span>
+                    Survey No <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("address", { required: "Address is required" })}
-                    className={inputClasses}
-                    disabled={!selectedVillage}
-                  >
-                    <option value="">----- Select Address -----</option>
-                    {(addressOptionsByVillage[selectedVillage as string] ?? []).map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  {savePlotErrors.address && <p className="text-red-600 text-sm mt-1">{savePlotErrors.address.message}</p>}
-                </div>
-              </div>
+                  <Controller
+                    name="proposedCtsNumber"
+                    control={savePlotControl}
+                    rules={{
+                      validate: (v) =>
+                        Array.isArray(v) && v.length > 0 ? true : "Please select at least one survey number",
+                    }}
+                    render={({ field, fieldState }) => {
+                      // Use CTS numbers from API (already sorted)
+                      const sortedOptions = ctsNumbers;
+                      const current = Array.isArray(field.value) ? field.value : [];
 
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  Survey No <span className="text-red-500">*</span>
-                </label>
-                <Controller
-                  name="proposedCtsNumber"
-                  control={savePlotControl}
-                  rules={{
-                    validate: (v) =>
-                      Array.isArray(v) && v.length > 0 ? true : "Please select at least one survey number",
-                  }}
-                  render={({ field, fieldState }) => {
-                    const options = getSurveyNumbersForAddress(selectedAddress as string);
-                    // Sort survey numbers in descending order
-                    // Handle both numeric and alphanumeric survey numbers
-                    const sortedOptions = [...options].sort((a, b) => {
-                      // Extract numeric parts for comparison
-                      const numA = parseInt(a.match(/\d+/)?.[0] || "0", 10);
-                      const numB = parseInt(b.match(/\d+/)?.[0] || "0", 10);
-                      if (numA !== numB) {
-                        return numB - numA; // Descending order
-                      }
-                      // If numeric parts are equal, compare as strings (descending)
-                      return b.localeCompare(a);
-                    });
-                    const current = Array.isArray(field.value) ? field.value : [];
+                      const addSurveyNo = (surveyNo: string) => {
+                        const cleaned = (surveyNo ?? "").trim();
+                        if (!cleaned) return;
+                        if (current.includes(cleaned)) return;
+                        field.onChange([...current, cleaned]);
+                      };
 
-                    const addSurveyNo = (surveyNo: string) => {
-                      const cleaned = (surveyNo ?? "").trim();
-                      if (!cleaned) return;
-                      if (current.includes(cleaned)) return;
-                      field.onChange([...current, cleaned]);
-                    };
+                      const removeSurveyNo = (surveyNo: string) => {
+                        field.onChange(current.filter((x) => x !== surveyNo));
+                      };
 
-                    const removeSurveyNo = (surveyNo: string) => {
-                      field.onChange(current.filter((x) => x !== surveyNo));
-                    };
-
-                    return (
-                      <div>
-                        <select
-                          className={inputClasses}
-                          disabled={!selectedAddress}
-                          value=""
-                          onChange={(e) => {
-                            addSurveyNo(e.target.value);
-                          }}
-                        >
-                          <option value="">----- Select Survey No -----</option>
-                          {sortedOptions.map((surveyNo) => (
-                            <option key={surveyNo} value={surveyNo}>
-                              {surveyNo}
-                            </option>
-                          ))}
-                        </select>
-
-                        {selectedSurveyNos && Array.isArray(selectedSurveyNos) && selectedSurveyNos.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {selectedSurveyNos.map((surveyNo) => (
-                              <span
-                                key={surveyNo}
-                                className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gray-200 text-sm bg-white"
-                              >
-                                <span className="text-black">{surveyNo}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeSurveyNo(surveyNo)}
-                                  className="text-gray-700 hover:text-red-700 font-semibold"
-                                  aria-label={`Remove survey number ${surveyNo}`}
-                                >
-                                  ×
-                                </button>
-                              </span>
+                      return (
+                        <div>
+                          <select
+                            className={inputClasses}
+                            disabled={!selectedVillage || !selectedWard}
+                            value=""
+                            onChange={(e) => {
+                              addSurveyNo(e.target.value);
+                            }}
+                          >
+                          <option value="">
+                            {sortedOptions.length === 0 
+                              ? "No CTS numbers found" 
+                              : "----- Select Survey No -----"}
+                          </option>
+                            {sortedOptions.map((surveyNo) => (
+                              <option key={surveyNo} value={surveyNo}>
+                                {surveyNo}
+                              </option>
                             ))}
-                          </div>
-                        )}
+                          </select>
 
-                        {fieldState.error?.message && (
-                          <p className="text-red-600 text-sm mt-1">{fieldState.error.message}</p>
-                        )}
-                      </div>
-                    );
-                  }}
-                />
+                          {selectedSurveyNos && Array.isArray(selectedSurveyNos) && selectedSurveyNos.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {selectedSurveyNos.map((surveyNo) => (
+                                <span
+                                  key={surveyNo}
+                                  className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gray-200 text-sm bg-white"
+                                >
+                                  <span className="text-black">{surveyNo}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSurveyNo(surveyNo)}
+                                    className="text-gray-700 hover:text-red-700 font-semibold"
+                                    aria-label={`Remove survey number ${surveyNo}`}
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {fieldState.error?.message && (
+                            <p className="text-red-600 text-sm mt-1">{fieldState.error.message}</p>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
+                </div>
               </div>
 
 
