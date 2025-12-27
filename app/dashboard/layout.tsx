@@ -31,8 +31,10 @@ const PROJECT_LIBRARY_MAX_FILES = 5;
 type BGEntry = {
   id: string;
   zone: string;
-  fileNo?: string;
-  file_no?: string;
+  proposalNo?: string;
+  proposal_no?: string;
+  fileNo?: string; // Keep for backward compatibility
+  file_no?: string; // Keep for backward compatibility
   bgNumber: string;
   bgDate: string;
   bankName: string;
@@ -194,26 +196,26 @@ function DashboardLayoutContent({
       const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
       const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
-      // Get file number from BG Details
+      // Get proposal number from BG Details (with backward compatibility for fileNo)
       const firstBgEntry: BGEntry | null = Array.isArray(bgEntries) && bgEntries.length > 0 ? bgEntries[0] : null;
-      const fileNo = firstBgEntry?.fileNo || firstBgEntry?.file_no || "";
+      const proposalNo = firstBgEntry?.proposalNo || firstBgEntry?.proposal_no || firstBgEntry?.fileNo || firstBgEntry?.file_no || "";
       
-      // Extract base title (remove file number if it was already appended in edit mode)
+      // Extract base title (remove proposal number if it was already appended in edit mode)
       let baseTitle = projectTitle as string;
-      if (isActuallyEditMode && fileNo && fileNo.trim() !== "") {
-        // Check if title ends with the file number (e.g., "demo 123" ends with "123")
-        const fileNoTrimmed = fileNo.trim();
+      if (isActuallyEditMode && proposalNo && proposalNo.trim() !== "") {
+        // Check if title ends with the proposal number (e.g., "demo 123" ends with "123")
+        const proposalNoTrimmed = proposalNo.trim();
         const titleTrimmed = baseTitle.trim();
-        if (titleTrimmed.endsWith(` ${fileNoTrimmed}`)) {
-          // Remove the file number from the end to get the base title
-          baseTitle = titleTrimmed.slice(0, -(fileNoTrimmed.length + 1)).trim();
+        if (titleTrimmed.endsWith(` ${proposalNoTrimmed}`)) {
+          // Remove the proposal number from the end to get the base title
+          baseTitle = titleTrimmed.slice(0, -(proposalNoTrimmed.length + 1)).trim();
         }
       }
       
-      // Combine base title with current file number: "baseTitle fileNo"
+      // Combine base title with current proposal number: "baseTitle proposalNo"
       let finalProjectTitle = baseTitle;
-      if (fileNo && fileNo.trim() !== "") {
-        finalProjectTitle = `${baseTitle} ${fileNo}`.trim();
+      if (proposalNo && proposalNo.trim() !== "") {
+        finalProjectTitle = `${baseTitle} ${proposalNo}`.trim();
       }
 
       // Helper function to deep compare two values

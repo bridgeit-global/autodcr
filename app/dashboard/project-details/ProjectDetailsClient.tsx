@@ -23,6 +23,7 @@ type ProjectFormData = {
 type SavePlotFormData = {
   planningAuthority: "BMC(BP)" | "BMC-TDR Generation & Transfer" | "Other" | "";
   projectProponent: string;
+  region: string;
   zone: string;
   ward: string;
   proposedCtsNumber: string[]; // Survey Nos (multi-select)
@@ -111,6 +112,7 @@ export default function ProjectDetailsClient() {
         planningAuthority: "",
         projectProponent: "",
         plotBelongsTo: "",
+        region: "",
         zone: "",
         ward: "",
         villageName: "",
@@ -149,10 +151,54 @@ export default function ProjectDetailsClient() {
     name: "plotEntries",
   });
 
+  // Region to Zone mapping (defined before use)
+  const regionToZonesMap: Record<string, string[]> = {
+    "City": ["Zone I", "Zone II"],
+    "Western": ["Zone III", "Zone IV"],
+    "Eastern": ["Zone V", "Zone VI", "Zone VII"],
+  };
+
+  // Helper function to derive region from zone (for backward compatibility)
+  const getRegionFromZone = (zone: string): string => {
+    if (!zone) return "";
+    // New zone format
+    if (zone === "Zone I" || zone === "Zone II") return "City";
+    if (zone === "Zone III" || zone === "Zone IV") return "Western";
+    if (zone === "Zone V" || zone === "Zone VI" || zone === "Zone VII") return "Eastern";
+    // Old zone format (backward compatibility)
+    if (zone === "City") return "City";
+    if (zone === "Central Mumbai" || zone === "Western South" || zone === "Western North") return "Western";
+    if (zone === "Eastern Suburbs" || zone === "Northern Suburbs") return "Eastern";
+    return "";
+  };
+
+  // Helper function to convert old zone names to new zone format (for backward compatibility)
+  const convertOldZoneToNew = (zone: string): string => {
+    if (!zone) return "";
+    // If already in new format, return as is
+    if (zone.startsWith("Zone ")) return zone;
+    // Convert old zone names to new format
+    const oldToNewZoneMap: Record<string, string> = {
+      "City": "Zone I", // Default to Zone I for City
+      "Central Mumbai": "Zone II",
+      "Western South": "Zone III",
+      "Eastern Suburbs": "Zone V",
+      "Western North": "Zone IV",
+      "Northern Suburbs": "Zone VI",
+    };
+    return oldToNewZoneMap[zone] || zone;
+  };
+
+  const selectedRegion = watchSavePlot("region");
   const selectedZone = watchSavePlot("zone");
   const selectedWard = watchSavePlot("ward");
   const selectedVillage = watchSavePlot("villageName");
   const selectedSurveyNos = watchSavePlot("proposedCtsNumber");
+  
+  // Filter zones based on selected region
+  const zoneOptions = selectedRegion && regionToZonesMap[selectedRegion]
+    ? regionToZonesMap[selectedRegion]
+    : [];
   
   // State to store CTS numbers from local mapping
   const [ctsNumbers, setCtsNumbers] = useState<string[]>([]);
@@ -199,10 +245,17 @@ export default function ProjectDetailsClient() {
           // Debug: Log the raw data to see what we're getting
           console.log("[Edit Mode] Raw save_plot_details:", savePlotDetails);
           
+          // Derive region from zone if region is missing (backward compatibility)
+          // Also convert old zone format to new format if needed
+          let zone = savePlotDetails.zone || "";
+          zone = convertOldZoneToNew(zone); // Convert old zone names to new format
+          const region = savePlotDetails.region || getRegionFromZone(zone);
+
           const savePlotFormData: SavePlotFormData = {
             planningAuthority: savePlotDetails.planningAuthority || "",
             projectProponent: savePlotDetails.projectProponent || "",
-            zone: savePlotDetails.zone || "",
+            region: region,
+            zone: zone,
             ward: savePlotDetails.ward || "",
             proposedCtsNumber: Array.isArray(savePlotDetails.proposedCtsNumber) 
               ? savePlotDetails.proposedCtsNumber.map(String)
@@ -352,6 +405,31 @@ export default function ProjectDetailsClient() {
     return () => subscription.unsubscribe();
   }, [watchSavePlot]);
 
+  // Track previous region value to detect actual changes
+  const prevRegionRef = useRef<string | undefined>(undefined);
+  
+  // When region changes: clear zone, ward, village, survey no, and CTS numbers
+  useEffect(() => {
+    // Skip clearing during initial data load or if region hasn't actually changed
+    if (isInitialLoad) {
+      prevRegionRef.current = selectedRegion;
+      return;
+    }
+    
+    // Only clear if region actually changed (not just on initial render)
+    if (prevRegionRef.current !== undefined && prevRegionRef.current !== selectedRegion) {
+      // Clear all dependent fields when region changes
+      setSavePlotValue("zone", "", { shouldValidate: false });
+      setSavePlotValue("ward", "", { shouldValidate: false });
+      setSavePlotValue("villageName", "", { shouldValidate: false });
+      setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
+      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+      setCtsNumbers([]); // Clear CTS numbers state
+    }
+    
+    prevRegionRef.current = selectedRegion;
+  }, [selectedRegion, setSavePlotValue, isInitialLoad]);
+
   // Track previous zone value to detect actual changes (not just initial render)
   const prevZoneRef = useRef<string | undefined>(undefined);
   
@@ -381,34 +459,34 @@ export default function ProjectDetailsClient() {
     // Skip during initial data load
     if (isInitialLoad) return;
     
-    // Only set if both zone and ward are selected (for City/Central Mumbai), or zone is selected (for non-City/Central Mumbai)
+    // Only set if both zone and ward are selected (for Zone I/Zone II), or zone is selected (for other zones)
     if (!selectedZone) {
       return;
     }
 
-    if (selectedZone === "City") {
-      // For City, wait for ward to be selected (City only has A, B, C, D, E wards)
+    if (selectedZone === "Zone I") {
+      // For Zone I, wait for ward to be selected (Zone I only has A, B, C, D, E wards)
       if (selectedWard) {
         setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
       } else {
-        // City selected but no ward yet - clear plotBelongsTo
+        // Zone I selected but no ward yet - clear plotBelongsTo
         setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
       }
-    } else if (selectedZone === "Central Mumbai") {
-      // For Central Mumbai, wait for ward to be selected
+    } else if (selectedZone === "Zone II") {
+      // For Zone II, wait for ward to be selected
       if (selectedWard) {
         if (selectedWard === "G/N Ward" || selectedWard === "G/S Ward") {
           setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
         } else {
-          // Central Mumbai with F/N or F/S ward
+          // Zone II with F/N or F/S ward
           setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
         }
       } else {
-        // Central Mumbai selected but no ward yet - clear plotBelongsTo
+        // Zone II selected but no ward yet - clear plotBelongsTo
         setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
       }
     } else {
-      // Any zone other than City or Central Mumbai - set immediately
+      // Any zone other than Zone I or Zone II - set immediately
       setSavePlotValue("plotBelongsTo", "CTS No.", { shouldValidate: false });
     }
   }, [selectedZone, selectedWard, setSavePlotValue, isInitialLoad]);
@@ -594,44 +672,55 @@ export default function ProjectDetailsClient() {
   ];
 
   const plotBelongsOptions: SavePlotFormData["plotBelongsTo"][] = ["CTS No.", "CS No.", "F.P.No"];
-  const zoneOptions = ["City", "Central Mumbai", "Western South", "Eastern Suburbs", "Western North", "Northern Suburbs"];
+  const regionOptions = ["City", "Western", "Eastern"];
+  const allZoneOptions = [
+    "Zone I",
+    "Zone II",
+    "Zone III",
+    "Zone IV",
+    "Zone V",
+    "Zone VI",
+    "Zone VII",
+  ];
   // Ward options based on zone mapping
   const wardOptionsMap: Record<string, string[]> = {
-    City: [
+    "Zone I": [
       "A Ward",
       "B Ward",
       "C Ward",
       "D Ward",
       "E Ward",
     ],
-    "Central Mumbai": [
+    "Zone II": [
       "F/N Ward",
       "F/S Ward",
       "G/N Ward",
       "G/S Ward",
     ],
-    "Western South": [
+    "Zone III": [
       "H/E Ward",
       "H/W Ward",
       "K/E Ward",
-      "K/W Ward",
     ],
-    "Eastern Suburbs": [
+    "Zone IV": [
+      "K/W Ward",
+      "P/S Ward",
+      "P/N Ward",
+    ],
+    "Zone V": [
       "L Ward",
       "M/E Ward",
       "M/W Ward",
-      "N Ward",
     ],
-    "Western North": [
-      "P/N Ward",
-      "P/S Ward",
+    "Zone VI": [
+      "N Ward",
+      "S Ward",
+      "T Ward",
+    ],
+    "Zone VII": [
       "R/N Ward",
       "R/C Ward",
       "R/S Ward",
-    ],
-    "Northern Suburbs": [
-      "S Ward",
-      "T Ward",
     ],
   };
   // Village options per ward (mapped from DP2034 API)
@@ -1223,11 +1312,29 @@ export default function ProjectDetailsClient() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">
+                    Region <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    {...registerSavePlot("region", { required: "Region is required" })}
+                    className={inputClasses}
+                  >
+                    <option value="">----- Select Region -----</option>
+                    {regionOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  {savePlotErrors.region && <p className="text-red-600 text-sm mt-1">{savePlotErrors.region.message}</p>}
+                </div>
+                <div>
+                  <label className="block font-medium text-black mb-1">
                     Zone <span className="text-red-500">*</span>
                   </label>
                   <select
                     {...registerSavePlot("zone", { required: "Zone is required" })}
                     className={inputClasses}
+                    disabled={!selectedRegion}
                   >
                     <option value="">----- Select Zone -----</option>
                     {zoneOptions.map((option) => (
@@ -1238,6 +1345,9 @@ export default function ProjectDetailsClient() {
                   </select>
                   {savePlotErrors.zone && <p className="text-red-600 text-sm mt-1">{savePlotErrors.zone.message}</p>}
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">
                     Ward <span className="text-red-500">*</span>
@@ -1256,28 +1366,27 @@ export default function ProjectDetailsClient() {
                   </select>
                   {savePlotErrors.ward && <p className="text-red-600 text-sm mt-1">{savePlotErrors.ward.message}</p>}
                 </div>
-              </div>
-
-              <div>
-                <label className="block font-medium text-black mb-2">
-                  This plot belongs to <span className="text-red-500">*</span>
-                </label>
-                <div className="flex flex-wrap gap-4 items-center">
-                  {plotBelongsOptions.map((option) => (
-                    <label key={option} className="flex items-center gap-2 text-sm text-black">
-                      <input
-                        {...registerSavePlot("plotBelongsTo", { required: "Please select an option" })}
-                        type="radio"
-                        value={option}
-                        className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      {option}
-                    </label>
-                  ))}
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    This plot belongs to <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex flex-wrap gap-4 items-center">
+                    {plotBelongsOptions.map((option) => (
+                      <label key={option} className="flex items-center gap-2 text-sm text-black">
+                        <input
+                          {...registerSavePlot("plotBelongsTo", { required: "Please select an option" })}
+                          type="radio"
+                          value={option}
+                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        {option}
+                      </label>
+                    ))}
+                  </div>
+                  {savePlotErrors.plotBelongsTo && (
+                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotBelongsTo.message}</p>
+                  )}
                 </div>
-                {savePlotErrors.plotBelongsTo && (
-                  <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotBelongsTo.message}</p>
-                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
