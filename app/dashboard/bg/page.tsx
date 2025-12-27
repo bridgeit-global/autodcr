@@ -9,7 +9,7 @@ import { supabase } from "@/app/utils/supabase";
 
 type BGFormData = {
   zone: string;
-  fileNo: string;
+  proposalNo: string;
   bgNumber: string;
   bgDate: string;
   bankName: string;
@@ -74,7 +74,7 @@ export default function BGDetailsPage() {
       const savedEntry = loadDraft<BGEntry[]>("draft-bg-details-entries", [])[0];
       const draftForm = loadDraft<BGFormData>("draft-bg-details-form", {
         zone: "",
-        fileNo: "",
+        proposalNo: "",
         bgNumber: "",
         bgDate: "",
         bankName: "",
@@ -88,7 +88,7 @@ export default function BGDetailsPage() {
       if (savedEntry) {
         return {
           zone: savedEntry.zone || "",
-          fileNo: savedEntry.fileNo || "",
+          proposalNo: savedEntry.proposalNo || "",
           bgNumber: savedEntry.bgNumber || "",
           bgDate: savedEntry.bgDate || "",
           bankName: savedEntry.bankName || "",
@@ -175,7 +175,7 @@ export default function BGDetailsPage() {
         <tr key={entry.id}>
           <td className="border px-3 py-2">1</td>
           <td className="border px-3 py-2">{entry.zone}</td>
-          <td className="border px-3 py-2">{entry.fileNo}</td>
+          <td className="border px-3 py-2">{entry.proposalNo}</td>
           <td className="border px-3 py-2">{entry.bgNumber}</td>
           <td className="border px-3 py-2">{entry.bankName}</td>
           <td className="border px-3 py-2">{entry.bgDate}</td>
@@ -200,7 +200,7 @@ export default function BGDetailsPage() {
         const bgEntry: BGEntry = {
           id: firstEntry.id || createId(),
           zone: firstEntry.zone || "",
-          fileNo: firstEntry.fileNo || firstEntry.file_no || "",
+          proposalNo: firstEntry.proposalNo || firstEntry.proposal_no || firstEntry.fileNo || firstEntry.file_no || "",
           bgNumber: firstEntry.bgNumber || firstEntry.bg_number || "",
           bgDate: firstEntry.bgDate || firstEntry.bg_date || "",
           bankName: firstEntry.bankName || firstEntry.bank_name || "",
@@ -336,15 +336,15 @@ export default function BGDetailsPage() {
             </div>
             <div>
               <label className="block font-medium text-black mb-1">
-                File No <span className="text-red-500">*</span>
+                Proposal No <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
-                {...register("fileNo", { required: "File number is required" })}
+                {...register("proposalNo", { required: "Proposal number is required" })}
                 className={inputClasses}
-                placeholder="Enter file number"
+                placeholder="Enter proposal number"
               />
-              {errors.fileNo && <p className="text-sm text-red-600 mt-1">{errors.fileNo.message}</p>}
+              {errors.proposalNo && <p className="text-sm text-red-600 mt-1">{errors.proposalNo.message}</p>}
             </div>
           </div>
 
@@ -520,7 +520,7 @@ export default function BGDetailsPage() {
                   <tr>
                     <th className="border-t px-3 py-2 text-left">Sr. No</th>
                     <th className="border-t px-3 py-2 text-left">Zone</th>
-                    <th className="border-t px-3 py-2 text-left">File Number</th>
+                    <th className="border-t px-3 py-2 text-left">Proposal Number</th>
                     <th className="border-t px-3 py-2 text-left">BG Number</th>
                     <th className="border-t px-3 py-2 text-left">Bank Name</th>
                     <th className="border-t px-3 py-2 text-left">BG Date</th>
