@@ -30,11 +30,9 @@ type SavePlotFormData = {
   villageName: string;
   plotBelongsTo: "CTS No." | "CS No." | "F.P.No" | "";
   grossPlotArea: string;
-  sacNo: string;
+  sacNo: string[]; // SAC Nos (multi-select)
   roadName: string;
   dpZone: string;
-  latitude: string;
-  longitude: string;
   majorUseOfPlot: string;
   plotSubUse: string;
   plotNo: string;
@@ -104,6 +102,8 @@ export default function ProjectDetailsClient() {
     watch: watchSavePlot,
     getValues: getSavePlotValues,
     setValue: setSavePlotValue,
+    setError: setSavePlotError,
+    clearErrors: clearSavePlotErrors,
     formState: { errors: savePlotErrors },
     reset: resetSavePlot,
   } = useForm<SavePlotFormData>({
@@ -118,11 +118,9 @@ export default function ProjectDetailsClient() {
         villageName: "",
         proposedCtsNumber: [],
         grossPlotArea: "",
-        sacNo: "",
+        sacNo: [],
         roadName: "",
         dpZone: "",
-        latitude: "",
-        longitude: "",
         majorUseOfPlot: "",
         plotSubUse: "",
         plotNo: "",
@@ -265,11 +263,13 @@ export default function ProjectDetailsClient() {
             villageName: savePlotDetails.villageName || "",
             plotBelongsTo: savePlotDetails.plotBelongsTo || "",
             grossPlotArea: savePlotDetails.grossPlotArea || "",
-            sacNo: savePlotDetails.sacNo || "",
+        sacNo: Array.isArray(savePlotDetails.sacNo)
+          ? savePlotDetails.sacNo.map(String)
+          : typeof savePlotDetails.sacNo === "string" && savePlotDetails.sacNo
+          ? [savePlotDetails.sacNo]
+          : [],
             roadName: savePlotDetails.roadName || "",
             dpZone: savePlotDetails.dpZone || "",
-            latitude: savePlotDetails.latitude || "",
-            longitude: savePlotDetails.longitude || "",
             majorUseOfPlot: savePlotDetails.majorUseOfPlot || "",
             plotSubUse: savePlotDetails.plotSubUse || "",
             plotNo: savePlotDetails.plotNo || "",
@@ -1493,63 +1493,136 @@ export default function ProjectDetailsClient() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                  <label className="block font-medium text-black mb-1">
-                    Gross Plot Area (Sq.m) <span className="text-red-500">*</span>
+                <label className="block font-medium text-black mb-1">
+                  Gross Plot Area (Sq.m) <span className="text-red-500">*</span>
                 </label>
                 <input
-                    {...registerSavePlot("grossPlotArea", { required: "Gross plot area is required" })}
+                  {...registerSavePlot("grossPlotArea", { required: "Gross plot area is required" })}
                   type="number"
-                    step="any"
-                    className={inputClasses}
-                    placeholder="Enter area"
+                  step="any"
+                  className={inputClasses}
+                  placeholder="Enter area"
                 />
-                  {savePlotErrors.grossPlotArea && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.grossPlotArea.message}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block font-medium text-black mb-1">
-                    SAC No <span className="text-red-500">*</span>
-                  </label>
-                  <Controller
-                    name="sacNo"
-                    control={savePlotControl}
-                    rules={{
-                      required: "SAC number is required",
-                      minLength: { value: 15, message: "SAC number must be exactly 15 characters" },
-                      maxLength: { value: 15, message: "SAC number must be exactly 15 characters" },
-                      pattern: {
-                        value: /^[A-Z]{2}\d{13}$/,
-                        message: "SAC number must start with 2 capital letters followed by 13 digits (e.g., AB1234567890123)",
-                      },
-                    }}
-                    render={({ field }) => (
-                      <input
-                        {...field}
-                        type="text"
-                        className={inputClasses}
-                        placeholder="e.g., AB1234567890123"
-                        onChange={(e) => {
-                          let value = e.target.value;
-                          // Convert first 2 characters to uppercase and only allow letters
-                          if (value.length > 0) {
-                            const firstPart = value.substring(0, 2).replace(/[^A-Za-z]/g, '').toUpperCase();
-                            // For characters after position 2, only allow digits
-                            const secondPart = value.substring(2).replace(/[^\d]/g, '');
-                            // Limit to 15 characters total
-                            value = (firstPart + secondPart).substring(0, 15);
-                            field.onChange(value);
-                          } else {
-                            field.onChange(value);
-                          }
-                        }}
-                      />
-                    )}
-                  />
-                  {savePlotErrors.sacNo && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.sacNo.message}</p>
-                  )}
-                </div>
+                {savePlotErrors.grossPlotArea && (
+                  <p className="text-red-600 text-sm mt-1">{savePlotErrors.grossPlotArea.message}</p>
+                )}
+              </div>
+              <div>
+                <label className="block font-medium text-black mb-1">
+                  SAC Nos <span className="text-red-500">*</span>
+                </label>
+                <Controller
+                  name="sacNo"
+                  control={savePlotControl}
+                  rules={{
+                    validate: (v) => {
+                      if (!Array.isArray(v) || v.length === 0) {
+                        return "Please add at least one SAC number";
+                      }
+                      const pattern = /^[A-Z]{2}\d{13}$/;
+                      const invalid = v.find((value) => !pattern.test(value));
+                      if (invalid) {
+                        return "Each SAC number must be exactly 15 characters: 2 capital letters followed by 13 digits (e.g., AB1234567890123)";
+                      }
+                      return true;
+                    },
+                  }}
+                  render={({ field }) => {
+                    const current: string[] = Array.isArray(field.value) ? field.value : [];
+
+                    const addSacNo = (raw: string): boolean => {
+                      let value = (raw ?? "").trim();
+                      if (!value) return false;
+
+                      // Normalise: 2 letters + 13 digits, max 15 chars
+                      const firstPart = value.substring(0, 2).replace(/[^A-Za-z]/g, "").toUpperCase();
+                      const secondPart = value.substring(2).replace(/[^\d]/g, "");
+                      value = (firstPart + secondPart).substring(0, 15);
+
+                      // Only accept if it fully matches the SAC pattern
+                      const pattern = /^[A-Z]{2}\d{13}$/;
+                      if (!pattern.test(value)) {
+                        setSavePlotError("sacNo", {
+                          type: "manual",
+                          message:
+                            "SAC number must be exactly 15 characters: 2 capital letters followed by 13 digits (e.g., AB1234567890123)",
+                        });
+                        return false;
+                      }
+
+                      if (current.includes(value)) return false;
+                      field.onChange([...current, value]);
+                      // We have at least one valid SAC now; clear any previous error
+                      clearSavePlotErrors("sacNo");
+                      return true;
+                    };
+
+                    const removeSacNo = (sac: string) => {
+                      field.onChange(current.filter((x) => x !== sac));
+                    };
+
+                    return (
+                      <div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            className={inputClasses}
+                            placeholder="e.g., AB1234567890123"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                const target = e.target as HTMLInputElement;
+                                const added = addSacNo(target.value);
+                                if (added) {
+                                  target.value = "";
+                                }
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="px-3 py-2 text-sm font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600"
+                            onClick={(event) => {
+                              const input = (event.currentTarget.previousSibling as HTMLInputElement) || null;
+                              if (input && input.value) {
+                                const added = addSacNo(input.value);
+                                if (added) {
+                                  input.value = "";
+                                }
+                              }
+                            }}
+                          >
+                            Add
+                          </button>
+                        </div>
+                        {current.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {current.map((sac) => (
+                              <span
+                                key={sac}
+                                className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gray-200 text-sm bg-white"
+                              >
+                                <span className="text-black">{sac}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeSacNo(sac)}
+                                  className="text-gray-700 hover:text-red-700 font-semibold"
+                                  aria-label={`Remove SAC ${sac}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
+                {savePlotErrors.sacNo && (
+                  <p className="text-red-600 text-sm mt-1">{(savePlotErrors.sacNo as any).message}</p>
+                )}
+              </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1579,51 +1652,6 @@ export default function ProjectDetailsClient() {
                   />
                   {savePlotErrors.dpZone && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.dpZone.message}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-medium text-black mb-1">
-                    Latitude <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    {...registerSavePlot("latitude", {
-                      required: "Latitude is required",
-                      pattern: {
-                        value: /^\d{1,2}\s+\d{1,2}\s+\d{1,2}(\.\d{1,2})?[NS]$/i,
-                        message: "Latitude must be in DMS format: DD MM SS.ssN (e.g., 19 04 38.24N)",
-                      },
-                    })}
-                    type="text"
-                    className={inputClasses}
-                    placeholder="e.g., 19 04 38.24N"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Format: Degrees Minutes Seconds.ddN/S</p>
-                  {savePlotErrors.latitude && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.latitude.message}</p>
-                  )}
-                </div>
-              <div>
-                  <label className="block font-medium text-black mb-1">
-                    Longitude <span className="text-red-500">*</span>
-                </label>
-                <input
-                    {...registerSavePlot("longitude", {
-                      required: "Longitude is required",
-                      pattern: {
-                        value: /^\d{1,3}\s+\d{1,2}\s+\d{1,2}(\.\d{1,2})?[EW]$/i,
-                        message: "Longitude must be in DMS format: DDD MM SS.ssE (e.g., 72 52 56.84E)",
-                      },
-                    })}
-                    type="text"
-                    className={inputClasses}
-                    placeholder="e.g., 72 52 56.84E"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Format: Degrees Minutes Seconds.ddE/W</p>
-                  {savePlotErrors.longitude && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.longitude.message}</p>
                   )}
                 </div>
               </div>
