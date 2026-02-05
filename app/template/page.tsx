@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, Suspense, useRef } from "react";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { Viewer, Worker } from "@react-pdf-viewer/core";
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
@@ -8,6 +8,11 @@ import "@react-pdf-viewer/core/lib/styles/index.css";
 import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
+import {
+  TEMPLATE_CONFIG,
+  TemplateFields,
+  TemplateType,
+} from "../templates/templateGenerators";
 
 const CopyIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -21,26 +26,7 @@ const CheckIcon = () => (
   </svg>
 );
 
-type TemplateFields = {
-  CurrentDate: string;
-  WardName: string;
-  ZoneName: string;
-  OfficeAddress: string;
-  CTSNo: string;
-  VillageName: string;
-  TalukaName: string;
-  DistrictName: string;
-  RoadWidth: string;
-  RoadName: string;
-  MainRoadWidth: string;
-  MainRoadName: string;
-  ApplicantName: string;
-  FirmName: string;
-  ConsultantName: string;
-  ConsultantType: string;
-  CouncilRegNo: string;
-  RegValidityDate: string;
-};
+// TemplateFields type is now imported from templateGenerators
 
 const projects = [
   "Proposed redevelopment of existing building known as \"Naindwar CHS Ltd.\" under Reg. 33(7)(B) of DCPR-2034 on plot bearing C.T.S. No. 236 of Village - Kurla (2), at Kale Marg, Kurla(W), Mumbai in 'L' Ward. Proposed redevelopment on plot bearing C.T.S. Nos. 130, 130/1 to 7 of Village- Kurla (4) at 30.50 M. wide L.B.S. Marg, Kurla (W), Mumbai in 'L' Ward.",
@@ -248,12 +234,38 @@ const getCurrentDate = () => {
 export default function TemplatePage() {
   const [sessionTime, setSessionTime] = useState(3600);
   const [selectedProject, setSelectedProject] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType | "">("");
   const [templateFields, setTemplateFields] = useState<TemplateFields | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [letterheadBytes, setLetterheadBytes] = useState<ArrayBuffer | null>(null);
   const [letterheadError, setLetterheadError] = useState<string | null>(null);
+  const [isDscModalOpen, setIsDscModalOpen] = useState(false);
+  const [dscStatus, setDscStatus] = useState<any | null>(null);
+  const [dscCertificates, setDscCertificates] = useState<any[]>([]);
+  const [selectedDsc, setSelectedDsc] = useState<{ slotIndex: number; certIndex: number } | null>(null);
+  const [dscPin, setDscPin] = useState("");
+  const [dscError, setDscError] = useState<string | null>(null);
+  const [dscLoading, setDscLoading] = useState(false);
+  const [isSelectingArea, setIsSelectingArea] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+  const pdfViewerRef = useRef<HTMLDivElement | null>(null);
+  const [selectionRect, setSelectionRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [selectionPdfRect, setSelectionPdfRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    pageIndex: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOffsetRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   
   // Call defaultLayoutPlugin at the top level to avoid hooks order issues
   const defaultLayoutPluginInstance = defaultLayoutPlugin();
@@ -296,8 +308,10 @@ export default function TemplatePage() {
         const fields = { ...projectTemplateData[projectIndex] };
         fields.CurrentDate = getCurrentDate();
         setTemplateFields(fields);
-        // Auto-generate PDF when project is selected
-        generatePDF(fields);
+        // Auto-generate PDF when project and template are both selected
+        if (selectedTemplate) {
+          generatePDF(fields);
+        }
       } else {
         setTemplateFields(null);
         setGeneratedPdfUrl(null);
@@ -306,7 +320,7 @@ export default function TemplatePage() {
       setTemplateFields(null);
       setGeneratedPdfUrl(null);
     }
-  }, [selectedProject]);
+  }, [selectedProject, selectedTemplate]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -344,6 +358,225 @@ export default function TemplatePage() {
     </div>
   );
 
+  const openDscModal = async () => {
+    if (!generatedPdfUrl) {
+      alert("Please generate the PDF first.");
+      return;
+    }
+    setIsDscModalOpen(true);
+    setDscError(null);
+    setDscLoading(true);
+    setIsSelectingArea(false);
+    setSelectionRect(null);
+    setSelectionPdfRect(null);
+    try {
+      const [statusRes, certsRes] = await Promise.all([
+        fetch("/api/dsc/status"),
+        fetch("/api/dsc/certificates"),
+      ]);
+
+      const statusData = await statusRes.json();
+      setDscStatus(statusData);
+
+      const certsData = await certsRes.json();
+      if (certsData.success && certsData.certificates.length > 0) {
+        setDscCertificates(certsData.certificates);
+        // Don't auto-select - let user choose
+        setSelectedDsc(null);
+      } else {
+        setDscCertificates([]);
+        setSelectedDsc(null);
+        if (!certsData.success) {
+          setDscError(certsData.error || "Failed to load DSC certificates.");
+        }
+      }
+    } catch (error: any) {
+      console.error("Failed to load DSC info:", error);
+      setDscError(error.message || "Failed to load DSC info.");
+    } finally {
+      setDscLoading(false);
+    }
+  };
+
+  const signWithDsc = async (rect?: { x: number; y: number; width: number; height: number; pageIndex: number }) => {
+    if (!generatedPdfUrl) {
+      setDscError("Please generate the PDF first.");
+      return;
+    }
+    if (!selectedDsc) {
+      setDscError("Please select a DSC certificate.");
+      return;
+    }
+    if (!dscPin) {
+      setDscError("Please enter DSC PIN.");
+      return;
+    }
+
+    try {
+      setIsSigning(true);
+      setDscError(null);
+
+      const pdfResponse = await fetch(generatedPdfUrl);
+      const pdfBlob = await pdfResponse.blob();
+      const pdfFile = new File([pdfBlob], "generated.pdf", { type: "application/pdf" });
+
+      const formData = new FormData();
+      formData.append("pdf", pdfFile);
+      formData.append("pin", dscPin);
+      formData.append("certificateIndex", selectedDsc.certIndex.toString());
+      formData.append("slotIndex", selectedDsc.slotIndex.toString());
+      const pdfWidth = 612;
+      const defaultWidth = 230;
+      const defaultHeight = 90;
+      const marginRight = 40;
+      // Leave more space below for owner name text so it doesn't sit behind the signature box
+      const marginBottom = 180;
+
+      const targetRect = rect ?? {
+        // Right-bottom corner, above signature text area
+        x: pdfWidth - marginRight - defaultWidth,
+        y: marginBottom,
+        width: defaultWidth,
+        height: defaultHeight,
+        pageIndex: 0,
+      };
+
+      formData.append("x", targetRect.x.toString());
+      formData.append("y", targetRect.y.toString());
+      formData.append("width", targetRect.width.toString());
+      formData.append("height", targetRect.height.toString());
+      formData.append("pageIndex", targetRect.pageIndex.toString());
+
+      const res = await fetch("/api/dsc/sign-pdf", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setDscError(data.error || data.details || "Failed to sign PDF.");
+        return;
+      }
+
+      // Replace current PDF preview with the digitally signed PDF from server
+      if (generatedPdfUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(generatedPdfUrl);
+      }
+      setGeneratedPdfUrl(data.signedUrl);
+      setIsDscModalOpen(false);
+      setIsSelectingArea(false);
+      setSelectionRect(null);
+      setSelectionPdfRect(null);
+    } catch (error: any) {
+      console.error("Error signing PDF:", error);
+      setDscError(error.message || "Error while signing PDF.");
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
+  const updatePdfRectFromSelection = (containerRect: DOMRect, sel: { left: number; top: number; width: number; height: number }) => {
+    const pdfWidth = 612;
+    const pdfHeight = 792;
+    const scaleX = pdfWidth / containerRect.width;
+    const scaleY = pdfHeight / containerRect.height;
+
+    const sigWidth = sel.width * scaleX;
+    const sigHeight = sel.height * scaleY;
+
+    const centerX = sel.left + sel.width / 2;
+    const centerY = sel.top + sel.height / 2;
+
+    const pdfX = centerX * scaleX - sigWidth / 2;
+    const pdfY = pdfHeight - centerY * scaleY - sigHeight / 2;
+
+    setSelectionPdfRect({
+      x: pdfX,
+      y: pdfY,
+      width: sigWidth,
+      height: sigHeight,
+      pageIndex: 0,
+    });
+  };
+
+  const handlePdfClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isSelectingArea || !pdfViewerRef.current) return;
+
+    const rect = pdfViewerRef.current.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    // If no block yet, create a fixed-size block centered at click
+    if (!selectionRect) {
+      const boxWidthPx = Math.min(220, rect.width * 0.6);
+      const boxHeightPx = 90;
+      const left = Math.max(0, Math.min(clickX - boxWidthPx / 2, rect.width - boxWidthPx));
+      const top = Math.max(0, Math.min(clickY - boxHeightPx / 2, rect.height - boxHeightPx));
+
+      const sel = {
+        left,
+        top,
+        width: boxWidthPx,
+        height: boxHeightPx,
+      };
+      setSelectionRect(sel);
+      updatePdfRectFromSelection(rect, sel);
+    }
+  };
+
+  const handlePdfMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!selectionRect || !pdfViewerRef.current) return;
+
+    const rect = pdfViewerRef.current.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    const withinX = clickX >= selectionRect.left && clickX <= selectionRect.left + selectionRect.width;
+    const withinY = clickY >= selectionRect.top && clickY <= selectionRect.top + selectionRect.height;
+
+    if (withinX && withinY) {
+      setIsDragging(true);
+      dragOffsetRef.current = {
+        offsetX: clickX - selectionRect.left,
+        offsetY: clickY - selectionRect.top,
+      };
+      event.preventDefault();
+    }
+  };
+
+  const handlePdfMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || !pdfViewerRef.current || !selectionRect || !dragOffsetRef.current) return;
+
+    const rect = pdfViewerRef.current.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+
+    const newLeft = Math.max(
+      0,
+      Math.min(pointerX - dragOffsetRef.current.offsetX, rect.width - selectionRect.width)
+    );
+    const newTop = Math.max(
+      0,
+      Math.min(pointerY - dragOffsetRef.current.offsetY, rect.height - selectionRect.height)
+    );
+
+    const updatedSel = {
+      ...selectionRect,
+      left: newLeft,
+      top: newTop,
+    };
+    setSelectionRect(updatedSel);
+    updatePdfRectFromSelection(rect, updatedSel);
+  };
+
+  const handlePdfMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      dragOffsetRef.current = null;
+    }
+  };
+
   const generatePDF = async (fields: TemplateFields) => {
     setIsGenerating(true);
     try {
@@ -353,149 +586,27 @@ export default function TemplatePage() {
         return;
       }
 
+      if (!selectedTemplate) {
+        setIsGenerating(false);
+        alert("Please select a template type first.");
+        return;
+      }
+
+      const templateConfig = TEMPLATE_CONFIG[selectedTemplate];
+      if (!templateConfig) {
+        setIsGenerating(false);
+        alert("Invalid template selected.");
+        return;
+      }
+
       const baseBytes = letterheadBytes.slice(0);
       const pdfDoc = await PDFDocument.load(baseBytes);
       const page = pdfDoc.getPages()[0] ?? pdfDoc.addPage([612, 792]);
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
       
-      // Adjust starting position based on letterhead - leave space for header at top
-      // Letterhead header takes about 100-120 points from top, footer takes about 100-120 from bottom
-      const startingY = letterheadBytes ? 650 : 750;
-      const bottomMargin = letterheadBytes ? 120 : 72; // Leave space for footer
-      let yPosition = startingY;
-      const lineHeight = 14;
-      const margin = 72;
-      const pageWidth = 612 - (margin * 2);
-      const pageHeight = 792;
-      
-      // Helper function to add text with word wrap and check bounds
-      const addText = (text: string, x: number, y: number, size: number, isBold: boolean = false, maxWidth?: number): number => {
-        // Check if we're too close to the bottom margin
-        if (y < bottomMargin) {
-          console.warn(`Content would overflow into footer area. Y position: ${y}, bottom margin: ${bottomMargin}`);
-          return y; // Don't draw if too low
-        }
-        
-        const currentFont = isBold ? boldFont : font;
-        if (maxWidth) {
-          const words = text.split(' ');
-          let line = '';
-          let currentY = y;
-          let linesDrawn = 0;
-          
-          for (let i = 0; i < words.length; i++) {
-            const testLine = line + words[i] + ' ';
-            const width = currentFont.widthOfTextAtSize(testLine, size);
-            
-            if (width > maxWidth && i > 0) {
-              // Check bounds before drawing each line
-              if (currentY >= bottomMargin) {
-                page.drawText(line.trim(), { x, y: currentY, size, font: currentFont });
-              }
-              line = words[i] + ' ';
-              currentY -= lineHeight;
-              linesDrawn++;
-            } else {
-              line = testLine;
-            }
-          }
-          if (line.trim() && currentY >= bottomMargin) {
-            page.drawText(line.trim(), { x, y: currentY, size, font: currentFont });
-            linesDrawn++;
-          }
-          return currentY;
-        } else {
-          if (y >= bottomMargin) {
-            page.drawText(text, { x, y, size, font: currentFont });
-          }
-          return y;
-        }
-      };
-      
-      // Title
-      yPosition = addText("TEMPLATE: Application for Survey Remarks", margin, yPosition, 16, true);
-      yPosition -= lineHeight;
-      yPosition = addText("(For use in Building Proposal / Survey Section Submissions)", margin, yPosition, 10, false);
-      yPosition -= lineHeight * 2;
-      
-      // Date
-      yPosition = addText(`Date: ${fields.CurrentDate}`, margin, yPosition, 12);
-      yPosition -= lineHeight * 2;
-      
-      // To section
-      yPosition = addText("To,", margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText(`The Assistant Engineer (Survey) - ${fields.WardName}`, margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText(`O/o The Deputy Chief Engineer (Building Proposal) ${fields.ZoneName},`, margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText("Brihanmumbai Municipal Corporation,", margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText(fields.OfficeAddress, margin, yPosition, 12);
-      yPosition -= lineHeight * 2;
-      
-      // Subject
-      const subjectText = `Subject: Application for Survey Remarks for plot bearing C.T.S. No. ${fields.CTSNo} of Village - ${fields.VillageName}, Taluka - ${fields.TalukaName}, District - ${fields.DistrictName}, situated at ${fields.RoadWidth} wide ${fields.RoadName}, off ${fields.MainRoadWidth} wide ${fields.MainRoadName}, within BMC Limits of ${fields.WardName}.`;
-      yPosition = addText(subjectText, margin, yPosition, 12, false, pageWidth);
-      yPosition -= lineHeight * 2;
-      
-      // Salutation
-      yPosition = addText("Sir/Madam,", margin, yPosition, 12);
-      yPosition -= lineHeight * 2;
-      
-      // Body paragraph
-      const bodyText = "I/We, the undersigned, hereby submit this application for obtaining Survey Remarks in respect of the above-mentioned property. The following documents are enclosed herewith for your kind examination and record:";
-      yPosition = addText(bodyText, margin, yPosition, 12, false, pageWidth);
-      yPosition -= lineHeight * 2;
-      
-      // Documents list (simple format without table)
-      const documents = [
-        "Architect Appointment Letter",
-        "Architect Registration Certificate",
-        "Three (3) sets of Block & Location Plan",
-        "Copy of DP Remarks",
-        "Copy of Property Register Cards (PRCs) & CTS Plan"
-      ];
-      
-      documents.forEach((doc) => {
-        yPosition = addText(`• ${doc}`, margin, yPosition, 12);
-        yPosition -= lineHeight;
-      });
-      
-      yPosition -= lineHeight;
-      
-      // Request paragraph
-      const requestText = "You are therefore requested to kindly process this application and issue Survey Remarks at the earliest.";
-      yPosition = addText(requestText, margin, yPosition, 12, false, pageWidth);
-      yPosition -= lineHeight;
-      
-      const chargesText = `The requisite charges, if any, shall be duly paid, and the challan may please be prepared in the name of ${fields.ApplicantName} (e.g., M/s. Adani Electricity Mumbai Ltd.).`;
-      yPosition = addText(chargesText, margin, yPosition, 12, false, pageWidth);
-      yPosition -= lineHeight * 2;
-      
-      // Closing
-      yPosition = addText("Thanking you,", margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText("Yours faithfully,", margin, yPosition, 12);
-      yPosition -= lineHeight * 2;
-      yPosition = addText(`For ${fields.FirmName}`, margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText("(Signed)", margin, yPosition, 12);
-      yPosition -= lineHeight * 3;
-      
-      // Consultant details
-      yPosition = addText(fields.ConsultantType, margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText(fields.ConsultantName, margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText(`Reg. No.: ${fields.CouncilRegNo}`, margin, yPosition, 12);
-      yPosition -= lineHeight;
-      yPosition = addText(`Reg. Validity: ${fields.RegValidityDate}`, margin, yPosition, 12);
-      yPosition -= lineHeight * 2;
-      
-      // Enclosures
-      yPosition = addText("Encl.: As above", margin, yPosition, 12);
+      // Use the selected template generator
+      await templateConfig.generator(pdfDoc, page, fields, font, boldFont);
       
       // Generate PDF bytes
       const pdfBytes = await pdfDoc.save();
@@ -576,6 +687,49 @@ export default function TemplatePage() {
                   <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-xs font-semibold text-blue-900 mb-1">Selected Project:</p>
                     <p className="text-sm text-gray-700">{selectedProject}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Template Type Selection Card */}
+          <section className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-gray-200 px-6 py-4">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Select Template Type
+              </h2>
+            </div>
+            <div className="p-6">
+              <div className="flex flex-col gap-2">
+                <label htmlFor="template" className="text-sm font-semibold text-gray-700">
+                  Choose an appointment letter template
+                </label>
+                <select
+                  id="template"
+                  value={selectedTemplate}
+                  onChange={(event) => {
+                    setSelectedTemplate(event.target.value as TemplateType | "");
+                    setGeneratedPdfUrl(null);
+                  }}
+                  className="rounded-lg border-2 border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200 transition-all shadow-sm hover:border-gray-400"
+                >
+                  <option value="">-- Select a Template --</option>
+                  {Object.keys(TEMPLATE_CONFIG).map((templateKey) => (
+                    <option key={templateKey} value={templateKey}>
+                      {TEMPLATE_CONFIG[templateKey as TemplateType].displayName}
+                    </option>
+                  ))}
+                </select>
+                {selectedTemplate && (
+                  <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                    <p className="text-xs font-semibold text-purple-900 mb-1">Selected Template:</p>
+                    <p className="text-sm text-gray-700">
+                      {TEMPLATE_CONFIG[selectedTemplate as TemplateType].displayName}
+                    </p>
                   </div>
                 )}
               </div>
@@ -681,8 +835,8 @@ export default function TemplatePage() {
                   <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                   </svg>
-                  Survey Remarks Document
-                  {templateFields && (
+                  {selectedTemplate ? TEMPLATE_CONFIG[selectedTemplate as TemplateType].displayName : "Appointment Letter Document"}
+                  {templateFields && selectedTemplate && (
                     <button
                       onClick={() => templateFields && generatePDF(templateFields)}
                       disabled={isGenerating}
@@ -718,7 +872,7 @@ export default function TemplatePage() {
                       <p className="text-sm font-medium text-gray-700">Generated Document Preview</p>
                       <a
                         href={generatedPdfUrl}
-                        download="Survey_Remarks_Application.pdf"
+                        download={selectedTemplate ? TEMPLATE_CONFIG[selectedTemplate as TemplateType].fileName : "Appointment_Letter.pdf"}
                         className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -730,8 +884,8 @@ export default function TemplatePage() {
                     <div className="h-[800px] overflow-auto">
                       <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
                         <div style={{ height: "100%", position: "relative" }}>
-                          <Viewer 
-                            fileUrl={generatedPdfUrl} 
+                          <Viewer
+                            fileUrl={generatedPdfUrl}
                             plugins={[defaultLayoutPluginInstance]}
                             defaultScale={1.0}
                           />
@@ -745,18 +899,215 @@ export default function TemplatePage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                     <p className="text-gray-600 font-medium mb-1">No PDF generated</p>
-                    <p className="text-gray-500 text-sm">Select a project to generate the Survey Remarks document</p>
+                    <p className="text-gray-500 text-sm">Select a project and template type to generate the appointment letter document</p>
                   </div>
                 )}
               </div>
             </section>
+            {generatedPdfUrl && (
+              <div className="flex justify-end">
+                <button
+                  onClick={openDscModal}
+                  className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                >
+                  Sign using DSC
+                </button>
+              </div>
+            )}
           </div>
           </div>
         </div>
       </div>
 
       <SiteFooter />
+
+      {isDscModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl max-w-5xl w-full h-[90vh] p-6 flex flex-col space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Sign Document using DSC</h3>
+              <button
+                className="text-gray-400 hover:text-gray-600"
+                onClick={() => {
+                  if (!isSigning) {
+                    setIsDscModalOpen(false);
+                    setIsSelectingArea(false);
+                  }
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-hidden space-y-4">
+              {dscLoading ? (
+                <p className="text-sm text-gray-600">Loading DSC information...</p>
+              ) : (
+                <>
+                  {dscStatus && (
+                    <div
+                      className={`rounded-lg px-3 py-2 text-sm border ${
+                        dscStatus.connected
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                          : "bg-red-50 border-red-200 text-red-900"
+                      }`}
+                    >
+                      <p className="font-semibold">
+                        Status: {dscStatus.connected ? "Connected" : "Not connected"}
+                      </p>
+                      <p>{dscStatus.message}</p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+                    <div className="space-y-3 md:col-span-1">
+                      {dscCertificates.length > 0 && (
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-gray-700">
+                            Select DSC Certificate
+                          </label>
+                          <select
+                            value={
+                              selectedDsc
+                                ? `${selectedDsc.slotIndex}-${selectedDsc.certIndex}`
+                                : ""
+                            }
+                            onChange={(e) => {
+                              if (e.target.value === "") {
+                                setSelectedDsc(null);
+                              } else {
+                                const [slotIdx, certIdx] = e.target.value.split("-").map(Number);
+                                setSelectedDsc({ slotIndex: slotIdx, certIndex: certIdx });
+                              }
+                            }}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-black"
+                          >
+                            <option value="">-- Select DSC Certificate --</option>
+                            {dscCertificates.map((cert, idx) => {
+                              // Show CN if available, otherwise use label
+                              const displayName = cert.cn || cert.label || `Certificate ${cert.certIndex + 1}`;
+                              return (
+                                <option
+                                  key={idx}
+                                  value={`${cert.slotIndex}-${cert.certIndex}`}
+                                >
+                                  {displayName}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-gray-700">DSC PIN</label>
+                        <input
+                          type="password"
+                          value={dscPin}
+                          onChange={(e) => setDscPin(e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-black"
+                          placeholder="Enter DSC PIN"
+                        />
+                      </div>
+
+                      {dscError && (
+                        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-900">
+                          {dscError}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-2 pt-2">
+                        <button
+                          className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400"
+                          onClick={() => {
+                            void signWithDsc(selectionPdfRect || undefined);
+                          }}
+                          disabled={
+                            isSigning ||
+                            !dscStatus?.connected ||
+                            !selectedDsc ||
+                            !dscPin
+                          }
+                        >
+                          {isSigning ? "Signing..." : "Sign here"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="md:col-span-2 flex flex-col gap-2 h-full min-h-0">
+                      {generatedPdfUrl && (
+                        <>
+                          <p className="text-xs text-gray-600">
+                            Step 2: Drag the green block over the PDF to choose where the DSC
+                            signature should appear.
+                          </p>
+                          <div className="flex-1 min-h-0 border border-gray-200 rounded-lg overflow-auto">
+                            <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
+                              <div
+                                style={{ height: "100%", minHeight: 0, position: "relative" }}
+                                ref={pdfViewerRef}
+                                onClick={handlePdfClick}
+                                onMouseDown={handlePdfMouseDown}
+                                onMouseMove={handlePdfMouseMove}
+                                onMouseUp={handlePdfMouseUp}
+                                onMouseLeave={handlePdfMouseUp}
+                                className={isSelectingArea || isDragging ? "cursor-move" : "cursor-default"}
+                              >
+                                <Viewer
+                                  fileUrl={generatedPdfUrl}
+                                  plugins={[defaultLayoutPluginInstance]}
+                                  defaultScale={1.0}
+                                />
+                                {selectionRect && (
+                                  <div
+                                    className="absolute border-2 border-emerald-500 bg-emerald-500/10 pointer-events-none"
+                                    style={{
+                                      left: selectionRect.left,
+                                      top: selectionRect.top,
+                                      width: selectionRect.width,
+                                      height: selectionRect.height,
+                                    }}
+                                  />
+                                )}
+                                {isSelectingArea && !selectionRect && (
+                                  <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-emerald-400" />
+                                )}
+                              </div>
+                            </Worker>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    className="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+                    onClick={() => {
+                      if (!isSigning) {
+                        setIsDscModalOpen(false);
+                        setIsSelectingArea(false);
+                        setSelectionRect(null);
+                        setSelectionPdfRect(null);
+                      }
+                    }}
+                    disabled={isSigning}
+                  >
+                    Cancel
+                  </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+// import DSCSigner from '../components/DSCSigner';
+   
+// export default function MyPage() {
+//   return <DSCSigner />;
+// }
