@@ -21,9 +21,16 @@ const BUILDING_TYPES = [
   "Industrial",
 ];
 
+const SAVED_BUILDING_SNAPSHOT_KEY = "saved-building-details-snapshot";
+const UNSAVED_BUILDING_FLAG_KEY = "unsaved-building-details";
+const BASELINE_BUILDING_SNAPSHOT_KEY = "baseline-building-details-snapshot";
+
+const areBuildingFormsEqual = (a: BuildingFormData, b: BuildingFormData) =>
+  JSON.stringify(a) === JSON.stringify(b);
+
 export default function BuildingDetailsPage() {
   const { isEditMode, isLoading, projectData } = useProjectData();
-  // Start as "not saved" so the button shows Add/Update until user actively saves.
+  // Saved means "current form is identical to last explicitly saved snapshot".
   const [isSaved, setIsSaved] = useState(false);
 
   const {
@@ -54,7 +61,12 @@ export default function BuildingDetailsPage() {
       };
       reset(formData);
       saveDraft("draft-building-details-form", formData);
-      // Do not mark as saved here; only mark after the user explicitly submits.
+      saveDraft(BASELINE_BUILDING_SNAPSHOT_KEY, formData);
+      const savedSnapshot = loadDraft<BuildingFormData | null>(SAVED_BUILDING_SNAPSHOT_KEY, null);
+      const hasSavedFlag = isPageSaved("saved-building-details");
+      const currentlySaved = hasSavedFlag && !!savedSnapshot && areBuildingFormsEqual(formData, savedSnapshot);
+      setIsSaved(currentlySaved);
+      saveDraft(UNSAVED_BUILDING_FLAG_KEY, !currentlySaved);
     }
   }, [isEditMode, projectData, isLoading, reset]);
 
@@ -107,6 +119,10 @@ export default function BuildingDetailsPage() {
       }
       saveDraft("draft-building-details-form", data);
       markPageSaved("saved-building-details");
+      saveDraft(SAVED_BUILDING_SNAPSHOT_KEY, data);
+      saveDraft(BASELINE_BUILDING_SNAPSHOT_KEY, data);
+      saveDraft("dirty-building-details", false);
+      saveDraft(UNSAVED_BUILDING_FLAG_KEY, false);
       setIsSaved(true);
     } catch (error: any) {
       console.error("Error saving building details:", error);
@@ -117,10 +133,36 @@ export default function BuildingDetailsPage() {
   // Persist draft as user types
   useEffect(() => {
     const subscription = watch((value) => {
-      saveDraft("draft-building-details-form", value as BuildingFormData);
+      const currentValue = value as BuildingFormData;
+      saveDraft("draft-building-details-form", currentValue);
+
+      const savedSnapshot = loadDraft<BuildingFormData | null>(SAVED_BUILDING_SNAPSHOT_KEY, null);
+      const hasSavedFlag = isPageSaved("saved-building-details");
+      const currentlySaved =
+        hasSavedFlag && !!savedSnapshot && areBuildingFormsEqual(currentValue, savedSnapshot);
+
+      setIsSaved(currentlySaved);
+      saveDraft(UNSAVED_BUILDING_FLAG_KEY, !currentlySaved);
     });
     return () => subscription.unsubscribe();
   }, [watch]);
+
+  useEffect(() => {
+    const initialDraft = loadDraft<BuildingFormData>("draft-building-details-form", {
+      buildingType: "",
+      height: "",
+      fsiBuiltUpArea: "",
+      grossConstructionArea: "",
+    });
+    const savedSnapshot = loadDraft<BuildingFormData | null>(SAVED_BUILDING_SNAPSHOT_KEY, null);
+    const hasSavedFlag = isPageSaved("saved-building-details");
+    const currentlySaved =
+      hasSavedFlag && !!savedSnapshot && areBuildingFormsEqual(initialDraft, savedSnapshot);
+
+    saveDraft(BASELINE_BUILDING_SNAPSHOT_KEY, initialDraft);
+    setIsSaved(currentlySaved);
+    saveDraft(UNSAVED_BUILDING_FLAG_KEY, !currentlySaved);
+  }, []);
 
   if (isLoading) {
     return (
@@ -156,10 +198,7 @@ export default function BuildingDetailsPage() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isEditMode 
-                ? (isSaved ? "Updated" : "Update")
-                : (isSaved ? "Added" : "Add")
-              }
+              {isSaved ? "Saved" : "Save"}
             </button>
           </div>
 

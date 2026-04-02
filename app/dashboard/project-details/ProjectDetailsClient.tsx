@@ -599,6 +599,8 @@ export default function ProjectDetailsClient() {
         alert("Project details saved successfully!");
       }
       markPageSaved("saved-project-info");
+      saveDraft("dirty-project-details", false);
+      saveDraft("saved-project-info-snapshot", data);
       setIsProjectInfoSaved(true);
     } catch (error: any) {
       console.error("Error saving project:", error);
@@ -647,6 +649,8 @@ export default function ProjectDetailsClient() {
         alert("Save plot details saved successfully!");
       }
       markPageSaved("saved-save-plot-details");
+      saveDraft("dirty-project-details", false);
+      saveDraft("saved-save-plot-details-snapshot", data);
       setIsSavePlotSaved(true);
     } catch (error: any) {
       console.error("Error saving plot details:", error);
@@ -1073,10 +1077,7 @@ export default function ProjectDetailsClient() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isEditMode 
-                ? (isProjectInfoSaved ? "Updated" : "Update")
-                : (isProjectInfoSaved ? "Added" : "Add")
-              }
+              {isProjectInfoSaved ? "Saved" : "Save"}
             </button>
           </div>
 
@@ -1275,10 +1276,7 @@ export default function ProjectDetailsClient() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isEditMode 
-                ? (isSavePlotSaved ? "Updated" : "Update")
-                : (isSavePlotSaved ? "Added" : "Add")
-              }
+              {isSavePlotSaved ? "Saved" : "Save"}
                 </button>
               </div>
 

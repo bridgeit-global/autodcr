@@ -35,39 +35,6 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
-  // Password generator function
-  const generateStrongPassword = () => {
-    // Generate a strong password with at least 12 characters
-    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const lowercase = "abcdefghijklmnopqrstuvwxyz";
-    const numbers = "0123456789";
-    const special = "!@#$%^&*()_+-=[]{}|;:,.<>?";
-    
-    // Ensure at least one of each type
-    let password = "";
-    password += uppercase[Math.floor(Math.random() * uppercase.length)];
-    password += lowercase[Math.floor(Math.random() * lowercase.length)];
-    password += numbers[Math.floor(Math.random() * numbers.length)];
-    password += special[Math.floor(Math.random() * special.length)];
-    
-    // Fill the rest randomly from all character sets
-    const allChars = uppercase + lowercase + numbers + special;
-    const length = 16; // Total length
-    for (let i = password.length; i < length; i++) {
-      password += allChars[Math.floor(Math.random() * allChars.length)];
-    }
-    
-    // Shuffle the password
-    password = password.split('').sort(() => Math.random() - 0.5).join('');
-    
-    // Set the generated password
-    setValue("newPassword", password);
-    setValue("confirmPassword", ""); // Clear confirm password - user must type it manually
-    
-    // Show the password temporarily so user can see it
-    setShowNewPassword(true);
-  };
-  
   // Password validation states
   const [isCurrentPasswordVerified, setIsCurrentPasswordVerified] = useState(false);
   const [isVerifyingCurrentPassword, setIsVerifyingCurrentPassword] = useState(false);
@@ -484,15 +451,6 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     disabled={isSubmitting || submitSuccess}
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={generateStrongPassword}
-                      className="text-xs text-emerald-600 hover:text-emerald-700 font-medium px-2 py-1 rounded hover:bg-emerald-50 transition-colors focus:outline-none"
-                      title="Generate strong password"
-                      disabled={isSubmitting || submitSuccess}
-                    >
-                      Generate
-                    </button>
                     <button
                       type="button"
                       onClick={() => setShowNewPassword(!showNewPassword)}
