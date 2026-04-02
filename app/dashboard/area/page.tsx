@@ -317,6 +317,14 @@ const removePlot = (plotId: string) => {
     }
 
     markPageSaved("saved-area-details");
+    saveDraft("dirty-area-details", false);
+    saveDraft("saved-area-details-snapshot", {
+      plots,
+      totals: {
+        allPlotsTotal: portalTotals,
+        totalLeaseArea,
+      },
+    });
     setIsSaved(true);
   };
 
@@ -370,10 +378,7 @@ const removePlot = (plotId: string) => {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isEditMode 
-                ? (isSaved ? "Updated" : "Update")
-                : (isSaved ? "Added" : "Add")
-              }
+              {isSaved ? "Saved" : "Save"}
             </button>
           </div>
         </div>

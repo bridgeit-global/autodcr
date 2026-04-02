@@ -194,7 +194,7 @@ export default function ApplicantDetailsPage() {
   );
   const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
   // Track whether the current form entry has been saved in this session.
-  // Start as "not saved" so the button shows "Add" / "Update" instead of "Added" / "Updated".
+  // Start as "not saved" so the button shows "Save" instead of "Saved".
   const [isSaved, setIsSaved] = useState(false);
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ open: boolean; applicantId: number | null; applicantName: string; applicantType: string }>({
@@ -286,8 +286,8 @@ export default function ApplicantDetailsPage() {
     }
   }, [isEditMode, projectData, isLoading]);
 
-  // If the form was previously added (green button) and the user starts editing/adding
-  // another applicant, move the button back to blue "Add"
+  // If the form was previously saved (green button) and the user starts editing/adding
+  // another applicant, move the button back to blue "Save"
   useEffect(() => {
     const subscription = watch(() => {
       if (isSaved) {
@@ -573,31 +573,44 @@ export default function ApplicantDetailsPage() {
   }
 
   const onSubmit = (data: ApplicantFormData) => {
-    setApplicants((prev) => {
-      const nextId = prev.length ? Math.max(...prev.map((item) => item.id)) + 1 : 1;
-      // All entries come from directory dropdown (consultants or owners), use their auth user id
-      const userId = (showDirectoryDropdown && selectedDirectoryId) ? selectedDirectoryId : undefined;
+    const nextId = applicants.length ? Math.max(...applicants.map((item) => item.id)) + 1 : 1;
+    // All entries come from directory dropdown (consultants or owners), use their auth user id
+    const userId = (showDirectoryDropdown && selectedDirectoryId) ? selectedDirectoryId : undefined;
 
-      const newApplicant = {
-        id: nextId,
-        user_id: userId,
-        applicantType: data.applicantType,
-        name: data.name || "-",
-        contactNumber: data.contactNumber || "-",
-        email: data.emailAddress || "-",
-        registrationNo: data.registrationNumber || "-",
-        panNo: data.panNo || "-",
-        licenseIssueDate: data.licenseIssueDate || "-",
-        residentialAddress: data.residentialAddress || "-",
-        officeAddress: "-", // Not collected from form anymore
-      };
-
-      return [...prev, newApplicant];
-    });
+    const newApplicant = {
+      id: nextId,
+      user_id: userId,
+      applicantType: data.applicantType,
+      name: data.name || "-",
+      contactNumber: data.contactNumber || "-",
+      email: data.emailAddress || "-",
+      registrationNo: data.registrationNumber || "-",
+      panNo: data.panNo || "-",
+      licenseIssueDate: data.licenseIssueDate || "-",
+      residentialAddress: data.residentialAddress || "-",
+      officeAddress: "-", // Not collected from form anymore
+    };
+    const nextApplicants = [...applicants, newApplicant];
+    setApplicants(nextApplicants);
 
     reset();
     setIsFormAutofilled(false);
     markPageSaved("saved-applicant-details");
+    saveDraft("dirty-applicant-details", false);
+    saveDraft("saved-applicant-details-snapshot", {
+      applicants: nextApplicants,
+      form: {
+        applicantType: "",
+        plumbingConsultant: "",
+        name: "",
+        residentialAddress: "",
+        contactNumber: "",
+        emailAddress: "",
+        registrationNumber: "",
+        panNo: "",
+        licenseIssueDate: "",
+      },
+    });
     setIsSaved(true);
   };
 
@@ -839,10 +852,7 @@ export default function ApplicantDetailsPage() {
                     : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
                 }`}
               >
-                {isEditMode 
-                  ? (isSaved ? "Updated" : "Update")
-                  : (isSaved ? "Added" : "Add")
-                }
+                {isSaved ? "Saved" : "Save"}
               </button>
             </div>
 

@@ -824,53 +824,29 @@ function UserDashboardContent() {
                           <td className="border border-gray-300 px-4 py-3 text-left font-medium text-black">
                             {app.name}
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.draft && app.draft !== "-" && Number(app.draft) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.draft, "Draft")}
-                          >
-                            {app.draft}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Draft")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.duePayment && app.duePayment !== "-" && Number(app.duePayment) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.duePayment, "Due Payment")}
-                          >
-                            {app.duePayment}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Due Payment")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.inProcess && app.inProcess !== "-" && Number(app.inProcess) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.inProcess, "In Process")}
-                          >
-                            {app.inProcess}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "In Process")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.needClarification && app.needClarification !== "-" && Number(app.needClarification) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.needClarification, "Need Clarification")}
-                          >
-                            {app.needClarification}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Need Clarification")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.withdrawn && app.withdrawn !== "-" && Number(app.withdrawn) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.withdrawn, "Withdrawn")}
-                          >
-                            {app.withdrawn}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Withdrawn")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.rejectedOrCancelled && app.rejectedOrCancelled !== "-" && Number(app.rejectedOrCancelled) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.rejectedOrCancelled, "Rejected or Cancelled")}
-                          >
-                            {app.rejectedOrCancelled}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.approvedOrVerified && app.approvedOrVerified !== "-" && Number(app.approvedOrVerified) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.approvedOrVerified, "Approved or Verified")}
-                          >
-                            {app.approvedOrVerified}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Approved or Verified")}>
+                            0
                           </td>
-                          <td 
-                            className={`border border-gray-300 px-4 py-3 text-center ${app.systemApproved && app.systemApproved !== "-" && Number(app.systemApproved) > 0 ? "text-blue-600 cursor-pointer hover:underline font-medium" : "text-black"}`}
-                            onClick={() => handleCellClick(app.name, app.systemApproved, "System Approved")}
-                          >
-                            {app.systemApproved}
+                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
+                            0
                           </td>
                         </tr>
                       ))}

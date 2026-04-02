@@ -41,30 +41,44 @@ export function clearProjectDrafts() {
     "saved-project-details",
     "saved-project-info",
     "saved-save-plot-details",
+    "saved-project-info-snapshot",
+    "saved-save-plot-details-snapshot",
+    "baseline-project-details-snapshot",
 
     // Applicant
     "draft-applicant-details-form",
     "draft-applicant-details-applicants",
     "saved-applicant-details",
+    "saved-applicant-details-snapshot",
+    "baseline-applicant-details-snapshot",
 
     // Building
     "draft-building-details-form",
     "saved-building-details",
+    "saved-building-details-snapshot",
+    "unsaved-building-details",
+    "baseline-building-details-snapshot",
 
     // Area
     "draft-area-details-plots",
     "draft-area-details-totals",
     "saved-area-details",
+    "saved-area-details-snapshot",
+    "baseline-area-details-snapshot",
 
     // Project library
     "draft-project-library-uploads",
     "saved-project-library",
+    "saved-project-library-snapshot",
+    "baseline-project-library-snapshot",
 
     // BG details
     "draft-bg-details-form",
     "draft-bg-details-entries",
     "draft-bg-details-active-tab",
     "saved-bg-details",
+    "saved-bg-details-snapshot",
+    "baseline-bg-details-snapshot",
   ];
 
   try {

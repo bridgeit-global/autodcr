@@ -153,6 +153,12 @@ export default function BGDetailsPage() {
       }
 
       markPageSaved("saved-bg-details");
+      saveDraft("dirty-bg-details", false);
+      saveDraft("saved-bg-details-snapshot", {
+        entries: [newEntry],
+        form: data,
+        activeTab,
+      });
       setIsSaved(true);
     } catch (error: any) {
       console.error("Error saving BG details:", error);
@@ -307,10 +313,7 @@ export default function BGDetailsPage() {
               }`}
               onClick={handleSubmit(onSubmit)}
             >
-              {isEditMode 
-                ? (isSaved ? "Updated" : "Update")
-                : (isSaved ? "Added" : "Add")
-              }
+              {isSaved ? "Saved" : "Save"}
             </button>
           </div>
         </div>

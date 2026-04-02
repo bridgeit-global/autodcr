@@ -516,21 +516,52 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       return;
     }
 
-    // Update file state
-    setLetterheadFile(file);
+    // Validate A4 size by checking image dimensions
+    const tempUrl = URL.createObjectURL(file);
+    const img = new Image();
 
-    // Create preview URL
-    if (letterheadPreviewUrl) {
-      URL.revokeObjectURL(letterheadPreviewUrl);
-    }
-    const fileUrl = URL.createObjectURL(file);
-    setLetterheadPreviewUrl(fileUrl);
+    img.onload = () => {
+      // A4 aspect ratio: 210mm x 297mm ≈ 0.707 (width/height)
+      const aspectRatio = img.width / img.height;
+      const a4Ratio = 210 / 297;
+      const tolerance = 0.02; // ±2% (same strictness as registration screens)
 
-    // For images, use the preview URL directly as thumbnail
-    setLetterheadThumbnail(fileUrl);
+      if (aspectRatio < a4Ratio - tolerance || aspectRatio > a4Ratio + tolerance) {
+        setSubmitError("Letterhead image must be of A4 size (210mm x 297mm aspect ratio)");
+        setLetterheadFile(null);
+        setIsLetterheadModalOpen(false);
+        URL.revokeObjectURL(tempUrl);
+        if (letterheadInputRef.current) {
+          letterheadInputRef.current.value = "";
+        }
+        return;
+      }
 
-    // Always open preview modal when new file is selected
-    setTimeout(() => setIsLetterheadModalOpen(true), 0);
+      setSubmitError(null);
+      setLetterheadFile(file);
+
+      // Replace existing preview URL safely
+      if (letterheadPreviewUrl) {
+        URL.revokeObjectURL(letterheadPreviewUrl);
+      }
+      setLetterheadPreviewUrl(tempUrl);
+      setLetterheadThumbnail(tempUrl);
+
+      // Open preview modal when new valid file is selected
+      setTimeout(() => setIsLetterheadModalOpen(true), 0);
+    };
+
+    img.onerror = () => {
+      setSubmitError("Failed to load image");
+      setLetterheadFile(null);
+      setIsLetterheadModalOpen(false);
+      URL.revokeObjectURL(tempUrl);
+      if (letterheadInputRef.current) {
+        letterheadInputRef.current.value = "";
+      }
+    };
+
+    img.src = tempUrl;
   };
 
   const handleLetterheadThumbnailClick = () => {
@@ -902,16 +933,29 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
               </div>
 
               <div className="flex-1 overflow-auto p-6 space-y-4">
-                <div className="border rounded-lg bg-white flex items-center justify-center" style={{ minHeight: "600px" }}>
-                  <img 
-                    src={previewUrl} 
-                    alt="Letterhead" 
-                    className="max-w-full max-h-full object-contain"
-                    onError={(e) => {
-                      console.error('Error loading letterhead image:', previewUrl);
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
+                <div
+                  className="border rounded-lg bg-white flex items-center justify-center"
+                  style={{ minHeight: "600px" }}
+                >
+                  <div
+                    className="relative w-full max-w-3xl mx-auto rounded-lg border-2 border-gray-300 bg-white shadow-sm overflow-hidden"
+                    style={{ aspectRatio: "210 / 297" }}
+                  >
+                    <img
+                      src={previewUrl}
+                      alt="Letterhead"
+                      className="absolute inset-0 w-full h-full object-contain"
+                      onError={(e) => {
+                        console.error('Error loading letterhead image:', previewUrl);
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                    {/* Blue content area overlay (simulating where content will appear) */}
+                    <div
+                      className="absolute rounded-xl border-2 border-blue-400 bg-blue-50/40"
+                      style={{ top: "14%", bottom: "14%", left: "8%", right: "8%" }}
+                    />
+                  </div>
                 </div>
               </div>
             </motion.div>

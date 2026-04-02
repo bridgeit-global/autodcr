@@ -40,47 +40,6 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  // Generate a strong random password (and fill confirm password too)
-  const generateStrongPassword = () => {
-    const length = 16;
-    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const lowercase = "abcdefghijklmnopqrstuvwxyz";
-    const numbers = "0123456789";
-    const special = "!@#$%^&*(),.?\":{}|<>";
-    const allChars = uppercase + lowercase + numbers + special;
-    
-    // Ensure at least one character from each required category
-    let pwd = "";
-    pwd += uppercase[Math.floor(Math.random() * uppercase.length)];
-    pwd += lowercase[Math.floor(Math.random() * lowercase.length)];
-    pwd += numbers[Math.floor(Math.random() * numbers.length)];
-    pwd += special[Math.floor(Math.random() * special.length)];
-    
-    // Fill the rest randomly from all character sets
-    for (let i = pwd.length; i < length; i++) {
-      pwd += allChars.charAt(Math.floor(Math.random() * allChars.length));
-    }
-    
-    // Shuffle the password to randomize the order
-    pwd = pwd.split('').sort(() => Math.random() - 0.5).join('');
-
-    // Update password & confirm password, and revalidate both
-    setFormData((prev) => {
-      const updated = {
-        ...prev,
-        password: pwd,
-        confirmPassword: pwd,
-      };
-      validateField("password", updated.password, updated);
-      validateField("confirmPassword", updated.confirmPassword, updated);
-      return updated;
-    });
-
-    // Show both fields so user can see the generated password
-    setShowPassword(true);
-    setShowConfirmPassword(true);
-  };
   
   // Cleanup object URL on unmount
   useEffect(() => {
@@ -2872,14 +2831,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={generateStrongPassword}
-                        className="text-xs text-emerald-600 hover:text-emerald-700 font-medium px-2 py-1 rounded hover:bg-emerald-50 transition-colors focus:outline-none"
-                        title="Generate strong password"
-                      >
-                        Generate
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => setShowPassword(!showPassword)}
                         className="text-gray-500 hover:text-gray-700 focus:outline-none"
                         aria-label={showPassword ? "Hide password" : "Show password"}
@@ -3229,7 +3180,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       style={{ minHeight: "600px" }}
                     >
                       <div
-                        className="relative w-full max-w-3xl mx-auto"
+                        className="relative w-full max-w-3xl mx-auto rounded-lg border-2 border-gray-300 bg-white shadow-sm overflow-hidden"
                         style={{ aspectRatio: "210 / 297" }}
                       >
                         {/* Letterhead image as background */}

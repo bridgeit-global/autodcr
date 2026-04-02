@@ -164,6 +164,8 @@ export default function ProjectLibraryPage() {
     console.log("Project Library (local) uploads:", filteredUploads);
     alert("Project library documents saved successfully!");
     markPageSaved("saved-project-library");
+    saveDraft("dirty-project-library", false);
+    saveDraft("saved-project-library-snapshot", uploads);
     setIsSaved(true);
   };
 
@@ -214,10 +216,7 @@ export default function ProjectLibraryPage() {
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
               }`}
             >
-              {isEditMode 
-                ? (isSaved ? "Updated" : "Update")
-                : (isSaved ? "Added" : "Add")
-              }
+              {isSaved ? "Saved" : "Save"}
             </button>
           </div>
         </div>
