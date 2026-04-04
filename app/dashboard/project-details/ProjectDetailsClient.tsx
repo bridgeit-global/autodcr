@@ -46,6 +46,73 @@ type SavePlotFormData = {
   }[];
 };
 
+/** Wards where plot belongs to F.P.No only (CTS No. / CS No. disabled). */
+const WARDS_FORCE_FP_NO = new Set<string>([
+  "B Ward",
+  "G/N Ward",
+  "G/S Ward",
+  "H/E Ward",
+  "H/W Ward",
+  "K/E Ward",
+  "K/W Ward",
+  "N Ward",
+  "P/N Ward",
+  "R/C Ward",
+]);
+
+function isWardForcingFpNo(ward: string | undefined): boolean {
+  return !!ward && WARDS_FORCE_FP_NO.has(ward);
+}
+
+/** Label for the multi-select that lists survey numbers, aligned with "This plot belongs to". */
+function labelForSurveyField(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
+  switch (plotBelongs) {
+    case "F.P.No":
+      return "F.P. No";
+    case "CS No.":
+      return "CS No.";
+    case "CTS No.":
+      return "CTS No.";
+    default:
+      return "Survey No";
+  }
+}
+
+function isPlotBelongsRadioDisabled(
+  option: SavePlotFormData["plotBelongsTo"],
+  ward: string | undefined
+): boolean {
+  if (!ward) return false;
+  if (isWardForcingFpNo(ward)) return option !== "F.P.No";
+  return option === "F.P.No";
+}
+
+function emptySurveyOptionsMessage(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
+  switch (plotBelongs) {
+    case "F.P.No":
+      return "No F.P. numbers found";
+    case "CS No.":
+      return "No CS numbers found";
+    case "CTS No.":
+      return "No CTS numbers found";
+    default:
+      return "No survey numbers found";
+  }
+}
+
+function validateSurveySelectionMessage(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
+  switch (plotBelongs) {
+    case "F.P.No":
+      return "Please select at least one F.P. number";
+    case "CS No.":
+      return "Please select at least one CS number";
+    case "CTS No.":
+      return "Please select at least one CTS number";
+    default:
+      return "Please select at least one survey number";
+  }
+}
+
 export default function ProjectDetailsClient() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -190,6 +257,7 @@ export default function ProjectDetailsClient() {
   const selectedRegion = watchSavePlot("region");
   const selectedZone = watchSavePlot("zone");
   const selectedWard = watchSavePlot("ward");
+  const selectedPlotBelongs = watchSavePlot("plotBelongsTo");
   const selectedVillage = watchSavePlot("villageName");
   const selectedSurveyNos = watchSavePlot("proposedCtsNumber");
   
@@ -454,42 +522,29 @@ export default function ProjectDetailsClient() {
     prevZoneRef.current = selectedZone;
   }, [selectedZone, setSavePlotValue, isInitialLoad]);
 
-  // Auto-select plotBelongsTo based on zone and ward
+  // plotBelongsTo: only auto-set F.P.No for FP wards; other wards require an explicit CTS / CS choice (no default).
   useEffect(() => {
-    // Skip during initial data load
     if (isInitialLoad) return;
-    
-    // Only set if both zone and ward are selected (for Zone I/Zone II), or zone is selected (for other zones)
+
     if (!selectedZone) {
       return;
     }
 
-    if (selectedZone === "Zone I") {
-      // For Zone I, wait for ward to be selected (Zone I only has A, B, C, D, E wards)
-      if (selectedWard) {
-        setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
-      } else {
-        // Zone I selected but no ward yet - clear plotBelongsTo
-        setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
-      }
-    } else if (selectedZone === "Zone II") {
-      // For Zone II, wait for ward to be selected
-      if (selectedWard) {
-        if (selectedWard === "G/N Ward" || selectedWard === "G/S Ward") {
-          setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
-        } else {
-          // Zone II with F/N or F/S ward
-          setSavePlotValue("plotBelongsTo", "CS No.", { shouldValidate: false });
-        }
-      } else {
-        // Zone II selected but no ward yet - clear plotBelongsTo
-        setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
-      }
-    } else {
-      // Any zone other than Zone I or Zone II - set immediately
-      setSavePlotValue("plotBelongsTo", "CTS No.", { shouldValidate: false });
+    if (!selectedWard) {
+      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+      return;
     }
-  }, [selectedZone, selectedWard, setSavePlotValue, isInitialLoad]);
+
+    if (isWardForcingFpNo(selectedWard)) {
+      setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
+      return;
+    }
+
+    const current = getSavePlotValues().plotBelongsTo;
+    if (current === "F.P.No") {
+      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+    }
+  }, [selectedZone, selectedWard, setSavePlotValue, isInitialLoad, getSavePlotValues]);
 
   // Track previous ward value to detect actual changes
   const prevWardRef = useRef<string | undefined>(undefined);
@@ -1370,12 +1425,20 @@ export default function ProjectDetailsClient() {
                   </label>
                   <div className="flex flex-wrap gap-4 items-center">
                     {plotBelongsOptions.map((option) => (
-                      <label key={option} className="flex items-center gap-2 text-sm text-black">
+                      <label
+                        key={option}
+                        className={`flex items-center gap-2 text-sm text-black ${
+                          isPlotBelongsRadioDisabled(option, selectedWard)
+                            ? "opacity-50 cursor-not-allowed"
+                            : ""
+                        }`}
+                      >
                         <input
                           {...registerSavePlot("plotBelongsTo", { required: "Please select an option" })}
                           type="radio"
                           value={option}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                          disabled={isPlotBelongsRadioDisabled(option, selectedWard)}
+                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50"
                         />
                         {option}
                       </label>
@@ -1410,19 +1473,22 @@ export default function ProjectDetailsClient() {
                 </div>
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Survey No <span className="text-red-500">*</span>
+                    {labelForSurveyField(selectedPlotBelongs)} <span className="text-red-500">*</span>
                   </label>
                   <Controller
                     name="proposedCtsNumber"
                     control={savePlotControl}
                     rules={{
                       validate: (v) =>
-                        Array.isArray(v) && v.length > 0 ? true : "Please select at least one survey number",
+                        Array.isArray(v) && v.length > 0
+                          ? true
+                          : validateSurveySelectionMessage(selectedPlotBelongs),
                     }}
                     render={({ field, fieldState }) => {
                       // Use CTS numbers from API (already sorted)
                       const sortedOptions = ctsNumbers;
                       const current = Array.isArray(field.value) ? field.value : [];
+                      const surveyKindLabel = labelForSurveyField(selectedPlotBelongs);
 
                       const addSurveyNo = (surveyNo: string) => {
                         const cleaned = (surveyNo ?? "").trim();
@@ -1447,8 +1513,8 @@ export default function ProjectDetailsClient() {
                           >
                           <option value="">
                             {sortedOptions.length === 0 
-                              ? "No CTS numbers found" 
-                              : "----- Select Survey No -----"}
+                              ? emptySurveyOptionsMessage(selectedPlotBelongs) 
+                              : `----- Select ${surveyKindLabel} -----`}
                           </option>
                             {sortedOptions.map((surveyNo) => (
                               <option key={surveyNo} value={surveyNo}>
@@ -1469,7 +1535,7 @@ export default function ProjectDetailsClient() {
                                     type="button"
                                     onClick={() => removeSurveyNo(surveyNo)}
                                     className="text-gray-700 hover:text-red-700 font-semibold"
-                                    aria-label={`Remove survey number ${surveyNo}`}
+                                    aria-label={`Remove ${surveyKindLabel} ${surveyNo}`}
                                   >
                                     ×
                                   </button>
