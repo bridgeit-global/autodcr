@@ -1,7 +1,7 @@
 /**
- * MCGM GIS "Search → FP" style TPS scheme labels per ward.
- * Labels are shown in the portal; each maps to a village key in villageToCtsMapping.json for that ward.
- * Adjust mappings if official crosswalk differs.
+ * Optional GIS TPS label → legacy village key in villageToCtsMapping.json (CS/CTS blocks).
+ * Prefer direct keys: merged MapServer/13 data uses TPS_NAME as the key (e.g. "TPS MAHIM No. II") with FP lists.
+ * This table is only used when the selected label has no direct entry under the ward.
  */
 export const FP_TPS_SCHEMA_OPTIONS_BY_WARD: Record<string, readonly string[]> = {
   "G/N Ward": ["TPS MAHIM No. II", "TPS MAHIM No. III", "TPS MAHIM No. IV"],

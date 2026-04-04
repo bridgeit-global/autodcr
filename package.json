@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "generate-dp2034-fp": "node scripts/fetch-dp2034-fp-static.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
