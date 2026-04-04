@@ -1,9 +1,10 @@
-// Village to Survey Numbers mapping
-// Uses static local data instead of external API calls
-// Data was pre-fetched from: https://agsmaps.mcgm.gov.in/server/rest/services/Development_Plan_2034/MapServer/13
+// Village to Survey Numbers mapping (CS/CTS + F.P.No GIS data in one file)
+// Uses static local data instead of external API calls.
+// F.P. TPS_NAME → FP_NO rows are merged into villageToCtsMapping.json by scripts/fetch-dp2034-fp-static.mjs
 
 import ctsMappingData from './villageToCtsMapping.json';
 import { getFpTpsSchemaOptionsForWard, resolveFpTpsSchemaToMappingVillage } from './fpTpsSchemaMapping';
+import { isDp2034GisTpsMappingKey } from './dp2034FpWards';
 
 // Type definition for the mapping structure
 type CtsMapping = Record<string, Record<string, string[]>>;
@@ -51,6 +52,13 @@ export function getSurveyNumbersForPlotFlowSync(
 ): string[] {
   if (!villageNameField || !ward) return [];
   if (plotBelongsTo === "F.P.No") {
+    const wardData = ctsMapping[ward];
+    if (wardData) {
+      const direct = wardData[villageNameField];
+      if (Array.isArray(direct) && direct.length > 0) {
+        return [...direct];
+      }
+    }
     const mapped = resolveFpTpsSchemaToMappingVillage(ward, villageNameField);
     const key = mapped ?? villageNameField;
     return getSurveyNumbersForVillage(key, ward);
@@ -67,5 +75,9 @@ export function getTpsSchemaOptionsForWard(ward: string): string[] {
   if (fpSpecific) return fpSpecific;
   const wardData = ctsMapping[ward];
   if (!wardData) return [];
+  const tpsKeys = Object.keys(wardData).filter(isDp2034GisTpsMappingKey);
+  if (tpsKeys.length > 0) {
+    return tpsKeys.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }
   return Object.keys(wardData).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }

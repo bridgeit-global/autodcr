@@ -22,3 +22,8 @@ export const DP2034_FP_WARD_LABELS = [
 ] as const;
 
 export const WARDS_WITH_FP_OPTION = new Set<string>(DP2034_FP_WARD_LABELS);
+
+/** GIS MapServer/13 `TPS_NAME` values merged under FP wards in `villageToCtsMapping.json`. */
+export function isDp2034GisTpsMappingKey(name: string): boolean {
+  return name.startsWith("TPS ");
+}
