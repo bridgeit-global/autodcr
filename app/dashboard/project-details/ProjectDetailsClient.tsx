@@ -4,7 +4,8 @@ import { useEffect, useState, useRef } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
-import { getSurveyNumbersForVillageSync } from "@/app/utils/villageToSurveyNumbers";
+import { getSurveyNumbersForPlotFlowSync } from "@/app/utils/villageToSurveyNumbers";
+import { WARDS_WITH_FP_OPTION } from "@/app/utils/dp2034FpWards";
 import { supabase } from "@/app/utils/supabase";
 
 
@@ -21,7 +22,7 @@ type ProjectFormData = {
 };
 
 type SavePlotFormData = {
-  planningAuthority: "BMC(BP)" | "BMC-TDR Generation & Transfer" | "Other" | "";
+  planningAuthority: "BMC" | "SRA" | "MHADA" | "MMRDA" | "";
   projectProponent: string;
   region: string;
   zone: string;
@@ -46,22 +47,114 @@ type SavePlotFormData = {
   }[];
 };
 
-/** Wards where plot belongs to F.P.No only (CTS No. / CS No. disabled). */
-const WARDS_FORCE_FP_NO = new Set<string>([
-  "B Ward",
-  "G/N Ward",
-  "G/S Ward",
-  "H/E Ward",
-  "H/W Ward",
-  "K/E Ward",
-  "K/W Ward",
-  "N Ward",
-  "P/N Ward",
-  "R/C Ward",
-]);
+const PLANNING_AUTHORITY_OPTIONS = ["BMC", "SRA", "MHADA", "MMRDA"] as const;
 
-function isWardForcingFpNo(ward: string | undefined): boolean {
-  return !!ward && WARDS_FORCE_FP_NO.has(ward);
+function normalizePlanningAuthority(v: unknown): SavePlotFormData["planningAuthority"] {
+  if (typeof v !== "string") return "";
+  return (PLANNING_AUTHORITY_OPTIONS as readonly string[]).includes(v)
+    ? (v as Exclude<SavePlotFormData["planningAuthority"], "">)
+    : "";
+}
+
+const SAVE_PLOT_FORM_DEFAULTS: SavePlotFormData = {
+  planningAuthority: "",
+  projectProponent: "",
+  plotBelongsTo: "",
+  region: "",
+  zone: "",
+  ward: "",
+  villageName: "",
+  proposedCtsNumber: [],
+  grossPlotArea: "",
+  sacNo: [],
+  roadName: "",
+  dpZone: "",
+  majorUseOfPlot: "",
+  plotSubUse: "",
+  plotNo: "",
+  isInternalRoadPresent: "",
+  plotType: "",
+  plotEntries: [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
+};
+
+/** Base plot-belongs choices by region only (no F.P.No here). */
+function plotBelongsBaseOptionsForRegion(region: string): SavePlotFormData["plotBelongsTo"][] {
+  if (region === "City") return ["CS No."];
+  if (region === "Western" || region === "Eastern") return ["CTS No."];
+  return [];
+}
+
+/** Options for the current region + ward (adds F.P.No only for WARDS_WITH_FP_OPTION). */
+function plotBelongsOptionsForRegionAndWard(
+  region: string,
+  ward: string | undefined
+): SavePlotFormData["plotBelongsTo"][] {
+  const base = plotBelongsBaseOptionsForRegion(region);
+  if (base.length === 0) return [];
+  if (!ward || !WARDS_WITH_FP_OPTION.has(ward)) return base;
+  return [...base, "F.P.No"];
+}
+
+/** Auto-selected plot type when ward is not an FP ward (or ward not chosen yet): CS or CTS only. */
+function defaultBasePlotBelongsForRegion(region: string): SavePlotFormData["plotBelongsTo"] {
+  const base = plotBelongsBaseOptionsForRegion(region);
+  return base.length === 1 ? base[0] : "";
+}
+
+function normalizePlotBelongsForRegion(
+  region: string,
+  ward: string | undefined,
+  value: SavePlotFormData["plotBelongsTo"] | string
+): SavePlotFormData["plotBelongsTo"] {
+  const allowed = plotBelongsOptionsForRegionAndWard(region, ward);
+  if (allowed.length === 0) return "";
+  if (allowed.includes(value as SavePlotFormData["plotBelongsTo"])) {
+    return value as SavePlotFormData["plotBelongsTo"];
+  }
+  // Invalid / empty: default CS/CTS for non-FP wards; no default when FP ward must choose CS/CTS vs F.P.No
+  const mustPickFpOrBase = ward && WARDS_WITH_FP_OPTION.has(ward) && allowed.length > 1;
+  if (mustPickFpOrBase) return "";
+  return allowed[0];
+}
+
+/** Label for the village/division/TPS dropdown, aligned with "This plot belongs to". */
+function labelForVillageDivisionField(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
+  switch (plotBelongs) {
+    case "CS No.":
+      return "Division";
+    case "CTS No.":
+      return "Village";
+    case "F.P.No":
+      return "TPS schema";
+    default:
+      return "Village/Division";
+  }
+}
+
+function villageSelectPlaceholder(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
+  switch (plotBelongs) {
+    case "CS No.":
+      return "----- Select Division -----";
+    case "CTS No.":
+      return "----- Select Village -----";
+    case "F.P.No":
+      return "----- Select TPS schema -----";
+    default:
+      return "----- Select Village -----";
+  }
+}
+
+function villageFieldRequiredMessage(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
+  switch (plotBelongs) {
+    case "CS No.":
+      return "Division is required";
+    case "CTS No.":
+      return "Village is required";
+    case "F.P.No":
+      return "TPS schema is required";
+    default:
+      return "Village/Division is required";
+  }
 }
 
 /** Label for the multi-select that lists survey numbers, aligned with "This plot belongs to". */
@@ -76,15 +169,6 @@ function labelForSurveyField(plotBelongs: SavePlotFormData["plotBelongsTo"]): st
     default:
       return "Survey No";
   }
-}
-
-function isPlotBelongsRadioDisabled(
-  option: SavePlotFormData["plotBelongsTo"],
-  ward: string | undefined
-): boolean {
-  if (!ward) return false;
-  if (isWardForcingFpNo(ward)) return option !== "F.P.No";
-  return option === "F.P.No";
 }
 
 function emptySurveyOptionsMessage(plotBelongs: SavePlotFormData["plotBelongsTo"]): string {
@@ -175,36 +259,30 @@ export default function ProjectDetailsClient() {
     reset: resetSavePlot,
   } = useForm<SavePlotFormData>({
     defaultValues: (() => {
-      const draft = loadDraft<any>("draft-project-details-save-plot", {
-        planningAuthority: "",
-        projectProponent: "",
-        plotBelongsTo: "",
-        region: "",
-        zone: "",
-        ward: "",
-        villageName: "",
-        proposedCtsNumber: [],
-        grossPlotArea: "",
-        sacNo: [],
-        roadName: "",
-        dpZone: "",
-        majorUseOfPlot: "",
-        plotSubUse: "",
-        plotNo: "",
-        isInternalRoadPresent: "",
-        plotType: "",
-        plotEntries: [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
-      });
+      const stored = loadDraft<Partial<SavePlotFormData>>(
+        "draft-project-details-save-plot",
+        SAVE_PLOT_FORM_DEFAULTS
+      );
+      const merged: SavePlotFormData = {
+        ...SAVE_PLOT_FORM_DEFAULTS,
+        ...(stored && typeof stored === "object" ? stored : {}),
+      };
 
       // Back-compat: older drafts may have `proposedCtsNumber` as a string (single select)
-      const raw = draft?.proposedCtsNumber;
+      const raw = merged.proposedCtsNumber;
       const normalizedProposedCtsNumber =
         Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw ? [raw] : [];
 
       return {
-        ...draft,
+        ...merged,
         proposedCtsNumber: normalizedProposedCtsNumber,
-      } as SavePlotFormData;
+        planningAuthority: normalizePlanningAuthority(merged.planningAuthority),
+        plotBelongsTo: normalizePlotBelongsForRegion(
+          merged.region || "",
+          merged.ward || undefined,
+          merged.plotBelongsTo || ""
+        ),
+      };
     })(),
   });
 
@@ -268,6 +346,9 @@ export default function ProjectDetailsClient() {
   
   // State to store CTS numbers from local mapping
   const [ctsNumbers, setCtsNumbers] = useState<string[]>([]);
+  /** F.P.No: TPS schemes from DP2034 MapServer/13 (same as dpremarks.mcgm.gov.in). */
+  const [fpTpsFromApi, setFpTpsFromApi] = useState<string[] | null>(null);
+  const [fpTpsReady, setFpTpsReady] = useState(false);
 
   // Fetch project data when in edit mode
   useEffect(() => {
@@ -318,7 +399,7 @@ export default function ProjectDetailsClient() {
           const region = savePlotDetails.region || getRegionFromZone(zone);
 
           const savePlotFormData: SavePlotFormData = {
-            planningAuthority: savePlotDetails.planningAuthority || "",
+            planningAuthority: normalizePlanningAuthority(savePlotDetails.planningAuthority),
             projectProponent: savePlotDetails.projectProponent || "",
             region: region,
             zone: zone,
@@ -329,7 +410,11 @@ export default function ProjectDetailsClient() {
               ? [savePlotDetails.proposedCtsNumber]
               : [],
             villageName: savePlotDetails.villageName || "",
-            plotBelongsTo: savePlotDetails.plotBelongsTo || "",
+            plotBelongsTo: normalizePlotBelongsForRegion(
+              region,
+              savePlotDetails.ward || undefined,
+              savePlotDetails.plotBelongsTo || ""
+            ),
             grossPlotArea: savePlotDetails.grossPlotArea || "",
         sacNo: Array.isArray(savePlotDetails.sacNo)
           ? savePlotDetails.sacNo.map(String)
@@ -415,15 +500,34 @@ export default function ProjectDetailsClient() {
                     });
                   }, 100);
                   
-                  // Get CTS numbers for the loaded village and ward from local mapping
                   if (savePlotFormData.villageName && savePlotFormData.ward) {
-                    console.log("[Edit Mode] Getting CTS numbers for:", savePlotFormData.villageName, savePlotFormData.ward);
-                    const numbers = getSurveyNumbersForVillageSync(
-                      savePlotFormData.villageName,
-                      savePlotFormData.ward
-                    );
-                    console.log("[Edit Mode] Got CTS numbers:", numbers);
-                    setCtsNumbers(numbers);
+                    console.log("[Edit Mode] Getting survey numbers for:", savePlotFormData.villageName, savePlotFormData.ward);
+                    const loadNumbers = async () => {
+                      if (savePlotFormData.plotBelongsTo === "F.P.No") {
+                        try {
+                          const qs = new URLSearchParams({
+                            type: "fp",
+                            ward: savePlotFormData.ward,
+                            tps: savePlotFormData.villageName,
+                          });
+                          const r = await fetch(`/api/dp2034/map-query?${qs}`);
+                          const data = await r.json();
+                          if (Array.isArray(data.values) && data.values.length > 0) {
+                            setCtsNumbers(data.values);
+                            return;
+                          }
+                        } catch {
+                          /* fall through */
+                        }
+                      }
+                      const numbers = getSurveyNumbersForPlotFlowSync(
+                        savePlotFormData.ward,
+                        savePlotFormData.villageName,
+                        savePlotFormData.plotBelongsTo || ""
+                      );
+                      setCtsNumbers(numbers);
+                    };
+                    void loadNumbers();
                   }
                   
                   // Reset flag after all values are set
@@ -515,36 +619,14 @@ export default function ProjectDetailsClient() {
       setSavePlotValue("ward", "", { shouldValidate: false });
       setSavePlotValue("villageName", "", { shouldValidate: false });
       setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
-      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
+      setSavePlotValue("plotBelongsTo", defaultBasePlotBelongsForRegion(selectedRegion), {
+        shouldValidate: false,
+      });
       setCtsNumbers([]); // Clear CTS numbers state
     }
     
     prevZoneRef.current = selectedZone;
-  }, [selectedZone, setSavePlotValue, isInitialLoad]);
-
-  // plotBelongsTo: only auto-set F.P.No for FP wards; other wards require an explicit CTS / CS choice (no default).
-  useEffect(() => {
-    if (isInitialLoad) return;
-
-    if (!selectedZone) {
-      return;
-    }
-
-    if (!selectedWard) {
-      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
-      return;
-    }
-
-    if (isWardForcingFpNo(selectedWard)) {
-      setSavePlotValue("plotBelongsTo", "F.P.No", { shouldValidate: false });
-      return;
-    }
-
-    const current = getSavePlotValues().plotBelongsTo;
-    if (current === "F.P.No") {
-      setSavePlotValue("plotBelongsTo", "", { shouldValidate: false });
-    }
-  }, [selectedZone, selectedWard, setSavePlotValue, isInitialLoad, getSavePlotValues]);
+  }, [selectedZone, selectedRegion, setSavePlotValue, isInitialLoad]);
 
   // Track previous ward value to detect actual changes
   const prevWardRef = useRef<string | undefined>(undefined);
@@ -563,10 +645,19 @@ export default function ProjectDetailsClient() {
       setSavePlotValue("villageName", "", { shouldValidate: false });
       setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
       setCtsNumbers([]); // Clear CTS numbers state
+      const current = getSavePlotValues().plotBelongsTo;
+      const next = normalizePlotBelongsForRegion(
+        selectedRegion,
+        selectedWard || undefined,
+        current
+      );
+      if (current !== next) {
+        setSavePlotValue("plotBelongsTo", next, { shouldValidate: false });
+      }
     }
     
     prevWardRef.current = selectedWard;
-  }, [selectedWard, setSavePlotValue, isInitialLoad]);
+  }, [selectedWard, selectedRegion, setSavePlotValue, isInitialLoad, getSavePlotValues]);
 
   // Track previous village value to detect actual changes
   const prevVillageRef = useRef<string | undefined>(undefined);
@@ -589,9 +680,59 @@ export default function ProjectDetailsClient() {
     prevVillageRef.current = selectedVillage;
   }, [selectedVillage, setSavePlotValue, isInitialLoad]);
 
-  // Get CTS numbers from local mapping when village and ward are selected
+  // F.P.No: load TPS scheme names from DP2034 MapServer (dpremarks.mcgm.gov.in / Widget.js layer 13)
   useEffect(() => {
-    // Skip during initial load in edit mode (handled separately in fetchProject)
+    if (selectedPlotBelongs !== "F.P.No" || !selectedWard) {
+      setFpTpsFromApi(null);
+      setFpTpsReady(false);
+      return;
+    }
+    setFpTpsReady(false);
+    setFpTpsFromApi(null);
+    const ac = new AbortController();
+    const url = `/api/dp2034/map-query?type=tps&ward=${encodeURIComponent(selectedWard)}`;
+    fetch(url, { signal: ac.signal })
+      .then((r) => r.json())
+      .then((data: { values?: string[] }) => {
+        const values = Array.isArray(data.values) ? data.values : [];
+        // Never substitute villageToCtsMapping.json keys here — those are CS/CTS names, not GIS TPS schemes.
+        setFpTpsFromApi(values);
+        setFpTpsReady(true);
+      })
+      .catch(() => {
+        setFpTpsFromApi([]);
+        setFpTpsReady(true);
+      });
+    return () => ac.abort();
+  }, [selectedPlotBelongs, selectedWard]);
+
+  // F.P.No: TPS / village option list validation — clear if current value not in allowed set
+  useEffect(() => {
+    if (isInitialLoad || !selectedWard) return;
+    if (selectedPlotBelongs === "F.P.No" && !fpTpsReady) return;
+
+    const fpOpts =
+      selectedPlotBelongs === "F.P.No" && fpTpsFromApi !== null ? fpTpsFromApi : null;
+    const regularOpts = villageOptionsByWard[selectedWard] ?? [];
+    const opts = selectedPlotBelongs === "F.P.No" ? (fpOpts ?? []) : regularOpts;
+    const v = getSavePlotValues().villageName;
+    if (v && !opts.includes(v)) {
+      setSavePlotValue("villageName", "", { shouldValidate: false });
+      setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
+      setCtsNumbers([]);
+    }
+  }, [
+    selectedPlotBelongs,
+    selectedWard,
+    isInitialLoad,
+    setSavePlotValue,
+    getSavePlotValues,
+    fpTpsReady,
+    fpTpsFromApi,
+  ]);
+
+  // Survey / F.P. numbers: CS/CTS from local JSON; F.P.No from MapServer/13 (then JSON fallback)
+  useEffect(() => {
     if (isInitialLoad && isEditMode) {
       return;
     }
@@ -601,17 +742,46 @@ export default function ProjectDetailsClient() {
       return;
     }
 
-    // Get CTS numbers synchronously from local mapping
-    const numbers = getSurveyNumbersForVillageSync(selectedVillage as string, selectedWard as string);
-    
-    // Only set if we got valid numbers (safety check)
-    if (numbers && numbers.length > 0) {
-      setCtsNumbers(numbers);
-    } else {
-      // Clear if no numbers found (village/ward combination might be invalid)
-      setCtsNumbers([]);
+    if (selectedPlotBelongs === "F.P.No") {
+      const ac = new AbortController();
+      const qs = new URLSearchParams({
+        type: "fp",
+        ward: String(selectedWard),
+        tps: String(selectedVillage),
+      });
+      fetch(`/api/dp2034/map-query?${qs}`, { signal: ac.signal })
+        .then((r) => r.json())
+        .then((data: { values?: string[] }) => {
+          if (Array.isArray(data.values) && data.values.length > 0) {
+            setCtsNumbers(data.values);
+          } else {
+            const fallback = getSurveyNumbersForPlotFlowSync(
+              selectedWard as string,
+              selectedVillage as string,
+              "F.P.No"
+            );
+            setCtsNumbers(fallback);
+          }
+        })
+        .catch(() => {
+          setCtsNumbers(
+            getSurveyNumbersForPlotFlowSync(
+              selectedWard as string,
+              selectedVillage as string,
+              "F.P.No"
+            )
+          );
+        });
+      return () => ac.abort();
     }
-  }, [selectedVillage, selectedWard, isInitialLoad, isEditMode]);
+
+    const numbers = getSurveyNumbersForPlotFlowSync(
+      selectedWard as string,
+      selectedVillage as string,
+      selectedPlotBelongs || ""
+    );
+    setCtsNumbers(numbers.length > 0 ? numbers : []);
+  }, [selectedVillage, selectedWard, selectedPlotBelongs, isInitialLoad, isEditMode]);
 
   const onProjectSubmit = async (data: ProjectFormData) => {
     try {
@@ -718,11 +888,7 @@ export default function ProjectDetailsClient() {
     { id: "project-info", label: "Project Info" },
   ];
 
-  const planningAuthorityOptions: SavePlotFormData["planningAuthority"][] = [
-    "BMC(BP)",
-    "BMC-TDR Generation & Transfer",
-    "Other",
-  ];
+  const planningAuthorityOptions = [...PLANNING_AUTHORITY_OPTIONS];
 
   const projectProponentOptions: string[] = [
     "BMC, Central Govt., State Govt., MHADA,Semi-Govt., Govt. Undertakings / Enterprises, Public Sector Undertakings (Special Cell )",
@@ -730,7 +896,7 @@ export default function ProjectDetailsClient() {
     "Self-Development plot for Cooperative Housing Societies (CHS) under Single Window Clearance",
   ];
 
-  const plotBelongsOptions: SavePlotFormData["plotBelongsTo"][] = ["CTS No.", "CS No.", "F.P.No"];
+  const plotBelongsOptions = plotBelongsOptionsForRegionAndWard(selectedRegion, selectedWard);
   const regionOptions = ["City", "Western", "Eastern"];
   const allZoneOptions = [
     "Zone I",
@@ -1031,6 +1197,14 @@ export default function ProjectDetailsClient() {
       "TULSI",
     ],
   };
+
+  /** CS/CTS: static ward list. F.P.No: TPS schemes from MapServer only (never use JSON village keys — those are CS/CTS). */
+  const villageDivisionOrTpsOptions =
+    selectedPlotBelongs === "F.P.No" && selectedWard
+      ? fpTpsReady && fpTpsFromApi !== null
+        ? fpTpsFromApi
+        : []
+      : (villageOptionsByWard[selectedWard as string] ?? []);
 
   // Simple placeholder CTS lists for each ward so the CTS dropdown is never empty
   const proposedCtsOptionsByWard: Record<string, string[]> = {
@@ -1341,24 +1515,35 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     Planning Authority for the project? <span className="text-red-500">*</span>
                   </label>
-                  <div className="flex flex-wrap gap-4">
-                    {planningAuthorityOptions.map((option) => (
-                      <label key={option} className="flex items-center gap-2 text-sm text-black">
-                        <input
-                          {...registerSavePlot("planningAuthority", {
-                            required: "Please select a planning authority",
-                          })}
-                          type="radio"
-                          value={option}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        {option}
-                      </label>
-                    ))}
-                  </div>
-                  {savePlotErrors.planningAuthority && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.planningAuthority.message}</p>
-                  )}
+                  <Controller
+                    name="planningAuthority"
+                    control={savePlotControl}
+                    rules={{ required: "Please select a planning authority" }}
+                    render={({ field, fieldState }) => (
+                      <>
+                        <div className="flex flex-wrap gap-4">
+                          {planningAuthorityOptions.map((option, index) => (
+                            <label key={option} className="flex items-center gap-2 text-sm text-black">
+                              <input
+                                type="radio"
+                                name={field.name}
+                                value={option}
+                                checked={field.value === option}
+                                onChange={() => field.onChange(option)}
+                                onBlur={field.onBlur}
+                                ref={index === 0 ? field.ref : undefined}
+                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              {option}
+                            </label>
+                          ))}
+                        </div>
+                        {fieldState.error && (
+                          <p className="text-red-600 text-sm mt-1">{fieldState.error.message}</p>
+                        )}
+                      </>
+                    )}
+                  />
                 </div>
               </div>
 
@@ -1423,27 +1608,23 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     This plot belongs to <span className="text-red-500">*</span>
                   </label>
-                  <div className="flex flex-wrap gap-4 items-center">
-                    {plotBelongsOptions.map((option) => (
-                      <label
-                        key={option}
-                        className={`flex items-center gap-2 text-sm text-black ${
-                          isPlotBelongsRadioDisabled(option, selectedWard)
-                            ? "opacity-50 cursor-not-allowed"
-                            : ""
-                        }`}
-                      >
-                        <input
-                          {...registerSavePlot("plotBelongsTo", { required: "Please select an option" })}
-                          type="radio"
-                          value={option}
-                          disabled={isPlotBelongsRadioDisabled(option, selectedWard)}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50"
-                        />
-                        {option}
-                      </label>
-                    ))}
-                  </div>
+                  {plotBelongsOptions.length === 0 ? (
+                    <p className="text-sm text-gray-500 py-2">Select a region first.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-4 items-center">
+                      {plotBelongsOptions.map((option) => (
+                        <label key={option} className="flex items-center gap-2 text-sm text-black">
+                          <input
+                            {...registerSavePlot("plotBelongsTo", { required: "Please select an option" })}
+                            type="radio"
+                            value={option}
+                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          {option}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                   {savePlotErrors.plotBelongsTo && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotBelongsTo.message}</p>
                   )}
@@ -1453,15 +1634,21 @@ export default function ProjectDetailsClient() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Village/Division <span className="text-red-500">*</span>
+                    {labelForVillageDivisionField(selectedPlotBelongs)}{" "}
+                    <span className="text-red-500">*</span>
                   </label>
                   <select
-                    {...registerSavePlot("villageName", { required: "Village name is required" })}
+                    {...registerSavePlot("villageName", {
+                      required: villageFieldRequiredMessage(selectedPlotBelongs),
+                    })}
                     className={inputClasses}
-                    disabled={!selectedWard}
+                    disabled={
+                      !selectedWard ||
+                      (selectedPlotBelongs === "F.P.No" && Boolean(selectedWard) && !fpTpsReady)
+                    }
                   >
-                    <option value="">----- Select Village -----</option>
-                    {(villageOptionsByWard[selectedWard as string] ?? []).map((option) => (
+                    <option value="">{villageSelectPlaceholder(selectedPlotBelongs)}</option>
+                    {villageDivisionOrTpsOptions.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
