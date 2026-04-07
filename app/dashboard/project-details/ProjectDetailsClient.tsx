@@ -6,6 +6,11 @@ import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { getSurveyNumbersForPlotFlowSync } from "@/app/utils/villageToSurveyNumbers";
 import { WARDS_WITH_FP_OPTION } from "@/app/utils/dp2034FpWards";
+import {
+  DP_ZONE_OPTIONS,
+  DP_ZONE_TO_MAJOR_USE_TO_SUB_USE,
+  type DpZone,
+} from "@/app/utils/dpZoneMajorUseSubUse";
 import { supabase } from "@/app/utils/supabase";
 
 
@@ -338,6 +343,8 @@ export default function ProjectDetailsClient() {
   const selectedPlotBelongs = watchSavePlot("plotBelongsTo");
   const selectedVillage = watchSavePlot("villageName");
   const selectedSurveyNos = watchSavePlot("proposedCtsNumber");
+  const selectedDpZone = watchSavePlot("dpZone");
+  const selectedMajorUse = watchSavePlot("majorUseOfPlot");
   
   // Filter zones based on selected region
   const zoneOptions = selectedRegion && regionToZonesMap[selectedRegion]
@@ -679,6 +686,37 @@ export default function ProjectDetailsClient() {
     
     prevVillageRef.current = selectedVillage;
   }, [selectedVillage, setSavePlotValue, isInitialLoad]);
+
+  // Track previous DP Zone value to detect actual changes
+  const prevDpZoneRef = useRef<string | undefined>(undefined);
+
+  // When DP Zone changes: clear major use + sub use
+  useEffect(() => {
+    if (isInitialLoad) {
+      prevDpZoneRef.current = selectedDpZone;
+      return;
+    }
+    if (prevDpZoneRef.current !== undefined && prevDpZoneRef.current !== selectedDpZone) {
+      setSavePlotValue("majorUseOfPlot", "", { shouldValidate: false });
+      setSavePlotValue("plotSubUse", "", { shouldValidate: false });
+    }
+    prevDpZoneRef.current = selectedDpZone;
+  }, [selectedDpZone, isInitialLoad, setSavePlotValue]);
+
+  // Track previous major use value to detect actual changes
+  const prevMajorUseRef = useRef<string | undefined>(undefined);
+
+  // When major use changes: clear sub use
+  useEffect(() => {
+    if (isInitialLoad) {
+      prevMajorUseRef.current = selectedMajorUse;
+      return;
+    }
+    if (prevMajorUseRef.current !== undefined && prevMajorUseRef.current !== selectedMajorUse) {
+      setSavePlotValue("plotSubUse", "", { shouldValidate: false });
+    }
+    prevMajorUseRef.current = selectedMajorUse;
+  }, [selectedMajorUse, isInitialLoad, setSavePlotValue]);
 
   // F.P.No: load TPS scheme names from DP2034 MapServer (dpremarks.mcgm.gov.in / Widget.js layer 13)
   useEffect(() => {
@@ -1233,9 +1271,29 @@ export default function ProjectDetailsClient() {
     "R/N Ward": ["CTS-RN1", "CTS-RN2"],
     "R/S Ward": ["CTS-RS1", "CTS-RS2"],
   };
-  const majorUseOptions = ["General Category", "Residential", "Commercial", "Industrial"];
-  const plotSubUseOptions = ["Select SubUse", "Residential Low Rise", "Residential High Rise", "Commercial Retail"];
   const plotTypeOptions = ["Select", "Corner Plot", "Regular Plot", "Narrow Plot"];
+  const dpZoneLabelMap: Record<string, string> = {
+    "1": "Residential Zone (R)",
+    "2": "Commercial Zone (C)",
+    "3": "Industrial Zone (I)",
+    "4": "Special Development Zone (SDZ)",
+    "5": "Port & Port Related Activities Zone (P)",
+    "6": "Natural Areas (NA)",
+    "7": "Green Zone (GZ)",
+  };
+
+  const majorUseOptions = (() => {
+    const z = selectedDpZone as DpZone | undefined;
+    if (!z || !(z in DP_ZONE_TO_MAJOR_USE_TO_SUB_USE)) return [];
+    return Object.keys(DP_ZONE_TO_MAJOR_USE_TO_SUB_USE[z]).sort((a, b) => a.localeCompare(b));
+  })();
+
+  const plotSubUseOptions = (() => {
+    const z = selectedDpZone as DpZone | undefined;
+    if (!z || !(z in DP_ZONE_TO_MAJOR_USE_TO_SUB_USE)) return [];
+    if (!selectedMajorUse) return [];
+    return DP_ZONE_TO_MAJOR_USE_TO_SUB_USE[z]?.[selectedMajorUse] ?? [];
+  })();
 
   // Show loading state while fetching project data
   if (isLoadingProject) {
@@ -1895,12 +1953,17 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     DP Zone <span className="text-red-500">*</span>
                   </label>
-                  <input
+                  <select
                     {...registerSavePlot("dpZone", { required: "DP Zone is required" })}
-                    type="text"
                     className={inputClasses}
-                    placeholder="Enter DP Zone"
-                  />
+                  >
+                    <option value="">----- Select DP Zone -----</option>
+                    {DP_ZONE_OPTIONS.map((z) => (
+                      <option key={z} value={z}>
+                        {dpZoneLabelMap[z] ?? `DP Zone ${z}`}
+                      </option>
+                    ))}
+                  </select>
                   {savePlotErrors.dpZone && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.dpZone.message}</p>
                   )}
@@ -1915,6 +1978,7 @@ export default function ProjectDetailsClient() {
                   <select
                     {...registerSavePlot("majorUseOfPlot", { required: "Select major use" })}
                     className={inputClasses}
+                    disabled={!selectedDpZone}
                   >
                     <option value="">----- Select Major Use -----</option>
                     {majorUseOptions.map((option) => (
@@ -1934,6 +1998,7 @@ export default function ProjectDetailsClient() {
                   <select
                     {...registerSavePlot("plotSubUse", { required: "Select subuse" })}
                     className={inputClasses}
+                    disabled={!selectedDpZone || !selectedMajorUse}
                   >
                     <option value="">----- Select Plot SubUse -----</option>
                     {plotSubUseOptions.map((option) => (
