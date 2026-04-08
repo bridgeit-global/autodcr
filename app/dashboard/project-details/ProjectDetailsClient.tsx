@@ -213,7 +213,17 @@ export default function ProjectDetailsClient() {
   const [isLoadingProject, setIsLoadingProject] = useState(isEditMode);
   const [projectData, setProjectData] = useState<any>(null);
   
-  const [activeTab, setActiveTab] = useState("save-plot");
+  const tabParam = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(
+    tabParam === "project-info" ? "project-info" : "save-plot"
+  );
+
+  useEffect(() => {
+    if (tabParam === "project-info" || tabParam === "save-plot") {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
+
   const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(() => isPageSaved("saved-project-info"));
   const [isSavePlotSaved, setIsSavePlotSaved] = useState(() => isPageSaved("saved-save-plot-details"));
   // Track initial load to prevent clearing fields during form initialization
@@ -231,6 +241,7 @@ export default function ProjectDetailsClient() {
     watch: watchProject,
     reset: resetProject,
     setValue: setProjectValue,
+    setError: setProjectError,
   } = useForm<ProjectFormData>({
     defaultValues: loadDraft<ProjectFormData>("draft-project-details-project", {
       proposalAsPer: "DCPR 2034",
@@ -860,9 +871,35 @@ export default function ProjectDetailsClient() {
 
   const onProjectSubmit = async (data: ProjectFormData) => {
     try {
+      const title = data.title?.trim();
+      if (!title) {
+        setProjectError("title", { type: "manual", message: "Title is required" });
+        return;
+      }
+
+      const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+
+      if (userId) {
+        const query = supabase
+          .from("projects")
+          .select("id, status")
+          .eq("user_id", userId)
+          .eq("title", title)
+          .limit(1);
+
+        if (isEditMode && projectId) {
+          query.neq("id", projectId);
+        }
+
+        const { data: duplicates } = await query;
+        if (duplicates && duplicates.length > 0) {
+          setProjectError("title", { type: "manual", message: "A project with this title already exists. Please use a different title." });
+          return;
+        }
+      }
+
       const isDraft = projectData?.status === "draft";
       if (isEditMode && projectId && !isDraft) {
-        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           alert("User not found in session. Please log in again.");
           return;
@@ -1363,8 +1400,8 @@ export default function ProjectDetailsClient() {
                 onClick={() => setActiveTab(tab.id)}
                   className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                     isActive
-                    ? "bg-white text-emerald-700 shadow-sm ring-1 ring-gray-200"
-                    : "text-gray-700 hover:text-gray-900 hover:bg-white/70"
+                    ? "bg-emerald-600 text-white shadow-md ring-1 ring-emerald-600"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-white/70"
                   }`}
               >
                 {tab.label}

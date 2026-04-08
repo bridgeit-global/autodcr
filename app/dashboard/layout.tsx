@@ -330,15 +330,23 @@ function DashboardLayoutContent({
       const projectInfoSaved = isPageSaved("saved-project-info");
       const savePlotSaved = isPageSaved("saved-save-plot-details");
       if (!projectInfoSaved || !savePlotSaved) {
-        const missingTabs: string[] = [];
-        if (!projectInfoSaved) missingTabs.push("Project Info");
-        if (!savePlotSaved) missingTabs.push("Save Plot Details");
+        const pages: RequiredPage[] = [];
+        if (!savePlotSaved) {
+          pages.push({
+            key: "saved-save-plot-details",
+            label: "Project Details (Save Plot Details)",
+            path: "/dashboard/project-details?tab=save-plot",
+          });
+        }
+        if (!projectInfoSaved) {
+          pages.push({
+            key: "saved-project-info",
+            label: "Project Details (Project Info)",
+            path: "/dashboard/project-details?tab=project-info",
+          });
+        }
         setIsSubmittingProject(false);
-        setMissingPages([{
-          key: "saved-project-details",
-          label: `Project Details (${missingTabs.join(" & ")})`,
-          path: "/dashboard/project-details",
-        }]);
+        setMissingPages(pages);
         setIsSubmitModalOpen(true);
         return;
       }
@@ -377,28 +385,64 @@ function DashboardLayoutContent({
         const result = await response.json();
         finalProjectId = result.project?.id || currentProjectId;
       } else {
-        const { data, error } = await supabase.rpc("create_project", {
-          p_user_id: payload.user_id,
-          p_title: payload.title,
-          p_status: "draft",
-          p_project_info: payload.project_info ?? {},
-          p_save_plot_details: payload.save_plot_details ?? {},
-          p_applicant_details: payload.applicant_details ?? {},
-          p_building_details: payload.building_details ?? {},
-          p_area_details: payload.area_details ?? {},
-          p_project_library: payload.project_library ?? {},
-          p_bg_details: payload.bg_details ?? {},
-        });
+        // Check if a draft with the same title already exists for this user
+        const { data: existingDrafts } = await supabase
+          .from("projects")
+          .select("id")
+          .eq("user_id", payload.user_id)
+          .eq("title", payload.title)
+          .eq("status", "draft")
+          .limit(1);
+        const existingDraft = existingDrafts && existingDrafts.length > 0 ? existingDrafts[0] : null;
 
-        if (error) {
-          console.error("Error saving draft via Supabase RPC:", error);
-          const message = error.message || "Failed to save draft.";
-          setSubmitError(message);
-          alert(`Draft save failed: ${message}`);
-          return;
+        if (existingDraft) {
+          // Update the existing draft instead of creating a duplicate
+          const { data: { session } } = await supabase.auth.getSession();
+          const authToken = session?.access_token;
+          const headers: HeadersInit = { "Content-Type": "application/json" };
+          if (authToken) {
+            headers["Authorization"] = `Bearer ${authToken}`;
+          }
+
+          const response = await fetch(`/api/projects/${existingDraft.id}`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            const message = errorData.error || "Failed to update existing draft.";
+            setSubmitError(message);
+            alert(`Draft save failed: ${message}`);
+            return;
+          }
+
+          finalProjectId = existingDraft.id;
+        } else {
+          const { data, error } = await supabase.rpc("create_project", {
+            p_user_id: payload.user_id,
+            p_title: payload.title,
+            p_status: "draft",
+            p_project_info: payload.project_info ?? {},
+            p_save_plot_details: payload.save_plot_details ?? {},
+            p_applicant_details: payload.applicant_details ?? {},
+            p_building_details: payload.building_details ?? {},
+            p_area_details: payload.area_details ?? {},
+            p_project_library: payload.project_library ?? {},
+            p_bg_details: payload.bg_details ?? {},
+          });
+
+          if (error) {
+            console.error("Error saving draft via Supabase RPC:", error);
+            const message = error.message || "Failed to save draft.";
+            setSubmitError(message);
+            alert(`Draft save failed: ${message}`);
+            return;
+          }
+
+          finalProjectId = extractProjectIdFromRpc(data);
         }
-
-        finalProjectId = extractProjectIdFromRpc(data);
       }
 
       if (finalProjectId) {

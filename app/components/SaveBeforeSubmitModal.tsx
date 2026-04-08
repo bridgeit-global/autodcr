@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type RequiredPage = {
   key: string;
@@ -20,8 +20,20 @@ export const SaveBeforeSubmitModal = ({
   onClose,
 }: SaveBeforeSubmitModalProps) => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId");
 
   if (!open || missingPages.length === 0) return null;
+
+  const navigateToPage = (path: string) => {
+    if (projectId) {
+      const separator = path.includes("?") ? "&" : "?";
+      router.push(`${path}${separator}projectId=${projectId}`);
+    } else {
+      router.push(path);
+    }
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -39,10 +51,7 @@ export const SaveBeforeSubmitModal = ({
             <li key={page.key}>
               <button
                 type="button"
-                onClick={() => {
-                  router.push(page.path);
-                  onClose();
-                }}
+                onClick={() => navigateToPage(page.path)}
                 className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:border-sky-500 hover:bg-sky-50"
               >
                 <span>{page.label}</span>
