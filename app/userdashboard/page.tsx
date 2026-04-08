@@ -427,7 +427,7 @@ interface ApplicationModalProps {
   onClose: () => void;
   items: MenuItem[];
   title: string;
-  projects?: { id: string; title: string }[];
+  projects?: { id: string; title: string; status?: string }[];
 }
 
 const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, items, title, projects = [] }) => {
@@ -521,7 +521,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
                             <option value="">-- Select Project --</option>
                             {projects.map((project) => (
                               <option key={project.id} value={project.id}>
-                                {project.title}
+                                {project.title}{project.status === "draft" ? " (Draft)" : ""}
                               </option>
                             ))}
                           </select>
@@ -579,7 +579,7 @@ function UserDashboardContent() {
   const [activeTab, setActiveTab] = useState("tile-view");
   // Project filter: "ALL" means don't filter
   const [selectedProject, setSelectedProject] = useState("ALL");
-  const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; title: string; status?: string }[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [selectedApplicationType, setSelectedApplicationType] = useState("Building Permission");
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
@@ -615,7 +615,7 @@ function UserDashboardContent() {
 
         const { data, error } = await supabase
           .from("projects")
-          .select("id,title")
+          .select("id,title,status")
           .eq("user_id", userId)
           .order("created_at", { ascending: false });
 
@@ -625,7 +625,7 @@ function UserDashboardContent() {
           return;
         }
 
-        setProjects((data ?? []).map((row: any) => ({ id: row.id, title: row.title })));
+        setProjects((data ?? []).map((row: any) => ({ id: row.id, title: row.title, status: row.status })));
       } finally {
         setProjectsLoading(false);
       }
@@ -687,7 +687,7 @@ function UserDashboardContent() {
                       <option value="ALL">All Projects</option>
                       {projects.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.title}
+                          {p.title}{p.status === "draft" ? " (Draft)" : ""}
                         </option>
                       ))}
                   </select>

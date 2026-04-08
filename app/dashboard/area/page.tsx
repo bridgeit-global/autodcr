@@ -141,8 +141,7 @@ export default function AreaDetailsPage() {
   const { isEditMode, isLoading, projectData } = useProjectData();
   // Start with Plot No. 1 by default
   const [plots, setPlots] = useState<PlotRow[]>([createPlot(1)]);
-  // Start as "not saved" so the button shows Add/Update until user explicitly saves.
-  const [isSaved, setIsSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-area-details"));
   const portalTotals = useMemo(() => getPortalFieldTotals(plots), [plots]);
   const plotTotalsSummary = useMemo(
     () =>
@@ -168,8 +167,9 @@ export default function AreaDetailsPage() {
       if (plotsData.length > 0) {
         setPlots(plotsData);
         saveDraft("draft-area-details-plots", plotsData);
+        markPageSaved("saved-area-details");
+        setIsSaved(true);
         
-        // Save totals if available
         if (areaDetails.totals) {
           saveDraft("draft-area-details-totals", areaDetails.totals);
         }
@@ -269,15 +269,14 @@ const removePlot = (plotId: string) => {
     }
 
     try {
-      if (isEditMode && projectData?.id) {
-        // Get user_id from localStorage
+      const isDraft = projectData?.status === "draft";
+      if (isEditMode && projectData?.id && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           alert("User not found in session. Please log in again.");
           return;
         }
 
-        // Get auth token for authenticated request
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
         
@@ -286,7 +285,6 @@ const removePlot = (plotId: string) => {
           headers["Authorization"] = `Bearer ${authToken}`;
         }
 
-        // Update existing project
         const areaTotals = loadDraft<any>("draft-area-details-totals", null);
         const response = await fetch(`/api/projects/${projectData.id}`, {
           method: "PUT",

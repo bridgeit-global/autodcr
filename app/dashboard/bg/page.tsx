@@ -56,8 +56,7 @@ export default function BGDetailsPage() {
   const [activeTab, setActiveTab] = useState<"bg-details" | "bg-refund">(
     loadDraft<"bg-details" | "bg-refund">("draft-bg-details-active-tab", "bg-details")
   );
-  // Start as "not saved" so the button shows Add/Update until user explicitly saves.
-  const [isSaved, setIsSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-bg-details"));
 
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
@@ -113,15 +112,14 @@ export default function BGDetailsPage() {
       setEntry(newEntry);
       saveDraft("draft-bg-details-entries", [newEntry]);
 
-      if (isEditMode && projectData?.id) {
-        // Get user_id from localStorage
+      const isDraft = projectData?.status === "draft";
+      if (isEditMode && projectData?.id && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           alert("User not found in session. Please log in again.");
           return;
         }
 
-        // Get auth token for authenticated request
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
         
@@ -130,7 +128,6 @@ export default function BGDetailsPage() {
           headers["Authorization"] = `Bearer ${authToken}`;
         }
 
-        // Update existing project
         const response = await fetch(`/api/projects/${projectData.id}`, {
           method: "PUT",
           headers,
@@ -221,6 +218,8 @@ export default function BGDetailsPage() {
         reset(bgEntry);
         saveDraft("draft-bg-details-entries", [bgEntry]);
         saveDraft("draft-bg-details-form", bgEntry);
+        markPageSaved("saved-bg-details");
+        setIsSaved(true);
       }
     }
   }, [isEditMode, projectData, isLoading, reset]);

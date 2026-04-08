@@ -193,9 +193,7 @@ export default function ApplicantDetailsPage() {
     loadDraft<ApplicantRow[]>("draft-applicant-details-applicants", [])
   );
   const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
-  // Track whether the current form entry has been saved in this session.
-  // Start as "not saved" so the button shows "Save" instead of "Saved".
-  const [isSaved, setIsSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ open: boolean; applicantId: number | null; applicantName: string; applicantType: string }>({
     open: false,
@@ -279,7 +277,8 @@ export default function ApplicantDetailsPage() {
         console.log("[Applicant Details] Mapped applicants:", mappedApplicants);
         setApplicants(mappedApplicants);
         saveDraft("draft-applicant-details-applicants", mappedApplicants);
-        // Don't set isSaved=true here - only set it after user actually submits the form
+        markPageSaved("saved-applicant-details");
+        setIsSaved(true);
       } else {
         console.log("[Applicant Details] No applicants found in project data");
       }
@@ -691,17 +690,15 @@ export default function ApplicantDetailsPage() {
     setApplicants(updatedApplicants);
     saveDraft("draft-applicant-details-applicants", updatedApplicants);
 
-    // If in edit mode, immediately update Supabase
-    if (isEditMode && projectId) {
+    const isDraft = projectData?.status === "draft";
+    if (isEditMode && projectId && !isDraft) {
       try {
-        // Get user_id from localStorage
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           console.error("User not found in session");
           return;
         }
 
-        // Get auth token for authenticated request
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
         
@@ -710,7 +707,6 @@ export default function ApplicantDetailsPage() {
           headers["Authorization"] = `Bearer ${authToken}`;
         }
 
-        // Update project with new applicants list
         const response = await fetch(`/api/projects/${projectId}`, {
           method: "PUT",
           headers,
@@ -724,7 +720,6 @@ export default function ApplicantDetailsPage() {
           const error = await response.json();
           console.error("Error updating applicants after deletion:", error);
           alert(`Failed to delete applicant: ${error.error || "Unknown error"}`);
-          // Revert local state on error
           setApplicants(applicants);
           saveDraft("draft-applicant-details-applicants", applicants);
           return;
@@ -734,7 +729,6 @@ export default function ApplicantDetailsPage() {
       } catch (error: any) {
         console.error("Error deleting applicant:", error);
         alert(`Failed to delete applicant: ${error.message || "Unknown error"}`);
-        // Revert local state on error
         setApplicants(applicants);
         saveDraft("draft-applicant-details-applicants", applicants);
       }
