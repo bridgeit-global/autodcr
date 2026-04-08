@@ -213,10 +213,19 @@ export default function ProjectDetailsClient() {
   const [isLoadingProject, setIsLoadingProject] = useState(isEditMode);
   const [projectData, setProjectData] = useState<any>(null);
   
-  const [activeTab, setActiveTab] = useState("save-plot");
-  // Start as "not saved" so the buttons show Add/Update until user explicitly saves each tab.
-  const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(false);
-  const [isSavePlotSaved, setIsSavePlotSaved] = useState(false);
+  const tabParam = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(
+    tabParam === "project-info" ? "project-info" : "save-plot"
+  );
+
+  useEffect(() => {
+    if (tabParam === "project-info" || tabParam === "save-plot") {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
+
+  const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(() => isPageSaved("saved-project-info"));
+  const [isSavePlotSaved, setIsSavePlotSaved] = useState(() => isPageSaved("saved-save-plot-details"));
   // Track initial load to prevent clearing fields during form initialization
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
@@ -232,6 +241,7 @@ export default function ProjectDetailsClient() {
     watch: watchProject,
     reset: resetProject,
     setValue: setProjectValue,
+    setError: setProjectError,
   } = useForm<ProjectFormData>({
     defaultValues: loadDraft<ProjectFormData>("draft-project-details-project", {
       proposalAsPer: "DCPR 2034",
@@ -459,6 +469,25 @@ export default function ProjectDetailsClient() {
           // Save to localStorage drafts for consistency
           saveDraft("draft-project-details-project", projectFormData);
           saveDraft("draft-project-details-save-plot", savePlotFormData);
+
+          // Mark tabs as saved if they have meaningful data from Supabase
+          const hasMeaningful = (val: any): boolean => {
+            if (val === null || val === undefined) return false;
+            if (typeof val === "string") return val.trim().length > 0;
+            if (typeof val === "number") return true;
+            if (typeof val === "boolean") return val;
+            if (Array.isArray(val)) return val.length > 0 && val.some(hasMeaningful);
+            if (typeof val === "object") return Object.values(val).some(hasMeaningful);
+            return false;
+          };
+          if (hasMeaningful(data.project_info)) {
+            markPageSaved("saved-project-info");
+            setIsProjectInfoSaved(true);
+          }
+          if (hasMeaningful(data.save_plot_details)) {
+            markPageSaved("saved-save-plot-details");
+            setIsSavePlotSaved(true);
+          }
           
           // Use requestAnimationFrame and setTimeout to ensure reset has completed
           // Then set values explicitly to ensure watched values update and dropdowns show correct selections
@@ -583,6 +612,25 @@ export default function ProjectDetailsClient() {
     });
     return () => subscription.unsubscribe();
   }, [watchSavePlot]);
+
+  // Mark as unsaved only on actual user interaction (DOM events don't fire for programmatic changes)
+  useEffect(() => {
+    const handleUserEdit = () => {
+      if (activeTab === "project-info" && isProjectInfoSaved) {
+        setIsProjectInfoSaved(false);
+      } else if (activeTab === "save-plot" && isSavePlotSaved) {
+        setIsSavePlotSaved(false);
+      }
+    };
+    const main = document.querySelector("main");
+    if (!main) return;
+    main.addEventListener("input", handleUserEdit, true);
+    main.addEventListener("change", handleUserEdit, true);
+    return () => {
+      main.removeEventListener("input", handleUserEdit, true);
+      main.removeEventListener("change", handleUserEdit, true);
+    };
+  }, [activeTab, isProjectInfoSaved, isSavePlotSaved]);
 
   // Track previous region value to detect actual changes
   const prevRegionRef = useRef<string | undefined>(undefined);
@@ -823,15 +871,40 @@ export default function ProjectDetailsClient() {
 
   const onProjectSubmit = async (data: ProjectFormData) => {
     try {
-      if (isEditMode && projectId) {
-        // Get user_id from localStorage
-        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+      const title = data.title?.trim();
+      if (!title) {
+        setProjectError("title", { type: "manual", message: "Title is required" });
+        return;
+      }
+
+      const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+
+      if (userId) {
+        const query = supabase
+          .from("projects")
+          .select("id, status")
+          .eq("user_id", userId)
+          .eq("title", title)
+          .limit(1);
+
+        if (isEditMode && projectId) {
+          query.neq("id", projectId);
+        }
+
+        const { data: duplicates } = await query;
+        if (duplicates && duplicates.length > 0) {
+          setProjectError("title", { type: "manual", message: "A project with this title already exists. Please use a different title." });
+          return;
+        }
+      }
+
+      const isDraft = projectData?.status === "draft";
+      if (isEditMode && projectId && !isDraft) {
         if (!userId) {
           alert("User not found in session. Please log in again.");
           return;
         }
 
-        // Get auth token for authenticated request
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
         
@@ -840,7 +913,6 @@ export default function ProjectDetailsClient() {
           headers["Authorization"] = `Bearer ${authToken}`;
         }
 
-        // Update existing project
         const response = await fetch(`/api/projects/${projectId}`, {
           method: "PUT",
           headers,
@@ -857,7 +929,6 @@ export default function ProjectDetailsClient() {
 
         alert("Project details updated successfully!");
       } else {
-        // Create mode - just save to localStorage (existing behavior)
         console.log("Project Data:", data);
         alert("Project details saved successfully!");
       }
@@ -873,15 +944,14 @@ export default function ProjectDetailsClient() {
 
   const onSavePlotSubmit = async (data: SavePlotFormData) => {
     try {
-      if (isEditMode && projectId) {
-        // Get user_id from localStorage
+      const isDraft = projectData?.status === "draft";
+      if (isEditMode && projectId && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           alert("User not found in session. Please log in again.");
           return;
         }
 
-        // Get auth token for authenticated request
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
         
@@ -890,7 +960,6 @@ export default function ProjectDetailsClient() {
           headers["Authorization"] = `Bearer ${authToken}`;
         }
 
-        // Update existing project
         const response = await fetch(`/api/projects/${projectId}`, {
           method: "PUT",
           headers,
@@ -907,7 +976,6 @@ export default function ProjectDetailsClient() {
 
         alert("Save plot details updated successfully!");
       } else {
-        // Create mode - just save to localStorage (existing behavior)
         console.log("Save Plot Data:", data);
         alert("Save plot details saved successfully!");
       }
@@ -1332,8 +1400,8 @@ export default function ProjectDetailsClient() {
                 onClick={() => setActiveTab(tab.id)}
                   className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                     isActive
-                    ? "bg-white text-emerald-700 shadow-sm ring-1 ring-gray-200"
-                    : "text-gray-700 hover:text-gray-900 hover:bg-white/70"
+                    ? "bg-emerald-600 text-white shadow-md ring-1 ring-emerald-600"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-white/70"
                   }`}
               >
                 {tab.label}

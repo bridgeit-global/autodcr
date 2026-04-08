@@ -9,9 +9,12 @@ type DashboardSidebarProps = {
   collapsed: boolean;
   onToggleSidebar: () => void;
   onSubmitProjectClick: () => void;
+  onSaveDraftClick: () => void;
+  allPagesSaved: boolean;
+  isDraftProject: boolean;
 };
 
-const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: DashboardSidebarProps) => {
+const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, onSaveDraftClick, allPagesSaved, isDraftProject }: DashboardSidebarProps) => {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -553,16 +556,41 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick }: 
           </button>
         </div>
 
-        {/* Submit Project Button (hidden when sidebar is collapsed or on small screens) */}
-        {!collapsed && (
-          <button
-            type="button"
-            onClick={onSubmitProjectClick}
-            className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
-          >
-            {isEditMode ? "Update Project" : "Submit Project"}
-          </button>
-        )}
+        {/* Action Button (hidden when sidebar is collapsed or on small screens) */}
+        {!collapsed && (() => {
+          const isSubmittedProject = isEditMode && !isDraftProject;
+          if (isSubmittedProject) {
+            return (
+              <button
+                type="button"
+                onClick={onSubmitProjectClick}
+                className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
+              >
+                Update Project
+              </button>
+            );
+          }
+          if (allPagesSaved) {
+            return (
+              <button
+                type="button"
+                onClick={onSubmitProjectClick}
+                className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
+              >
+                Submit Project
+              </button>
+            );
+          }
+          return (
+            <button
+              type="button"
+              onClick={onSaveDraftClick}
+              className="hidden md:block w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
+            >
+              Save as Draft
+            </button>
+          );
+        })()}
 
         {/* Navigation Items - Scrollable */}
         <nav className="space-y-1 flex-1 overflow-y-auto min-h-0">

@@ -42,3 +42,13 @@ next-env.d.ts
 
 # data files (source CSV files used to generate code)
 *.csv
+
+# Python virtual environment
+.venv/
+
+# Temp/generated files
+tmp-*.json
+
+# Assets (PDFs, images not part of source)
+*.pdf
+Parkour-Letterhead-*.png

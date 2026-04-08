@@ -52,8 +52,7 @@ export default function ProjectLibraryPage() {
     }
     return saved;
   });
-  // Start as "not saved" so the button shows Add until the user explicitly saves.
-  const [isSaved, setIsSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-project-library"));
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -137,13 +136,14 @@ export default function ProjectLibraryPage() {
       const uploadsData = projectLibrary.uploads || [];
       
       if (uploadsData.length > 0) {
-        // Ensure we have exactly MAX_FILES slots
         const paddedUploads = [...uploadsData];
         while (paddedUploads.length < MAX_FILES) {
           paddedUploads.push(undefined);
         }
         setUploads(paddedUploads.slice(0, MAX_FILES));
         saveDraft("draft-project-library-uploads", paddedUploads.slice(0, MAX_FILES));
+        markPageSaved("saved-project-library");
+        setIsSaved(true);
       }
     }
   }, [isEditMode, projectData, isLoading]);

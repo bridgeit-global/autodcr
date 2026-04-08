@@ -30,8 +30,7 @@ const areBuildingFormsEqual = (a: BuildingFormData, b: BuildingFormData) =>
 
 export default function BuildingDetailsPage() {
   const { isEditMode, isLoading, projectData } = useProjectData();
-  // Saved means "current form is identical to last explicitly saved snapshot".
-  const [isSaved, setIsSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-building-details"));
 
   const {
     register,
@@ -62,11 +61,16 @@ export default function BuildingDetailsPage() {
       reset(formData);
       saveDraft("draft-building-details-form", formData);
       saveDraft(BASELINE_BUILDING_SNAPSHOT_KEY, formData);
-      const savedSnapshot = loadDraft<BuildingFormData | null>(SAVED_BUILDING_SNAPSHOT_KEY, null);
-      const hasSavedFlag = isPageSaved("saved-building-details");
-      const currentlySaved = hasSavedFlag && !!savedSnapshot && areBuildingFormsEqual(formData, savedSnapshot);
-      setIsSaved(currentlySaved);
-      saveDraft(UNSAVED_BUILDING_FLAG_KEY, !currentlySaved);
+      saveDraft(SAVED_BUILDING_SNAPSHOT_KEY, formData);
+      const hasData = Object.values(formData).some((v) => typeof v === "string" && v.trim().length > 0);
+      if (hasData) {
+        markPageSaved("saved-building-details");
+        setIsSaved(true);
+        saveDraft(UNSAVED_BUILDING_FLAG_KEY, false);
+      } else {
+        setIsSaved(false);
+        saveDraft(UNSAVED_BUILDING_FLAG_KEY, true);
+      }
     }
   }, [isEditMode, projectData, isLoading, reset]);
 
@@ -79,15 +83,14 @@ export default function BuildingDetailsPage() {
 
   const onSubmit = async (data: BuildingFormData) => {
     try {
-      if (isEditMode && projectData?.id) {
-        // Get user_id from localStorage
+      const isDraft = projectData?.status === "draft";
+      if (isEditMode && projectData?.id && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           alert("User not found in session. Please log in again.");
           return;
         }
 
-        // Get auth token for authenticated request
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
         
@@ -96,7 +99,6 @@ export default function BuildingDetailsPage() {
           headers["Authorization"] = `Bearer ${authToken}`;
         }
 
-        // Update existing project
         const response = await fetch(`/api/projects/${projectData.id}`, {
           method: "PUT",
           headers,
@@ -113,7 +115,6 @@ export default function BuildingDetailsPage() {
 
         alert("Building details updated successfully!");
       } else {
-        // Create mode
         console.log("Building Details:", data);
         alert("Building details saved successfully!");
       }

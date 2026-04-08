@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import SiteFooter from "../components/SiteFooter";
 import DashboardHeader from "../components/DashboardHeader";
 import DashboardSidebar from "../components/DashboardSidebar";
 import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
-import { isPageSaved, loadDraft, clearProjectDrafts } from "../utils/draftStorage";
+import { isPageSaved, loadDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
 import { supabase } from "../utils/supabase";
 import { clearAllProjectLibraryFiles, getProjectLibraryFile } from "../utils/projectLibraryFiles";
 import { useProjectData } from "../hooks/useProjectData";
@@ -74,6 +74,8 @@ function DashboardLayoutContent({
   // Use useProjectData hook to verify project actually exists
   const { projectData: verifiedProjectData } = useProjectData();
   
+  const isDraftProject = !!(verifiedProjectData && verifiedProjectData.status === "draft");
+
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
@@ -81,6 +83,24 @@ function DashboardLayoutContent({
   const [isSubmittingProject, setIsSubmittingProject] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccessMessage, setSubmitSuccessMessage] = useState<string | null>(null);
+  const [allPagesSaved, setAllPagesSaved] = useState(false);
+  const [showDraftConfirm, setShowDraftConfirm] = useState(false);
+
+  useEffect(() => {
+    const checkAllPagesSaved = () => {
+      const allSaved = REQUIRED_PAGES.every((page) => {
+        if (page.key === "saved-project-details") {
+          return isPageSaved("saved-project-info") && isPageSaved("saved-save-plot-details");
+        }
+        return isPageSaved(page.key);
+      });
+      setAllPagesSaved(allSaved);
+    };
+
+    checkAllPagesSaved();
+    const interval = setInterval(checkAllPagesSaved, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -92,6 +112,36 @@ function DashboardLayoutContent({
 
     return () => clearInterval(interval);
   }, []);
+
+  // Pre-mark sections that already have meaningful data for draft projects.
+  // Runs synchronously during render (not in useEffect) so that child components
+  // see the correct localStorage flags when they initialize their state.
+  const preMarkedProjectRef = useRef<string | null>(null);
+  if (
+    verifiedProjectData &&
+    verifiedProjectData.status === "draft" &&
+    preMarkedProjectRef.current !== verifiedProjectData.id
+  ) {
+    preMarkedProjectRef.current = verifiedProjectData.id;
+
+    const hasMeaningful = (val: any): boolean => {
+      if (val === null || val === undefined) return false;
+      if (typeof val === "string") return val.trim().length > 0;
+      if (typeof val === "number") return true;
+      if (typeof val === "boolean") return val;
+      if (Array.isArray(val)) return val.length > 0 && val.some(hasMeaningful);
+      if (typeof val === "object") return Object.values(val).some(hasMeaningful);
+      return false;
+    };
+
+    if (hasMeaningful(verifiedProjectData.project_info)) markPageSaved("saved-project-info");
+    if (hasMeaningful(verifiedProjectData.save_plot_details)) markPageSaved("saved-save-plot-details");
+    if (hasMeaningful(verifiedProjectData.applicant_details)) markPageSaved("saved-applicant-details");
+    if (hasMeaningful(verifiedProjectData.building_details)) markPageSaved("saved-building-details");
+    if (hasMeaningful(verifiedProjectData.area_details)) markPageSaved("saved-area-details");
+    if (hasMeaningful(verifiedProjectData.project_library)) markPageSaved("saved-project-library");
+    if (hasMeaningful(verifiedProjectData.bg_details)) markPageSaved("saved-bg-details");
+  }
 
   // Clear all project drafts when leaving the dashboard (unmount)
   useEffect(() => {
@@ -106,14 +156,355 @@ function DashboardLayoutContent({
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const buildProjectPayload = (statusOverride: string) => {
+    const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+
+    const projectInfo = loadDraft("draft-project-details-project", {
+      proposalAsPer: "",
+      title: "",
+      propertyAddress: "",
+      landmark: "",
+      earlierBuildingProposalFileNo: "",
+      pincode: "",
+      fullNameOfApplicant: "",
+      addressOfApplicant: "",
+      hasPaidLatestPropertyTax: "",
+    });
+
+    let projectTitle = (projectInfo as any)?.title;
+    const currentProjectId = projectId || (typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("projectId")
+      : null);
+    const isActuallyEditMode = !!currentProjectId && !!verifiedProjectData;
+
+    if (isActuallyEditMode && verifiedProjectData && (!projectTitle || projectTitle.trim() === "")) {
+      projectTitle = verifiedProjectData.title || "";
+    }
+
+    const savePlotDetails = loadDraft("draft-project-details-save-plot", {});
+    const applicantsList = loadDraft("draft-applicant-details-applicants", []);
+    const buildingDetails = loadDraft("draft-building-details-form", {});
+    const areaPlots = loadDraft("draft-area-details-plots", []);
+    const rawAreaTotals = loadDraft<any>("draft-area-details-totals", null);
+    const areaTotals =
+      rawAreaTotals && typeof rawAreaTotals === "object"
+        ? {
+            ...rawAreaTotals,
+            allPlotsTotal: {
+              prcArea: Number(rawAreaTotals?.allPlotsTotal?.prcArea ?? 0) || 0,
+              ulcArea: Number(rawAreaTotals?.allPlotsTotal?.ulcArea ?? 0) || 0,
+              bFormArea: Number(rawAreaTotals?.allPlotsTotal?.bFormArea ?? 0) || 0,
+              conveyanceArea: Number(rawAreaTotals?.allPlotsTotal?.conveyanceArea ?? 0) || 0,
+              attorneyArea: Number(rawAreaTotals?.allPlotsTotal?.attorneyArea ?? 0) || 0,
+              dilrMapArea: Number(rawAreaTotals?.allPlotsTotal?.dilrMapArea ?? 0) || 0,
+              leaseArea: Number(rawAreaTotals?.allPlotsTotal?.leaseArea ?? 0) || 0,
+            },
+            totalLeaseArea: Number(rawAreaTotals?.totalLeaseArea ?? 0) || 0,
+          }
+        : null;
+    const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
+    const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
+
+    const firstBgEntry: BGEntry | null = Array.isArray(bgEntries) && bgEntries.length > 0 ? bgEntries[0] : null;
+    const proposalNo = firstBgEntry?.proposalNo || firstBgEntry?.proposal_no || firstBgEntry?.fileNo || firstBgEntry?.file_no || "";
+
+    let baseTitle = (projectTitle as string) || "";
+    if (isActuallyEditMode && proposalNo && proposalNo.trim() !== "") {
+      const proposalNoTrimmed = proposalNo.trim();
+      const titleTrimmed = baseTitle.trim();
+      if (titleTrimmed.endsWith(` ${proposalNoTrimmed}`)) {
+        baseTitle = titleTrimmed.slice(0, -(proposalNoTrimmed.length + 1)).trim();
+      }
+    }
+
+    let finalProjectTitle = baseTitle;
+    if (proposalNo && proposalNo.trim() !== "") {
+      finalProjectTitle = `${baseTitle} ${proposalNo}`.trim();
+    }
+
+    const deepEqual = (a: any, b: any): boolean => {
+      if (a === b) return true;
+      if (a == null || b == null) return a === b;
+      if (typeof a !== typeof b) return false;
+      if (typeof a !== "object") return a === b;
+      if (Array.isArray(a) !== Array.isArray(b)) return false;
+      if (Array.isArray(a)) {
+        if (a.length !== b.length) return false;
+        return a.every((val: any, idx: number) => deepEqual(val, b[idx]));
+      }
+      const keysA = Object.keys(a);
+      const keysB = Object.keys(b);
+      if (keysA.length !== keysB.length) return false;
+      return keysA.every(key => deepEqual(a[key], b[key]));
+    };
+
+    const payload: any = {
+      user_id: userId,
+      title: finalProjectTitle,
+      status: statusOverride,
+    };
+
+    const existingData = isActuallyEditMode && verifiedProjectData ? verifiedProjectData : null;
+
+    if (projectInfo && Object.keys(projectInfo).length > 0) {
+      const existingProjectInfo = existingData?.project_info || {};
+      if (!deepEqual(projectInfo, existingProjectInfo)) {
+        payload.project_info = projectInfo;
+      }
+    }
+
+    if (savePlotDetails && Object.keys(savePlotDetails).length > 0) {
+      const existingSavePlot = existingData?.save_plot_details || {};
+      if (!deepEqual(savePlotDetails, existingSavePlot)) {
+        payload.save_plot_details = savePlotDetails;
+      }
+    }
+
+    if (applicantsList && (applicantsList as any[]).length > 0) {
+      const existingApplicants = existingData?.applicant_details?.applicants || [];
+      if (!deepEqual(applicantsList, existingApplicants)) {
+        payload.applicant_details = { applicants: applicantsList };
+      }
+    }
+
+    if (buildingDetails && Object.keys(buildingDetails).length > 0) {
+      const existingBuilding = existingData?.building_details || {};
+      if (!deepEqual(buildingDetails, existingBuilding)) {
+        payload.building_details = buildingDetails;
+      }
+    }
+
+    if (areaPlots && Array.isArray(areaPlots) && areaPlots.length > 0) {
+      const existingArea = existingData?.area_details || {};
+      const existingPlots = existingArea.plots || [];
+      if (!deepEqual(areaPlots, existingPlots)) {
+        payload.area_details = { plots: areaPlots, totals: areaTotals };
+      }
+    }
+
+    if (projectLibraryUploads && Array.isArray(projectLibraryUploads)) {
+      const filteredUploads = (projectLibraryUploads as any[]).filter((u: any) => u !== null && u !== undefined && u !== "") as ProjectLibraryUpload[];
+      if (filteredUploads.length > 0) {
+        const existingLibrary = existingData?.project_library || {};
+        const existingUploads = existingLibrary.uploads || [];
+        const normalizedNew = filteredUploads.map((u) => ({ name: u?.name, path: u?.path, url: u?.url }));
+        const normalizedExisting = existingUploads.map((u: any) => ({ name: u?.name, path: u?.path, url: u?.url }));
+        if (!deepEqual(normalizedNew, normalizedExisting)) {
+          payload.project_library = { uploads: filteredUploads };
+        }
+      }
+    }
+
+    if (bgEntries && Array.isArray(bgEntries) && bgEntries.length > 0) {
+      const existingBg = existingData?.bg_details || {};
+      const existingBgEntries = existingBg.entries || [];
+      if (!deepEqual(bgEntries, existingBgEntries)) {
+        payload.bg_details = { entries: bgEntries };
+      }
+    }
+
+    return { payload, isActuallyEditMode, currentProjectId };
+  };
+
+  const handleSaveDraftClick = () => {
+    setShowDraftConfirm(true);
+  };
+
+  const handleDraftConfirmYes = async () => {
+    setShowDraftConfirm(false);
+    setSubmitError(null);
+    setSubmitSuccessMessage(null);
+
+    try {
+      setIsSubmittingProject(true);
+
+      const { payload, isActuallyEditMode, currentProjectId } = buildProjectPayload("draft");
+
+      if (!payload.user_id) {
+        const message = "User not found in local session. Please log in again.";
+        setSubmitError(message);
+        alert(message);
+        return;
+      }
+
+      const projectInfoSaved = isPageSaved("saved-project-info");
+      const savePlotSaved = isPageSaved("saved-save-plot-details");
+      if (!projectInfoSaved || !savePlotSaved) {
+        const pages: RequiredPage[] = [];
+        if (!savePlotSaved) {
+          pages.push({
+            key: "saved-save-plot-details",
+            label: "Project Details (Save Plot Details)",
+            path: "/dashboard/project-details?tab=save-plot",
+          });
+        }
+        if (!projectInfoSaved) {
+          pages.push({
+            key: "saved-project-info",
+            label: "Project Details (Project Info)",
+            path: "/dashboard/project-details?tab=project-info",
+          });
+        }
+        setIsSubmittingProject(false);
+        setMissingPages(pages);
+        setIsSubmitModalOpen(true);
+        return;
+      }
+
+      if (!payload.title || typeof payload.title !== "string" || payload.title.trim() === "") {
+        const message = "Project title is missing. Please fill in the title under Project Details.";
+        setSubmitError(message);
+        alert(message);
+        return;
+      }
+
+      let finalProjectId: string | null = null;
+
+      if (isActuallyEditMode && currentProjectId && verifiedProjectData) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        const response = await fetch(`/api/projects/${currentProjectId}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          const message = errorData.error || "Failed to save draft.";
+          setSubmitError(message);
+          alert(`Draft save failed: ${message}`);
+          return;
+        }
+
+        const result = await response.json();
+        finalProjectId = result.project?.id || currentProjectId;
+      } else {
+        // Check if a draft with the same title already exists for this user
+        const { data: existingDrafts } = await supabase
+          .from("projects")
+          .select("id")
+          .eq("user_id", payload.user_id)
+          .eq("title", payload.title)
+          .eq("status", "draft")
+          .limit(1);
+        const existingDraft = existingDrafts && existingDrafts.length > 0 ? existingDrafts[0] : null;
+
+        if (existingDraft) {
+          // Update the existing draft instead of creating a duplicate
+          const { data: { session } } = await supabase.auth.getSession();
+          const authToken = session?.access_token;
+          const headers: HeadersInit = { "Content-Type": "application/json" };
+          if (authToken) {
+            headers["Authorization"] = `Bearer ${authToken}`;
+          }
+
+          const response = await fetch(`/api/projects/${existingDraft.id}`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            const message = errorData.error || "Failed to update existing draft.";
+            setSubmitError(message);
+            alert(`Draft save failed: ${message}`);
+            return;
+          }
+
+          finalProjectId = existingDraft.id;
+        } else {
+          const { data, error } = await supabase.rpc("create_project", {
+            p_user_id: payload.user_id,
+            p_title: payload.title,
+            p_status: "draft",
+            p_project_info: payload.project_info ?? {},
+            p_save_plot_details: payload.save_plot_details ?? {},
+            p_applicant_details: payload.applicant_details ?? {},
+            p_building_details: payload.building_details ?? {},
+            p_area_details: payload.area_details ?? {},
+            p_project_library: payload.project_library ?? {},
+            p_bg_details: payload.bg_details ?? {},
+          });
+
+          if (error) {
+            console.error("Error saving draft via Supabase RPC:", error);
+            const message = error.message || "Failed to save draft.";
+            setSubmitError(message);
+            alert(`Draft save failed: ${message}`);
+            return;
+          }
+
+          finalProjectId = extractProjectIdFromRpc(data);
+        }
+      }
+
+      if (finalProjectId) {
+        const uploads: any[] = [];
+        for (let i = 0; i < PROJECT_LIBRARY_MAX_FILES; i++) {
+          const local = await getProjectLibraryFile(i);
+          if (!local?.blob) continue;
+          const safeDocName = `document-${i + 1}`;
+          const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
+          const path = `${finalProjectId}/project-library/${safeDocName}-${i + 1}.${extension}`;
+          const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
+            upsert: true,
+            contentType: local.type || "application/pdf",
+          });
+          if (uploadError) {
+            console.error("Error uploading project library doc:", uploadError);
+            setSubmitError(uploadError.message);
+          } else {
+            const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
+            uploads.push({
+              name: local.name,
+              path,
+              url: publicData?.publicUrl || "",
+              uploadedAt: new Date().toISOString(),
+            });
+          }
+        }
+
+        if (uploads.length > 0) {
+          const { error: updateError } = await supabase
+            .from("projects")
+            .update({ project_library: { uploads } })
+            .eq("id", finalProjectId);
+          if (updateError) {
+            console.error("Failed to update project_library on project:", updateError);
+          }
+        }
+
+        await clearAllProjectLibraryFiles(PROJECT_LIBRARY_MAX_FILES);
+      }
+
+      clearProjectDrafts();
+      router.push("/userdashboard");
+    } catch (err: any) {
+      console.error("Error saving draft:", err);
+      const message = err?.message || "Unexpected error while saving draft.";
+      setSubmitError(message);
+      alert(message);
+    } finally {
+      setIsSubmittingProject(false);
+    }
+  };
+
   const handleSubmitProjectClick = async () => {
     setSubmitError(null);
     setSubmitSuccessMessage(null);
 
-    // In edit mode, skip the "all pages saved" check - allow updating individual sections
-    if (!isEditMode) {
+    // For submitted projects in edit mode, skip the "all pages saved" check (allow partial updates).
+    // For create mode and draft projects, require all pages to be saved before submission.
+    const isSubmittedProject = isEditMode && !isDraftProject;
+    if (!isSubmittedProject) {
       const missing = REQUIRED_PAGES.filter((page) => {
-        // Special handling for project details - check both tabs are saved
         if (page.key === "saved-project-details") {
           return !(isPageSaved("saved-project-info") && isPageSaved("saved-save-plot-details"));
         }
@@ -494,6 +885,9 @@ function DashboardLayoutContent({
                       collapsed={isSidebarCollapsed}
                       onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
                       onSubmitProjectClick={handleSubmitProjectClick}
+                      onSaveDraftClick={handleSaveDraftClick}
+                      allPagesSaved={allPagesSaved}
+                      isDraftProject={isDraftProject}
                     />
                   </Suspense>
                 </div>
@@ -519,16 +913,43 @@ function DashboardLayoutContent({
         onClose={() => setIsSubmitModalOpen(false)}
       />
 
+      {showDraftConfirm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Save as Draft</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to save changes as draft?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDraftConfirm(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDraftConfirmYes}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+              >
+                Yes, Save Draft
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Loading overlay when submitting project */}
       {isSubmittingProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col items-center space-y-4">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
             <p className="text-lg font-semibold text-gray-900">
-              {isEditMode ? "Updating Project..." : "Creating Project..."}
+              {isEditMode ? "Updating Project..." : allPagesSaved ? "Creating Project..." : "Saving Draft..."}
             </p>
             <p className="text-sm text-gray-600 text-center">
-              Please wait while we {isEditMode ? "update" : "create"} your project. This may take a few moments.
+              Please wait while we {isEditMode ? "update" : allPagesSaved ? "create" : "save"} your project. This may take a few moments.
             </p>
           </div>
         </div>
