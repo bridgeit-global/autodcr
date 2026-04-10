@@ -12,11 +12,14 @@ import {
   type DpZone,
 } from "@/app/utils/dpZoneMajorUseSubUse";
 import { supabase } from "@/app/utils/supabase";
+import { useUserMetadata } from "@/app/contexts/UserContext";
+import CustomSelect from "@/app/components/CustomSelect";
 
 
 type ProjectFormData = {
   proposalAsPer: "DCPR 2034";
   title: string;
+  proposalNo: string;
   propertyAddress: string;
   landmark: string;
   earlierBuildingProposalFileNo: string;
@@ -206,6 +209,7 @@ export default function ProjectDetailsClient() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const projectId = searchParams.get("projectId");
+  const { userMetadata } = useUserMetadata();
   
   // Only enable edit mode if we're on the project-details page and have a projectId
   const isProjectDetailsPage = pathname === "/dashboard/project-details";
@@ -246,6 +250,7 @@ export default function ProjectDetailsClient() {
     defaultValues: loadDraft<ProjectFormData>("draft-project-details-project", {
       proposalAsPer: "DCPR 2034",
       title: "",
+      proposalNo: "",
       propertyAddress: "",
       landmark: "",
       earlierBuildingProposalFileNo: "",
@@ -260,6 +265,22 @@ export default function ProjectDetailsClient() {
   useEffect(() => {
     setProjectValue("proposalAsPer", "DCPR 2034");
   }, [setProjectValue]);
+
+  // Auto-fill applicant name and address from logged-in user metadata (only for new projects)
+  useEffect(() => {
+    if (isEditMode || !userMetadata) return;
+    const draft = loadDraft<ProjectFormData>("draft-project-details-project", {} as ProjectFormData);
+    if (draft.fullNameOfApplicant || draft.addressOfApplicant) return;
+
+    const fullName =
+      [userMetadata.first_name, userMetadata.middle_name, userMetadata.last_name]
+        .filter(Boolean)
+        .join(" ") || "";
+    const address = userMetadata.address || "";
+
+    if (fullName) setProjectValue("fullNameOfApplicant", fullName);
+    if (address) setProjectValue("addressOfApplicant", address);
+  }, [isEditMode, userMetadata, setProjectValue]);
 
   const {
     register: registerSavePlot,
@@ -394,6 +415,7 @@ export default function ProjectDetailsClient() {
           const projectFormData: ProjectFormData = {
             proposalAsPer: projectInfo.proposalAsPer === "DCR 1991" ? "DCPR 2034" : (projectInfo.proposalAsPer || "DCPR 2034"),
             title: data.title || "",
+            proposalNo: projectInfo.proposalNo || "",
             propertyAddress: projectInfo.propertyAddress || "",
             landmark: projectInfo.landmark || "",
             earlierBuildingProposalFileNo: projectInfo.earlierBuildingProposalFileNo || "",
@@ -877,6 +899,9 @@ export default function ProjectDetailsClient() {
         return;
       }
 
+      const proposalNo = data.proposalNo?.trim() || "";
+      const combinedTitle = proposalNo ? `${title} ${proposalNo}` : title;
+
       const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
 
       if (userId) {
@@ -884,7 +909,7 @@ export default function ProjectDetailsClient() {
           .from("projects")
           .select("id, status")
           .eq("user_id", userId)
-          .eq("title", title)
+          .eq("title", combinedTitle)
           .limit(1);
 
         if (isEditMode && projectId) {
@@ -893,7 +918,7 @@ export default function ProjectDetailsClient() {
 
         const { data: duplicates } = await query;
         if (duplicates && duplicates.length > 0) {
-          setProjectError("title", { type: "manual", message: "A project with this title already exists. Please use a different title." });
+          setProjectError("title", { type: "manual", message: "A project with this Title and Proposal No combination already exists. Please change the title or proposal number." });
           return;
         }
       }
@@ -918,6 +943,7 @@ export default function ProjectDetailsClient() {
           headers,
           body: JSON.stringify({
             user_id: userId,
+            title: combinedTitle,
             project_info: data,
           }),
         });
@@ -1437,20 +1463,36 @@ export default function ProjectDetailsClient() {
           </div>
 
               <div className="pt-6 space-y-6">
-            {/* Proposal is as per */}
-            <div>
+            {/* Proposal is as per + Proposal No */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
                 <label className="block font-medium text-black mb-1">Proposal is as per</label>
-              <div className="flex gap-6">
+                <div className="flex gap-6">
                   <label className="flex items-center gap-2 text-sm text-black">
-                  <input
+                    <input
                       {...registerProject("proposalAsPer")}
-                    type="radio"
-                    value="DCPR 2034"
-                    defaultChecked
-                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  DCPR 2034
+                      type="radio"
+                      value="DCPR 2034"
+                      defaultChecked
+                      className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    DCPR 2034
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="block font-medium text-black mb-1">
+                  Proposal No <span className="text-red-500">*</span>
                 </label>
+                <input
+                  {...registerProject("proposalNo", {
+                    required: "Proposal number is required",
+                  })}
+                  type="text"
+                  className={inputClasses}
+                  placeholder="Enter proposal number"
+                />
+                {projectErrors.proposalNo && <p className="text-red-600 text-sm mt-1">{projectErrors.proposalNo.message}</p>}
               </div>
             </div>
 
@@ -1459,14 +1501,9 @@ export default function ProjectDetailsClient() {
                 <label className="block font-medium text-black mb-1">
                 Title <span className="text-red-500">*</span>
               </label>
-              <p className="text-xs text-gray-500 mb-2">(Note:[, ], - characters are not allowed in title.)</p>
               <input
                   {...registerProject("title", {
                   required: "Title is required",
-                  pattern: {
-                    value: /^[^\[\]-]+$/,
-                    message: "Characters [, ], - are not allowed",
-                  },
                 })}
                 type="text"
                   className={inputClasses}
@@ -1539,8 +1576,9 @@ export default function ProjectDetailsClient() {
                     required: "Full name is required",
                   })}
                   type="text"
-                    className={inputClasses}
-                  placeholder="Enter full name"
+                  readOnly={!isEditMode}
+                    className={isEditMode ? inputClasses : `${inputClasses} bg-gray-100 cursor-not-allowed`}
+                  placeholder={isEditMode ? "Enter full name" : "Auto-filled from profile"}
                 />
                   {projectErrors.fullNameOfApplicant && (
                     <p className="text-red-600 text-sm mt-1">{projectErrors.fullNameOfApplicant.message}</p>
@@ -1556,8 +1594,9 @@ export default function ProjectDetailsClient() {
                     required: "Address is required",
                   })}
                   type="text"
-                    className={inputClasses}
-                  placeholder="Enter address"
+                  readOnly={!isEditMode}
+                    className={isEditMode ? inputClasses : `${inputClasses} bg-gray-100 cursor-not-allowed`}
+                  placeholder={isEditMode ? "Enter address" : "Auto-filled from profile"}
                 />
                   {projectErrors.addressOfApplicant && (
                     <p className="text-red-600 text-sm mt-1">{projectErrors.addressOfApplicant.message}</p>
@@ -1678,35 +1717,25 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     Region <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("region", { required: "Region is required" })}
-                    className={inputClasses}
-                  >
-                    <option value="">----- Select Region -----</option>
-                    {regionOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  <CustomSelect
+                    value={watchSavePlot("region") || ""}
+                    onChange={(val) => setSavePlotValue("region", val, { shouldValidate: true })}
+                    options={regionOptions.map((option) => ({ value: option, label: option }))}
+                    placeholder="----- Select Region -----"
+                  />
                   {savePlotErrors.region && <p className="text-red-600 text-sm mt-1">{savePlotErrors.region.message}</p>}
                 </div>
                 <div>
                   <label className="block font-medium text-black mb-1">
                     Zone <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("zone", { required: "Zone is required" })}
-                    className={inputClasses}
+                  <CustomSelect
+                    value={watchSavePlot("zone") || ""}
+                    onChange={(val) => setSavePlotValue("zone", val, { shouldValidate: true })}
+                    options={zoneOptions.map((option) => ({ value: option, label: option }))}
+                    placeholder="----- Select Zone -----"
                     disabled={!selectedRegion}
-                  >
-                    <option value="">----- Select Zone -----</option>
-                    {zoneOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {savePlotErrors.zone && <p className="text-red-600 text-sm mt-1">{savePlotErrors.zone.message}</p>}
                 </div>
               </div>
@@ -1716,18 +1745,13 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     Ward <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("ward", { required: "Ward is required" })}
-                    className={inputClasses}
+                  <CustomSelect
+                    value={watchSavePlot("ward") || ""}
+                    onChange={(val) => setSavePlotValue("ward", val, { shouldValidate: true })}
+                    options={(wardOptionsMap[selectedZone as string] ?? []).map((option) => ({ value: option, label: option }))}
+                    placeholder="----- Select Ward -----"
                     disabled={!selectedZone}
-                  >
-                    <option value="">----- Select Ward -----</option>
-                    {(wardOptionsMap[selectedZone as string] ?? []).map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {savePlotErrors.ward && <p className="text-red-600 text-sm mt-1">{savePlotErrors.ward.message}</p>}
                 </div>
                 <div>
@@ -1763,23 +1787,16 @@ export default function ProjectDetailsClient() {
                     {labelForVillageDivisionField(selectedPlotBelongs)}{" "}
                     <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("villageName", {
-                      required: villageFieldRequiredMessage(selectedPlotBelongs),
-                    })}
-                    className={inputClasses}
+                  <CustomSelect
+                    value={watchSavePlot("villageName") || ""}
+                    onChange={(val) => setSavePlotValue("villageName", val, { shouldValidate: true })}
+                    options={villageDivisionOrTpsOptions.map((option) => ({ value: option, label: option }))}
+                    placeholder={villageSelectPlaceholder(selectedPlotBelongs)}
                     disabled={
                       !selectedWard ||
                       (selectedPlotBelongs === "F.P.No" && Boolean(selectedWard) && !fpTpsReady)
                     }
-                  >
-                    <option value="">{villageSelectPlaceholder(selectedPlotBelongs)}</option>
-                    {villageDivisionOrTpsOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {savePlotErrors.villageName && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.villageName.message}</p>
                   )}
@@ -1816,25 +1833,19 @@ export default function ProjectDetailsClient() {
 
                       return (
                         <div>
-                          <select
-                            className={inputClasses}
-                            disabled={!selectedVillage || !selectedWard}
+                          <CustomSelect
                             value=""
-                            onChange={(e) => {
-                              addSurveyNo(e.target.value);
+                            onChange={(val) => {
+                              addSurveyNo(val);
                             }}
-                          >
-                          <option value="">
-                            {sortedOptions.length === 0 
-                              ? emptySurveyOptionsMessage(selectedPlotBelongs) 
-                              : `----- Select ${surveyKindLabel} -----`}
-                          </option>
-                            {sortedOptions.map((surveyNo) => (
-                              <option key={surveyNo} value={surveyNo}>
-                                {surveyNo}
-                              </option>
-                            ))}
-                          </select>
+                            options={sortedOptions.map((surveyNo) => ({ value: surveyNo, label: surveyNo }))}
+                            placeholder={
+                              sortedOptions.length === 0
+                                ? emptySurveyOptionsMessage(selectedPlotBelongs)
+                                : `----- Select ${surveyKindLabel} -----`
+                            }
+                            disabled={!selectedVillage || !selectedWard}
+                          />
 
                           {selectedSurveyNos && Array.isArray(selectedSurveyNos) && selectedSurveyNos.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2">
@@ -2021,17 +2032,12 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     DP Zone <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("dpZone", { required: "DP Zone is required" })}
-                    className={inputClasses}
-                  >
-                    <option value="">----- Select DP Zone -----</option>
-                    {DP_ZONE_OPTIONS.map((z) => (
-                      <option key={z} value={z}>
-                        {dpZoneLabelMap[z] ?? `DP Zone ${z}`}
-                      </option>
-                    ))}
-                  </select>
+                  <CustomSelect
+                    value={watchSavePlot("dpZone") || ""}
+                    onChange={(val) => setSavePlotValue("dpZone", val, { shouldValidate: true })}
+                    options={DP_ZONE_OPTIONS.map((z) => ({ value: z, label: dpZoneLabelMap[z] ?? `DP Zone ${z}` }))}
+                    placeholder="----- Select DP Zone -----"
+                  />
                   {savePlotErrors.dpZone && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.dpZone.message}</p>
                   )}
@@ -2043,18 +2049,13 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     Major Use of Plot <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("majorUseOfPlot", { required: "Select major use" })}
-                    className={inputClasses}
+                  <CustomSelect
+                    value={watchSavePlot("majorUseOfPlot") || ""}
+                    onChange={(val) => setSavePlotValue("majorUseOfPlot", val, { shouldValidate: true })}
+                    options={majorUseOptions.map((option) => ({ value: option, label: option }))}
+                    placeholder="----- Select Major Use -----"
                     disabled={!selectedDpZone}
-                  >
-                    <option value="">----- Select Major Use -----</option>
-                    {majorUseOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {savePlotErrors.majorUseOfPlot && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.majorUseOfPlot.message}</p>
                   )}
@@ -2063,18 +2064,13 @@ export default function ProjectDetailsClient() {
                   <label className="block font-medium text-black mb-1">
                     Plot SubUse <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    {...registerSavePlot("plotSubUse", { required: "Select subuse" })}
-                    className={inputClasses}
+                  <CustomSelect
+                    value={watchSavePlot("plotSubUse") || ""}
+                    onChange={(val) => setSavePlotValue("plotSubUse", val, { shouldValidate: true })}
+                    options={plotSubUseOptions.map((option) => ({ value: option, label: option }))}
+                    placeholder="----- Select Plot SubUse -----"
                     disabled={!selectedDpZone || !selectedMajorUse}
-                  >
-                    <option value="">----- Select Plot SubUse -----</option>
-                    {plotSubUseOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {savePlotErrors.plotSubUse && (
                     <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotSubUse.message}</p>
                   )}
@@ -2124,17 +2120,12 @@ export default function ProjectDetailsClient() {
                       <label className="block font-medium text-black mb-1">
                         Plot Type <span className="text-red-500">*</span>
               </label>
-                      <select
-                        {...registerSavePlot("plotType", { required: "Select plot type" })}
-                        className={inputClasses}
-                      >
-                        <option value="">----- Select -----</option>
-                        {plotTypeOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                      <CustomSelect
+                        value={watchSavePlot("plotType") || ""}
+                        onChange={(val) => setSavePlotValue("plotType", val, { shouldValidate: true })}
+                        options={plotTypeOptions.map((option) => ({ value: option, label: option }))}
+                        placeholder="----- Select -----"
+                      />
                       {savePlotErrors.plotType && (
                         <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotType.message}</p>
               )}

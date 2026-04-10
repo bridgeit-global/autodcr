@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
+import CustomSelect from "@/app/components/CustomSelect";
 
 type BGFormData = {
   zone: string;
@@ -197,13 +198,15 @@ export default function BGDetailsPage() {
     if (isEditMode && projectData && !isLoading) {
       const bgDetails = projectData.bg_details || {};
       const entries = bgDetails.entries || [];
-      
+      const projectInfo = projectData.project_info || {};
+      const proposalNoFromProject = projectInfo.proposalNo || projectInfo.proposal_no || "";
+
       if (entries.length > 0) {
         const firstEntry = entries[0];
         const bgEntry: BGEntry = {
           id: firstEntry.id || createId(),
           zone: firstEntry.zone || "",
-          proposalNo: firstEntry.proposalNo || firstEntry.proposal_no || firstEntry.fileNo || firstEntry.file_no || "",
+          proposalNo: proposalNoFromProject || firstEntry.proposalNo || firstEntry.proposal_no || firstEntry.fileNo || firstEntry.file_no || "",
           bgNumber: firstEntry.bgNumber || firstEntry.bg_number || "",
           bgDate: firstEntry.bgDate || firstEntry.bg_date || "",
           bankName: firstEntry.bankName || firstEntry.bank_name || "",
@@ -220,9 +223,19 @@ export default function BGDetailsPage() {
         saveDraft("draft-bg-details-form", bgEntry);
         markPageSaved("saved-bg-details");
         setIsSaved(true);
+      } else if (proposalNoFromProject) {
+        setValue("proposalNo", proposalNoFromProject);
       }
     }
-  }, [isEditMode, projectData, isLoading, reset]);
+  }, [isEditMode, projectData, isLoading, reset, setValue]);
+
+  // Auto-fill proposalNo from Project Details draft
+  useEffect(() => {
+    const projectDraft = loadDraft<{ proposalNo?: string }>("draft-project-details-project", {});
+    if (projectDraft.proposalNo) {
+      setValue("proposalNo", projectDraft.proposalNo);
+    }
+  }, [setValue]);
 
   // Persist drafts
   useEffect(() => {
@@ -323,17 +336,13 @@ export default function BGDetailsPage() {
               <label className="block font-medium text-black mb-1">
                 Zone <span className="text-red-500">*</span>
               </label>
-              <select
-                {...register("zone", { required: "Zone is required" })}
-                className={inputClasses}
-              >
-                <option value="">Select Zone</option>
-                {zoneOptions.map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
-                  </option>
-                ))}
-              </select>
+              <input type="hidden" {...register("zone", { required: "Zone is required" })} />
+              <CustomSelect
+                value={watch("zone") || ""}
+                onChange={(val) => setValue("zone", val, { shouldValidate: true })}
+                options={zoneOptions.map((zone) => ({ value: zone, label: zone }))}
+                placeholder="Select Zone"
+              />
               {errors.zone && <p className="text-sm text-red-600 mt-1">{errors.zone.message}</p>}
             </div>
             <div>
@@ -343,8 +352,9 @@ export default function BGDetailsPage() {
               <input
                 type="text"
                 {...register("proposalNo", { required: "Proposal number is required" })}
-                className={inputClasses}
-                placeholder="Enter proposal number"
+                readOnly
+                className={`${inputClasses} bg-gray-100 cursor-not-allowed`}
+                placeholder="Auto-filled from Project Details"
               />
               {errors.proposalNo && <p className="text-sm text-red-600 mt-1">{errors.proposalNo.message}</p>}
             </div>

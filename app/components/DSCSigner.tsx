@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import CustomSelect from '@/app/components/CustomSelect';
 
 export default function DSCSigner() {
   const [status, setStatus] = useState<any>(null);
@@ -133,26 +134,18 @@ export default function DSCSigner() {
       {certificates.length > 0 && (
         <div style={{ marginBottom: '20px' }}>
           <h3>Select Certificate</h3>
-          <select
+          <CustomSelect
             value={`${selectedCert.slotIndex}-${selectedCert.certIndex}`}
-            onChange={(e) => {
-              const [slotIdx, certIdx] = e.target.value.split('-').map(Number);
+            onChange={(val) => {
+              const [slotIdx, certIdx] = val.split('-').map(Number);
               setSelectedCert({ certIndex: certIdx, slotIndex: slotIdx });
             }}
-            style={{
-              width: '100%',
-              padding: '10px',
-              fontSize: '14px',
-              borderRadius: '5px',
-              border: '1px solid #ddd',
-            }}
-          >
-            {certificates.map((cert, idx) => (
-              <option key={idx} value={`${cert.slotIndex}-${cert.certIndex}`}>
-                {cert.tokenLabel} - {cert.label} (Slot {cert.slotIndex}, Cert {cert.certIndex})
-              </option>
-            ))}
-          </select>
+            options={certificates.map((cert) => ({
+              value: `${cert.slotIndex}-${cert.certIndex}`,
+              label: `${cert.tokenLabel} - ${cert.label} (Slot ${cert.slotIndex}, Cert ${cert.certIndex})`,
+            }))}
+            className="w-full"
+          />
         </div>
       )}
 

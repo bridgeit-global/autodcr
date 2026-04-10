@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
+import CustomSelect from "@/app/components/CustomSelect";
 
 type BuildingFormData = {
   buildingType: string;
@@ -38,6 +39,7 @@ export default function BuildingDetailsPage() {
     formState: { errors },
     watch,
     reset,
+    setValue,
   } = useForm<BuildingFormData>({
     defaultValues: loadDraft<BuildingFormData>("draft-building-details-form", {
       buildingType: "",
@@ -209,17 +211,16 @@ export default function BuildingDetailsPage() {
                 <label className="block font-medium text-black mb-1">
                   Type <span className="text-red-500">*</span>
                 </label>
-                <select
+                <input
+                  type="hidden"
                   {...register("buildingType", { required: "Please select a type" })}
-                  className={inputClasses}
-                >
-                  <option value="">Select type</option>
-                  {BUILDING_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
+                />
+                <CustomSelect
+                  value={watch("buildingType") || ""}
+                  onChange={(val) => setValue("buildingType", val, { shouldValidate: true })}
+                  options={BUILDING_TYPES.map((type) => ({ value: type, label: type }))}
+                  placeholder="Select type"
+                />
                 {errors.buildingType && (
                   <p className="text-red-600 text-sm mt-1">{errors.buildingType.message}</p>
                 )}

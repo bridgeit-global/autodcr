@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHeader from "../components/DashboardHeader";
+import CustomSelect from "@/app/components/CustomSelect";
 import SiteFooter from "../components/SiteFooter";
+import { supabase } from "@/app/utils/supabase";
 
 type PlanningAuthority = {
   id: string;
@@ -19,17 +21,10 @@ type PermissionType = {
 };
 
 const planningAuthorities: PlanningAuthority[] = [
-  { id: "mcgm-bp", label: "MCGM(BP)" },
-  { id: "other", label: "Other" },
-  { id: "mcgm-tdr", label: "MCGM-TDR Generation & Transfer" },
-  { id: "mcgm-tdr-sra", label: "MCGM-TDR SRA Utilization" },
-  { id: "bmc-tdr", label: "BMC-TDR Generation and Transfer (SRA/MMRDA/Dharavi Redevelopment Project/BMC-Improvement)" },
-];
-
-const projects = [
-  { id: "project-1", name: "Siddhi Heights Redevelopment" },
-  { id: "project-2", name: "Green Meadows Township" },
-  { id: "project-3", name: "Lotus Residency Phase II" },
+  { id: "bmc", label: "BMC" },
+  { id: "sra", label: "SRA" },
+  { id: "mhada", label: "MHADA" },
+  { id: "mmrda", label: "MMRDA" },
 ];
 
 const departments = [
@@ -529,8 +524,45 @@ const authorityPermissions: Record<string, PermissionType[]> = {
 export default function CreateApplicationPage() {
   const router = useRouter();
   const [sessionTime, setSessionTime] = useState(3600);
-  const [selectedAuthority, setSelectedAuthority] = useState(planningAuthorities[0].id);
+  const [selectedAuthority, setSelectedAuthority] = useState("bmc");
   const [selectedProject, setSelectedProject] = useState("");
+  const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
+
+  useEffect(() => {
+    const loadProjects = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id;
+      if (!userId) return;
+
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id,title")
+        .eq("user_id", userId)
+        .eq("status", "submitted")
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        setProjects(data);
+      }
+    };
+    loadProjects();
+  }, []);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!projectDropdownOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
+        setProjectDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [projectDropdownOpen]);
+
+  const selectedProjectTitle = projects.find((p) => p.id === selectedProject)?.title || "";
+
   const [selectedDepartment, setSelectedDepartment] = useState(departments[0]);
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
   const [proposalSubmission, setProposalSubmission] = useState(
@@ -572,9 +604,7 @@ export default function CreateApplicationPage() {
   }, [selectedAuthority, selectedDepartment]);
 
   useEffect(() => {
-    if (selectedAuthority === "mcgm-tdr-sra") {
-      setSelectedDepartment(sraDepartment);
-    } else if (!departments.includes(selectedDepartment)) {
+    if (!departments.includes(selectedDepartment)) {
       setSelectedDepartment(departments[0]);
     }
   }, [selectedAuthority, selectedDepartment]);
@@ -589,259 +619,268 @@ export default function CreateApplicationPage() {
     setSelectedPermission((prev) => (prev === id ? null : id));
   };
 
-  const isDepartmentDrivenAuthority = selectedAuthority === "mcgm-bp" || selectedAuthority === "other";
-  const permissionTypes = isDepartmentDrivenAuthority
-    ? getDepartmentPermissions(selectedDepartment)
-    : authorityPermissions[selectedAuthority] ?? authorityPermissions.default;
-  const showDepartment = !["mcgm-tdr", "bmc-tdr"].includes(selectedAuthority);
-  const departmentOptions =
-    selectedAuthority === "mcgm-tdr-sra" ? [sraDepartment] : departments;
-  const showBuildingPermissionFields =
-    isDepartmentDrivenAuthority && selectedDepartment === "Building Permission";
+  const permissionTypes = getDepartmentPermissions(selectedDepartment);
+  const showDepartment = true;
+  const departmentOptions = departments;
+  const showBuildingPermissionFields = selectedDepartment === "Building Permission";
+
+  const inputClasses =
+    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-      <Suspense fallback={<div className="h-16 bg-white border border-gray-200 rounded-3xl"></div>}>
-        <DashboardHeader sessionTime={formatTime(sessionTime)} />
-      </Suspense>
+    <div className="h-screen bg-gray-100 flex flex-col overflow-hidden">
+      <div className="p-4 md:p-6 shrink-0">
+        <Suspense fallback={<div className="h-16 bg-white border border-gray-200 rounded-3xl"></div>}>
+          <DashboardHeader sessionTime={formatTime(sessionTime)} />
+        </Suspense>
+      </div>
 
-      <div className="flex-1 overflow-y-auto bg-gray-100">
-        <div className="max-w-5xl mx-auto px-6 pt-8 pb-12 space-y-6">
-          <section className="border border-gray-300 rounded-lg bg-white flex flex-col shadow-sm">
-            <div className="border-b border-gray-200 px-6 py-4 bg-white">
-              <h2 className="text-xl font-semibold text-gray-900">Create New Application</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Fill in the details below to start a new application for your project.
-              </p>
-            </div>
+      <div className="px-4 md:px-6 pb-4 md:pb-6 flex-1 min-h-0 overflow-hidden">
+        <div className="h-full w-full rounded-3xl bg-white shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="flex flex-1 min-h-0 bg-gray-50">
+            <div className="p-4 md:p-6 flex flex-1 min-h-0 overflow-hidden">
+              <main className="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white border border-gray-200 shadow-sm px-4 md:px-6 py-6">
+                <div className="max-w-5xl mx-auto px-6 pt-8 space-y-6">
+                  <section className="border border-gray-200 rounded-2xl p-6 bg-white shadow-sm">
+                    <div className="border-b border-gray-200 pb-4 mb-6">
+                      <h2 className="text-xl font-bold text-black">Create New Application</h2>
+                      <p className="text-sm text-black mt-1">
+                        Fill in the details below to start a new application for your project.
+                      </p>
+                    </div>
 
-            <div className="p-6 space-y-8">
-              <div>
-                <p className="text-sm font-semibold text-gray-900 mb-4">
-                  Who is planning authority for the project?
-                </p>
-                <div className="grid gap-3 md:grid-cols-3">
-                  {planningAuthorities.map((authority) => (
-                    <label
-                      key={authority.id}
-                      className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm ${
-                        selectedAuthority === authority.id
-                          ? "border-blue-500 bg-blue-50 text-blue-900"
-                          : "border-gray-200 bg-white text-gray-800"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="planning-authority"
-                        checked={selectedAuthority === authority.id}
-                        onChange={() => setSelectedAuthority(authority.id)}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>{authority.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className={`grid gap-6 ${showDepartment ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="project" className="text-sm font-semibold text-gray-900">
-                    Project
-                  </label>
-                  <select
-                    id="project"
-                    value={selectedProject}
-                    onChange={(event) => setSelectedProject(event.target.value)}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="">Select Project</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {showDepartment && (
-                  <div className="flex flex-col gap-2">
-                    <label htmlFor="department" className="text-sm font-semibold text-gray-900">
-                      Select Department
-                    </label>
-                    <select
-                      id="department"
-                      value={selectedDepartment}
-                      onChange={(event) => setSelectedDepartment(event.target.value)}
-                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    >
-                      {departmentOptions.map((department) => (
-                        <option key={department} value={department}>
-                          {department}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <p className="text-sm font-semibold text-gray-900 mb-2">Permission Type</p>
-                <p className="text-xs text-gray-500 mb-4">
-                  Select the type of permission you want to apply for
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {permissionTypes.map((type) => (
-                    <button
-                      key={type.id}
-                      type="button"
-                      onClick={() => handlePermissionCardClick(type.id)}
-                      className={`h-full rounded-lg border px-4 py-5 text-left transition ${
-                        selectedPermission === type.id
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 bg-gray-50 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className="mb-4 flex items-center justify-center">{type.icon}</div>
-                      <p className="text-sm font-semibold text-gray-900">{type.title}</p>
-                      <p className="text-xs text-gray-500 mt-2">{type.description}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {showBuildingPermissionFields && (
-                <div className="space-y-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900 mb-3">
-                      Proposal Submission For -
-                    </p>
-                    <div className="flex flex-wrap gap-4">
-                      {proposalSubmissionOptions.map((option) => (
-                        <label key={option} className="flex items-center gap-2 text-sm text-gray-800">
-                          <input
-                            type="radio"
-                            name="proposal-submission"
-                            value={option}
-                            checked={proposalSubmission === option}
-                            onChange={() => setProposalSubmission(option)}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500"
-                          />
-                          {option}
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block font-medium text-black mb-1">
+                          Who is planning authority for the project?
                         </label>
-                      ))}
-                    </div>
-                  </div>
+                        <div className="flex flex-wrap gap-4">
+                          {planningAuthorities.map((authority) => (
+                            <label
+                              key={authority.id}
+                              className="flex items-center gap-2 text-sm text-black"
+                            >
+                              <input
+                                type="radio"
+                                name="planning-authority"
+                                checked={selectedAuthority === authority.id}
+                                onChange={() => setSelectedAuthority(authority.id)}
+                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              {authority.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
 
-                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-semibold text-gray-900">Type of Notice</label>
-                      <select
-                        value={typeOfNotice}
-                        onChange={(event) => setTypeOfNotice(event.target.value)}
-                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="">Select</option>
-                        {noticeOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                      <div className={`grid gap-4 ${showDepartment ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
+                        <div ref={projectDropdownRef} className="relative">
+                          <label className="block font-medium text-black mb-1">
+                            Project
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setProjectDropdownOpen((prev) => !prev)}
+                            className={`${inputClasses} text-left flex items-center justify-between gap-2 h-auto min-h-[40px] py-2`}
+                          >
+                            <span className={`${selectedProject ? "text-gray-900" : "text-gray-400"} break-words text-left leading-snug`}>
+                              {selectedProject ? selectedProjectTitle : "Select Project"}
+                            </span>
+                            <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${projectDropdownOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          {projectDropdownOpen && (
+                            <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                              <button
+                                type="button"
+                                onClick={() => { setSelectedProject(""); setProjectDropdownOpen(false); }}
+                                className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50"
+                              >
+                                Select Project
+                              </button>
+                              {projects.map((project) => (
+                                <button
+                                  key={project.id}
+                                  type="button"
+                                  onClick={() => { setSelectedProject(project.id); setProjectDropdownOpen(false); }}
+                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 break-words leading-snug ${
+                                    selectedProject === project.id ? "bg-emerald-50 text-emerald-700 font-medium" : "text-gray-900"
+                                  }`}
+                                >
+                                  {project.title}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
 
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-semibold text-gray-900">Proposed Application</label>
-                      <input
-                        type="text"
-                        value={proposedApplication}
-                        onChange={(event) => setProposedApplication(event.target.value)}
-                        placeholder="Enter proposal reference"
-                        className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
+                        {showDepartment && (
+                          <div>
+                            <label htmlFor="department" className="block font-medium text-black mb-1">
+                              Select Department
+                            </label>
+                            <CustomSelect
+                              id="department"
+                              value={selectedDepartment}
+                              onChange={(val) => setSelectedDepartment(val)}
+                              options={departmentOptions.map((department) => ({
+                                value: department,
+                                label: department,
+                              }))}
+                            />
+                          </div>
+                        )}
+                      </div>
 
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-semibold text-gray-900">Major Use of Plot</label>
-                      <select
-                        value={majorUse}
-                        onChange={(event) => setMajorUse(event.target.value)}
-                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="">Select</option>
-                        {majorUseOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                      <div>
+                        <p className="block font-medium text-black mb-1">Permission Type</p>
+                        <p className="text-xs text-gray-500 mb-4">
+                          Select the type of permission you want to apply for
+                        </p>
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                          {permissionTypes.map((type) => (
+                            <button
+                              key={type.id}
+                              type="button"
+                              onClick={() => handlePermissionCardClick(type.id)}
+                              className={`h-full rounded-2xl border px-4 py-5 text-left transition ${
+                                selectedPermission === type.id
+                                  ? "border-emerald-500 bg-emerald-50"
+                                  : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
+                              }`}
+                            >
+                              <div className="mb-4 flex items-center justify-center">{type.icon}</div>
+                              <p className="text-sm font-semibold text-black">{type.title}</p>
+                              <p className="text-xs text-gray-500 mt-2">{type.description}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
-                    <div className="flex flex-col gap-2">
-                      <label className="text-sm font-semibold text-gray-900">Application Type</label>
-                      <select
-                        value={applicationType}
-                        onChange={(event) => setApplicationType(event.target.value)}
-                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="">Select</option>
-                        {applicationTypeOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                      {showBuildingPermissionFields && (
+                        <div className="space-y-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                          <div>
+                            <p className="block font-medium text-black mb-3">
+                              Proposal Submission For -
+                            </p>
+                            <div className="flex flex-wrap gap-4">
+                              {proposalSubmissionOptions.map((option) => (
+                                <label key={option} className="flex items-center gap-2 text-sm text-black">
+                                  <input
+                                    type="radio"
+                                    name="proposal-submission"
+                                    value={option}
+                                    checked={proposalSubmission === option}
+                                    onChange={() => setProposalSubmission(option)}
+                                    className="h-4 w-4 text-emerald-600 focus:ring-emerald-500"
+                                  />
+                                  {option}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                            <div>
+                              <label className="block font-medium text-black mb-1">Type of Notice</label>
+                              <CustomSelect
+                                value={typeOfNotice}
+                                onChange={(val) => setTypeOfNotice(val)}
+                                options={noticeOptions.map((option) => ({
+                                  value: option,
+                                  label: option,
+                                }))}
+                                placeholder="Select"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-medium text-black mb-1">Proposed Application</label>
+                              <input
+                                type="text"
+                                value={proposedApplication}
+                                onChange={(event) => setProposedApplication(event.target.value)}
+                                placeholder="Enter proposal reference"
+                                className={inputClasses}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-medium text-black mb-1">Major Use of Plot</label>
+                              <CustomSelect
+                                value={majorUse}
+                                onChange={(val) => setMajorUse(val)}
+                                options={majorUseOptions.map((option) => ({
+                                  value: option,
+                                  label: option,
+                                }))}
+                                placeholder="Select"
+                                className={inputClasses}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-medium text-black mb-1">Application Type</label>
+                              <CustomSelect
+                                value={applicationType}
+                                onChange={(val) => setApplicationType(val)}
+                                options={applicationTypeOptions.map((option) => ({
+                                  value: option,
+                                  label: option,
+                                }))}
+                                placeholder="Select"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
+                  </section>
+
+                  <div className="flex justify-end gap-3 pb-6">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-emerald-300 transition-colors"
+                      disabled={
+                        !selectedProject ||
+                        !selectedPermission ||
+                        (showBuildingPermissionFields &&
+                          (!typeOfNotice || !proposedApplication || !majorUse || !applicationType))
+                      }
+                      onClick={handleProceed}
+                    >
+                      Proceed
+                    </button>
                   </div>
                 </div>
-              )}
+              </main>
             </div>
-          </section>
-
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-md bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300"
-              disabled={
-                !selectedProject ||
-                !selectedPermission ||
-                (showBuildingPermissionFields &&
-                  (!typeOfNotice || !proposedApplication || !majorUse || !applicationType))
-              }
-              onClick={handleProceed}
-            >
-              Proceed
-            </button>
           </div>
         </div>
       </div>
 
-      {/* Information Modal */}
       {showInfoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg shadow-xl w-[500px] overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-[#4A9BD9] px-6 py-3">
-              <h3 className="text-white text-lg font-medium">Information</h3>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-[500px] overflow-hidden">
+            <div className="bg-emerald-600 px-6 py-3">
+              <h3 className="text-white text-lg font-semibold">Information</h3>
             </div>
-            
-            {/* Modal Body */}
             <div className="px-6 py-6">
               <p className="text-gray-800 text-sm">
                 Dear Applicant, You have already created new for selected application for this project
               </p>
             </div>
-            
-            {/* Modal Footer */}
             <div className="px-6 py-4 flex justify-end border-t border-gray-200">
               <button
                 onClick={handleModalOk}
-                className="px-6 py-2 bg-white border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="px-6 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 OK
               </button>
@@ -850,7 +889,9 @@ export default function CreateApplicationPage() {
         </div>
       )}
 
-      <SiteFooter />
+      <div className="shrink-0">
+        <SiteFooter />
+      </div>
     </div>
   );
 }

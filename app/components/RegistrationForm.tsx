@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import OTPVerificationModal from "./OTPVerificationModal";
 import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
+import CustomSelect from "@/app/components/CustomSelect";
 
 interface RegistrationFormProps {
   title?: string;
@@ -2236,18 +2237,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               <label className="block font-medium text-black mb-1">
                     Entity Type <span className="text-red-600 font-bold">*</span>
             </label>
-              <select
-                    value={formData.entityType}
-                    onChange={(e) => handleInputChange("entityType", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
-              >
-                <option value="">Select Entity Type</option>
-                {ENTITY_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
+              <CustomSelect
+                value={formData.entityType}
+                onChange={(val) => handleInputChange("entityType", val)}
+                options={ENTITY_TYPES.map((type) => ({ value: type, label: type }))}
+                placeholder="Select Entity Type"
+                className="w-full"
+              />
                   {errors.entityType && (
                     <p className="text-xs text-red-600 mt-1">{errors.entityType}</p>
                   )}
