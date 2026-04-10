@@ -25,7 +25,8 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const { clearUserMetadata, userMetadata, fetchUserMetadata, loading } = useUserMetadata();
   
   // Check if we're on a dashboard page
-  const isDashboardPage = pathname?.startsWith("/dashboard");
+  const isDashboardPage = pathname?.startsWith("/dashboard") || pathname?.startsWith("/create-application");
+  const isApplicationPage = pathname?.startsWith("/create-application");
   
   // Check if we're in edit mode (has projectId in URL)
   const isEditMode = !!searchParams?.get("projectId");
@@ -274,12 +275,14 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white w-[90%] max-w-md rounded-xl shadow-2xl p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">
-              {isEditMode ? "Leave Edit Project?" : "Leave Create Project?"}
+              {isApplicationPage ? "Leave Create Application?" : isEditMode ? "Leave Edit Project?" : "Leave Create Project?"}
             </h2>
             <p className="text-sm text-gray-600 mb-4">
-              {isEditMode 
-                ? "You have unsaved changes. Any unsaved information on this page will not be saved if you go back to the dashboard."
-                : "You have not submitted your project. Any unsaved information on this page will not be saved if you go back to the dashboard."
+              {isApplicationPage
+                ? "Any unsaved information on this page will not be saved if you go back to the dashboard."
+                : isEditMode 
+                  ? "You have unsaved changes. Any unsaved information on this page will not be saved if you go back to the dashboard."
+                  : "You have not submitted your project. Any unsaved information on this page will not be saved if you go back to the dashboard."
               }
             </p>
             <div className="flex justify-end gap-3 mt-4">

@@ -8,6 +8,7 @@ import "@react-pdf-viewer/core/lib/styles/index.css";
 import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
+import CustomSelect from "@/app/components/CustomSelect";
 import {
   TEMPLATE_CONFIG,
   TemplateFields,
@@ -670,19 +671,16 @@ export default function TemplatePage() {
                 <label htmlFor="project" className="text-sm font-semibold text-gray-700">
                   Choose a project from the list below
                 </label>
-                <select
+                <CustomSelect
                   id="project"
                   value={selectedProject}
-                  onChange={(event) => setSelectedProject(event.target.value)}
-                  className="rounded-lg border-2 border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all shadow-sm hover:border-gray-400"
-                >
-                  <option value="">-- Select a Project --</option>
-                  {projects.map((project, index) => (
-                    <option key={index} value={project}>
-                      {project.length > 100 ? `${project.substring(0, 100)}...` : project}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedProject(val)}
+                  options={projects.map((project, index) => ({
+                    value: project,
+                    label: project.length > 100 ? `${project.substring(0, 100)}...` : project,
+                  }))}
+                  placeholder="-- Select a Project --"
+                />
                 {selectedProject && (
                   <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-xs font-semibold text-blue-900 mb-1">Selected Project:</p>
@@ -708,22 +706,19 @@ export default function TemplatePage() {
                 <label htmlFor="template" className="text-sm font-semibold text-gray-700">
                   Choose an appointment letter template
                 </label>
-                <select
+                <CustomSelect
                   id="template"
                   value={selectedTemplate}
-                  onChange={(event) => {
-                    setSelectedTemplate(event.target.value as TemplateType | "");
+                  onChange={(val) => {
+                    setSelectedTemplate(val as TemplateType | "");
                     setGeneratedPdfUrl(null);
                   }}
-                  className="rounded-lg border-2 border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200 transition-all shadow-sm hover:border-gray-400"
-                >
-                  <option value="">-- Select a Template --</option>
-                  {Object.keys(TEMPLATE_CONFIG).map((templateKey) => (
-                    <option key={templateKey} value={templateKey}>
-                      {TEMPLATE_CONFIG[templateKey as TemplateType].displayName}
-                    </option>
-                  ))}
-                </select>
+                  options={Object.keys(TEMPLATE_CONFIG).map((templateKey) => ({
+                    value: templateKey,
+                    label: TEMPLATE_CONFIG[templateKey as TemplateType].displayName,
+                  }))}
+                  placeholder="-- Select a Template --"
+                />
                 {selectedTemplate && (
                   <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                     <p className="text-xs font-semibold text-purple-900 mb-1">Selected Template:</p>
@@ -966,36 +961,29 @@ export default function TemplatePage() {
                           <label className="text-sm font-medium text-gray-700">
                             Select DSC Certificate
                           </label>
-                          <select
+                          <CustomSelect
                             value={
                               selectedDsc
                                 ? `${selectedDsc.slotIndex}-${selectedDsc.certIndex}`
                                 : ""
                             }
-                            onChange={(e) => {
-                              if (e.target.value === "") {
+                            onChange={(val) => {
+                              if (val === "") {
                                 setSelectedDsc(null);
                               } else {
-                                const [slotIdx, certIdx] = e.target.value.split("-").map(Number);
+                                const [slotIdx, certIdx] = val.split("-").map(Number);
                                 setSelectedDsc({ slotIndex: slotIdx, certIndex: certIdx });
                               }
                             }}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-black"
-                          >
-                            <option value="">-- Select DSC Certificate --</option>
-                            {dscCertificates.map((cert, idx) => {
-                              // Show CN if available, otherwise use label
+                            options={dscCertificates.map((cert) => {
                               const displayName = cert.cn || cert.label || `Certificate ${cert.certIndex + 1}`;
-                              return (
-                                <option
-                                  key={idx}
-                                  value={`${cert.slotIndex}-${cert.certIndex}`}
-                                >
-                                  {displayName}
-                                </option>
-                              );
+                              return {
+                                value: `${cert.slotIndex}-${cert.certIndex}`,
+                                label: displayName,
+                              };
                             })}
-                          </select>
+                            placeholder="-- Select DSC Certificate --"
+                          />
                         </div>
                       )}
 

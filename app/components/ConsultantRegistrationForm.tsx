@@ -8,6 +8,7 @@ import OTPVerificationModal from "./OTPVerificationModal";
 import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
+import CustomSelect from "@/app/components/CustomSelect";
 
 interface ConsultantRegistrationFormProps {
   title?: string;
@@ -1589,24 +1590,25 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   <label className="block font-medium text-black mb-1">
                     Consultant Type <span className="text-red-600 font-bold">*</span>
                   </label>
-                  <select 
+                  <CustomSelect
                     value={formData.consultantType}
-                    onChange={(e) => handleInputChange("consultantType", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
-                  >
-                    <option value="">Select Consultant Type</option>
-                    <option value="Architect">Architect</option>
-                    <option value="Structural Engineer">Structural Engineer</option>
-                    <option value="Licensed Surveyor">Licensed Surveyor</option>
-                    <option value="MEP Consultant">MEP Consultant</option>
-                    <option value="Plumber">Plumber</option>
-                    <option value="Fire Consultant">Fire Consultant</option>
-                    <option value="Landscape Consultant">Landscape Consultant</option>
-                    <option value="PMC / Project Manager">PMC / Project Manager</option>
-                    <option value="Geotechnical Consultant">Geotechnical Consultant</option>
-                    <option value="Environmental Consultant">Environmental Consultant</option>
-                    <option value="Town Planner">Town Planner</option>
-                  </select>
+                    onChange={(val) => handleInputChange("consultantType", val)}
+                    options={[
+                      { value: "Architect", label: "Architect" },
+                      { value: "Structural Engineer", label: "Structural Engineer" },
+                      { value: "Licensed Surveyor", label: "Licensed Surveyor" },
+                      { value: "MEP Consultant", label: "MEP Consultant" },
+                      { value: "Plumber", label: "Plumber" },
+                      { value: "Fire Consultant", label: "Fire Consultant" },
+                      { value: "Landscape Consultant", label: "Landscape Consultant" },
+                      { value: "PMC / Project Manager", label: "PMC / Project Manager" },
+                      { value: "Geotechnical Consultant", label: "Geotechnical Consultant" },
+                      { value: "Environmental Consultant", label: "Environmental Consultant" },
+                      { value: "Town Planner", label: "Town Planner" },
+                    ]}
+                    placeholder="Select Consultant Type"
+                    className="w-full"
+                  />
                   {errors.consultantType && (
                     <p className="text-xs text-red-600 mt-1">{errors.consultantType}</p>
                   )}
@@ -1929,17 +1931,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   </div>
                   <div>
                     <label className="block font-medium text-black mb-1">Qualification (BE / ME Civil)</label>
-                    <select
+                    <CustomSelect
                       value={formData.qualification}
-                      onChange={(e) => handleInputChange("qualification", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
-                    >
-                      <option value="">Select</option>
-                      <option value="BE Civil">BE Civil</option>
-                      <option value="ME Civil">ME Civil</option>
-                      <option value="B.Tech Civil">B.Tech Civil</option>
-                      <option value="M.Tech Structural">M.Tech Structural</option>
-                    </select>
+                      onChange={(val) => handleInputChange("qualification", val)}
+                      options={[
+                        { value: "BE Civil", label: "BE Civil" },
+                        { value: "ME Civil", label: "ME Civil" },
+                        { value: "B.Tech Civil", label: "B.Tech Civil" },
+                        { value: "M.Tech Structural", label: "M.Tech Structural" },
+                      ]}
+                      placeholder="Select"
+                      className="w-full"
+                    />
                   </div>
                     </div>
               )}
@@ -1973,15 +1976,16 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   </div>
                   <div>
                     <label className="block font-medium text-black mb-1">Competency Class <span className="text-red-600 font-bold">*</span></label>
-                    <select
+                    <CustomSelect
                       value={formData.competencyClass}
-                      onChange={(e) => handleInputChange("competencyClass", e.target.value)}
-                      className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
-                    >
-                      <option value="">Select Class</option>
-                      <option value="Class A">Class A</option>
-                      <option value="Class B">Class B</option>
-                    </select>
+                      onChange={(val) => handleInputChange("competencyClass", val)}
+                      options={[
+                        { value: "Class A", label: "Class A" },
+                        { value: "Class B", label: "Class B" },
+                      ]}
+                      placeholder="Select Class"
+                      className="w-full"
+                    />
                     {errors.competencyClass && (
                       <p className="text-xs text-red-600 mt-1">{errors.competencyClass}</p>
                     )}

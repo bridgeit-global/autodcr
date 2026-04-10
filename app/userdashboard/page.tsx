@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
 import DraftApplicationsModal, { DraftApplication } from "../components/DraftApplicationsModal";
+import CustomSelect from "@/app/components/CustomSelect";
 import { supabase } from "@/app/utils/supabase";
 
 type ApplicationType = {
@@ -508,23 +509,20 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
                           <label className="text-sm text-gray-700 font-medium block">
                             Select a project to edit:
                           </label>
-                          <select
+                          <CustomSelect
                             value={selectedProjectForEdit}
-                            onChange={(e) => {
-                              setSelectedProjectForEdit(e.target.value);
-                              if (e.target.value) {
-                                handleProjectSelect(e.target.value);
+                            onChange={(val) => {
+                              setSelectedProjectForEdit(val);
+                              if (val) {
+                                handleProjectSelect(val);
                               }
                             }}
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="">-- Select Project --</option>
-                            {projects.map((project) => (
-                              <option key={project.id} value={project.id}>
-                                {project.title}{project.status === "draft" ? " (Draft)" : ""}
-                              </option>
-                            ))}
-                          </select>
+                            options={projects.map((project) => ({
+                              value: project.id,
+                              label: `${project.title}${project.status === "draft" ? " (Draft)" : ""}`,
+                            }))}
+                            placeholder="-- Select Project --"
+                          />
                           {projects.length === 0 && (
                             <p className="text-xs text-gray-500 mt-1">No projects available</p>
                           )}
@@ -679,18 +677,17 @@ function UserDashboardContent() {
                 {/* Left Dropdowns */}
                 <div className="flex items-center gap-2">
                 <div className="flex items-center gap-2">
-                  <select
+                  <CustomSelect
                     value={selectedProject}
-                    onChange={(e) => setSelectedProject(e.target.value)}
-                    className="border border-black rounded px-3 py-2 text-sm text-black bg-white"
-                  >
-                      <option value="ALL">All Projects</option>
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title}{p.status === "draft" ? " (Draft)" : ""}
-                        </option>
-                      ))}
-                  </select>
+                    onChange={(val) => setSelectedProject(val)}
+                    options={[
+                      { value: "ALL", label: "All Projects" },
+                      ...projects.map((p) => ({
+                        value: p.id,
+                        label: `${p.title}${p.status === "draft" ? " (Draft)" : ""}`,
+                      })),
+                    ]}
+                  />
 
                     {projectsLoading && (
                       <span className="text-xs text-gray-600">Loading projects…</span>
@@ -738,17 +735,14 @@ function UserDashboardContent() {
                 {/* Dropdown and Buttons Row */}
                 <div className="flex items-center justify-between w-full">
                   {/* Left - Department Dropdown */}
-                  <select
+                  <CustomSelect
                     value={selectedApplicationType}
-                    onChange={(e) => setSelectedApplicationType(e.target.value)}
-                    className="border border-black rounded px-3 py-2 text-sm text-black bg-white"
-                  >
-                    {departments.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setSelectedApplicationType(val)}
+                    options={departments.map((department) => ({
+                      value: department,
+                      label: department,
+                    }))}
+                  />
 
                   {/* Right - 4 Buttons */}
                   <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
+import CustomSelect from "@/app/components/CustomSelect";
 
 export type DraftApplication = {
   applicationNo: string;
@@ -35,6 +36,8 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
   status,
   applications,
 }) => {
+  const [headerApplicationType, setHeaderApplicationType] = useState("");
+
   if (!open) return null;
 
   return (
@@ -49,9 +52,13 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600">Application Type</span>
-              <select className="border border-gray-300 rounded px-3 py-1.5 text-sm bg-white">
-                <option>Select</option>
-              </select>
+              <CustomSelect
+                value={headerApplicationType}
+                onChange={(val) => setHeaderApplicationType(val)}
+                options={[]}
+                placeholder="Select"
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm bg-white"
+              />
             </div>
             <div className="flex items-center">
               <input

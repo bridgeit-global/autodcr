@@ -162,6 +162,7 @@ function DashboardLayoutContent({
     const projectInfo = loadDraft("draft-project-details-project", {
       proposalAsPer: "",
       title: "",
+      proposalNo: "",
       propertyAddress: "",
       landmark: "",
       earlierBuildingProposalFileNo: "",
@@ -205,22 +206,16 @@ function DashboardLayoutContent({
     const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
     const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
-    const firstBgEntry: BGEntry | null = Array.isArray(bgEntries) && bgEntries.length > 0 ? bgEntries[0] : null;
-    const proposalNo = firstBgEntry?.proposalNo || firstBgEntry?.proposal_no || firstBgEntry?.fileNo || firstBgEntry?.file_no || "";
+    const proposalNo = (projectInfo as any)?.proposalNo?.trim() || "";
 
     let baseTitle = (projectTitle as string) || "";
-    if (isActuallyEditMode && proposalNo && proposalNo.trim() !== "") {
-      const proposalNoTrimmed = proposalNo.trim();
-      const titleTrimmed = baseTitle.trim();
-      if (titleTrimmed.endsWith(` ${proposalNoTrimmed}`)) {
-        baseTitle = titleTrimmed.slice(0, -(proposalNoTrimmed.length + 1)).trim();
+    if (isActuallyEditMode && proposalNo) {
+      if (baseTitle.trim().endsWith(` ${proposalNo}`)) {
+        baseTitle = baseTitle.trim().slice(0, -(proposalNo.length + 1)).trim();
       }
     }
 
-    let finalProjectTitle = baseTitle;
-    if (proposalNo && proposalNo.trim() !== "") {
-      finalProjectTitle = `${baseTitle} ${proposalNo}`.trim();
-    }
+    const finalProjectTitle = proposalNo ? `${baseTitle} ${proposalNo}`.trim() : baseTitle;
 
     const deepEqual = (a: any, b: any): boolean => {
       if (a === b) return true;
@@ -541,6 +536,7 @@ function DashboardLayoutContent({
       const projectInfo = loadDraft("draft-project-details-project", {
         proposalAsPer: "",
         title: "",
+        proposalNo: "",
         propertyAddress: "",
         landmark: "",
         earlierBuildingProposalFileNo: "",
@@ -587,27 +583,16 @@ function DashboardLayoutContent({
       const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
       const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
-      // Get proposal number from BG Details (with backward compatibility for fileNo)
-      const firstBgEntry: BGEntry | null = Array.isArray(bgEntries) && bgEntries.length > 0 ? bgEntries[0] : null;
-      const proposalNo = firstBgEntry?.proposalNo || firstBgEntry?.proposal_no || firstBgEntry?.fileNo || firstBgEntry?.file_no || "";
-      
-      // Extract base title (remove proposal number if it was already appended in edit mode)
+      const proposalNo = (projectInfo as any)?.proposalNo?.trim() || "";
+
       let baseTitle = projectTitle as string;
-      if (isActuallyEditMode && proposalNo && proposalNo.trim() !== "") {
-        // Check if title ends with the proposal number (e.g., "demo 123" ends with "123")
-        const proposalNoTrimmed = proposalNo.trim();
-        const titleTrimmed = baseTitle.trim();
-        if (titleTrimmed.endsWith(` ${proposalNoTrimmed}`)) {
-          // Remove the proposal number from the end to get the base title
-          baseTitle = titleTrimmed.slice(0, -(proposalNoTrimmed.length + 1)).trim();
+      if (isActuallyEditMode && proposalNo) {
+        if (baseTitle.trim().endsWith(` ${proposalNo}`)) {
+          baseTitle = baseTitle.trim().slice(0, -(proposalNo.length + 1)).trim();
         }
       }
-      
-      // Combine base title with current proposal number: "baseTitle proposalNo"
-      let finalProjectTitle = baseTitle;
-      if (proposalNo && proposalNo.trim() !== "") {
-        finalProjectTitle = `${baseTitle} ${proposalNo}`.trim();
-      }
+
+      const finalProjectTitle = proposalNo ? `${baseTitle} ${proposalNo}`.trim() : baseTitle;
 
       // Helper function to deep compare two values
       const deepEqual = (a: any, b: any): boolean => {

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import CustomSelect from "@/app/components/CustomSelect";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 
@@ -11,6 +12,7 @@ interface Props {
 
 const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const router = useRouter();
+  const [ownerType, setOwnerType] = useState("");
   
   useEffect(() => {
     if (open) {
@@ -97,12 +99,17 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
 
     <div>
       <label className="block font-medium text-black mb-1">Type</label>
-      <select className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-blue-500 outline-none">
-        <option value="">Select Type</option>
-        <option>Developer</option>
-        <option>Firm</option>
-        <option>Individual</option>
-      </select>
+      <CustomSelect
+        value={ownerType}
+        onChange={(val) => setOwnerType(val)}
+        options={[
+          { value: "Developer", label: "Developer" },
+          { value: "Firm", label: "Firm" },
+          { value: "Individual", label: "Individual" },
+        ]}
+        placeholder="Select Type"
+        className="w-full"
+      />
     </div>
   </div>
 

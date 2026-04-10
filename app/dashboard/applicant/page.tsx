@@ -8,6 +8,7 @@ import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/dr
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { useProjectData } from "@/app/hooks/useProjectData";
+import CustomSelect from "@/app/components/CustomSelect";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -876,17 +877,16 @@ export default function ApplicantDetailsPage() {
                 <label className="block font-medium text-black mb-1">
                   Applicant / Authorized Person <span className="text-red-500">*</span>
                 </label>
-                <select
+                <input
+                  type="hidden"
                   {...register("applicantType", { required: "This field is required" })}
-                  className={inputClasses}
-                >
-                  <option value="">Select</option>
-                  {availableApplicantTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
+                />
+                <CustomSelect
+                  value={watch("applicantType") || ""}
+                  onChange={(val) => setValue("applicantType", val, { shouldValidate: true })}
+                  options={availableApplicantTypes.map((type) => ({ value: type, label: type }))}
+                  placeholder="Select"
+                />
                 {errors.applicantType && <p className="text-red-600 text-sm mt-1">{errors.applicantType.message}</p>}
               </div>
 
@@ -895,24 +895,26 @@ export default function ApplicantDetailsPage() {
                   <label className="block font-medium text-black mb-1">
                   Name <span className="text-red-500">*</span>
                   </label>
-                  <select
+                  <input
+                    type="hidden"
                     {...register("plumbingConsultant", {
                       required: `Please select a ${selectedApplicantType?.toLowerCase() || "record"}`,
                     })}
-                    className={`${inputClasses} ${directoryOptions.length === 0 ? disabledClasses : ""}`}
-                    disabled={directoryOptions.length === 0}
-                  >
-                    <option value="">
-                      {directoryOptions.length === 0
+                  />
+                  <CustomSelect
+                    value={watch("plumbingConsultant") || ""}
+                    onChange={(val) => setValue("plumbingConsultant", val, { shouldValidate: true })}
+                    options={directoryOptions.map((entry) => ({
+                      value: entry.id,
+                      label: entry.fullName,
+                    }))}
+                    placeholder={
+                      directoryOptions.length === 0
                         ? `No ${selectedApplicantType} found`
-                        : `Select ${selectedApplicantType}`}
-                    </option>
-                    {directoryOptions.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.fullName}
-                      </option>
-                    ))}
-                  </select>
+                        : `Select ${selectedApplicantType}`
+                    }
+                    disabled={directoryOptions.length === 0}
+                  />
                   {errors.plumbingConsultant && (
                     <p className="text-red-600 text-sm mt-1">{errors.plumbingConsultant.message}</p>
                   )}
