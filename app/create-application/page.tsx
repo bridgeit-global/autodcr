@@ -653,7 +653,7 @@ export default function CreateApplicationPage() {
     }
   }, [filteredProjects, selectedProject]);
 
-  const [selectedDepartment, setSelectedDepartment] = useState(departments[0]);
+  const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
   const [proposalSubmission, setProposalSubmission] = useState(
     proposalSubmissionOptions[0]
@@ -666,6 +666,7 @@ export default function CreateApplicationPage() {
   const [modalMessage, setModalMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingPermissionTypes, setExistingPermissionTypes] = useState<string[]>([]);
+  const [redirectOnModalOk, setRedirectOnModalOk] = useState(false);
 
   const handleProceed = async () => {
     if (!selectedProject || !selectedPermission) return;
@@ -695,6 +696,7 @@ export default function CreateApplicationPage() {
         setModalMessage(
           "This permission type is already added for the selected project. Please choose a different permission type."
         );
+        setRedirectOnModalOk(false);
         setShowInfoModal(true);
         return;
       }
@@ -704,11 +706,15 @@ export default function CreateApplicationPage() {
     }
 
     setModalMessage("Application created successfully.");
+    setRedirectOnModalOk(true);
     setShowInfoModal(true);
   };
 
   const handleModalOk = () => {
     setShowInfoModal(false);
+    if (redirectOnModalOk) {
+      router.push(`/userdashboard?department=${encodeURIComponent(selectedDepartment)}`);
+    }
   };
 
   useEffect(() => {
@@ -733,9 +739,15 @@ export default function CreateApplicationPage() {
 
   useEffect(() => {
     if (!departments.includes(selectedDepartment)) {
-      setSelectedDepartment(departments[0]);
+      setSelectedDepartment("");
     }
   }, [selectedAuthority, selectedDepartment]);
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setSelectedDepartment("");
+    }
+  }, [selectedProject]);
 
   useEffect(() => {
     const loadExistingPermissions = async () => {
@@ -774,7 +786,9 @@ export default function CreateApplicationPage() {
     setSelectedPermission((prev) => (prev === id ? null : id));
   };
 
-  const permissionTypes = getDepartmentPermissions(selectedDepartment);
+  const permissionTypes = selectedDepartment
+    ? getDepartmentPermissions(selectedDepartment)
+    : [];
   const showDepartment = true;
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const showBuildingPermissionFields = selectedDepartment === "Building Permission";
@@ -942,7 +956,7 @@ export default function CreateApplicationPage() {
                         {showDepartment && (
                           <div>
                             <label htmlFor="department" className="block font-medium text-black mb-1">
-                              Select Department
+                              Department
                             </label>
                             <CustomSelect
                               id="department"
@@ -952,6 +966,8 @@ export default function CreateApplicationPage() {
                                 value: department,
                                 label: department,
                               }))}
+                              placeholder="Select Department"
+                              disabled={!selectedProject}
                             />
                           </div>
                         )}
@@ -976,6 +992,7 @@ export default function CreateApplicationPage() {
                                   setModalMessage(
                                     "This permission type is already created for the selected project."
                                   );
+                                  setRedirectOnModalOk(false);
                                   setShowInfoModal(true);
                                   return;
                                 }
