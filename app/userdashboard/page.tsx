@@ -518,6 +518,7 @@ function UserDashboardContent() {
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
   const [draftApplicationsByType, setDraftApplicationsByType] = useState<Record<string, DraftApplication[]>>({});
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
+  const selectableProjects = projects.filter((project) => project.status !== "draft");
 
   const getProjectOptionLabel = (project: {
     title: string;
@@ -725,7 +726,7 @@ function UserDashboardContent() {
                     onChange={(val) => setSelectedProject(val)}
                     options={[
                       { value: "ALL", label: "All Projects" },
-                      ...projects.map((p) => ({
+                      ...selectableProjects.map((p) => ({
                         value: p.id,
                         ...getProjectOptionLabel(p),
                       })),
