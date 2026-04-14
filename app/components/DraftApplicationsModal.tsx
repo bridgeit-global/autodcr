@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
-import CustomSelect from "@/app/components/CustomSelect";
+import React, { useMemo, useState } from "react";
 
 export type DraftApplication = {
+  applicationId?: string;
   applicationNo: string;
   ward: string;
   applicationType: string;
@@ -18,14 +18,13 @@ interface DraftApplicationsModalProps {
   appType: string;
   status: string;
   applications: DraftApplication[];
+  onDeleteApplication?: (applicationId: string) => Promise<void>;
 }
 
 const STAGES = [
   "Draft",
-  "Payment Pending",
   "Proposal Submitted",
   "Survey Done",
-  "Scrutiny Done",
   "Plan Approved",
 ];
 
@@ -35,10 +34,32 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
   appType,
   status,
   applications,
+  onDeleteApplication,
 }) => {
-  const [headerApplicationType, setHeaderApplicationType] = useState("");
+  const [fileNumberQuery, setFileNumberQuery] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   if (!open) return null;
+
+  const filteredApplications = useMemo(() => {
+    const query = fileNumberQuery.trim().toLowerCase();
+    if (!query) return applications;
+    return applications.filter((app) =>
+      app.applicationNo.toLowerCase().includes(query)
+    );
+  }, [applications, fileNumberQuery]);
+
+  const handleDelete = async (applicationId: string) => {
+    if (!onDeleteApplication) return;
+    setPendingDeleteId(null);
+    setDeletingId(applicationId);
+    try {
+      await onDeleteApplication(applicationId);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -50,21 +71,13 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
             <p className="text-sm text-orange-400">{status}</p>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">Application Type</span>
-              <CustomSelect
-                value={headerApplicationType}
-                onChange={(val) => setHeaderApplicationType(val)}
-                options={[]}
-                placeholder="Select"
-                className="border border-gray-300 rounded px-3 py-1.5 text-sm bg-white"
-              />
-            </div>
             <div className="flex items-center">
               <input
                 type="text"
-                placeholder="Enter file number"
-                className="border border-gray-300 rounded-l px-3 py-1.5 text-sm w-44"
+                placeholder="Enter application no"
+                className="border border-gray-300 rounded-l px-3 py-1.5 text-sm w-44 bg-white text-black font-medium placeholder:text-gray-500 caret-black"
+                value={fileNumberQuery}
+                onChange={(event) => setFileNumberQuery(event.target.value)}
               />
               <button className="border border-l-0 border-gray-300 rounded-r px-3 py-1.5 text-blue-600 hover:bg-gray-50">
                 <svg
@@ -94,67 +107,61 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto max-h-[65vh] bg-white">
-          {/* Application Entries */}
-          {applications.map((app, index) => (
-            <div 
-              key={index} 
-              className="border border-gray-200 rounded-lg p-5 mb-4"
-            >
-              {/* Stage Headers Row */}
-              <div className="flex mb-4">
-                <div className="w-44 flex-shrink-0"></div>
-                <div className="flex-1">
+          {filteredApplications.length > 0 && (
+            <div className="mb-2">
+              <div className="flex justify-end px-2">
+                <div className="w-[calc(100%-15rem)]">
                   <div className="flex justify-between">
                     {STAGES.map((stage, idx) => (
-                      <div key={idx} className="w-24 text-center">
-                        <span className="text-xs text-gray-500 leading-tight">
-                          {stage.split(" ").map((word, i) => (
-                            <span key={i} className="block">{word}</span>
-                          ))}
-                        </span>
+                      <div key={idx} className="w-24 text-center text-xs text-gray-500 leading-tight">
+                        {stage.split(" ").map((word, i) => (
+                          <span key={i} className="block">
+                            {word}
+                          </span>
+                        ))}
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Content Row */}
+          {filteredApplications.map((app, index) => (
+            <div key={index} className="py-4 px-3 rounded-xl border border-gray-100 bg-gradient-to-r from-white to-sky-50/40 mb-3 last:mb-0">
               <div className="flex">
-                {/* Left Info */}
-                <div className="w-44 flex-shrink-0 pr-4">
-                  <p className="text-xs text-gray-500 mb-1">Application No:</p>
-                  <a href="#" className="text-blue-600 text-sm hover:underline block mb-3 leading-tight">
-                    {app.applicationNo}
-                  </a>
-                  <p className="text-sm text-gray-600 mb-1">{app.ward}</p>
-                  <p className="text-blue-600 text-sm mb-1">{app.applicationType}</p>
-                  <p className="text-blue-600 text-sm mb-1">{app.status}</p>
-                  <button className="text-blue-600 text-sm hover:underline">Delete</button>
+                <div className="w-60 shrink-0 pr-4">
+                  <div className="mb-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-gray-600">Application No:</span>
+                    <span className="inline-flex items-center rounded-full bg-sky-100 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-semibold break-all">
+                      {app.applicationNo}
+                    </span>
+                  </div>
+                  <p className="text-[13px] font-medium text-sky-700 mb-1">{app.status}</p>
+                  <button
+                    type="button"
+                    className="text-[13px] text-rose-600 hover:text-rose-700 hover:underline disabled:text-gray-400 disabled:no-underline"
+                    onClick={() => app.applicationId && setPendingDeleteId(app.applicationId)}
+                    disabled={!app.applicationId || deletingId === app.applicationId}
+                  >
+                    {deletingId === app.applicationId ? "Deleting..." : "Delete"}
+                  </button>
                 </div>
 
-                {/* Progress Timeline */}
-                <div className="flex-1 relative">
-                  {/* Horizontal Line */}
-                  <div className="absolute top-4 left-12 right-12 h-px bg-gray-300"></div>
-                  
-                  {/* Circles */}
+                <div className="flex-1 relative pt-2">
+                  <div className="absolute top-6 left-12 right-12 h-px bg-gray-300"></div>
                   <div className="flex justify-between relative">
-                    {STAGES.map((stage, stageIndex) => (
+                    {STAGES.map((_, stageIndex) => (
                       <div key={stageIndex} className="w-24 flex flex-col items-center">
-                        {/* Circle */}
                         {stageIndex <= app.currentStage ? (
-                          <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center z-10">
-                            <div className="w-3 h-3 rounded-full bg-white"></div>
-                          </div>
+                          <div className="w-6 h-6 rounded-full bg-sky-500 z-10"></div>
                         ) : (
-                          <div className="w-8 h-8 rounded-full border-2 border-gray-300 bg-white z-10"></div>
+                          <div className="w-6 h-6 rounded-full border border-gray-300 bg-white z-10"></div>
                         )}
-                        
-                        {/* Date label for current stage */}
                         {stageIndex === app.currentStage && (
                           <div className="mt-2 text-center">
-                            <p className="text-xs text-gray-500">Started on</p>
-                            <p className="text-xs text-gray-700">{app.startedOn}</p>
+                            <p className="text-[11px] text-gray-500">Started on</p>
+                            <p className="text-[11px] text-gray-700">{app.startedOn}</p>
                           </div>
                         )}
                       </div>
@@ -165,12 +172,38 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
             </div>
           ))}
 
-          {applications.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
+          {filteredApplications.length === 0 && (
+            <div className="text-center py-10 text-gray-500 border border-dashed border-gray-300 rounded-md bg-gray-50">
               No applications found
             </div>
           )}
         </div>
+
+        {pendingDeleteId && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-5 w-[360px]">
+              <p className="text-sm text-gray-800">
+                Are you sure you want to delete this application?
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                  onClick={() => setPendingDeleteId(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-rose-600 text-sm text-white hover:bg-rose-700"
+                  onClick={() => handleDelete(pendingDeleteId)}
+                >
+                  Yes, Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

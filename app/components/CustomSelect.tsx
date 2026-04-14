@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 export interface CustomSelectOption {
   value: string;
   label: string;
+  highlightedPart?: string;
 }
 
 interface CustomSelectProps {
@@ -40,7 +41,22 @@ export default function CustomSelect({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const selectedLabel = options.find((o) => o.value === value)?.label || "";
+  const selectedOption = options.find((o) => o.value === value);
+  const selectedLabel = selectedOption?.label || "";
+
+  const renderHighlightedLabel = (label: string, highlightedPart?: string) => {
+    if (!highlightedPart || !label.includes(highlightedPart)) {
+      return label;
+    }
+    const [prefix, suffix] = label.split(highlightedPart, 2);
+    return (
+      <>
+        <span>{prefix}</span>
+        <span className="text-emerald-700 font-semibold">{highlightedPart}</span>
+        <span>{suffix}</span>
+      </>
+    );
+  };
 
   return (
     <div ref={ref} className={`relative ${className}`} id={id}>
@@ -57,7 +73,9 @@ export default function CustomSelect({
             value ? "text-gray-900" : "text-gray-400"
           }`}
         >
-          {value ? selectedLabel : placeholder}
+          {value
+            ? renderHighlightedLabel(selectedLabel, selectedOption?.highlightedPart)
+            : placeholder}
         </span>
         <svg
           className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${
@@ -91,7 +109,7 @@ export default function CustomSelect({
                   : "text-gray-900"
               }`}
             >
-              {opt.label}
+              {renderHighlightedLabel(opt.label, opt.highlightedPart)}
             </button>
           ))}
         </div>

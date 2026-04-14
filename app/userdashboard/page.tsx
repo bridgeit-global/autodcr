@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import DashboardHeader from "../components/DashboardHeader";
@@ -64,7 +64,7 @@ const DEVELOPMENT_PLAN_APPLICATION_DATA: ApplicationType[] = [
 
 const GENERAL_APPLICATION_DATA: ApplicationType[] = [
   {
-    name: "Acceptance by Consultant",
+    name: "Appointment Letter for Architect",
     draft: 0,
     duePayment: "-",
     inProcess: 0,
@@ -75,7 +75,7 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     systemApproved: "-",
   },
   {
-    name: "Architect Licensed Surveyor",
+    name: "Appointment Letter for Fire Consultant",
     draft: 0,
     duePayment: "-",
     inProcess: 0,
@@ -86,7 +86,7 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     systemApproved: "-",
   },
   {
-    name: "Fire Safety Consultant",
+    name: "Appointment Letter for Plumber",
     draft: 0,
     duePayment: "-",
     inProcess: 0,
@@ -97,7 +97,7 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     systemApproved: "-",
   },
   {
-    name: "Horticulturist",
+    name: "Appointment Letter for Town Planner",
     draft: 0,
     duePayment: "-",
     inProcess: 0,
@@ -108,7 +108,7 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     systemApproved: "-",
   },
   {
-    name: "M&E Consultant",
+    name: "Appointment Letter for Structural Engineer",
     draft: 0,
     duePayment: "-",
     inProcess: 0,
@@ -119,106 +119,7 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     systemApproved: "-",
   },
   {
-    name: "Parking Consultant",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Plumber",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Rain Water Consultant",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Site Supervisor",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Structural Engineer",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Development Completion Certificate",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Notice for Start of Work",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Owners Plot Area Affidavit",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Plot Area Certificate",
-    draft: 0,
-    duePayment: "-",
-    inProcess: 0,
-    needClarification: "-",
-    withdrawn: "-",
-    rejectedOrCancelled: 0,
-    approvedOrVerified: 0,
-    systemApproved: "-",
-  },
-  {
-    name: "Supervision Memo of Architect",
+    name: "Appointment Letter for Environmental Consultant",
     draft: 0,
     duePayment: "-",
     inProcess: 0,
@@ -428,13 +329,32 @@ interface ApplicationModalProps {
   onClose: () => void;
   items: MenuItem[];
   title: string;
-  projects?: { id: string; title: string; status?: string }[];
+  projects?: { id: string; title: string; status?: string; project_info?: { proposalNo?: string } | null }[];
 }
 
 const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, items, title, projects = [] }) => {
   const router = useRouter();
   const [showProjectDropdownIndex, setShowProjectDropdownIndex] = useState<number | null>(null);
   const [selectedProjectForEdit, setSelectedProjectForEdit] = useState<string>("");
+
+  const getProjectOptionLabel = (project: {
+    title: string;
+    status?: string;
+    project_info?: { proposalNo?: string } | null;
+  }) => {
+    const detectedProposalNo = project.title.match(/\s(\d{3,})$/)?.[1];
+    const proposalNo = project.project_info?.proposalNo?.trim() || detectedProposalNo;
+    const cleanTitle =
+      proposalNo && project.title.endsWith(` ${proposalNo}`)
+        ? project.title.slice(0, -(proposalNo.length + 1))
+        : project.title;
+    const proposalPart = proposalNo ? ` (${proposalNo})` : "";
+    const draftPart = project.status === "draft" ? " (Draft)" : "";
+    return {
+      label: `${cleanTitle}${proposalPart}${draftPart}`,
+      highlightedPart: proposalNo ? `(${proposalNo})` : undefined,
+    };
+  };
 
   useEffect(() => {
     if (open) {
@@ -519,7 +439,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
                             }}
                             options={projects.map((project) => ({
                               value: project.id,
-                              label: `${project.title}${project.status === "draft" ? " (Draft)" : ""}`,
+                              ...getProjectOptionLabel(project),
                             }))}
                             placeholder="-- Select Project --"
                           />
@@ -574,10 +494,20 @@ const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
 function UserDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState("tile-view");
   // Project filter: "ALL" means don't filter
   const [selectedProject, setSelectedProject] = useState("ALL");
-  const [projects, setProjects] = useState<{ id: string; title: string; status?: string }[]>([]);
+  const [projects, setProjects] = useState<
+    {
+      id: string;
+      title: string;
+      status?: string;
+      project_info?: { proposalNo?: string } | null;
+      save_plot_details?: {
+        selectedSurveyNos?: string[];
+        plotEntries?: Array<{ ctsNumber?: string }>;
+      } | null;
+    }[]
+  >([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [selectedApplicationType, setSelectedApplicationType] = useState("Building Permission");
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
@@ -585,6 +515,28 @@ function UserDashboardContent() {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [selectedDraftApp, setSelectedDraftApp] = useState<{ appType: string; status: string } | null>(null);
+  const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
+  const [draftApplicationsByType, setDraftApplicationsByType] = useState<Record<string, DraftApplication[]>>({});
+  const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
+
+  const getProjectOptionLabel = (project: {
+    title: string;
+    status?: string;
+    project_info?: { proposalNo?: string } | null;
+  }) => {
+    const detectedProposalNo = project.title.match(/\s(\d{3,})$/)?.[1];
+    const proposalNo = project.project_info?.proposalNo?.trim() || detectedProposalNo;
+    const cleanTitle =
+      proposalNo && project.title.endsWith(` ${proposalNo}`)
+        ? project.title.slice(0, -(proposalNo.length + 1))
+        : project.title;
+    const proposalPart = proposalNo ? ` (${proposalNo})` : "";
+    const draftPart = project.status === "draft" ? " (Draft)" : "";
+    return {
+      label: `${cleanTitle}${proposalPart}${draftPart}`,
+      highlightedPart: proposalNo ? `(${proposalNo})` : undefined,
+    };
+  };
 
   // Read department from URL query parameter
   useEffect(() => {
@@ -613,7 +565,7 @@ function UserDashboardContent() {
 
         const { data, error } = await supabase
           .from("projects")
-          .select("id,title,status")
+          .select("id,title,status,project_info,save_plot_details")
           .eq("user_id", userId)
           .order("created_at", { ascending: false });
 
@@ -623,7 +575,15 @@ function UserDashboardContent() {
           return;
         }
 
-        setProjects((data ?? []).map((row: any) => ({ id: row.id, title: row.title, status: row.status })));
+        setProjects(
+          (data ?? []).map((row: any) => ({
+            id: row.id,
+            title: row.title,
+            status: row.status,
+            project_info: row.project_info,
+            save_plot_details: row.save_plot_details,
+          }))
+        );
       } finally {
         setProjectsLoading(false);
       }
@@ -656,6 +616,92 @@ function UserDashboardContent() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const loadDraftCounts = useCallback(async () => {
+    if (projects.length === 0) {
+      setDraftCounts({});
+      return;
+    }
+
+    let query = supabase
+      .from("applications")
+      .select("id,project_id,project_title,permission_type,created_at")
+      .eq("department", selectedApplicationType);
+
+    if (selectedProject === "ALL") {
+      query = query.in("project_id", projects.map((project) => project.id));
+    } else {
+      query = query.eq("project_id", selectedProject);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("Error loading application draft counts:", error);
+      setDraftCounts({});
+      setDraftApplicationsByType({});
+      return;
+    }
+
+    const counts: Record<string, number> = {};
+    const groupedApplications: Record<string, DraftApplication[]> = {};
+
+    (data ?? []).forEach((row: { id?: string; project_id: string; permission_type: string; project_title?: string; created_at?: string }) => {
+      counts[row.permission_type] = (counts[row.permission_type] ?? 0) + 1;
+
+      const startedOn = row.created_at
+        ? new Date(row.created_at).toLocaleDateString("en-GB")
+        : "-";
+      const matchedProject = projects.find((project) => String(project.id) === String(row.project_id));
+      const proposalNo = matchedProject?.project_info?.proposalNo?.trim();
+      const surveyNo =
+        matchedProject?.save_plot_details?.selectedSurveyNos?.[0] ||
+        matchedProject?.save_plot_details?.plotEntries?.[0]?.ctsNumber;
+      const applicationNo =
+        proposalNo ||
+        surveyNo ||
+        row.project_title ||
+        row.id ||
+        "-";
+
+      const entry: DraftApplication = {
+        applicationId: row.id,
+        applicationNo,
+        ward: "-",
+        applicationType: row.permission_type,
+        status: "Draft",
+        startedOn,
+        currentStage: 0,
+      };
+
+      if (!groupedApplications[row.permission_type]) {
+        groupedApplications[row.permission_type] = [];
+      }
+      groupedApplications[row.permission_type].push(entry);
+    });
+
+    setDraftCounts(counts);
+    setDraftApplicationsByType(groupedApplications);
+  }, [projects, selectedApplicationType, selectedProject]);
+
+  useEffect(() => {
+    loadDraftCounts();
+  }, [loadDraftCounts]);
+
+  const handleDeleteApplication = async (applicationId: string) => {
+    const { error } = await supabase.from("applications").delete().eq("id", applicationId);
+    if (error) {
+      alert("Failed to delete application. Please try again.");
+      return;
+    }
+    await loadDraftCounts();
+  };
+
+  const tableData =
+    selectedApplicationType === "General"
+      ? GENERAL_APPLICATION_DATA
+      : selectedApplicationType === "Development Plan"
+      ? DEVELOPMENT_PLAN_APPLICATION_DATA
+      : APPLICATION_DATA;
+
   return (
     <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
       <DashboardHeader sessionTime={formatTime(sessionTime)} />
@@ -667,16 +713,13 @@ function UserDashboardContent() {
         </div>
 
         {/* Main Content */}
-        <div className="flex gap-4 p-6">
+        <div className="flex gap-4 p-6 min-h-full overflow-x-hidden">
           {/* Left Content Area */}
-          <div className="flex-1 space-y-4">
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4">
             {/* Navigation and Filters */}
-            <div className="bg-white rounded-lg border border-gray-300 p-4 space-y-4">
-              {/* Top Row - Dropdowns and Tabs */}
-              <div className="flex flex-wrap items-center gap-4">
-                {/* Left Dropdowns */}
-                <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2">
+            <div className="bg-white rounded-lg border border-gray-300 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
                   <CustomSelect
                     value={selectedProject}
                     onChange={(val) => setSelectedProject(val)}
@@ -684,184 +727,129 @@ function UserDashboardContent() {
                       { value: "ALL", label: "All Projects" },
                       ...projects.map((p) => ({
                         value: p.id,
-                        label: `${p.title}${p.status === "draft" ? " (Draft)" : ""}`,
+                        ...getProjectOptionLabel(p),
                       })),
                     ]}
+                    className="w-[260px]"
                   />
 
-                    {projectsLoading && (
-                      <span className="text-xs text-gray-600">Loading projects…</span>
-                    )}
-                    {!projectsLoading && projects.length === 0 && (
-                      <span className="text-xs text-gray-600">No projects found</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Center Tabs */}
-                <div className="flex items-center gap-2 ml-auto">
-                  <button
-                    onClick={() => setActiveTab("tile-view")}
-                    className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                      activeTab === "tile-view"
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                    }`}
-                  >
-                    Tile View
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("pie-chart")}
-                    className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                      activeTab === "pie-chart"
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                    }`}
-                  >
-                    Pie Chart
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("air-pollution")}
-                    className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                      activeTab === "air-pollution"
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                    }`}
-                  >
-                    Air Pollution Control Application List
-                  </button>
-                </div>
-
-                {/* Dropdown and Buttons Row */}
-                <div className="flex items-center justify-between w-full">
-                  {/* Left - Department Dropdown */}
                   <CustomSelect
                     value={selectedApplicationType}
                     onChange={(val) => setSelectedApplicationType(val)}
-                    options={departments.map((department) => ({
+                    options={departmentOptions.map((department) => ({
                       value: department,
                       label: department,
                     }))}
+                    className="w-[220px]"
                   />
+                </div>
 
-                  {/* Right - 4 Buttons */}
-                  <div className="flex items-center gap-2">
-                    <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
-                      Go
-                    </button>
-                    <button
-                      onClick={() => setIsProjectModalOpen(true)}
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-                    >
-                      + Projects
-                    </button>
-                    <button
-                      onClick={() => setIsApplicationModalOpen(true)}
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-                    >
-                      + Applications
-                    </button>
-                    <button
-                      onClick={() => router.push("/template")}
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-                    >
-                      Template
-                    </button>
-                  </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
+                    Go
+                  </button>
+                  <button
+                    onClick={() => setIsProjectModalOpen(true)}
+                    className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+                  >
+                    + Projects
+                  </button>
+                  <button
+                    onClick={() => setIsApplicationModalOpen(true)}
+                    className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+                  >
+                    + Applications
+                  </button>
                 </div>
               </div>
+              {projectsLoading && (
+                <span className="text-xs text-gray-600 mt-1 inline-block">Loading projects...</span>
+              )}
+              {!projectsLoading && projects.length === 0 && (
+                <span className="text-xs text-gray-600 mt-1 inline-block">No projects found</span>
+              )}
             </div>
 
             {/* Main Data Table */}
-            {activeTab === "tile-view" && (
-              <div className="bg-white rounded-lg border border-gray-300 overflow-hidden">
-                <div className="overflow-auto max-h-96">
-                  <table className="w-full text-sm border-collapse">
-                    <thead className="sticky top-0 z-10">
-                      <tr>
-                        <th className="bg-green-100 border border-gray-300 px-4 py-3 text-left font-semibold text-black">
-                          Application Type
-                        </th>
-                        <th className="bg-blue-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          Draft
-                        </th>
-                        <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          Due Payment
-                        </th>
-                        <th className="bg-purple-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          In Process
-                        </th>
-                        <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          Need Clarification
-                        </th>
-                        <th className="bg-amber-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          Withdrawn
-                        </th>
-                        <th className="bg-red-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          Rejected or Cancelled
-                        </th>
-                        <th className="bg-green-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          Approved or Verified
-                        </th>
-                        <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
-                          System Approved
-                        </th>
+            <div className="bg-white rounded-lg border border-gray-300 overflow-hidden flex-1 min-h-0">
+              <div className="overflow-auto h-full min-h-[420px]">
+                <table className="w-full text-sm border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      <th className="bg-green-100 border border-gray-300 px-4 py-3 text-left font-semibold text-black">
+                        Application Type
+                      </th>
+                      <th className="bg-blue-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        Draft
+                      </th>
+                      <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        Due Payment
+                      </th>
+                      <th className="bg-purple-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        In Process
+                      </th>
+                      <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        Need Clarification
+                      </th>
+                      <th className="bg-amber-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        Withdrawn
+                      </th>
+                      <th className="bg-red-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        Rejected or Cancelled
+                      </th>
+                      <th className="bg-green-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        Approved or Verified
+                      </th>
+                      <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                        System Approved
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableData.map((app, index) => {
+                      const draftCount = draftCounts[app.name] ?? 0;
+                      return (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="border border-gray-300 px-4 py-3 text-left font-medium text-black">
+                          {app.name}
+                        </td>
+                        <td
+                          className={`border border-gray-300 px-4 py-3 text-center ${
+                            draftCount > 0
+                              ? "text-blue-600 font-semibold underline cursor-pointer hover:bg-blue-50"
+                              : "text-black"
+                          }`}
+                          onClick={() => handleCellClick(app.name, draftCount, "Draft")}
+                        >
+                          {draftCount}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Due Payment")}>
+                          0
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "In Process")}>
+                          0
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Need Clarification")}>
+                          0
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Withdrawn")}>
+                          0
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
+                          0
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Approved or Verified")}>
+                          0
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
+                          0
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {(selectedApplicationType === "General" 
-                        ? GENERAL_APPLICATION_DATA 
-                        : selectedApplicationType === "Development Plan" 
-                        ? DEVELOPMENT_PLAN_APPLICATION_DATA 
-                        : APPLICATION_DATA).map((app, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 px-4 py-3 text-left font-medium text-black">
-                            {app.name}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Draft")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Due Payment")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "In Process")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Need Clarification")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Withdrawn")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Approved or Verified")}>
-                            0
-                          </td>
-                          <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
-                            0
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    )})}
+                  </tbody>
+                </table>
               </div>
-            )}
-
-            {/* Placeholder for other tabs */}
-            {activeTab === "pie-chart" && (
-              <div className="bg-white rounded-lg border border-gray-300 p-8 text-center text-gray-600">
-                Pie Chart view will be displayed here
-              </div>
-            )}
-
-            {activeTab === "air-pollution" && (
-              <div className="bg-white rounded-lg border border-gray-300 p-8 text-center text-gray-600">
-                Air Pollution Control Application List will be displayed here
-              </div>
-            )}
+            </div>
           </div>
 
           {/* Right Sidebar - Announcements */}
@@ -912,7 +900,8 @@ function UserDashboardContent() {
           }}
           appType={selectedDraftApp.appType}
           status={selectedDraftApp.status}
-          applications={DRAFT_APPLICATIONS[selectedDraftApp.appType] || []}
+          applications={draftApplicationsByType[selectedDraftApp.appType] || []}
+          onDeleteApplication={handleDeleteApplication}
         />
       )}
     </div>

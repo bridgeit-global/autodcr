@@ -51,6 +51,7 @@ const departments = [
   "DP(TDR)",
   "Estate and Land Management",
   "Airport Authority of India",
+  "General",
 ];
 const sraDepartment = "DP(TDR)";
 
@@ -336,6 +337,36 @@ const permissionLibrary: Record<string, { title: string; description: string; ic
       description: "Airport Authority height clearance",
       icon: <PlaneIcon />,
     },
+    Appointment_Letter_for_Architect: {
+      title: "Appointment Letter for Architect",
+      description: "Upload and manage architect appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_Fire_Consultant: {
+      title: "Appointment Letter for Fire Consultant",
+      description: "Upload and manage fire consultant appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_Plumber: {
+      title: "Appointment Letter for Plumber",
+      description: "Upload and manage plumber appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_Town_Planner: {
+      title: "Appointment Letter for Town Planner",
+      description: "Upload and manage town planner appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_Structural_Engineer: {
+      title: "Appointment Letter for Structural Engineer",
+      description: "Upload and manage structural engineer appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_Environmental_Consultant: {
+      title: "Appointment Letter for Environmental Consultant",
+      description: "Upload and manage environmental consultant appointment letter",
+      icon: <DocumentIcon />,
+    },
   };
 
 type PermissionKey = keyof typeof permissionLibrary;
@@ -367,6 +398,14 @@ const generalPermissionTypes = getPermissionTypesFromKeys(fallbackPermissionKeys
 
 const departmentPermissionMap: Record<string, PermissionKey[]> = {
   "Building Permission": fallbackPermissionKeys,
+  General: [
+    "Appointment_Letter_for_Architect",
+    "Appointment_Letter_for_Fire_Consultant",
+    "Appointment_Letter_for_Plumber",
+    "Appointment_Letter_for_Town_Planner",
+    "Appointment_Letter_for_Structural_Engineer",
+    "Appointment_Letter_for_Environmental_Consultant",
+  ],
   Fire: ["Provisional_Fire_NOC", "CFO_Refund_Process", "Final_Fire_NOC"],
   "Traffic and Co-ordination": ["Parking_Layout_Remarks"],
   "Solid Waste Management": ["Construction_and_Demolition_waste_management_remarks"],
@@ -526,7 +565,15 @@ export default function CreateApplicationPage() {
   const [sessionTime, setSessionTime] = useState(3600);
   const [selectedAuthority, setSelectedAuthority] = useState("bmc");
   const [selectedProject, setSelectedProject] = useState("");
-  const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
+  const [projects, setProjects] = useState<
+    {
+      id: string;
+      title: string;
+      project_info?: { proposalNo?: string } | null;
+      save_plot_details?: { planningAuthority?: string } | null;
+    }[]
+  >([]);
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -536,7 +583,7 @@ export default function CreateApplicationPage() {
 
       const { data, error } = await supabase
         .from("projects")
-        .select("id,title")
+        .select("id,title,project_info,save_plot_details")
         .eq("user_id", userId)
         .eq("status", "submitted")
         .order("created_at", { ascending: false });
@@ -561,7 +608,50 @@ export default function CreateApplicationPage() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [projectDropdownOpen]);
 
-  const selectedProjectTitle = projects.find((p) => p.id === selectedProject)?.title || "";
+  const authorityLabelMap: Record<string, string> = {
+    bmc: "BMC",
+    sra: "SRA",
+    mhada: "MHADA",
+    mmrda: "MMRDA",
+  };
+  const selectedAuthorityLabel = authorityLabelMap[selectedAuthority];
+  const getProjectDisplayData = (project: {
+    title: string;
+    project_info?: { proposalNo?: string } | null;
+  }) => {
+    const detectedProposalNo = project.title.match(/\s(\d{3,})$/)?.[1];
+    const proposalNo = project.project_info?.proposalNo?.trim() || detectedProposalNo;
+    const cleanTitle =
+      proposalNo && project.title.endsWith(` ${proposalNo}`)
+        ? project.title.slice(0, -(proposalNo.length + 1))
+        : project.title;
+    const highlightedPart = proposalNo ? `(${proposalNo})` : undefined;
+    return {
+      label: proposalNo ? `${cleanTitle} ${highlightedPart}` : cleanTitle,
+      highlightedPart,
+    };
+  };
+  const filteredProjects = projects.filter(
+    (project) =>
+      project.save_plot_details?.planningAuthority?.toUpperCase() === selectedAuthorityLabel
+  );
+  const selectedProjectTitle =
+    getProjectDisplayData(
+      filteredProjects.find((project) => project.id === selectedProject) || { title: "" }
+    ).label || "";
+  const selectedProjectHighlightedPart =
+    getProjectDisplayData(
+      filteredProjects.find((project) => project.id === selectedProject) || { title: "" }
+    ).highlightedPart;
+  const filteredProjectOptions = filteredProjects.filter((project) =>
+    project.title.toLowerCase().includes(projectSearchQuery.trim().toLowerCase())
+  );
+
+  useEffect(() => {
+    if (selectedProject && !filteredProjects.some((project) => project.id === selectedProject)) {
+      setSelectedProject("");
+    }
+  }, [filteredProjects, selectedProject]);
 
   const [selectedDepartment, setSelectedDepartment] = useState(departments[0]);
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
@@ -573,14 +663,52 @@ export default function CreateApplicationPage() {
   const [majorUse, setMajorUse] = useState("");
   const [applicationType, setApplicationType] = useState("");
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [modalMessage, setModalMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [existingPermissionTypes, setExistingPermissionTypes] = useState<string[]>([]);
 
-  const handleProceed = () => {
+  const handleProceed = async () => {
+    if (!selectedProject || !selectedPermission) return;
+
+    const selectedProjectRecord = filteredProjects.find((project) => project.id === selectedProject);
+    const selectedPermissionRecord = permissionTypes.find(
+      (permission) => permission.id === selectedPermission
+    );
+
+    if (!selectedProjectRecord || !selectedPermissionRecord) {
+      alert("Please select a valid project and permission type.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    const { error } = await supabase.from("applications").insert({
+      project_id: selectedProjectRecord.id,
+      project_title: selectedProjectRecord.title,
+      department: selectedDepartment,
+      permission_type: selectedPermissionRecord.title,
+    });
+    setIsSubmitting(false);
+
+    if (error) {
+      // Postgres unique violation code: duplicate permission type for same project.
+      if (error.code === "23505") {
+        setModalMessage(
+          "This permission type is already added for the selected project. Please choose a different permission type."
+        );
+        setShowInfoModal(true);
+        return;
+      }
+
+      alert("Failed to create application. Please try again.");
+      return;
+    }
+
+    setModalMessage("Application created successfully.");
     setShowInfoModal(true);
   };
 
   const handleModalOk = () => {
     setShowInfoModal(false);
-    router.push(`/userdashboard?department=${encodeURIComponent(selectedDepartment)}`);
   };
 
   useEffect(() => {
@@ -609,6 +737,33 @@ export default function CreateApplicationPage() {
     }
   }, [selectedAuthority, selectedDepartment]);
 
+  useEffect(() => {
+    const loadExistingPermissions = async () => {
+      if (!selectedProject) {
+        setExistingPermissionTypes([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("applications")
+        .select("permission_type")
+        .eq("project_id", selectedProject)
+        .eq("department", selectedDepartment);
+
+      if (error) {
+        console.error("Error loading existing permissions:", error);
+        setExistingPermissionTypes([]);
+        return;
+      }
+
+      setExistingPermissionTypes(
+        (data ?? []).map((row: { permission_type: string }) => row.permission_type)
+      );
+    };
+
+    loadExistingPermissions();
+  }, [selectedProject, selectedDepartment]);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -621,8 +776,18 @@ export default function CreateApplicationPage() {
 
   const permissionTypes = getDepartmentPermissions(selectedDepartment);
   const showDepartment = true;
-  const departmentOptions = departments;
+  const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const showBuildingPermissionFields = selectedDepartment === "Building Permission";
+
+  useEffect(() => {
+    if (!selectedPermission) return;
+    const selectedPermissionTitle = permissionTypes.find(
+      (permission) => permission.id === selectedPermission
+    )?.title;
+    if (selectedPermissionTitle && existingPermissionTypes.includes(selectedPermissionTitle)) {
+      setSelectedPermission(null);
+    }
+  }, [existingPermissionTypes, permissionTypes, selectedPermission]);
 
   const inputClasses =
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
@@ -684,7 +849,26 @@ export default function CreateApplicationPage() {
                             className={`${inputClasses} text-left flex items-center justify-between gap-2 h-auto min-h-[40px] py-2`}
                           >
                             <span className={`${selectedProject ? "text-gray-900" : "text-gray-400"} break-words text-left leading-snug`}>
-                              {selectedProject ? selectedProjectTitle : "Select Project"}
+                              {selectedProject ? (
+                                selectedProjectHighlightedPart &&
+                                selectedProjectTitle.includes(selectedProjectHighlightedPart) ? (
+                                  <>
+                                    <span>
+                                      {selectedProjectTitle.split(selectedProjectHighlightedPart, 2)[0]}
+                                    </span>
+                                    <span className="text-black font-semibold">
+                                      {selectedProjectHighlightedPart}
+                                    </span>
+                                    <span>
+                                      {selectedProjectTitle.split(selectedProjectHighlightedPart, 2)[1]}
+                                    </span>
+                                  </>
+                                ) : (
+                                  selectedProjectTitle
+                                )
+                              ) : (
+                                "Select Project"
+                              )}
                             </span>
                             <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${projectDropdownOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -692,25 +876,65 @@ export default function CreateApplicationPage() {
                           </button>
                           {projectDropdownOpen && (
                             <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                              <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
+                                <input
+                                  type="text"
+                                  value={projectSearchQuery}
+                                  onChange={(event) => setProjectSearchQuery(event.target.value)}
+                                  placeholder="Search project"
+                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => { setSelectedProject(""); setProjectDropdownOpen(false); }}
+                                onClick={() => {
+                                  setSelectedProject("");
+                                  setProjectDropdownOpen(false);
+                                  setProjectSearchQuery("");
+                                }}
                                 className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50"
                               >
                                 Select Project
                               </button>
-                              {projects.map((project) => (
+                              {filteredProjectOptions.map((project) => (
                                 <button
                                   key={project.id}
                                   type="button"
-                                  onClick={() => { setSelectedProject(project.id); setProjectDropdownOpen(false); }}
+                                  onClick={() => {
+                                    setSelectedProject(project.id);
+                                    setProjectDropdownOpen(false);
+                                    setProjectSearchQuery("");
+                                  }}
                                   className={`w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 break-words leading-snug ${
                                     selectedProject === project.id ? "bg-emerald-50 text-emerald-700 font-medium" : "text-gray-900"
                                   }`}
                                 >
-                                  {project.title}
+                                  {(() => {
+                                    const display = getProjectDisplayData(project);
+                                    if (!display.highlightedPart || !display.label.includes(display.highlightedPart)) {
+                                      return display.label;
+                                    }
+                                    const [prefix, suffix] = display.label.split(display.highlightedPart, 2);
+                                    return (
+                                      <>
+                                        <span>{prefix}</span>
+                                        <span className="text-emerald-700 font-semibold">{display.highlightedPart}</span>
+                                        <span>{suffix}</span>
+                                      </>
+                                    );
+                                  })()}
                                 </button>
                               ))}
+                              {filteredProjects.length === 0 && (
+                                <div className="px-3 py-2 text-sm text-gray-500">
+                                  No submitted projects for selected authority
+                                </div>
+                              )}
+                              {filteredProjects.length > 0 && filteredProjectOptions.length === 0 && (
+                                <div className="px-3 py-2 text-sm text-gray-500">
+                                  No projects match your search
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -739,22 +963,42 @@ export default function CreateApplicationPage() {
                           Select the type of permission you want to apply for
                         </p>
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                          {permissionTypes.map((type) => (
+                          {permissionTypes.map((type) => {
+                            const isAlreadyCreated =
+                              selectedProject && existingPermissionTypes.includes(type.title);
+
+                            return (
                             <button
                               key={type.id}
                               type="button"
-                              onClick={() => handlePermissionCardClick(type.id)}
+                              onClick={() => {
+                                if (isAlreadyCreated) {
+                                  setModalMessage(
+                                    "This permission type is already created for the selected project."
+                                  );
+                                  setShowInfoModal(true);
+                                  return;
+                                }
+                                handlePermissionCardClick(type.id);
+                              }}
                               className={`h-full rounded-2xl border px-4 py-5 text-left transition ${
                                 selectedPermission === type.id
                                   ? "border-emerald-500 bg-emerald-50"
+                                  : isAlreadyCreated
+                                  ? "border-gray-200 bg-gray-100 opacity-70 cursor-not-allowed"
                                   : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
                               }`}
                             >
                               <div className="mb-4 flex items-center justify-center">{type.icon}</div>
                               <p className="text-sm font-semibold text-black">{type.title}</p>
                               <p className="text-xs text-gray-500 mt-2">{type.description}</p>
+                              {isAlreadyCreated && (
+                                <p className="text-xs font-medium text-amber-700 mt-2">
+                                  Already added for this project
+                                </p>
+                              )}
                             </button>
-                          ))}
+                          )})}
                         </div>
                       </div>
 
@@ -849,6 +1093,7 @@ export default function CreateApplicationPage() {
                       type="button"
                       className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-emerald-300 transition-colors"
                       disabled={
+                        isSubmitting ||
                         !selectedProject ||
                         !selectedPermission ||
                         (showBuildingPermissionFields &&
@@ -856,7 +1101,7 @@ export default function CreateApplicationPage() {
                       }
                       onClick={handleProceed}
                     >
-                      Proceed
+                      {isSubmitting ? "Submitting..." : "Proceed"}
                     </button>
                   </div>
                 </div>
@@ -874,7 +1119,7 @@ export default function CreateApplicationPage() {
             </div>
             <div className="px-6 py-6">
               <p className="text-gray-800 text-sm">
-                Dear Applicant, You have already created new for selected application for this project
+                {modalMessage}
               </p>
             </div>
             <div className="px-6 py-4 flex justify-end border-t border-gray-200">
