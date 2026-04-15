@@ -3,12 +3,24 @@ import * as fs from "fs";
 import * as path from "path";
 
 function resolveTemplatePdfPath(templateType: string): string {
-  // Keep simple for now: one confirmed template source, expand mapping later.
-  if (templateType === "Architect Licensed Surveyor") {
-    return path.join(process.cwd(), "appointment letter (Architect Licensed Surveyor).pdf");
-  }
-  // Fallback to same template until additional PDFs are provided/mapped.
-  return path.join(process.cwd(), "appointment letter (Architect Licensed Surveyor).pdf");
+  const candidateNames =
+    templateType === "Architect Licensed Surveyor"
+      ? [
+          "appointment letter (Architect Licensed Surveyor).pdf",
+          "appointment letter (Architect Licensed Surveyor) copy.pdf",
+        ]
+      : [
+          "appointment letter (Architect Licensed Surveyor).pdf",
+          "appointment letter (Architect Licensed Surveyor) copy.pdf",
+        ];
+
+  const candidatePaths = candidateNames.flatMap((name) => [
+    path.join(process.cwd(), name),
+    path.join(process.cwd(), "public", name),
+  ]);
+
+  const existing = candidatePaths.find((p) => fs.existsSync(p));
+  return existing || candidatePaths[0];
 }
 
 export async function GET(request: NextRequest) {
@@ -19,7 +31,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Preview template PDF not found. Please ensure `appointment letter (Architect Licensed Surveyor).pdf` exists in workspace root.",
+          "Preview template PDF not found. Ensure one of these files exists in repo root or public/: `appointment letter (Architect Licensed Surveyor).pdf` or `appointment letter (Architect Licensed Surveyor) copy.pdf`.",
       },
       { status: 404 }
     );
