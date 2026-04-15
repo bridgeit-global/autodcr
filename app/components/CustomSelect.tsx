@@ -64,12 +64,12 @@ export default function CustomSelect({
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen((p) => !p)}
-        className={`border border-gray-200 rounded-xl px-3 py-2 h-auto min-h-[40px] w-full text-left bg-white focus:ring-2 focus:ring-emerald-500 outline-none flex items-center justify-between gap-2 ${
+        className={`border border-gray-200 rounded-xl px-3 h-10 w-full text-left bg-white focus:ring-2 focus:ring-emerald-500 outline-none flex items-center justify-between gap-2 ${
           disabled ? "bg-gray-100 cursor-not-allowed" : ""
         }`}
       >
         <span
-          className={`break-words leading-snug text-sm ${
+          className={`min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm ${
             value ? "text-gray-900" : "text-gray-400"
           }`}
         >
@@ -94,7 +94,7 @@ export default function CustomSelect({
         </svg>
       </button>
       {open && (
-        <div className="absolute z-50 mt-1 min-w-full w-max max-w-[500px] bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
           {options.map((opt) => (
             <button
               key={opt.value}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
@@ -30,6 +31,8 @@ const areBuildingFormsEqual = (a: BuildingFormData, b: BuildingFormData) =>
   JSON.stringify(a) === JSON.stringify(b);
 
 export default function BuildingDetailsPage() {
+  const searchParams = useSearchParams();
+  const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-building-details"));
 
@@ -84,6 +87,7 @@ export default function BuildingDetailsPage() {
     "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
 
   const onSubmit = async (data: BuildingFormData) => {
+    if (isReadOnlyMode) return;
     try {
       const isDraft = projectData?.status === "draft";
       if (isEditMode && projectData?.id && !isDraft) {
@@ -183,6 +187,14 @@ export default function BuildingDetailsPage() {
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       <form onSubmit={handleSubmit(onSubmit)}>
+        <fieldset
+          disabled={isReadOnlyMode}
+          className={
+            isReadOnlyMode
+              ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+              : ""
+          }
+        >
         <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
           {/* Header */}
           <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
@@ -193,16 +205,18 @@ export default function BuildingDetailsPage() {
               </p>
             </div>
 
-            <button
-              type="submit"
-              className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                isSaved
-                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
-              }`}
-            >
-              {isSaved ? "Saved" : "Save"}
-            </button>
+            {!isReadOnlyMode && (
+              <button
+                type="submit"
+                className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
+                  isSaved
+                    ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                    : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                }`}
+              >
+                {isSaved ? "Saved" : "Save"}
+              </button>
+            )}
           </div>
 
           <div className="p-6 space-y-6 pb-6">
@@ -300,6 +314,7 @@ export default function BuildingDetailsPage() {
             </div>
           </div>
         </section>
+        </fieldset>
       </form>
     </div>
   );

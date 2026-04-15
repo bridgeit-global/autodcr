@@ -41,19 +41,36 @@ function cleanTextPreservingLines(text: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { templateName } = await request.json();
+    const { templateName, sourcePath } = await request.json();
     
-    if (!templateName) {
+    if (!templateName && !sourcePath) {
       return NextResponse.json(
-        { error: "Template name is required" },
+        { error: "Template name or source path is required" },
         { status: 400 }
       );
     }
     
-    // Get the path to the template file
-    const templatesDir = path.join(process.cwd(), "app", "templates");
-    const fileName = `appointment letter (${templateName}).docx`;
-    const filePath = path.join(templatesDir, fileName);
+    let filePath = "";
+    let fileName = "";
+
+    if (sourcePath) {
+      const resolvedSourcePath = path.resolve(String(sourcePath));
+      const workspaceRoot = path.resolve(process.cwd());
+      // Keep this endpoint scoped to workspace files for safety.
+      if (!resolvedSourcePath.startsWith(workspaceRoot)) {
+        return NextResponse.json(
+          { error: "Source path must be inside workspace" },
+          { status: 400 }
+        );
+      }
+      filePath = resolvedSourcePath;
+      fileName = path.basename(resolvedSourcePath);
+    } else {
+      // Get the path to the template file
+      const templatesDir = path.join(process.cwd(), "app", "templates");
+      fileName = `appointment letter (${templateName}).docx`;
+      filePath = path.join(templatesDir, fileName);
+    }
     
     // Check if file exists
     if (!fs.existsSync(filePath)) {

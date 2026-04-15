@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { supabase } from "@/app/utils/supabase";
 import { useProjectData } from "@/app/hooks/useProjectData";
@@ -36,6 +37,8 @@ const createId = () =>
     : Math.random().toString(36).slice(2);
 
 export default function ProjectLibraryPage() {
+  const searchParams = useSearchParams();
+  const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   const [uploads, setUploads] = useState<(UploadRecord | undefined)[]>(() => {
     const saved = loadDraft<(UploadRecord | undefined)[]>(
@@ -61,6 +64,7 @@ export default function ProjectLibraryPage() {
 
   const handleFileChange =
     (index: number) => async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (isReadOnlyMode) return;
     const file = event.target.files?.[0];
 
     if (!file) {
@@ -108,6 +112,7 @@ export default function ProjectLibraryPage() {
   };
 
   const handleClearFile = (index: number) => () => {
+    if (isReadOnlyMode) return;
     setUploads((prev) => {
       const next = [...prev];
       const existing = next[index];
@@ -154,6 +159,7 @@ export default function ProjectLibraryPage() {
   }, [uploads]);
 
   const handleSave = async () => {
+    if (isReadOnlyMode) return;
     // Require all five documents to be selected (stored locally)
     const ok = await hasAllProjectLibraryFiles(MAX_FILES);
     if (!ok) {
@@ -183,7 +189,13 @@ export default function ProjectLibraryPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+    <div
+      className={`max-w-6xl mx-auto px-6 pt-8 space-y-6 ${
+        isReadOnlyMode
+          ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed"
+          : ""
+      }`}
+    >
       <DocumentPreviewModal
         open={previewOpen}
         onClose={() => {
@@ -210,11 +222,12 @@ export default function ProjectLibraryPage() {
             <button
               type="button"
               onClick={handleSave}
+              disabled={isReadOnlyMode}
               className={`px-6 py-2 rounded-lg font-semibold text-sm shadow transition-colors ${
                 isSaved
                   ? "bg-emerald-700 hover:bg-emerald-800 text-white"
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
-              }`}
+              } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
             >
               {isSaved ? "Saved" : "Save"}
             </button>
@@ -222,6 +235,13 @@ export default function ProjectLibraryPage() {
         </div>
 
         <div className="p-6 space-y-4 pb-6">
+          <div
+            className={
+              isReadOnlyMode
+                ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed"
+                : ""
+            }
+          >
           <div className="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
             <table className="min-w-full text-sm text-left text-gray-900">
               <thead className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600">
@@ -253,6 +273,7 @@ export default function ProjectLibraryPage() {
                   type="file"
                   accept={ACCEPTED_TYPES.join(",")}
                   onChange={handleFileChange(index)}
+                  disabled={isReadOnlyMode}
                   ref={(el) => {
                     inputRefs.current[index] = el;
                   }}
@@ -261,7 +282,10 @@ export default function ProjectLibraryPage() {
                         <button
                           type="button"
                           onClick={() => inputRefs.current[index]?.click()}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 leading-none shadow-sm transition-colors"
+                          disabled={isReadOnlyMode}
+                          className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 leading-none shadow-sm transition-colors ${
+                            isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""
+                          }`}
                           aria-label="Attach document"
                         >
                           <svg
@@ -276,8 +300,11 @@ export default function ProjectLibraryPage() {
                 {upload && (
                           <button
                             type="button"
-                            className="text-[11px] text-red-600 hover:underline"
+                            className={`text-[11px] text-red-600 hover:underline ${
+                              isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""
+                            }`}
                             onClick={handleClearFile(index)}
+                            disabled={isReadOnlyMode}
                           >
                             Clear
                           </button>
@@ -312,7 +339,7 @@ export default function ProjectLibraryPage() {
                               setPreviewOpen(true);
                             })();
                           }}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-emerald-700 hover:text-emerald-900 shadow-sm transition-colors"
+                          className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-emerald-700 hover:text-emerald-900 shadow-sm transition-colors cursor-pointer"
                           aria-label="Preview document"
                     >
                           <svg
@@ -338,6 +365,7 @@ export default function ProjectLibraryPage() {
             </table>
           </div>
           <div className="text-sm text-gray-700 mt-2">Total Number : {MAX_FILES}</div>
+          </div>
         </div>
       </section>
     </div>

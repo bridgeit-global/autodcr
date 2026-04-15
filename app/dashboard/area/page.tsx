@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
@@ -138,6 +139,8 @@ const getPortalFieldTotals = (plots: PlotRow[]) => {
 };
 
 export default function AreaDetailsPage() {
+  const searchParams = useSearchParams();
+  const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   // Start with Plot No. 1 by default
   const [plots, setPlots] = useState<PlotRow[]>([createPlot(1)]);
@@ -153,6 +156,7 @@ export default function AreaDetailsPage() {
   );
 
   const handlePlotChange = (plotId: string, key: keyof PlotRow, value: string) => {
+    if (isReadOnlyMode) return;
     setPlots((prev) =>
       prev.map((plot) => (plot.id === plotId ? { ...plot, [key]: value } : plot))
     );
@@ -189,6 +193,7 @@ export default function AreaDetailsPage() {
     key: keyof ExtractRow,
     value: string
   ) => {
+    if (isReadOnlyMode) return;
     setPlots((prev) =>
       prev.map((plot) =>
         plot.id === plotId
@@ -214,6 +219,7 @@ export default function AreaDetailsPage() {
   };
 
   const addExtract = (plotId: string) => {
+    if (isReadOnlyMode) return;
     setPlots((prev) =>
       prev.map((plot) =>
         plot.id === plotId ? { ...plot, extracts: [...plot.extracts, createExtract()] } : plot
@@ -222,6 +228,7 @@ export default function AreaDetailsPage() {
   };
 
 const removeExtract = (plotId: string, extractId: string) => {
+  if (isReadOnlyMode) return;
   setPlots((prev) =>
     prev.map((plot) =>
       plot.id === plotId
@@ -235,10 +242,12 @@ const removeExtract = (plotId: string, extractId: string) => {
 };
 
   const addPlot = () => {
+    if (isReadOnlyMode) return;
     setPlots((prev) => [...prev, createPlot(prev.length + 1)]);
   };
 
 const removePlot = (plotId: string) => {
+  if (isReadOnlyMode) return;
   setPlots((prev) => (prev.length > 1 ? prev.filter((plot) => plot.id !== plotId) : prev));
 };
 
@@ -255,6 +264,7 @@ const removePlot = (plotId: string) => {
   }, [plots]);
 
   const handleSave = async () => {
+    if (isReadOnlyMode) return;
     // Basic validation: ensure each plot has Name, Owner Name, and Type selected
     const invalidPlots = plots.filter(
       (plot) =>
@@ -358,6 +368,14 @@ const removePlot = (plotId: string) => {
 
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+      <fieldset
+        disabled={isReadOnlyMode}
+        className={
+          isReadOnlyMode
+            ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+            : ""
+        }
+      >
       <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
         <div className="bg-white border-b border-gray-200 p-6 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
           <div>
@@ -676,6 +694,7 @@ const removePlot = (plotId: string) => {
           </div>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 }
