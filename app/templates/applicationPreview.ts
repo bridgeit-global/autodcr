@@ -1,5 +1,6 @@
 "use client";
 
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
 type ApplicationPreviewSource = {
@@ -145,28 +146,206 @@ export function mapToPdfFieldValues(
   };
 }
 
+async function loadTemplatePdfBytes(templateType: TemplateType): Promise<ArrayBuffer> {
+  const response = await fetch(
+    `/api/application-preview-template?templateType=${encodeURIComponent(templateType)}`
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error || `Failed to load preview PDF template (${response.status})`);
+  }
+  return response.arrayBuffer();
+}
+
+type OverlaySpec = {
+  key: string;
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+};
+
+const OVERLAY_BASE_PAGE_WIDTH = 612;
+const OVERLAY_BASE_PAGE_HEIGHT = 792;
+
+function drawWrappedText(page: PDFPage, font: PDFFont, text: string, spec: OverlaySpec): void {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return;
+
+  const lines: string[] = [];
+  let line = "";
+  words.forEach((word) => {
+    const candidate = line ? `${line} ${word}` : word;
+    const candidateWidth = font.widthOfTextAtSize(candidate, spec.fontSize);
+    if (candidateWidth <= spec.width || !line) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  });
+  if (line) lines.push(line);
+
+  const maxLines = Math.max(1, Math.floor(spec.height / spec.lineHeight));
+  lines.slice(0, maxLines).forEach((row, idx) => {
+    page.drawText(row, {
+      x: spec.x,
+      y: spec.y - idx * spec.lineHeight,
+      size: spec.fontSize,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  });
+}
+
+async function fillStaticTemplateOverlay(
+  pdfDoc: PDFDocument,
+  values: Record<string, string | undefined>
+): Promise<void> {
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const overlays: OverlaySpec[] = [
+    {
+      key: "project_date_generation",
+      pageIndex: 0,
+      x: 452,
+      y: 649,
+      width: 170,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Document_Number",
+      pageIndex: 0,
+      x: 100,
+      y: 649,
+      width: 220,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Name_Architect/L.S",
+      pageIndex: 0,
+      x: 145,
+      y: 624,
+      width: 360,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Company_Name_Architect/L.S",
+      pageIndex: 0,
+      x: 145,
+      y: 608,
+      width: 360,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Address_line1_Architect/L.S",
+      pageIndex: 0,
+      x: 145,
+      y: 592,
+      width: 360,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Address_line2_Architect/L.S",
+      pageIndex: 0,
+      x: 145,
+      y: 576,
+      width: 360,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Address_line3Architect/L.S",
+      pageIndex: 0,
+      x: 145,
+      y: 560,
+      width: 360,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_ addressline1_BuildingProposal",
+      pageIndex: 1,
+      x: 246,
+      y: 214,
+      width: 270,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_ addressline2_BuildingProposal",
+      pageIndex: 1,
+      x: 246,
+      y: 198,
+      width: 270,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+  ];
+
+  overlays.forEach((spec) => {
+    const value = values[spec.key];
+    if (value === undefined) return;
+    const page = pdfDoc.getPages()[spec.pageIndex];
+    if (!page) return;
+
+    const scaleX = page.getWidth() / OVERLAY_BASE_PAGE_WIDTH;
+    const scaleY = page.getHeight() / OVERLAY_BASE_PAGE_HEIGHT;
+    const scaledSpec: OverlaySpec = {
+      ...spec,
+      x: spec.x * scaleX,
+      y: spec.y * scaleY,
+      width: spec.width * scaleX,
+      height: spec.height * scaleY,
+      fontSize: Math.max(8, spec.fontSize * Math.min(scaleX, scaleY)),
+      lineHeight: Math.max(10, spec.lineHeight * scaleY),
+    };
+
+    page.drawRectangle({
+      x: scaledSpec.x - 6,
+      y: scaledSpec.y - scaledSpec.height - 2,
+      width: scaledSpec.width + 30,
+      height: scaledSpec.height + 10,
+      color: rgb(1, 1, 1),
+      borderWidth: 0,
+    });
+
+    if (value.trim()) {
+      drawWrappedText(page, font, value, scaledSpec);
+    }
+  });
+}
+
 export async function generateApplicationPreviewPdf(
   fields: TemplateFields,
   templateType: TemplateType,
   source?: ApplicationPreviewSource
 ): Promise<Blob> {
   const formValues = mapToPdfFieldValues(fields, source);
-  const response = await fetch("/api/application-preview-docx", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      templateType,
-      fields: formValues,
-    }),
-  });
+  const templatePdfBytes = await loadTemplatePdfBytes(templateType);
+  const pdfDoc = await PDFDocument.load(templatePdfBytes);
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || `Failed to generate preview (${response.status})`);
+  if (templateType === "Architect Licensed Surveyor") {
+    await fillStaticTemplateOverlay(pdfDoc, formValues);
   }
 
-  return response.blob();
+  const bytes = await pdfDoc.save();
+  return new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
 }
 
