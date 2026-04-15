@@ -11,6 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const execFileAsync = promisify(execFile);
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const TEMPLATE_DOCX_MAP: Record<TemplateType, string> = {
   "Architect Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).docx",
@@ -125,6 +127,68 @@ async function convertDocxToPdf(docxPath: string, outDir: string): Promise<strin
   return pdfPath;
 }
 
+type ConverterMode = "raw" | "gotenberg";
+
+function getExternalConverterUrl(): string | null {
+  const url = process.env.DOCX_CONVERTER_URL?.trim();
+  return url || null;
+}
+
+function getExternalConverterMode(url: string): ConverterMode {
+  const configured = process.env.DOCX_CONVERTER_MODE?.trim().toLowerCase();
+  if (configured === "raw" || configured === "gotenberg") return configured;
+  if (url.includes("/forms/libreoffice/convert")) return "gotenberg";
+  return "raw";
+}
+
+function getExternalAuthHeaders(): Record<string, string> {
+  const token = process.env.DOCX_CONVERTER_BEARER_TOKEN?.trim();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+async function convertWithExternalService(
+  docxBuffer: Buffer,
+  fileName: string
+): Promise<Buffer> {
+  const url = getExternalConverterUrl();
+  if (!url) throw new Error("DOCX_CONVERTER_URL is not configured.");
+
+  const mode = getExternalConverterMode(url);
+  const authHeaders = getExternalAuthHeaders();
+  let response: Response;
+
+  if (mode === "gotenberg") {
+    const form = new FormData();
+    form.append("files", new Blob([docxBuffer], { type: DOCX_MIME }), fileName);
+    response = await fetch(url, {
+      method: "POST",
+      headers: authHeaders,
+      body: form,
+    });
+  } else {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...authHeaders,
+        "Content-Type": DOCX_MIME,
+        Accept: "application/pdf",
+      },
+      body: docxBuffer,
+    });
+  }
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(
+      `External DOCX converter failed (${response.status}). ${message.slice(0, 300)}`
+    );
+  }
+
+  const pdfBytes = await response.arrayBuffer();
+  return Buffer.from(pdfBytes);
+}
+
 export async function POST(request: NextRequest) {
   let tempDir = "";
   try {
@@ -152,6 +216,21 @@ export async function POST(request: NextRequest) {
     const templateBuffer = await fs.readFile(templatePath);
     const replacedDocx = replaceInDocxXml(templateBuffer, fields);
 
+    const externalConverterUrl = getExternalConverterUrl();
+    if (externalConverterUrl) {
+      const pdfBuffer = await convertWithExternalService(
+        replacedDocx,
+        "application-preview-output.docx"
+      );
+      return new NextResponse(pdfBuffer, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'inline; filename="application-preview.pdf"',
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "application-preview-"));
     const outputDocxPath = path.join(tempDir, "application-preview-output.docx");
     await fs.writeFile(outputDocxPath, replacedDocx);
@@ -168,8 +247,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("application-preview-docx failed:", error);
-    const message =
-      error instanceof Error ? error.message : "Failed to generate application preview PDF.";
+    const fallbackHint =
+      " On Vercel, set DOCX_CONVERTER_URL (and optionally DOCX_CONVERTER_MODE=gotenberg) to use an external DOCX->PDF converter.";
+    const message = error instanceof Error
+      ? `${error.message}${error.message.includes("DOCX_CONVERTER_URL") ? "" : fallbackHint}`
+      : `Failed to generate application preview PDF.${fallbackHint}`;
     return NextResponse.json({ error: message }, { status: 500 });
   } finally {
     if (tempDir) {
