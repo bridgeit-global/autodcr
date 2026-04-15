@@ -188,6 +188,7 @@ export default function ApplicantDetailsPage() {
   const { isEditMode, isLoading, projectData } = useProjectData();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
+  const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   const [applicants, setApplicants] = useState<ApplicantRow[]>(() =>
@@ -573,6 +574,7 @@ export default function ApplicantDetailsPage() {
   }
 
   const onSubmit = (data: ApplicantFormData) => {
+    if (isReadOnlyMode) return;
     const nextId = applicants.length ? Math.max(...applicants.map((item) => item.id)) + 1 : 1;
     // All entries come from directory dropdown (consultants or owners), use their auth user id
     const userId = (showDirectoryDropdown && selectedDirectoryId) ? selectedDirectoryId : undefined;
@@ -628,6 +630,7 @@ export default function ApplicantDetailsPage() {
   }, [applicants]);
 
   const handleDeleteClick = (id: number, name: string, applicantType: string) => {
+    if (isReadOnlyMode) return;
     const applicantToRemove = applicants.find((applicant) => applicant.id === id);
     if (!applicantToRemove) return;
     
@@ -667,6 +670,7 @@ export default function ApplicantDetailsPage() {
   };
 
   const handleRemoveApplicant = async (id: number) => {
+    if (isReadOnlyMode) return;
     const applicantToRemove = applicants.find((applicant) => applicant.id === id);
     // Prevent deletion if applicant belongs to logged-in user or is Licensed Site Supervisor
     if (!applicantToRemove) return;
@@ -795,7 +799,8 @@ export default function ApplicantDetailsPage() {
                             (String(applicant.user_id) === String(authUserId) || 
                              (applicant.id === 1 && userMetadata !== null));
                           
-                          const isDisabled = 
+                          const isDisabled =
+                            isReadOnlyMode ||
                             applicant.applicantType === "Licensed Site Supervisor" ||
                             isLoggedInUserEntry;
                           
@@ -830,6 +835,7 @@ export default function ApplicantDetailsPage() {
             </div>
           </div>
 
+          {!isReadOnlyMode && (
           <form onSubmit={handleSubmit(onSubmit)} className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
             {/* Header */}
             <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
@@ -839,19 +845,28 @@ export default function ApplicantDetailsPage() {
                   Provide applicant/authorized person information. Ensure the details match the submitted documents.
                 </p>
               </div>
-              <button
-                type="submit"
-                className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                  isSaved
-                    ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                    : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
-                }`}
-              >
-                {isSaved ? "Saved" : "Save"}
-              </button>
+              {!isReadOnlyMode && (
+                <button
+                  type="submit"
+                  className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
+                    isSaved
+                      ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                      : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                  }`}
+                >
+                  {isSaved ? "Saved" : "Save"}
+                </button>
+              )}
             </div>
 
-            <div className="pt-6 space-y-6 px-6 pb-6">
+            <fieldset
+              disabled={isReadOnlyMode}
+              className={
+                isReadOnlyMode
+                  ? "pt-6 space-y-6 px-6 pb-6 [&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+                  : "pt-6 space-y-6 px-6 pb-6"
+              }
+            >
             {isLocked && (
               <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
                 <svg
@@ -1045,8 +1060,9 @@ export default function ApplicantDetailsPage() {
                 )}
               </div>
             </div>
-            </div>
+            </fieldset>
           </form>
+          )}
         </div>
       </div>
 

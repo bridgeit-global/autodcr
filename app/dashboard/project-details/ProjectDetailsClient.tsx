@@ -209,6 +209,8 @@ export default function ProjectDetailsClient() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const projectId = searchParams.get("projectId");
+  const mode = searchParams.get("mode");
+  const isReadOnlyMode = mode === "readonly";
   const { userMetadata } = useUserMetadata();
   
   // Only enable edit mode if we're on the project-details page and have a projectId
@@ -622,21 +624,24 @@ export default function ProjectDetailsClient() {
 
   // Persist drafts whenever forms change
   useEffect(() => {
+    if (isReadOnlyMode) return;
     const subscription = watchProject((value) => {
       saveDraft("draft-project-details-project", value as ProjectFormData);
     });
     return () => subscription.unsubscribe();
-  }, [watchProject]);
+  }, [isReadOnlyMode, watchProject]);
 
   useEffect(() => {
+    if (isReadOnlyMode) return;
     const subscription = watchSavePlot((value) => {
       saveDraft("draft-project-details-save-plot", value as SavePlotFormData);
     });
     return () => subscription.unsubscribe();
-  }, [watchSavePlot]);
+  }, [isReadOnlyMode, watchSavePlot]);
 
   // Mark as unsaved only on actual user interaction (DOM events don't fire for programmatic changes)
   useEffect(() => {
+    if (isReadOnlyMode) return;
     const handleUserEdit = () => {
       if (activeTab === "project-info" && isProjectInfoSaved) {
         setIsProjectInfoSaved(false);
@@ -652,13 +657,14 @@ export default function ProjectDetailsClient() {
       main.removeEventListener("input", handleUserEdit, true);
       main.removeEventListener("change", handleUserEdit, true);
     };
-  }, [activeTab, isProjectInfoSaved, isSavePlotSaved]);
+  }, [activeTab, isProjectInfoSaved, isReadOnlyMode, isSavePlotSaved]);
 
   // Track previous region value to detect actual changes
   const prevRegionRef = useRef<string | undefined>(undefined);
   
   // When region changes: clear zone, ward, village, survey no, and CTS numbers
   useEffect(() => {
+    if (isReadOnlyMode) return;
     // Skip clearing during initial data load or if region hasn't actually changed
     if (isInitialLoad) {
       prevRegionRef.current = selectedRegion;
@@ -677,13 +683,14 @@ export default function ProjectDetailsClient() {
     }
     
     prevRegionRef.current = selectedRegion;
-  }, [selectedRegion, setSavePlotValue, isInitialLoad]);
+  }, [isInitialLoad, isReadOnlyMode, selectedRegion, setSavePlotValue]);
 
   // Track previous zone value to detect actual changes (not just initial render)
   const prevZoneRef = useRef<string | undefined>(undefined);
   
   // When zone changes: clear ward, village, survey no, and CTS numbers
   useEffect(() => {
+    if (isReadOnlyMode) return;
     // Skip clearing during initial data load or if zone hasn't actually changed
     if (isInitialLoad) {
       prevZoneRef.current = selectedZone;
@@ -703,13 +710,14 @@ export default function ProjectDetailsClient() {
     }
     
     prevZoneRef.current = selectedZone;
-  }, [selectedZone, selectedRegion, setSavePlotValue, isInitialLoad]);
+  }, [isInitialLoad, isReadOnlyMode, selectedRegion, selectedZone, setSavePlotValue]);
 
   // Track previous ward value to detect actual changes
   const prevWardRef = useRef<string | undefined>(undefined);
   
   // When ward changes: clear village, survey no, and CTS numbers
   useEffect(() => {
+    if (isReadOnlyMode) return;
     // Skip clearing during initial data load or if ward hasn't actually changed
     if (isInitialLoad) {
       prevWardRef.current = selectedWard;
@@ -734,13 +742,14 @@ export default function ProjectDetailsClient() {
     }
     
     prevWardRef.current = selectedWard;
-  }, [selectedWard, selectedRegion, setSavePlotValue, isInitialLoad, getSavePlotValues]);
+  }, [getSavePlotValues, isInitialLoad, isReadOnlyMode, selectedRegion, selectedWard, setSavePlotValue]);
 
   // Track previous village value to detect actual changes
   const prevVillageRef = useRef<string | undefined>(undefined);
   
   // When village changes: clear survey no and CTS numbers
   useEffect(() => {
+    if (isReadOnlyMode) return;
     // Skip clearing during initial data load or if village hasn't actually changed
     if (isInitialLoad) {
       prevVillageRef.current = selectedVillage;
@@ -755,13 +764,14 @@ export default function ProjectDetailsClient() {
     }
     
     prevVillageRef.current = selectedVillage;
-  }, [selectedVillage, setSavePlotValue, isInitialLoad]);
+  }, [isInitialLoad, isReadOnlyMode, selectedVillage, setSavePlotValue]);
 
   // Track previous DP Zone value to detect actual changes
   const prevDpZoneRef = useRef<string | undefined>(undefined);
 
   // When DP Zone changes: clear major use + sub use
   useEffect(() => {
+    if (isReadOnlyMode) return;
     if (isInitialLoad) {
       prevDpZoneRef.current = selectedDpZone;
       return;
@@ -771,13 +781,14 @@ export default function ProjectDetailsClient() {
       setSavePlotValue("plotSubUse", "", { shouldValidate: false });
     }
     prevDpZoneRef.current = selectedDpZone;
-  }, [selectedDpZone, isInitialLoad, setSavePlotValue]);
+  }, [isInitialLoad, isReadOnlyMode, selectedDpZone, setSavePlotValue]);
 
   // Track previous major use value to detect actual changes
   const prevMajorUseRef = useRef<string | undefined>(undefined);
 
   // When major use changes: clear sub use
   useEffect(() => {
+    if (isReadOnlyMode) return;
     if (isInitialLoad) {
       prevMajorUseRef.current = selectedMajorUse;
       return;
@@ -786,7 +797,7 @@ export default function ProjectDetailsClient() {
       setSavePlotValue("plotSubUse", "", { shouldValidate: false });
     }
     prevMajorUseRef.current = selectedMajorUse;
-  }, [selectedMajorUse, isInitialLoad, setSavePlotValue]);
+  }, [isInitialLoad, isReadOnlyMode, selectedMajorUse, setSavePlotValue]);
 
   // F.P.No: load TPS scheme names from DP2034 MapServer (dpremarks.mcgm.gov.in / Widget.js layer 13)
   useEffect(() => {
@@ -892,6 +903,7 @@ export default function ProjectDetailsClient() {
   }, [selectedVillage, selectedWard, selectedPlotBelongs, isInitialLoad, isEditMode]);
 
   const onProjectSubmit = async (data: ProjectFormData) => {
+    if (isReadOnlyMode) return;
     try {
       const title = data.title?.trim();
       if (!title) {
@@ -969,6 +981,7 @@ export default function ProjectDetailsClient() {
   };
 
   const onSavePlotSubmit = async (data: SavePlotFormData) => {
+    if (isReadOnlyMode) return;
     try {
       const isDraft = projectData?.status === "draft";
       if (isEditMode && projectId && !isDraft) {
@@ -1408,8 +1421,10 @@ export default function ProjectDetailsClient() {
       {/* Warning Message */}
       <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md shadow-sm">
         <p className="text-sm text-red-700">
-          <strong>Note:</strong> Dear Applicant, you will not be able to edit project if any application submitted for
-          this Project. You can edit / add information before submitting any application.
+          <strong>Note:</strong>{" "}
+          {isReadOnlyMode
+            ? "This project is opened in read-only mode for a submitted/linked application. Editing is disabled."
+            : "Dear Applicant, you will not be able to edit project if any application submitted for this Project. You can edit / add information before submitting any application."}
         </p>
       </div>
 
@@ -1441,6 +1456,14 @@ export default function ProjectDetailsClient() {
       <div className="space-y-6">
         {activeTab === "project-info" && (
           <form onSubmit={handleProjectSubmit(onProjectSubmit)}>
+            <fieldset
+              disabled={isReadOnlyMode}
+              className={
+                isReadOnlyMode
+                  ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+                  : ""
+              }
+            >
             <section className="border border-gray-200 rounded-2xl p-6 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 pb-4">
             <div>
@@ -1450,16 +1473,18 @@ export default function ProjectDetailsClient() {
               </p>
             </div>
 
-            <button
-              type="submit"
-              className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                isProjectInfoSaved
-                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
-              }`}
-            >
-              {isProjectInfoSaved ? "Saved" : "Save"}
-            </button>
+            {!isReadOnlyMode && (
+              <button
+                type="submit"
+                className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
+                  isProjectInfoSaved
+                    ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                    : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                }`}
+              >
+                {isProjectInfoSaved ? "Saved" : "Save"}
+              </button>
+            )}
           </div>
 
               <div className="pt-6 space-y-6">
@@ -1649,11 +1674,20 @@ export default function ProjectDetailsClient() {
             </div>
           </div>
         </section>
+            </fieldset>
           </form>
         )}
 
         {activeTab === "save-plot" && (
           <form onSubmit={handleSavePlotSubmit(onSavePlotSubmit)}>
+            <fieldset
+              disabled={isReadOnlyMode}
+              className={
+                isReadOnlyMode
+                  ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+                  : ""
+              }
+            >
             <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm overflow-hidden">
               {/* Header (scrolls with content) */}
               <div className="bg-white border-b border-gray-200 p-4 flex flex-wrap items-center justify-between gap-4 rounded-t-2xl">
@@ -1662,16 +1696,18 @@ export default function ProjectDetailsClient() {
                   <p className="text-sm text-black mt-1">Provide comprehensive plot details for this application.</p>
                 </div>
 
-                <button
-                  type="submit"
-              className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                isSavePlotSaved
-                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
-              }`}
-            >
-              {isSavePlotSaved ? "Saved" : "Save"}
-                </button>
+                {!isReadOnlyMode && (
+                  <button
+                    type="submit"
+                    className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
+                      isSavePlotSaved
+                        ? "bg-emerald-700 hover:bg-emerald-800 text-white"
+                        : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                    }`}
+                  >
+                    {isSavePlotSaved ? "Saved" : "Save"}
+                  </button>
+                )}
               </div>
 
               <div className="pt-6 space-y-8 px-4 pb-4">
@@ -2134,6 +2170,7 @@ export default function ProjectDetailsClient() {
             </div>
           </div>
         </section>
+            </fieldset>
       </form>
         )}
       </div>

@@ -696,6 +696,35 @@ function UserDashboardContent() {
     await loadDraftCounts();
   };
 
+  const handleOpenApplicationDetails = async (payload: {
+    applicationId: string;
+    applicationNo: string;
+    appType: string;
+  }) => {
+    const { data, error } = await supabase
+      .from("applications")
+      .select("project_id")
+      .eq("id", payload.applicationId)
+      .single();
+
+    if (error || !data?.project_id) {
+      alert("Unable to open application details. Linked project not found.");
+      return;
+    }
+
+    const query = new URLSearchParams({
+      projectId: String(data.project_id),
+      applicationId: payload.applicationId,
+      applicationNo: payload.applicationNo,
+      selectedApplication: payload.appType,
+      mode: "readonly",
+    });
+
+    setIsDraftModalOpen(false);
+    setSelectedDraftApp(null);
+    router.push(`/dashboard/project-details?${query.toString()}`);
+  };
+
   const tableData =
     selectedApplicationType === "General"
       ? GENERAL_APPLICATION_DATA
@@ -718,58 +747,38 @@ function UserDashboardContent() {
           {/* Left Content Area */}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4">
             {/* Navigation and Filters */}
-            <div className="bg-white rounded-lg border border-gray-300 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <CustomSelect
-                    value={selectedProject}
-                    onChange={(val) => setSelectedProject(val)}
-                    options={[
-                      { value: "ALL", label: "All Projects" },
-                      ...selectableProjects.map((p) => ({
-                        value: p.id,
-                        ...getProjectOptionLabel(p),
-                      })),
-                    ]}
-                    className="w-[260px]"
-                  />
+            <div className="flex items-center gap-3 w-full">
+              <div className="flex items-center gap-2 min-w-0 w-full">
+                <CustomSelect
+                  value={selectedProject}
+                  onChange={(val) => setSelectedProject(val)}
+                  options={[
+                    { value: "ALL", label: "All Projects" },
+                    ...selectableProjects.map((p) => ({
+                      value: p.id,
+                      ...getProjectOptionLabel(p),
+                    })),
+                  ]}
+                  className="flex-[7] min-w-0"
+                />
 
-                  <CustomSelect
-                    value={selectedApplicationType}
-                    onChange={(val) => setSelectedApplicationType(val)}
-                    options={departmentOptions.map((department) => ({
-                      value: department,
-                      label: department,
-                    }))}
-                    className="w-[220px]"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
-                    Go
-                  </button>
-                  <button
-                    onClick={() => setIsProjectModalOpen(true)}
-                    className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
-                  >
-                    + Projects
-                  </button>
-                  <button
-                    onClick={() => setIsApplicationModalOpen(true)}
-                    className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
-                  >
-                    + Applications
-                  </button>
-                </div>
+                <CustomSelect
+                  value={selectedApplicationType}
+                  onChange={(val) => setSelectedApplicationType(val)}
+                  options={departmentOptions.map((department) => ({
+                    value: department,
+                    label: department,
+                  }))}
+                  className="flex-[3] min-w-0"
+                />
               </div>
-              {projectsLoading && (
-                <span className="text-xs text-gray-600 mt-1 inline-block">Loading projects...</span>
-              )}
-              {!projectsLoading && projects.length === 0 && (
-                <span className="text-xs text-gray-600 mt-1 inline-block">No projects found</span>
-              )}
             </div>
+            {projectsLoading && (
+              <span className="text-xs text-gray-600 mt-1 inline-block">Loading projects...</span>
+            )}
+            {!projectsLoading && projects.length === 0 && (
+              <span className="text-xs text-gray-600 mt-1 inline-block">No projects found</span>
+            )}
 
             {/* Main Data Table */}
             <div className="bg-white rounded-lg border border-gray-300 overflow-hidden flex-1 min-h-0">
@@ -855,6 +864,20 @@ function UserDashboardContent() {
 
           {/* Right Sidebar - Announcements */}
           <div className="w-80 space-y-4">
+            <div className="flex items-center gap-2 w-full">
+              <button
+                onClick={() => setIsProjectModalOpen(true)}
+                className="h-9 flex-1 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+              >
+                + Projects
+              </button>
+              <button
+                onClick={() => setIsApplicationModalOpen(true)}
+                className="h-9 flex-1 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+              >
+                + Applications
+              </button>
+            </div>
             <div className="bg-white rounded-lg border border-gray-300 p-4">
               <h3 className="text-lg font-semibold text-black mb-4">Announcements</h3>
               <div className="space-y-4">
@@ -903,6 +926,7 @@ function UserDashboardContent() {
           status={selectedDraftApp.status}
           applications={draftApplicationsByType[selectedDraftApp.appType] || []}
           onDeleteApplication={handleDeleteApplication}
+          onOpenApplicationDetails={handleOpenApplicationDetails}
         />
       )}
     </div>

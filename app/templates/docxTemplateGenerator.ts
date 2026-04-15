@@ -10,20 +10,28 @@ export async function generateFromDocx(
   fields: TemplateFields,
   font: any,
   boldFont: any,
-  templateName: string
+  templateName: string,
+  sourcePath?: string,
+  customReplacements?: Record<string, string | undefined>
 ): Promise<number> {
   const margin = 72;
   const pageWidth = 612 - margin * 2;
   const bottomMargin = 120;
   const lineHeight = 14;
   let yPosition = 650;
+  let currentPage = page;
+
+  const addNewPage = () => {
+    currentPage = pdfDoc.addPage([612, 792]);
+    yPosition = 730;
+  };
 
   try {
     // Fetch DOCX content from API route
     const response = await fetch("/api/parse-docx", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ templateName }),
+      body: JSON.stringify({ templateName, sourcePath }),
     });
     
     if (!response.ok) {
@@ -48,7 +56,7 @@ export async function generateFromDocx(
       let cleanedLine = cleanText(line);
       
       // Replace placeholders
-      cleanedLine = replacePlaceholders(cleanedLine, fields);
+      cleanedLine = replacePlaceholders(cleanedLine, fields, customReplacements);
       
       // Replace field values
       cleanedLine = replaceFieldValues(cleanedLine, fields);
@@ -100,7 +108,7 @@ export async function generateFromDocx(
     // Render lines with proper formatting - preserve exact line structure
     for (let i = 0; i < processedLines.length; i++) {
       if (yPosition < bottomMargin) {
-        break; // No more space on page
+        addNewPage();
       }
       
       const line = processedLines[i];
@@ -114,45 +122,45 @@ export async function generateFromDocx(
       // Handle special formatting cases
       if (line.startsWith("Date:")) {
         // Date line - render without wrapping
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
         yPosition -= lineHeight * 1.5;
       } else if (line === "To," || line.trim() === "To,") {
         // "To," line - single line, no wrapping
-        yPosition = addText(page, "To,", margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
+        yPosition = addText(currentPage, "To,", margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
         yPosition -= lineHeight;
       } else if (line.startsWith("Subject:") || line.startsWith("Project:") || line.startsWith("Ref.:")) {
         // Section headers - add extra space before, allow wrapping if needed
         yPosition -= lineHeight * 0.5;
         const lineWidth = font.widthOfTextAtSize(line, 12);
         const shouldWrap = lineWidth > pageWidth;
-        const finalY = addText(page, line, margin, yPosition, 12, font, boldFont, false, shouldWrap ? pageWidth : undefined, bottomMargin);
+        const finalY = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, shouldWrap ? pageWidth : undefined, bottomMargin);
         // Only subtract lineHeight if text didn't wrap (wrapped text already accounts for spacing)
         yPosition = shouldWrap ? finalY : finalY - lineHeight;
         yPosition -= lineHeight * 0.5; // Add extra space after
       } else if (line.startsWith("Sir,") || line.startsWith("Sir/Madam,")) {
         // Salutation - single line
         yPosition -= lineHeight * 0.5;
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
         yPosition -= lineHeight * 1.5;
       } else if (line.includes("The name, address and registration number are given below.") || 
                  line.includes("name, address and registration number are given below")) {
         // This line should have a blank line after it
         const lineWidth = font.widthOfTextAtSize(line, 12);
         const shouldWrap = lineWidth > pageWidth;
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, shouldWrap ? pageWidth : undefined, bottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, shouldWrap ? pageWidth : undefined, bottomMargin);
         yPosition -= lineHeight * 2; // Add extra blank line after this
       } else if (line.startsWith("Name:") || line.startsWith("Address:") || line.startsWith("Lic. No.:") || line.startsWith("Mobile:")) {
         // Consultant detail labels - single line, no wrapping
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
         yPosition -= lineHeight;
       } else if (line.startsWith("Email.:") || line.startsWith("Email:")) {
         // Email line - add blank line after it
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
         yPosition -= lineHeight * 2; // Add blank line after email
       } else if (line.startsWith("Thanking you,") || line.startsWith("Yours faithfully,")) {
         // Closing sections - single line
         yPosition -= lineHeight * 0.5;
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin);
         yPosition -= lineHeight;
       } else if (line.startsWith("Signature of Owner") || line.includes("Signature of Owner")) {
         // Skip rendering the "Signature of Owner" label; just add vertical spacing
@@ -161,7 +169,7 @@ export async function generateFromDocx(
         // CC section - single line, allow it closer to footer
         yPosition -= lineHeight * 0.5;
         const ccBottomMargin = 30;
-        yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, ccBottomMargin);
+        yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, ccBottomMargin);
         yPosition -= lineHeight;
       } else {
         // Check if this is the owner name line (usually comes after "Signature of Owner")
@@ -178,12 +186,12 @@ export async function generateFromDocx(
           const lineWidth = font.widthOfTextAtSize(line, 12);
           // Allow owner name to go even closer to the footer by using a very small bottom margin
           const ownerBottomMargin = 0;
-          yPosition = addText(page, line, pageWidth + margin - lineWidth, yPosition, 12, font, boldFont, false, undefined, ownerBottomMargin);
+          yPosition = addText(currentPage, line, pageWidth + margin - lineWidth, yPosition, 12, font, boldFont, false, undefined, ownerBottomMargin);
           yPosition -= lineHeight;
         } else if (isCcName) {
           // CC recipient name - keep it visible near footer
           const ccBottomMargin = 30;
-          yPosition = addText(page, line, margin, yPosition, 12, font, boldFont, false, undefined, ccBottomMargin);
+          yPosition = addText(currentPage, line, margin, yPosition, 12, font, boldFont, false, undefined, ccBottomMargin);
           yPosition -= lineHeight;
         } else {
           // Regular lines - render without wrapping to preserve structure
@@ -191,7 +199,7 @@ export async function generateFromDocx(
           const shouldWrap = lineWidth > pageWidth;
           
           yPosition = addText(
-            page,
+            currentPage,
             line,
             margin,
             yPosition,
@@ -205,13 +213,17 @@ export async function generateFromDocx(
           yPosition -= lineHeight;
         }
       }
+
+      if (yPosition < bottomMargin) {
+        addNewPage();
+      }
     }
     
     return yPosition;
   } catch (error) {
     console.error(`Error generating PDF from DOCX template ${templateName}:`, error);
     // Fallback: render error message
-    page.drawText(
+    currentPage.drawText(
       `Error loading template: ${error}`,
       { x: margin, y: yPosition, size: 12, font }
     );
@@ -247,7 +259,11 @@ function cleanText(text: string): string {
  * Replace placeholders in text with field values
  * Handles various placeholder formats: {FieldName}, {{FieldName}}, [FieldName], (Issue), etc.
  */
-function replacePlaceholders(text: string, fields: TemplateFields): string {
+function replacePlaceholders(
+  text: string,
+  fields: TemplateFields,
+  customReplacements?: Record<string, string | undefined>
+): string {
   let result = text;
   
   // Map of field names to values
@@ -324,6 +340,17 @@ function replacePlaceholders(text: string, fields: TemplateFields): string {
     // Handle (FieldName) format
     result = result.replace(new RegExp(`\\(${fieldName}\\)`, "g"), value);
   });
+
+  if (customReplacements) {
+    Object.entries(customReplacements).forEach(([placeholder, value]) => {
+      if (value === undefined) return;
+      const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      result = result.replace(new RegExp(escaped, "g"), value);
+      if (!placeholder.startsWith("$")) {
+        result = result.replace(new RegExp(`\\$${escaped}`, "g"), value);
+      }
+    });
+  }
   
   return result;
 }

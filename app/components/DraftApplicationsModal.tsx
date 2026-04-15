@@ -19,6 +19,11 @@ interface DraftApplicationsModalProps {
   status: string;
   applications: DraftApplication[];
   onDeleteApplication?: (applicationId: string) => Promise<void>;
+  onOpenApplicationDetails?: (payload: {
+    applicationId: string;
+    applicationNo: string;
+    appType: string;
+  }) => void;
 }
 
 const STAGES = [
@@ -35,6 +40,7 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
   status,
   applications,
   onDeleteApplication,
+  onOpenApplicationDetails,
 }) => {
   const [fileNumberQuery, setFileNumberQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -133,9 +139,25 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                 <div className="w-60 shrink-0 pr-4">
                   <div className="mb-2 flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-medium text-gray-600">Application No:</span>
-                    <span className="inline-flex items-center rounded-full bg-sky-100 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-semibold break-all">
-                      {app.applicationNo}
-                    </span>
+                    {app.applicationId && onOpenApplicationDetails ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center rounded-full bg-sky-100 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-semibold break-all hover:bg-sky-200 hover:text-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                        onClick={() =>
+                          onOpenApplicationDetails({
+                            applicationId: app.applicationId as string,
+                            applicationNo: app.applicationNo,
+                            appType: app.applicationType || appType,
+                          })
+                        }
+                      >
+                        {app.applicationNo}
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-sky-100 text-sky-700 border border-sky-200 px-2.5 py-0.5 text-xs font-semibold break-all">
+                        {app.applicationNo}
+                      </span>
+                    )}
                   </div>
                   <p className="text-[13px] font-medium text-sky-700 mb-1">{app.status}</p>
                   <button

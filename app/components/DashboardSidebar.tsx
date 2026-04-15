@@ -21,6 +21,11 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
   
   // Get projectId from URL to preserve it when navigating
   const projectId = searchParams.get("projectId");
+  const isReadOnlyMode = searchParams.get("mode") === "readonly";
+  const mode = searchParams.get("mode");
+  const applicationId = searchParams.get("applicationId");
+  const selectedApplication = searchParams.get("selectedApplication");
+  const selectedApplicationNo = searchParams.get("applicationNo");
   const isEditMode = !!projectId;
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -403,7 +408,14 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
   }, [pathname]);
 
   const navigateWithProjectId = (path: string) => {
-    const url = projectId ? `${path}?projectId=${projectId}` : path;
+    const params = new URLSearchParams();
+    if (projectId) params.set("projectId", projectId);
+    if (mode) params.set("mode", mode);
+    if (applicationId) params.set("applicationId", applicationId);
+    if (selectedApplication) params.set("selectedApplication", selectedApplication);
+    if (selectedApplicationNo) params.set("applicationNo", selectedApplicationNo);
+    const qs = params.toString();
+    const url = qs ? `${path}?${qs}` : path;
     router.push(url);
   };
 
@@ -424,6 +436,25 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
   };
 
   const menuItems = [
+    ...(isReadOnlyMode
+      ? [
+          {
+            id: "application-details",
+            label: "Application Details",
+            path: "/dashboard/application-details",
+            icon: (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"
+                />
+              </svg>
+            ),
+          },
+        ]
+      : []),
     {
       id: "project-details",
       label: "Project Details",
@@ -534,7 +565,17 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
       <div className="p-4 flex flex-col h-full">
         {/* Title + toggle */}
         <div className="flex items-center justify-between mb-4 shrink-0">
-          {!collapsed && <h2 className="hidden md:block text-lg font-bold text-gray-900">{isEditMode ? "EDIT PROJECT" : "CREATE PROJECT"}</h2>}
+          {!collapsed && !isReadOnlyMode && (
+            <h2 className="hidden md:block text-lg font-bold text-gray-900">
+              {isEditMode ? "EDIT PROJECT" : "CREATE PROJECT"}
+            </h2>
+          )}
+          {!collapsed && isReadOnlyMode && (
+            <div className="hidden md:block min-w-0 pr-2">
+              <p className="text-xs font-semibold text-gray-900 break-words leading-tight">{selectedApplication || "-"}</p>
+              <p className="text-[11px] text-gray-600 break-all leading-tight mt-0.5">{selectedApplicationNo || "-"}</p>
+            </div>
+          )}
           <button
             type="button"
             onClick={onToggleSidebar}
@@ -557,7 +598,7 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
         </div>
 
         {/* Action Button (hidden when sidebar is collapsed or on small screens) */}
-        {!collapsed && (() => {
+        {!collapsed && !isReadOnlyMode && (() => {
           const isSubmittedProject = isEditMode && !isDraftProject;
           if (isSubmittedProject) {
             return (

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
@@ -49,6 +49,8 @@ const REQUIRED_PAGES: RequiredPage[] = [
 
 export default function BGDetailsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   const [entry, setEntry] = useState<BGEntry | null>(() => {
     const savedEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
@@ -104,6 +106,7 @@ export default function BGDetailsPage() {
   });
 
   const onSubmit = async (data: BGFormData) => {
+    if (isReadOnlyMode) return;
     try {
       // Only one entry allowed - replace existing or create new
       const newEntry: BGEntry = { 
@@ -165,6 +168,7 @@ export default function BGDetailsPage() {
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (isReadOnlyMode) return;
     const file = event.target.files?.[0];
     if (file) {
       setValue("scanCopyName", file.name, { shouldValidate: true });
@@ -257,6 +261,7 @@ export default function BGDetailsPage() {
   const [missingPages, setMissingPages] = useState<RequiredPage[]>([]);
 
   const handleSubmitAll = () => {
+    if (isReadOnlyMode) return;
     const missing = REQUIRED_PAGES.filter((page) => !isPageSaved(page.key));
 
     if (missing.length > 0) {
@@ -269,7 +274,13 @@ export default function BGDetailsPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6 relative">
+    <div
+      className={`max-w-6xl mx-auto px-6 pt-8 space-y-6 relative ${
+        isReadOnlyMode
+          ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+          : ""
+      }`}
+    >
       {missingPages.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6 space-y-4">
@@ -322,7 +333,8 @@ export default function BGDetailsPage() {
                 isSaved
                   ? "bg-emerald-700 hover:bg-emerald-800 text-white"
                   : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
-              }`}
+              } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
+              disabled={isReadOnlyMode}
               onClick={handleSubmit(onSubmit)}
             >
               {isSaved ? "Saved" : "Save"}
@@ -331,6 +343,14 @@ export default function BGDetailsPage() {
         </div>
 
         <form className="space-y-6 px-6 py-4" onSubmit={handleSubmit(onSubmit)}>
+          <fieldset
+            disabled={isReadOnlyMode}
+            className={
+              isReadOnlyMode
+                ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+                : ""
+            }
+          >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block font-medium text-black mb-1">
@@ -496,6 +516,7 @@ export default function BGDetailsPage() {
               {errors.scanCopyName && <p className="text-sm text-red-600 mt-1">{errors.scanCopyName.message}</p>}
             </div>
           </div>
+          </fieldset>
         </form>
       </section>
 
