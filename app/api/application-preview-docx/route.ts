@@ -160,7 +160,8 @@ async function convertWithExternalService(
 
   if (mode === "gotenberg") {
     const form = new FormData();
-    form.append("files", new Blob([docxBuffer], { type: DOCX_MIME }), fileName);
+    const docxBytes = new Uint8Array(docxBuffer);
+    form.append("files", new Blob([docxBytes], { type: DOCX_MIME }), fileName);
     response = await fetch(url, {
       method: "POST",
       headers: authHeaders,
@@ -174,7 +175,7 @@ async function convertWithExternalService(
         "Content-Type": DOCX_MIME,
         Accept: "application/pdf",
       },
-      body: docxBuffer,
+      body: new Uint8Array(docxBuffer),
     });
   }
 
@@ -222,7 +223,7 @@ export async function POST(request: NextRequest) {
         replacedDocx,
         "application-preview-output.docx"
       );
-      return new NextResponse(pdfBuffer, {
+      return new NextResponse(new Uint8Array(pdfBuffer), {
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": 'inline; filename="application-preview.pdf"',
@@ -238,7 +239,7 @@ export async function POST(request: NextRequest) {
     const outputPdfPath = await convertDocxToPdf(outputDocxPath, tempDir);
     const pdfBuffer = await fs.readFile(outputPdfPath);
 
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": 'inline; filename="application-preview.pdf"',
