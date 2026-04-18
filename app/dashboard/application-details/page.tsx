@@ -20,7 +20,8 @@ type PreviewProjectData = {
   save_plot_details?: {
     ward?: string;
     zone?: string;
-    proposedCtsNumber?: string[];
+    plotBelongsTo?: "" | "CTS No." | "CS No." | "F.P.No";
+    proposedCtsNumber?: string[] | string;
     villageName?: string;
     roadName?: string;
   } | null;
