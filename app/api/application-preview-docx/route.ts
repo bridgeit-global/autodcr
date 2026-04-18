@@ -1,14 +1,78 @@
+/**
+ * DOCX placeholder replacement + PDF conversion.
+ *
+ * Vercel cannot run LibreOffice inside serverless functions. Production setup:
+ * - Deploy Gotenberg (or any LibreOffice headless service) on Docker/VPS/free-tier host.
+ * - Set DOCX_CONVERTER_URL to the convert endpoint (e.g. .../forms/libreoffice/convert).
+ * - Set DOCX_CONVERTER_MODE=gotenberg when using Gotenberg.
+ *
+ * Local dev: if DOCX_CONVERTER_URL is unset, falls back to `soffice` when installed.
+ *
+ * Speed: identical template+fields are cached in-memory (default TTL 180000 ms). Optional env:
+ * APPLICATION_PREVIEW_CACHE_TTL_MS, APPLICATION_PREVIEW_CACHE_MAX_ENTRIES, DOCX_CONVERTER_TIMEOUT_MS.
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { createHash } from "crypto";
 import PizZip from "pizzip";
 import type { TemplateType } from "@/app/templates/templateGenerators";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** In-process cache: same inputs → skip LibreOffice/Gotenberg (repeat preview, warm lambda). TTL in ms. */
+const PREVIEW_CACHE_TTL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.APPLICATION_PREVIEW_CACHE_TTL_MS || "180000", 10) || 180000
+);
+const PREVIEW_CACHE_MAX_ENTRIES = Math.max(
+  4,
+  Math.min(200, Number.parseInt(process.env.APPLICATION_PREVIEW_CACHE_MAX_ENTRIES || "40", 10) || 40)
+);
+
+type CacheEntry = { expires: number; pdf: Buffer };
+const pdfResultCache = new Map<string, CacheEntry>();
+const templateBufferCache = new Map<TemplateType, Buffer>();
+
+function stableSerializeFields(fields: Record<string, string | undefined>): string {
+  const keys = Object.keys(fields).sort();
+  const obj: Record<string, string | undefined> = {};
+  keys.forEach((k) => {
+    obj[k] = fields[k];
+  });
+  return JSON.stringify(obj);
+}
+
+function previewCacheKey(templateType: string, fields: Record<string, string | undefined>): string {
+  return createHash("sha256").update(templateType).update("\0").update(stableSerializeFields(fields)).digest("hex");
+}
+
+function getCachedPdf(key: string): Buffer | null {
+  if (PREVIEW_CACHE_TTL_MS <= 0) return null;
+  const entry = pdfResultCache.get(key);
+  if (!entry || Date.now() > entry.expires) {
+    if (entry) pdfResultCache.delete(key);
+    return null;
+  }
+  return entry.pdf;
+}
+
+function setCachedPdf(key: string, pdf: Buffer): void {
+  if (PREVIEW_CACHE_TTL_MS <= 0) return;
+  while (pdfResultCache.size >= PREVIEW_CACHE_MAX_ENTRIES) {
+    const first = pdfResultCache.keys().next().value;
+    if (first !== undefined) pdfResultCache.delete(first);
+    else break;
+  }
+  pdfResultCache.set(key, {
+    expires: Date.now() + PREVIEW_CACHE_TTL_MS,
+    pdf: Buffer.from(pdf),
+  });
+}
 
 const execFileAsync = promisify(execFile);
 const DOCX_MIME =
@@ -61,7 +125,18 @@ function normalizeReplacements(
     });
 }
 
-function replaceInDocxXml(docxBuffer: Buffer, fields: Record<string, string | undefined>): Buffer {
+/** Hard-coded label "Architect/L.S." in body/subject lines → "Architect" for this template only. */
+function applyArchitectLetterStaticLabels(xml: string): string {
+  return xml
+    .replace(/<w:t([^>]*)>Architect\/L\.S\.<\/w:t>/gi, "<w:t$1>Architect</w:t>")
+    .replace(/<w:t([^>]*)>Architect\/L\.S<\/w:t>/gi, "<w:t$1>Architect</w:t>");
+}
+
+function replaceInDocxXml(
+  docxBuffer: Buffer,
+  fields: Record<string, string | undefined>,
+  templateType: TemplateType
+): Buffer {
   const zip = new PizZip(docxBuffer);
   const replacements = normalizeReplacements(fields);
   const xmlFiles = Object.keys(zip.files).filter(
@@ -86,6 +161,10 @@ function replaceInDocxXml(docxBuffer: Buffer, fields: Record<string, string | un
       const splitTokenRegex = buildSplitTokenRegex(token);
       xml = xml.replace(splitTokenRegex, value);
     });
+
+    if (templateType === "Architect Licensed Surveyor") {
+      xml = applyArchitectLetterStaticLabels(xml);
+    }
 
     zip.file(fileName, xml);
   });
@@ -115,7 +194,17 @@ async function convertDocxToPdf(docxPath: string, outDir: string): Promise<strin
 
   await execFileAsync(
     officeBinary,
-    ["--headless", "--convert-to", "pdf:writer_pdf_Export", "--outdir", outDir, docxPath],
+    [
+      "--headless",
+      "--norestore",
+      "--nologo",
+      "--nolockcheck",
+      "--convert-to",
+      "pdf:writer_pdf_Export",
+      "--outdir",
+      outDir,
+      docxPath,
+    ],
     { timeout: 120000 }
   );
 
@@ -147,6 +236,11 @@ function getExternalAuthHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
+const EXTERNAL_CONVERT_MS = Math.max(
+  15000,
+  Number.parseInt(process.env.DOCX_CONVERTER_TIMEOUT_MS || "90000", 10) || 90000
+);
+
 async function convertWithExternalService(
   docxBuffer: Buffer,
   fileName: string
@@ -156,6 +250,7 @@ async function convertWithExternalService(
 
   const mode = getExternalConverterMode(url);
   const authHeaders = getExternalAuthHeaders();
+  const abortSignal = AbortSignal.timeout(EXTERNAL_CONVERT_MS);
   let response: Response;
 
   if (mode === "gotenberg") {
@@ -166,6 +261,7 @@ async function convertWithExternalService(
       method: "POST",
       headers: authHeaders,
       body: form,
+      signal: abortSignal,
     });
   } else {
     response = await fetch(url, {
@@ -176,6 +272,7 @@ async function convertWithExternalService(
         Accept: "application/pdf",
       },
       body: new Uint8Array(docxBuffer),
+      signal: abortSignal,
     });
   }
 
@@ -213,9 +310,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unsupported template type." }, { status: 400 });
     }
 
-    const templatePath = path.join(process.cwd(), templateFileName);
-    const templateBuffer = await fs.readFile(templatePath);
-    const replacedDocx = replaceInDocxXml(templateBuffer, fields);
+    const cacheKey = previewCacheKey(templateType, fields);
+    const cached = getCachedPdf(cacheKey);
+    if (cached) {
+      return new NextResponse(new Uint8Array(cached), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'inline; filename="application-preview.pdf"',
+          "Cache-Control": "private, max-age=120",
+          "X-Preview-Cache": "hit",
+        },
+      });
+    }
+
+    let templateBuffer = templateBufferCache.get(templateType);
+    if (!templateBuffer) {
+      const templatePath = path.join(process.cwd(), templateFileName);
+      templateBuffer = await fs.readFile(templatePath);
+      templateBufferCache.set(templateType, templateBuffer);
+    }
+
+    const replacedDocx = replaceInDocxXml(templateBuffer, fields, templateType);
 
     const externalConverterUrl = getExternalConverterUrl();
     if (externalConverterUrl) {
@@ -223,11 +338,13 @@ export async function POST(request: NextRequest) {
         replacedDocx,
         "application-preview-output.docx"
       );
+      setCachedPdf(cacheKey, pdfBuffer);
       return new NextResponse(new Uint8Array(pdfBuffer), {
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": 'inline; filename="application-preview.pdf"',
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, max-age=120",
+          "X-Preview-Cache": "miss",
         },
       });
     }
@@ -238,12 +355,14 @@ export async function POST(request: NextRequest) {
 
     const outputPdfPath = await convertDocxToPdf(outputDocxPath, tempDir);
     const pdfBuffer = await fs.readFile(outputPdfPath);
+    setCachedPdf(cacheKey, pdfBuffer);
 
     return new NextResponse(new Uint8Array(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": 'inline; filename="application-preview.pdf"',
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, max-age=120",
+        "X-Preview-Cache": "miss",
       },
     });
   } catch (error) {

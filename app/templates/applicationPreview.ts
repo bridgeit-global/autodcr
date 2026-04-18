@@ -17,7 +17,10 @@ type ApplicationPreviewSource = {
     save_plot_details?: {
       ward?: string;
       zone?: string;
-      proposedCtsNumber?: string[];
+      /** Matches Project Details → "This plot belongs to" (CS vs CTS vs F.P.). */
+      plotBelongsTo?: "" | "CTS No." | "CS No." | "F.P.No";
+      /** Survey numbers (CS or CTS) from project / area form — same as "CTS No." selection. */
+      proposedCtsNumber?: string[] | string;
       villageName?: string;
       roadName?: string;
     } | null;
@@ -63,12 +66,52 @@ function formatApplicationDate(value?: string | null): string {
   return `${day}/${month}/${year}`;
 }
 
+function joinProposedCsOrCtsNos(source?: ApplicationPreviewSource): string {
+  const raw = source?.projectData?.save_plot_details?.proposedCtsNumber;
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  if (Array.isArray(raw)) return raw.filter(Boolean).join(", ");
+  return "";
+}
+
+/** Label before bracketed survey numbers — includes “No.” like Project Details (`plotBelongsTo`). */
+function surveyNumbersKindLabel(plotBelongs?: string): string | undefined {
+  switch (plotBelongs) {
+    case "CTS No.":
+      return "CTS No.";
+    case "CS No.":
+      return "CS No.";
+    case "F.P.No":
+      return "F.P. No";
+    default:
+      return undefined;
+  }
+}
+
+/** Renders `(338, 340)` from stored numbers (comma-separated list inside parentheses). */
+function bracketSurveyNumberList(joinedList: string): string {
+  const trimmed = joinedList.trim();
+  if (!trimmed) return "";
+  if (/^\(.*\)$/.test(trimmed)) return trimmed;
+  return `(${trimmed})`;
+}
+
+/**
+ * DOCX placeholders like `project_CS/CTSNos`: kind label outside brackets, values inside —
+ * e.g. `CTS No. (338, 340)` or `CS No. (338, 340)`. If plot type is unknown, brackets only.
+ */
+function formatCsCtsSurveyToken(source?: ApplicationPreviewSource): string {
+  const joined = joinProposedCsOrCtsNos(source).trim();
+  if (!joined) return "";
+  const bracketed = bracketSurveyNumberList(joined);
+  const kind = surveyNumbersKindLabel(source?.projectData?.save_plot_details?.plotBelongsTo);
+  return kind ? `${kind} ${bracketed}` : bracketed;
+}
+
 export function mapApplicationPreviewFields(source: ApplicationPreviewSource): TemplateFields {
   const projectInfo = source.projectData?.project_info || {};
   const savePlot = source.projectData?.save_plot_details || {};
-  const ctsNo = Array.isArray(savePlot.proposedCtsNumber)
-    ? savePlot.proposedCtsNumber.filter(Boolean).join(", ")
-    : "";
+  const joined = joinProposedCsOrCtsNos(source).trim();
+  const ctsNo = joined ? bracketSurveyNumberList(joined) : source.applicationNo || "-";
 
   return {
     CurrentDate: formatApplicationDate(source.applicationCreatedAt),
@@ -91,7 +134,6 @@ export function mapApplicationPreviewFields(source: ApplicationPreviewSource): T
     RegValidityDate: "-",
     // TODO: Map final backend fields once mapping contract is finalized:
     // - project_Proposal_Number
-    // - project_CS/CTSNos
     // - consultant registration and validity
     // - office/taluka/district authoritative values
   };
@@ -107,8 +149,13 @@ export function mapToPdfFieldValues(
   );
   const architectName = architectApplicant?.name?.trim();
   const architectAddress = architectApplicant?.residentialAddress?.trim();
+  const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const propertyAddress = source?.projectData?.project_info?.propertyAddress?.trim();
+  const divisionVillage = source?.projectData?.save_plot_details?.villageName?.trim();
+  const wardForProjectToken = source?.projectData?.save_plot_details?.ward?.trim();
   const documentNumber = source?.applicationNo?.trim();
+  const csCtsToken = formatCsCtsSurveyToken(source).trim();
+  const csCtsNos = csCtsToken || undefined;
 
   return {
     CurrentDate: fields.CurrentDate,
@@ -130,6 +177,18 @@ export function mapToPdfFieldValues(
     CouncilRegNo: fields.CouncilRegNo,
     RegValidityDate: fields.RegValidityDate,
     project_date_generation: fields.CurrentDate,
+    // Title line: "1. APPOINTMENT LETTER FOR ARCHITECT" (this template is architect-only)
+    "project_Consultant_Architect/L.S._Type": "ARCHITECT",
+    "project_Consultant_Architect/L.S.": "ARCHITECT",
+    // Subject line: CTS/CS survey numbers from project save_plot_details (same as CTS No. in Project Details).
+    "project_CS/CTSNos": csCtsNos,
+    "project_CS/CTSNos.": csCtsNos,
+    // Village/Division line comes directly from Project Details form field value.
+    "project_Division/Village": divisionVillage || undefined,
+    // Ward line (e.g. "L Ward") — same as Project Details → Ward.
+    "project_Ward.": wardForProjectToken || undefined,
+    // Proposal number from project_info (e.g. BMC/123/WS/337).
+    project_Proposal_Number: proposalNumber || undefined,
     project_Document_Number: documentNumber || undefined,
     "project_Name_Architect/L.S": architectName || undefined,
     "project_Name_Architect/L.S.": architectName || undefined,
@@ -332,12 +391,10 @@ async function fillStaticTemplateOverlay(
   });
 }
 
-export async function generateApplicationPreviewPdf(
-  fields: TemplateFields,
+async function generatePreviewPdfOverlayFallback(
   templateType: TemplateType,
-  source?: ApplicationPreviewSource
+  formValues: Record<string, string | undefined>
 ): Promise<Blob> {
-  const formValues = mapToPdfFieldValues(fields, source);
   const templatePdfBytes = await loadTemplatePdfBytes(templateType);
   const pdfDoc = await PDFDocument.load(templatePdfBytes);
 
@@ -347,5 +404,51 @@ export async function generateApplicationPreviewPdf(
 
   const bytes = await pdfDoc.save();
   return new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
+}
+
+/**
+ * Primary path: DOCX placeholders replaced server-side, then converted to PDF via LibreOffice
+ * (local `soffice` or remote Gotenberg — see `/api/application-preview-docx`).
+ * On Vercel, set DOCX_CONVERTER_URL to your self-hosted Gotenberg `/forms/libreoffice/convert`.
+ *
+ * Development fallback: if conversion is unavailable, uses static PDF + overlay (lower fidelity).
+ */
+export async function generateApplicationPreviewPdf(
+  fields: TemplateFields,
+  templateType: TemplateType,
+  source?: ApplicationPreviewSource
+): Promise<Blob> {
+  const formValues = mapToPdfFieldValues(fields, source);
+
+  const docxResponse = await fetch("/api/application-preview-docx", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      templateType,
+      fields: formValues,
+    }),
+  });
+
+  if (docxResponse.ok) {
+    return docxResponse.blob();
+  }
+
+  const payload = await docxResponse.json().catch(() => null);
+  const message =
+    typeof payload?.error === "string"
+      ? payload.error
+      : `Preview conversion failed (${docxResponse.status}).`;
+
+  if (process.env.NODE_ENV === "development") {
+    console.warn(
+      "[application preview] DOCX→PDF unavailable, using PDF overlay fallback:",
+      message
+    );
+    return generatePreviewPdfOverlayFallback(templateType, formValues);
+  }
+
+  throw new Error(message);
 }
 
