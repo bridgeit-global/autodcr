@@ -13,7 +13,8 @@ const nextConfig: NextConfig = {
 	// The dynamic import with ssr: false in RegistrationForm handles the canvas module issue
 	turbopack: {},
 	// Server-only modules configuration - prevents bundling native modules
-	serverExternalPackages: ['pkcs11js', 'usb'],
+	// and keeps Chromium binaries at expected runtime paths on Vercel.
+	serverExternalPackages: ['pkcs11js', 'usb', '@sparticuz/chromium', 'puppeteer-core'],
 	// Exclude native modules from client-side bundling
 	webpack: (config, { isServer }) => {
 		if (!isServer) {
