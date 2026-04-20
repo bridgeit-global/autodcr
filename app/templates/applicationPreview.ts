@@ -667,6 +667,13 @@ export async function generateApplicationPreviewPdf(
     if (htmlResponse.ok) {
       return htmlResponse.blob();
     }
+
+    const htmlPayload = await htmlResponse.json().catch(() => null);
+    const htmlMessage =
+      typeof htmlPayload?.error === "string"
+        ? htmlPayload.error
+        : `HTML preview conversion failed (${htmlResponse.status}).`;
+    throw new Error(htmlMessage);
   }
 
   await supabase.auth.refreshSession();
