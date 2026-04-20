@@ -15,6 +15,12 @@ const nextConfig: NextConfig = {
 	// Server-only modules configuration - prevents bundling native modules
 	// and keeps Chromium binaries at expected runtime paths on Vercel.
 	serverExternalPackages: ['pkcs11js', 'usb', '@sparticuz/chromium', 'puppeteer-core'],
+	// Ensure Chromium binary assets are traced into serverless output on Vercel.
+	outputFileTracingIncludes: {
+		"/api/application-preview-html": [
+			"./node_modules/@sparticuz/chromium/**",
+		],
+	},
 	// Exclude native modules from client-side bundling
 	webpack: (config, { isServer }) => {
 		if (!isServer) {
