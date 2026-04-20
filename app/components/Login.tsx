@@ -119,10 +119,17 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
         localStorage.setItem('consultantUserId', userId || data.username);
         localStorage.setItem('consultantType', consultantType || '');
         
-        // Store metadata from Supabase auth user_metadata (primary source)
-        const metadataToStore = authData.user.user_metadata || userData.metadata;
-        if (metadataToStore && typeof metadataToStore === 'object' && Object.keys(metadataToStore).length > 0) {
-          localStorage.setItem('userMetadata', JSON.stringify(metadataToStore));
+        // Merge JWT claims with RPC `raw_user_meta_data` from get-user-email. JWT alone often omits
+        // `coa_reg_no` / `coa_expiry_date`; DB metadata must win for those fields.
+        const jwtMeta =
+          authData.user.user_metadata && typeof authData.user.user_metadata === "object"
+            ? authData.user.user_metadata
+            : {};
+        const rpcMeta =
+          userData.metadata && typeof userData.metadata === "object" ? userData.metadata : {};
+        const metadataToStore = { ...jwtMeta, ...rpcMeta };
+        if (Object.keys(metadataToStore).length > 0) {
+          localStorage.setItem("userMetadata", JSON.stringify(metadataToStore));
         }
         
         // Navigate to dashboard on successful login
