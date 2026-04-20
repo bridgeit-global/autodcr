@@ -1,12 +1,20 @@
 "use client";
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
+import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
 type ApplicationPreviewSource = {
   selectedApplication?: string | null;
   applicationNo?: string | null;
   applicationCreatedAt?: string | null;
+  /** COA registration no. from `auth.users` → `raw_user_meta_data` / session `user_metadata.coa_reg_no`. */
+  coaRegNo?: string | null;
+  /** COA expiry as stored (e.g. ISO `YYYY-MM-DD` in `coa_expiry_date`). */
+  coaExpiryDate?: string | null;
+  /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
+  consultantLookupUserIds?: string[];
   projectData?: {
     title?: string;
     project_info?: {
@@ -26,6 +34,7 @@ type ApplicationPreviewSource = {
     } | null;
     applicant_details?: {
       applicants?: Array<{
+        user_id?: string;
         applicantType?: string;
         name?: string;
         registrationNumber?: string;
@@ -46,6 +55,44 @@ export function mapSelectedApplicationToTemplate(
   if (value.includes("site supervisor")) return "Site Supervisor";
   if (value.includes("horticulturist")) return "Horticulturist";
   return "Architect Licensed Surveyor";
+}
+
+function templateConsultantApplicantKeywords(templateType: TemplateType): string[] {
+  switch (templateType) {
+    case "Structural Engineer":
+      return ["structural"];
+    case "Fire Safety Consultant":
+      return ["fire"];
+    case "M&E Consultant":
+      return ["mep"];
+    case "Plumber":
+      return ["plumb"];
+    case "Parking Consultant":
+      return ["parking"];
+    case "Rainwater Consultant":
+      return ["rain", "rainwater"];
+    case "Site Supervisor":
+      return ["site supervisor"];
+    case "Horticulturist":
+      return ["horticultur"];
+    default:
+      return ["architect", "licensed surveyor"];
+  }
+}
+
+export function pickConsultantLookupUserIdsFromProject(
+  templateType: TemplateType,
+  projectData: ApplicationPreviewSource["projectData"]
+): string[] {
+  const applicants = projectData?.applicant_details?.applicants || [];
+  const keywords = templateConsultantApplicantKeywords(templateType);
+  const row = applicants.find((a) => {
+    const t = (a.applicantType || "").toLowerCase();
+    return keywords.some((k) => t.includes(k));
+  });
+  const uid =
+    row && typeof row.user_id === "string" ? row.user_id.trim() : "";
+  return uid ? [uid] : [];
 }
 
 function getCurrentDate(): string {
@@ -130,8 +177,8 @@ export function mapApplicationPreviewFields(source: ApplicationPreviewSource): T
     FirmName: source.projectData?.title || "-",
     ConsultantName: "-",
     ConsultantType: source.selectedApplication || "-",
-    CouncilRegNo: "-",
-    RegValidityDate: "-",
+    CouncilRegNo: source.coaRegNo?.trim() || "-",
+    RegValidityDate: formatCoaExpiryDisplay(source.coaExpiryDate) || "-",
     // TODO: Map final backend fields once mapping contract is finalized:
     // - project_Proposal_Number
     // - consultant registration and validity
@@ -151,11 +198,19 @@ export function mapToPdfFieldValues(
   const architectAddress = architectApplicant?.residentialAddress?.trim();
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const propertyAddress = source?.projectData?.project_info?.propertyAddress?.trim();
+  const street = source?.projectData?.save_plot_details?.roadName?.trim();
   const divisionVillage = source?.projectData?.save_plot_details?.villageName?.trim();
   const wardForProjectToken = source?.projectData?.save_plot_details?.ward?.trim();
   const documentNumber = source?.applicationNo?.trim();
   const csCtsToken = formatCsCtsSurveyToken(source).trim();
   const csCtsNos = csCtsToken || undefined;
+  const architectCoaRegNo = source?.coaRegNo?.trim() ?? "";
+  const architectValidityDisplay = formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "";
+  const clientName = fields.ApplicantName?.trim() || source?.projectData?.title?.trim() || "-";
+  const clientCompanyName = fields.FirmName?.trim() || source?.projectData?.title?.trim() || "-";
+  const clientCompanyDesignation = "Authorized Signatory";
+  const buildingProposalDesignation =
+    wardForProjectToken ? `The Executive Engineer (${wardForProjectToken}) Ward` : "The Executive Engineer (Ward)";
 
   return {
     CurrentDate: fields.CurrentDate,
@@ -185,6 +240,7 @@ export function mapToPdfFieldValues(
     "project_CS/CTSNos.": csCtsNos,
     // Village/Division line comes directly from Project Details form field value.
     "project_Division/Village": divisionVillage || undefined,
+    project_Street: street || undefined,
     // Ward line (e.g. "L Ward") — same as Project Details → Ward.
     "project_Ward.": wardForProjectToken || undefined,
     // Proposal number from project_info (e.g. BMC/123/WS/337).
@@ -202,6 +258,17 @@ export function mapToPdfFieldValues(
     // Building Proposal address lines from property address (line1 only).
     "project_ addressline1_BuildingProposal": propertyAddress || undefined,
     "project_ addressline2_BuildingProposal": "",
+    // Always send a string: JSON.stringify drops `undefined`, so the API would skip replacement and leave `$project_RegNo_...` in the DOCX.
+    "project_RegNo_Architect/L.S.": architectCoaRegNo,
+    // Template variants (same value).
+    "project_RegNo_Architect/L.S": architectCoaRegNo,
+    // COA validity (from `coa_expiry_date`); always string so JSON body includes the key.
+    "project_Validity_Architect/L.S.": architectValidityDisplay,
+    "project_Validity_Architect/L.S": architectValidityDisplay,
+    "project_Client_Company_Name": clientCompanyName,
+    "project_Client_Company_Designation": clientCompanyDesignation,
+    "project_Client_Name": clientName,
+    project_BuildingProposal_OfficerDesignation: buildingProposalDesignation,
   };
 }
 
@@ -267,11 +334,21 @@ async function fillStaticTemplateOverlay(
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const overlays: OverlaySpec[] = [
     {
+      key: "project_Consultant_Architect/L.S._Type",
+      pageIndex: 0,
+      x: 278,
+      y: 722,
+      width: 280,
+      height: 14,
+      fontSize: 11,
+      lineHeight: 12,
+    },
+    {
       key: "project_date_generation",
       pageIndex: 0,
-      x: 452,
-      y: 649,
-      width: 170,
+      x: 410,
+      y: 666,
+      width: 150,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -279,9 +356,9 @@ async function fillStaticTemplateOverlay(
     {
       key: "project_Document_Number",
       pageIndex: 0,
-      x: 100,
-      y: 649,
-      width: 220,
+      x: 58,
+      y: 666,
+      width: 190,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -289,9 +366,9 @@ async function fillStaticTemplateOverlay(
     {
       key: "project_Name_Architect/L.S",
       pageIndex: 0,
-      x: 145,
-      y: 624,
-      width: 360,
+      x: 66,
+      y: 640,
+      width: 260,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -299,9 +376,9 @@ async function fillStaticTemplateOverlay(
     {
       key: "project_Company_Name_Architect/L.S",
       pageIndex: 0,
-      x: 145,
-      y: 608,
-      width: 360,
+      x: 66,
+      y: 622,
+      width: 380,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -309,9 +386,9 @@ async function fillStaticTemplateOverlay(
     {
       key: "project_Address_line1_Architect/L.S",
       pageIndex: 0,
-      x: 145,
-      y: 592,
-      width: 360,
+      x: 66,
+      y: 604,
+      width: 420,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -319,9 +396,9 @@ async function fillStaticTemplateOverlay(
     {
       key: "project_Address_line2_Architect/L.S",
       pageIndex: 0,
-      x: 145,
-      y: 576,
-      width: 360,
+      x: 66,
+      y: 586,
+      width: 420,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -329,9 +406,159 @@ async function fillStaticTemplateOverlay(
     {
       key: "project_Address_line3Architect/L.S",
       pageIndex: 0,
-      x: 145,
-      y: 560,
-      width: 360,
+      x: 66,
+      y: 568,
+      width: 420,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_CS/CTSNos.",
+      pageIndex: 0,
+      x: 318,
+      y: 548,
+      width: 180,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Division/Village",
+      pageIndex: 0,
+      x: 496,
+      y: 548,
+      width: 110,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Street",
+      pageIndex: 0,
+      x: 66,
+      y: 530,
+      width: 270,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Ward.",
+      pageIndex: 0,
+      x: 348,
+      y: 530,
+      width: 130,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Proposal_Number",
+      pageIndex: 0,
+      x: 52,
+      y: 512,
+      width: 300,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Consultant_Architect/L.S.",
+      pageIndex: 0,
+      x: 200,
+      y: 460,
+      width: 190,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Client_Company_Name",
+      pageIndex: 1,
+      x: 95,
+      y: 335,
+      width: 220,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Client_Company_Designation",
+      pageIndex: 1,
+      x: 35,
+      y: 319,
+      width: 220,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Client_Name",
+      pageIndex: 1,
+      x: 35,
+      y: 303,
+      width: 220,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Company_Name_Architect/L.S",
+      pageIndex: 1,
+      x: 96,
+      y: 272,
+      width: 235,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Consultant_Architect/L.S.",
+      pageIndex: 1,
+      x: 35,
+      y: 256,
+      width: 240,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Name_Architect/L.S.",
+      pageIndex: 1,
+      x: 35,
+      y: 240,
+      width: 240,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_RegNo_Architect/L.S.",
+      pageIndex: 1,
+      x: 35,
+      y: 224,
+      width: 240,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_Validity_Architect/L.S.",
+      pageIndex: 1,
+      x: 35,
+      y: 208,
+      width: 240,
+      height: 14,
+      fontSize: 9,
+      lineHeight: 11,
+    },
+    {
+      key: "project_BuildingProposal_OfficerDesignation",
+      pageIndex: 1,
+      x: 35,
+      y: 176,
+      width: 260,
       height: 14,
       fontSize: 9,
       lineHeight: 11,
@@ -407,11 +634,16 @@ async function generatePreviewPdfOverlayFallback(
 }
 
 /**
- * Primary path: DOCX placeholders replaced server-side, then converted to PDF via LibreOffice
+ * Primary path: DOCX placeholders replaced server-side, then converted to PDF.
+ *
+ * Converter order in `/api/application-preview-docx`:
+ * `docx-pdf-converter` package first, then external converter (if configured), then local LibreOffice.
+ *
+ * Development fallback here: if conversion is unavailable, uses static PDF + overlay (lower fidelity).
+ *
+ * Other template types use DOCX placeholders replaced server-side, then converted to PDF via LibreOffice
  * (local `soffice` or remote Gotenberg — see `/api/application-preview-docx`).
  * On Vercel, set DOCX_CONVERTER_URL to your self-hosted Gotenberg `/forms/libreoffice/convert`.
- *
- * Development fallback: if conversion is unavailable, uses static PDF + overlay (lower fidelity).
  */
 export async function generateApplicationPreviewPdf(
   fields: TemplateFields,
@@ -419,6 +651,10 @@ export async function generateApplicationPreviewPdf(
   source?: ApplicationPreviewSource
 ): Promise<Blob> {
   const formValues = mapToPdfFieldValues(fields, source);
+
+  await supabase.auth.refreshSession();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const access_token = sessionData.session?.access_token;
 
   const docxResponse = await fetch("/api/application-preview-docx", {
     method: "POST",
@@ -428,6 +664,10 @@ export async function generateApplicationPreviewPdf(
     body: JSON.stringify({
       templateType,
       fields: formValues,
+      ...(access_token ? { access_token } : {}),
+      ...(source?.consultantLookupUserIds?.length
+        ? { consultant_lookup_user_ids: source.consultantLookupUserIds }
+        : {}),
     }),
   });
 

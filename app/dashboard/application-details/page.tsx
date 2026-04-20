@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import {
   generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
   mapSelectedApplicationToTemplate,
+  pickConsultantLookupUserIdsFromProject,
 } from "@/app/templates/applicationPreview";
 
 type PreviewProjectData = {
@@ -27,13 +29,92 @@ type PreviewProjectData = {
   } | null;
   applicant_details?: {
     applicants?: Array<{
+      user_id?: string;
       applicantType?: string;
       residentialAddress?: string;
     }>;
   } | null;
 };
 
+function pickCoaRegNoFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["coa_reg_no", "COA_reg_no", "coaRegNo"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickCoaExpiryFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["coa_expiry_date", "COA_expiry_date", "coaExpiryDate"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function readLocalStoredUserMetadata(): unknown | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("userMetadata");
+    if (!raw) return null;
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchRawUserMetadataFromApi(
+  userMetadata: unknown,
+  preferredPortalIds?: string[]
+): Promise<unknown | null> {
+  const portalFromMeta =
+    typeof userMetadata === "object" &&
+    userMetadata !== null &&
+    typeof (userMetadata as { user_id?: unknown }).user_id === "string"
+      ? (userMetadata as { user_id: string }).user_id.trim()
+      : undefined;
+
+  let portalFromStorage: string | undefined;
+  if (typeof window !== "undefined") {
+    portalFromStorage = localStorage.getItem("consultantUserId")?.trim() || undefined;
+  }
+
+  const { data: authData } = await supabase.auth.getUser();
+  const authUuid = authData.user?.id;
+
+  const candidates = [
+    ...new Set(
+      [...(preferredPortalIds ?? []).map((s) => String(s).trim()), portalFromMeta, portalFromStorage, authUuid].filter(
+        Boolean
+      )
+    ),
+  ] as string[];
+
+  for (const user_id of candidates) {
+    try {
+      const res = await fetch("/api/get-user-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id }),
+      });
+      if (!res.ok) continue;
+      const payload = (await res.json()) as { metadata?: unknown };
+      if (payload.metadata && typeof payload.metadata === "object") {
+        return payload.metadata;
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
 export default function ApplicationDetailsPage() {
+  const { userMetadata } = useUserMetadata();
   const searchParams = useSearchParams();
   const selectedApplication = searchParams.get("selectedApplication");
   const applicationNo = searchParams.get("applicationNo");
@@ -93,17 +174,77 @@ export default function ApplicationDetailsPage() {
     try {
       setPreviewError(null);
       setIsPreviewLoading(true);
+
+      const localMeta = readLocalStoredUserMetadata();
+
+      let coaRegNo =
+        pickCoaRegNoFromMeta(userMetadata) ||
+        pickCoaRegNoFromMeta(localMeta);
+      let coaExpiryDate =
+        pickCoaExpiryFromMeta(userMetadata) ||
+        pickCoaExpiryFromMeta(localMeta);
+
+      const mergeConsultantMeta = (meta: unknown) => {
+        if (!coaRegNo) coaRegNo = pickCoaRegNoFromMeta(meta);
+        if (!coaExpiryDate) coaExpiryDate = pickCoaExpiryFromMeta(meta);
+      };
+
+      const templateType = mapSelectedApplicationToTemplate(selectedApplication);
+      const consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
+        templateType,
+        projectData
+      );
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (token) {
+          const res = await fetch("/api/preview-consultant-metadata", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              access_token: token,
+              ...(consultantLookupUserIds.length
+                ? { consultant_lookup_user_ids: consultantLookupUserIds }
+                : {}),
+            }),
+          });
+          if (res.ok) {
+            const payload = (await res.json()) as { metadata?: unknown };
+            if (payload.metadata) mergeConsultantMeta(payload.metadata);
+          }
+        }
+      } catch {
+        /* fall through to client-only sources */
+      }
+
+      mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
+
+      if (!coaRegNo || !coaExpiryDate) {
+        await supabase.auth.refreshSession();
+        mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
+      }
+
+      if (!coaRegNo || !coaExpiryDate) {
+        const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, consultantLookupUserIds);
+        if (serverMeta) mergeConsultantMeta(serverMeta);
+      }
+
       const fields = mapApplicationPreviewFields({
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
+        coaRegNo,
+        coaExpiryDate,
         projectData,
       });
-      const templateType = mapSelectedApplicationToTemplate(selectedApplication);
       const blob = await generateApplicationPreviewPdf(fields, templateType, {
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
+        coaRegNo,
+        coaExpiryDate,
+        consultantLookupUserIds,
         projectData,
       });
       if (previewUrl?.startsWith("blob:")) {

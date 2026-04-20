@@ -49,6 +49,9 @@ next-env.d.ts
 # Temp/generated files
 tmp-*.json
 
+# Supabase CLI local cache (not migrations)
+supabase/.temp/
+
 # Assets (PDFs, images not part of source)
 *.pdf
 Parkour-Letterhead-*.png

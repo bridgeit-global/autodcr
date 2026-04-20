@@ -19,7 +19,9 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { createHash } from "crypto";
 import PizZip from "pizzip";
+import { convertDocxToPdf as convertDocxToPdfViaPackage } from "docx-pdf-converter";
 import type { TemplateType } from "@/app/templates/templateGenerators";
+import { enrichPreviewDocxFields } from "@/app/utils/enrichPreviewDocxFields";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,7 +186,7 @@ async function resolveOfficeBinary(): Promise<string | null> {
   return null;
 }
 
-async function convertDocxToPdf(docxPath: string, outDir: string): Promise<string> {
+async function convertDocxToPdfWithLibreOffice(docxPath: string, outDir: string): Promise<string> {
   const officeBinary = await resolveOfficeBinary();
   if (!officeBinary) {
     throw new Error(
@@ -214,6 +216,28 @@ async function convertDocxToPdf(docxPath: string, outDir: string): Promise<strin
   );
   await fs.access(pdfPath);
   return pdfPath;
+}
+
+type DocxPdfConverterResult = {
+  buffer: ArrayBuffer | Uint8Array | Buffer;
+};
+
+function toPdfBuffer(result: DocxPdfConverterResult): Buffer {
+  const out = result.buffer;
+  if (Buffer.isBuffer(out)) return out;
+  if (out instanceof Uint8Array) return Buffer.from(out);
+  return Buffer.from(out);
+}
+
+async function convertWithDocxPdfConverter(
+  docxBuffer: Buffer,
+  fileName = "application-preview-output.docx"
+): Promise<Buffer> {
+  const result = (await convertDocxToPdfViaPackage(
+    docxBuffer,
+    fileName
+  )) as DocxPdfConverterResult;
+  return toPdfBuffer(result);
 }
 
 type ConverterMode = "raw" | "gotenberg";
@@ -293,16 +317,29 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       templateType?: TemplateType;
       fields?: Record<string, string | undefined>;
+      access_token?: string;
+      consultant_lookup_user_ids?: string[];
     };
 
     const templateType = body.templateType;
-    const fields = body.fields;
+    const fields: Record<string, string | undefined> = { ...(body.fields || {}) };
 
-    if (!templateType || !fields) {
+    if (!templateType || !body.fields) {
       return NextResponse.json(
         { error: "templateType and fields are required." },
         { status: 400 }
       );
+    }
+
+    const token = body.access_token?.trim();
+    const consultantLookupIds = Array.isArray(body.consultant_lookup_user_ids)
+      ? body.consultant_lookup_user_ids.map((s) => String(s).trim()).filter(Boolean)
+      : [];
+    const resolveOpts =
+      consultantLookupIds.length > 0 ? { lookupUserIds: consultantLookupIds } : undefined;
+
+    if (token) {
+      await enrichPreviewDocxFields(fields, token, resolveOpts);
     }
 
     const templateFileName = TEMPLATE_DOCX_MAP[templateType];
@@ -332,6 +369,24 @@ export async function POST(request: NextRequest) {
 
     const replacedDocx = replaceInDocxXml(templateBuffer, fields, templateType);
 
+    try {
+      const pdfBuffer = await convertWithDocxPdfConverter(
+        replacedDocx,
+        "application-preview-output.docx"
+      );
+      setCachedPdf(cacheKey, pdfBuffer);
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'inline; filename="application-preview.pdf"',
+          "Cache-Control": "private, max-age=120",
+          "X-Preview-Cache": "miss",
+        },
+      });
+    } catch (pkgError) {
+      console.warn("docx-pdf-converter failed, falling back:", pkgError);
+    }
+
     const externalConverterUrl = getExternalConverterUrl();
     if (externalConverterUrl) {
       const pdfBuffer = await convertWithExternalService(
@@ -353,7 +408,7 @@ export async function POST(request: NextRequest) {
     const outputDocxPath = path.join(tempDir, "application-preview-output.docx");
     await fs.writeFile(outputDocxPath, replacedDocx);
 
-    const outputPdfPath = await convertDocxToPdf(outputDocxPath, tempDir);
+    const outputPdfPath = await convertDocxToPdfWithLibreOffice(outputDocxPath, tempDir);
     const pdfBuffer = await fs.readFile(outputPdfPath);
     setCachedPdf(cacheKey, pdfBuffer);
 
