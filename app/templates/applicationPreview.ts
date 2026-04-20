@@ -652,6 +652,23 @@ export async function generateApplicationPreviewPdf(
 ): Promise<Blob> {
   const formValues = mapToPdfFieldValues(fields, source);
 
+  if (templateType === "Architect Licensed Surveyor") {
+    const htmlResponse = await fetch("/api/application-preview-html", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        templateType,
+        fields: formValues,
+      }),
+    });
+
+    if (htmlResponse.ok) {
+      return htmlResponse.blob();
+    }
+  }
+
   await supabase.auth.refreshSession();
   const { data: sessionData } = await supabase.auth.getSession();
   const access_token = sessionData.session?.access_token;

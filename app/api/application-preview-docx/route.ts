@@ -369,6 +369,7 @@ export async function POST(request: NextRequest) {
 
     const replacedDocx = replaceInDocxXml(templateBuffer, fields, templateType);
 
+    let packageConverterError: unknown;
     try {
       const pdfBuffer = await convertWithDocxPdfConverter(
         replacedDocx,
@@ -384,6 +385,7 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (pkgError) {
+      packageConverterError = pkgError;
       console.warn("docx-pdf-converter failed, falling back:", pkgError);
     }
 
@@ -402,6 +404,16 @@ export async function POST(request: NextRequest) {
           "X-Preview-Cache": "miss",
         },
       });
+    }
+
+    if (process.env.VERCEL && packageConverterError) {
+      const packageMessage =
+        packageConverterError instanceof Error
+          ? packageConverterError.message
+          : "docx-pdf-converter failed on Vercel runtime.";
+      throw new Error(
+        `${packageMessage} Configure DOCX_CONVERTER_URL (and optionally DOCX_CONVERTER_MODE=gotenberg) as fallback on Vercel.`
+      );
     }
 
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "application-preview-"));
