@@ -226,6 +226,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     alternatePhone: "",
     pan: "",
     address: "",
+    addressLine1: "",
+    addressLine2: "",
+    addressLine3: "",
     
     // Proprietorship / Individual
     fullNameProprietor: "",
@@ -288,6 +291,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const docsForEntity = DOC_CHECKLIST[formData.entityType] || [];
 
+  const composeAddress = (line1: string, line2: string, line3: string): string =>
+    [line1, line2, line3].map((v) => v.trim()).filter(Boolean).join("\n");
+
   const handleInputChange = (field: string, value: string | boolean) => {
     const normalizedValue =
       field === "pan" && typeof value === "string" ? value.toUpperCase() : value;
@@ -296,6 +302,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         ...prev,
         [field]: normalizedValue
       };
+      if (field === "addressLine1" || field === "addressLine2" || field === "addressLine3") {
+        updated.address = composeAddress(
+          String(updated.addressLine1 || ""),
+          String(updated.addressLine2 || ""),
+          String(updated.addressLine3 || "")
+        );
+      }
       validateField(field, normalizedValue, updated);
       if (field === "password") {
         validateField("confirmPassword", updated.confirmPassword, updated);
@@ -511,7 +524,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     "email",
     "city",
     "pincode",
-    "address",
+    "addressLine1",
     "gstNo",
     "alternatePhone",
   ];
@@ -598,8 +611,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         if (!value) error = "Pincode is required";
         else if (!pincodeRegex.test(value as string)) error = "Enter a 6-digit pincode";
         break;
-      case "address":
-        if (!value) error = "Address is required";
+      case "addressLine1":
+        if (!value) error = "Address line 1 is required";
+        break;
+      case "addressLine2":
+      case "addressLine3":
         break;
       case "gstNo":
         if (!value || (typeof value === "string" && value.trim() === "")) {
@@ -1180,7 +1196,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "email",
         "city",
         "pincode",
-        "address",
+        "addressLine1",
         "alternatePhone",
         "pan",
         "gstNo",
@@ -1532,6 +1548,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
       // Step 3: Build all form data to store in raw_user_meta_data
       const buildUserMetadata = () => {
+        const fullAddress = composeAddress(
+          formData.addressLine1,
+          formData.addressLine2,
+          formData.addressLine3
+        );
         const baseData: any = {
             entity_type: formData.entityType,
             entity_name: formData.entityName,
@@ -1543,7 +1564,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             email: formData.email,
             city: formData.city,
             pincode: formData.pincode,
-            address: formData.address,
+            address: fullAddress,
+            address_line1: formData.addressLine1 || null,
+            address_line2: formData.addressLine2 || null,
+            address_line3: formData.addressLine3 || null,
           gst_no: formData.gstNo || null,
             alternate_phone: formData.alternatePhone || null,
             pan: formData.pan || null,
@@ -2462,18 +2486,42 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 {/* Row 5 */}
                 <div className="md:col-span-2">
                   <label className="block font-medium text-black mb-1">
-                    Address <span className="text-red-600 font-bold">*</span>
+                    Address Line 1 <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
-                    value={formData.address}
-                    onChange={(e) => handleInputChange("address", e.target.value)}
+                    value={formData.addressLine1}
+                    onChange={(e) => handleInputChange("addressLine1", e.target.value)}
                     className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
-                    placeholder="Office address"
+                    placeholder="Building / Street / Area"
                   />
-                  {errors.address && (
-                    <p className="text-xs text-red-600 mt-1">{errors.address}</p>
+                  {errors.addressLine1 && (
+                    <p className="text-xs text-red-600 mt-1">{errors.addressLine1}</p>
                   )}
-        </div>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block font-medium text-black mb-1">
+                    Address Line 2
+                  </label>
+                  <input
+                    value={formData.addressLine2}
+                    onChange={(e) => handleInputChange("addressLine2", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="Landmark / Locality"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block font-medium text-black mb-1">
+                    Address Line 3
+                  </label>
+                  <input
+                    value={formData.addressLine3}
+                    onChange={(e) => handleInputChange("addressLine3", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="Additional details (optional)"
+                  />
+                </div>
       </div>
     </div>
 
