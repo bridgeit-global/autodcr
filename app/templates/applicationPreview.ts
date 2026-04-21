@@ -1,6 +1,5 @@
 "use client";
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
 import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
@@ -13,6 +12,15 @@ type ApplicationPreviewSource = {
   coaRegNo?: string | null;
   /** COA expiry as stored (e.g. ISO `YYYY-MM-DD` in `coa_expiry_date`). */
   coaExpiryDate?: string | null;
+  consultantName?: string | null;
+  consultantCompanyName?: string | null;
+  clientCompanyName?: string | null;
+  clientName?: string | null;
+  clientCompanyDesignation?: string | null;
+  ownerDebug?: unknown;
+  consultantAddressLine1?: string | null;
+  consultantAddressLine2?: string | null;
+  consultantAddressLine3?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
   consultantLookupUserIds?: string[];
   projectData?: {
@@ -23,6 +31,7 @@ type ApplicationPreviewSource = {
       propertyAddress?: string;
     } | null;
     save_plot_details?: {
+      region?: string;
       ward?: string;
       zone?: string;
       /** Matches Project Details → "This plot belongs to" (CS vs CTS vs F.P.). */
@@ -36,7 +45,13 @@ type ApplicationPreviewSource = {
       applicants?: Array<{
         user_id?: string;
         applicantType?: string;
+        applicant_type?: string;
         name?: string;
+        entity_name?: string;
+        entityName?: string;
+        address_line1?: string;
+        address_line2?: string;
+        address_line3?: string;
         registrationNumber?: string;
         registrationNo?: string;
         residentialAddress?: string;
@@ -44,6 +59,74 @@ type ApplicationPreviewSource = {
     } | null;
   } | null;
 };
+
+type BuildingProposalAddressBlock = {
+  officerName: string;
+  line1: string;
+  line2: string;
+  line3: string;
+};
+
+const BP_CITY: BuildingProposalAddressBlock = {
+  officerName: "SHRI. VIJAY TAWDE",
+  line1:
+    "Dy. Chief Engineer (Building Proposal) - City, New Municipal Building, C.S. No. 355 / B,",
+  line2: "Bhagwan Walmiki Chowk, Vidyalankar Marg, Opp. Hanuman Mandir, Antop Hill,",
+  line3: "Wadala (East), Mumbai - 400 037",
+};
+
+const BP_WESTERN_I: BuildingProposalAddressBlock = {
+  officerName: "SHRI. BAJIRAO PATIL",
+  line1: "Dy. Chief Engineer, Building Proposals (W. S. - I)",
+  line2: "Hinduhrudaysamrat Balasaheb Thackeray Market, 6th to 9th Floor, New Majas Market,",
+  line3: "Poonam Nagar, Opp. J. V. Link Road, Jogeshwari (East), Mumbai - 400 093",
+};
+
+const BP_WESTERN_II: BuildingProposalAddressBlock = {
+  officerName: "SHRI. CHANDRAKANT CHAUDHARI",
+  line1:
+    "Dy. Chief Engineer, Building Proposals (W. S. - II) 1st Floor, C Wing, Municipal Building, Near Sanskruti Complex, 90 Feet D. P. Road,",
+  line2: "Kandivali (East), Mumbai- 400 101",
+  line3: "",
+};
+
+const BP_EASTERN: BuildingProposalAddressBlock = {
+  officerName: "SHRI. MEHUL PAINTER",
+  line1:
+    "Dy. Chief Engineer, Building Proposals (E. S.) Near Raj Legacy (Residential Complex)",
+  line2: "Paper Mill Compound, L. B. S. Marg,",
+  line3: "Vikhroli (West), Mumbai - 400 083",
+};
+
+const BP_SPECIAL_CELL: BuildingProposalAddressBlock = {
+  officerName: "SHRI. RAJENDRA JADHAV",
+  line1: "Dy. Chief Engineer (Building Proposal), Special Cell, Ground Floor, Municipal Training Center,",
+  line2: "Raheja Vihar Complex, Chandivali Farm Road, Powai, Andheri (East), Mumbai - 400 072",
+  line3: "",
+};
+
+function normalizeWardPrefix(ward?: string): string {
+  const s = (ward || "").trim().toUpperCase();
+  if (!s) return "";
+  return s.charAt(0);
+}
+
+function resolveBuildingProposalAddress(
+  region?: string,
+  ward?: string
+): BuildingProposalAddressBlock | undefined {
+  const normalizedRegion = (region || "").trim().toLowerCase();
+  if (normalizedRegion === "city") return BP_CITY;
+  if (normalizedRegion === "eastern") return BP_EASTERN;
+  if (normalizedRegion.includes("special")) return BP_SPECIAL_CELL;
+  if (normalizedRegion === "western") {
+    const wardPrefix = normalizeWardPrefix(ward);
+    // Western split: outer wards (R/T) use WS-II, others default to WS-I.
+    if (wardPrefix === "R" || wardPrefix === "T") return BP_WESTERN_II;
+    return BP_WESTERN_I;
+  }
+  return undefined;
+}
 
 export function mapSelectedApplicationToTemplate(
   selectedApplication?: string | null
@@ -154,6 +237,23 @@ function formatCsCtsSurveyToken(source?: ApplicationPreviewSource): string {
   return kind ? `${kind} ${bracketed}` : bracketed;
 }
 
+function splitAddressLines(address?: string, maxLines = 3): string[] {
+  const raw = (address || "").trim();
+  if (!raw) return Array.from({ length: maxLines }, () => "");
+  const parts = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (parts.length >= maxLines) {
+    const head = parts.slice(0, maxLines - 1);
+    const tail = parts.slice(maxLines - 1).join(", ");
+    return [...head, tail];
+  }
+
+  return [...parts, ...Array.from({ length: maxLines - parts.length }, () => "")];
+}
+
 export function mapApplicationPreviewFields(source: ApplicationPreviewSource): TemplateFields {
   const projectInfo = source.projectData?.project_info || {};
   const savePlot = source.projectData?.save_plot_details || {};
@@ -191,26 +291,54 @@ export function mapToPdfFieldValues(
   source?: ApplicationPreviewSource
 ): Record<string, string | undefined> {
   const applicants = source?.projectData?.applicant_details?.applicants || [];
-  const architectApplicant = applicants.find(
-    (applicant) => (applicant.applicantType || "").toLowerCase().includes("architect")
+  const ownerApplicant = applicants.find(
+    (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("owner")
   );
-  const architectName = architectApplicant?.name?.trim();
-  const architectAddress = architectApplicant?.residentialAddress?.trim();
+  const architectApplicant = applicants.find(
+    (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("architect")
+  );
+  const architectName = architectApplicant?.name?.trim() || source?.consultantName?.trim() || "";
+  const architectAddressLine1 =
+    source?.consultantAddressLine1?.trim() || "";
+  const architectAddressLine2 =
+    source?.consultantAddressLine2?.trim() || "";
+  const architectAddressLine3 =
+    source?.consultantAddressLine3?.trim() || "";
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const propertyAddress = source?.projectData?.project_info?.propertyAddress?.trim();
   const street = source?.projectData?.save_plot_details?.roadName?.trim();
   const divisionVillage = source?.projectData?.save_plot_details?.villageName?.trim();
   const wardForProjectToken = source?.projectData?.save_plot_details?.ward?.trim();
+  const regionForProjectToken = source?.projectData?.save_plot_details?.region?.trim();
   const documentNumber = source?.applicationNo?.trim();
   const csCtsToken = formatCsCtsSurveyToken(source).trim();
   const csCtsNos = csCtsToken || undefined;
   const architectCoaRegNo = source?.coaRegNo?.trim() ?? "";
   const architectValidityDisplay = formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "";
-  const clientName = fields.ApplicantName?.trim() || source?.projectData?.title?.trim() || "-";
-  const clientCompanyName = fields.FirmName?.trim() || source?.projectData?.title?.trim() || "-";
-  const clientCompanyDesignation = "Authorized Signatory";
-  const buildingProposalDesignation =
-    wardForProjectToken ? `The Executive Engineer (${wardForProjectToken}) Ward` : "The Executive Engineer (Ward)";
+  const clientName =
+    source?.clientName?.trim() ||
+    fields.ApplicantName?.trim() ||
+    source?.projectData?.title?.trim() ||
+    "-";
+  const clientCompanyName =
+    ownerApplicant?.entity_name?.trim() ||
+    ownerApplicant?.entityName?.trim() ||
+    source?.clientCompanyName?.trim() ||
+    "";
+  const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
+  const normalizedClientEntityType = clientCompanyDesignation.toLowerCase();
+  const displayClientCompanyDesignation =
+    normalizedClientEntityType === "proprietorship / individual"
+      ? "Director"
+      : clientCompanyDesignation;
+  const buildingProposalAddress = resolveBuildingProposalAddress(
+    regionForProjectToken,
+    wardForProjectToken
+  );
+  const buildingProposalBaseDesignation =
+    wardForProjectToken
+      ? `The Executive Engineer (${wardForProjectToken}) Ward`
+      : "The Executive Engineer (Ward) Ward";
 
   return {
     CurrentDate: fields.CurrentDate,
@@ -248,16 +376,20 @@ export function mapToPdfFieldValues(
     project_Document_Number: documentNumber || undefined,
     "project_Name_Architect/L.S": architectName || undefined,
     "project_Name_Architect/L.S.": architectName || undefined,
-    "project_Company_Name_Architect/L.S": architectName || undefined,
-    "project_Company_Name_Architect/L.S.": architectName || undefined,
+    "project_Company_Name_Architect/L.S":
+      source?.consultantCompanyName?.trim() || undefined,
+    "project_Company_Name_Architect/L.S.":
+      source?.consultantCompanyName?.trim() || undefined,
     // Phase-1 approved mapping:
     // Architect/L.S section uses Architect only for this template run.
-    "project_Address_line1_Architect/L.S": architectAddress || undefined,
-    "project_Address_line2_Architect/L.S": "",
-    "project_Address_line3Architect/L.S": "",
-    // Building Proposal address lines from property address (line1 only).
-    "project_ addressline1_BuildingProposal": propertyAddress || undefined,
-    "project_ addressline2_BuildingProposal": "",
+    "project_Address_line1_Architect/L.S": architectAddressLine1 || undefined,
+    "project_Address_line2_Architect/L.S": architectAddressLine2,
+    "project_Address_line3Architect/L.S": architectAddressLine3,
+    // Building Proposal address lines from region/ward mapping.
+    "project_ addressline1_BuildingProposal":
+      buildingProposalAddress?.line1 || propertyAddress || "",
+    "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
+    "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
     // Always send a string: JSON.stringify drops `undefined`, so the API would skip replacement and leave `$project_RegNo_...` in the DOCX.
     "project_RegNo_Architect/L.S.": architectCoaRegNo,
     // Template variants (same value).
@@ -266,371 +398,11 @@ export function mapToPdfFieldValues(
     "project_Validity_Architect/L.S.": architectValidityDisplay,
     "project_Validity_Architect/L.S": architectValidityDisplay,
     "project_Client_Company_Name": clientCompanyName,
-    "project_Client_Company_Designation": clientCompanyDesignation,
+    "project_Client_Company_Designation": displayClientCompanyDesignation,
     "project_Client_Name": clientName,
-    project_BuildingProposal_OfficerDesignation: buildingProposalDesignation,
+    project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
+    project_BuildingProposal_OfficerDesignation: "",
   };
-}
-
-async function loadTemplatePdfBytes(templateType: TemplateType): Promise<ArrayBuffer> {
-  const response = await fetch(
-    `/api/application-preview-template?templateType=${encodeURIComponent(templateType)}`
-  );
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || `Failed to load preview PDF template (${response.status})`);
-  }
-  return response.arrayBuffer();
-}
-
-type OverlaySpec = {
-  key: string;
-  pageIndex: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  fontSize: number;
-  lineHeight: number;
-};
-
-const OVERLAY_BASE_PAGE_WIDTH = 612;
-const OVERLAY_BASE_PAGE_HEIGHT = 792;
-
-function drawWrappedText(page: PDFPage, font: PDFFont, text: string, spec: OverlaySpec): void {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return;
-
-  const lines: string[] = [];
-  let line = "";
-  words.forEach((word) => {
-    const candidate = line ? `${line} ${word}` : word;
-    const candidateWidth = font.widthOfTextAtSize(candidate, spec.fontSize);
-    if (candidateWidth <= spec.width || !line) {
-      line = candidate;
-    } else {
-      lines.push(line);
-      line = word;
-    }
-  });
-  if (line) lines.push(line);
-
-  const maxLines = Math.max(1, Math.floor(spec.height / spec.lineHeight));
-  lines.slice(0, maxLines).forEach((row, idx) => {
-    page.drawText(row, {
-      x: spec.x,
-      y: spec.y - idx * spec.lineHeight,
-      size: spec.fontSize,
-      font,
-      color: rgb(0, 0, 0),
-    });
-  });
-}
-
-async function fillStaticTemplateOverlay(
-  pdfDoc: PDFDocument,
-  values: Record<string, string | undefined>
-): Promise<void> {
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const overlays: OverlaySpec[] = [
-    {
-      key: "project_Consultant_Architect/L.S._Type",
-      pageIndex: 0,
-      x: 278,
-      y: 722,
-      width: 280,
-      height: 14,
-      fontSize: 11,
-      lineHeight: 12,
-    },
-    {
-      key: "project_date_generation",
-      pageIndex: 0,
-      x: 410,
-      y: 666,
-      width: 150,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Document_Number",
-      pageIndex: 0,
-      x: 58,
-      y: 666,
-      width: 190,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Name_Architect/L.S",
-      pageIndex: 0,
-      x: 66,
-      y: 640,
-      width: 260,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Company_Name_Architect/L.S",
-      pageIndex: 0,
-      x: 66,
-      y: 622,
-      width: 380,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Address_line1_Architect/L.S",
-      pageIndex: 0,
-      x: 66,
-      y: 604,
-      width: 420,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Address_line2_Architect/L.S",
-      pageIndex: 0,
-      x: 66,
-      y: 586,
-      width: 420,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Address_line3Architect/L.S",
-      pageIndex: 0,
-      x: 66,
-      y: 568,
-      width: 420,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_CS/CTSNos.",
-      pageIndex: 0,
-      x: 318,
-      y: 548,
-      width: 180,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Division/Village",
-      pageIndex: 0,
-      x: 496,
-      y: 548,
-      width: 110,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Street",
-      pageIndex: 0,
-      x: 66,
-      y: 530,
-      width: 270,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Ward.",
-      pageIndex: 0,
-      x: 348,
-      y: 530,
-      width: 130,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Proposal_Number",
-      pageIndex: 0,
-      x: 52,
-      y: 512,
-      width: 300,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Consultant_Architect/L.S.",
-      pageIndex: 0,
-      x: 200,
-      y: 460,
-      width: 190,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Client_Company_Name",
-      pageIndex: 1,
-      x: 95,
-      y: 335,
-      width: 220,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Client_Company_Designation",
-      pageIndex: 1,
-      x: 35,
-      y: 319,
-      width: 220,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Client_Name",
-      pageIndex: 1,
-      x: 35,
-      y: 303,
-      width: 220,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Company_Name_Architect/L.S",
-      pageIndex: 1,
-      x: 96,
-      y: 272,
-      width: 235,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Consultant_Architect/L.S.",
-      pageIndex: 1,
-      x: 35,
-      y: 256,
-      width: 240,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Name_Architect/L.S.",
-      pageIndex: 1,
-      x: 35,
-      y: 240,
-      width: 240,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_RegNo_Architect/L.S.",
-      pageIndex: 1,
-      x: 35,
-      y: 224,
-      width: 240,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_Validity_Architect/L.S.",
-      pageIndex: 1,
-      x: 35,
-      y: 208,
-      width: 240,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_BuildingProposal_OfficerDesignation",
-      pageIndex: 1,
-      x: 35,
-      y: 176,
-      width: 260,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_ addressline1_BuildingProposal",
-      pageIndex: 1,
-      x: 246,
-      y: 214,
-      width: 270,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-    {
-      key: "project_ addressline2_BuildingProposal",
-      pageIndex: 1,
-      x: 246,
-      y: 198,
-      width: 270,
-      height: 14,
-      fontSize: 9,
-      lineHeight: 11,
-    },
-  ];
-
-  overlays.forEach((spec) => {
-    const value = values[spec.key];
-    if (value === undefined) return;
-    const page = pdfDoc.getPages()[spec.pageIndex];
-    if (!page) return;
-
-    const scaleX = page.getWidth() / OVERLAY_BASE_PAGE_WIDTH;
-    const scaleY = page.getHeight() / OVERLAY_BASE_PAGE_HEIGHT;
-    const scaledSpec: OverlaySpec = {
-      ...spec,
-      x: spec.x * scaleX,
-      y: spec.y * scaleY,
-      width: spec.width * scaleX,
-      height: spec.height * scaleY,
-      fontSize: Math.max(8, spec.fontSize * Math.min(scaleX, scaleY)),
-      lineHeight: Math.max(10, spec.lineHeight * scaleY),
-    };
-
-    page.drawRectangle({
-      x: scaledSpec.x - 6,
-      y: scaledSpec.y - scaledSpec.height - 2,
-      width: scaledSpec.width + 30,
-      height: scaledSpec.height + 10,
-      color: rgb(1, 1, 1),
-      borderWidth: 0,
-    });
-
-    if (value.trim()) {
-      drawWrappedText(page, font, value, scaledSpec);
-    }
-  });
-}
-
-async function generatePreviewPdfOverlayFallback(
-  templateType: TemplateType,
-  formValues: Record<string, string | undefined>
-): Promise<Blob> {
-  const templatePdfBytes = await loadTemplatePdfBytes(templateType);
-  const pdfDoc = await PDFDocument.load(templatePdfBytes);
-
-  if (templateType === "Architect Licensed Surveyor") {
-    await fillStaticTemplateOverlay(pdfDoc, formValues);
-  }
-
-  const bytes = await pdfDoc.save();
-  return new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
 }
 
 /**
@@ -638,9 +410,6 @@ async function generatePreviewPdfOverlayFallback(
  *
  * Converter order in `/api/application-preview-docx`:
  * `docx-pdf-converter` package first, then external converter (if configured), then local LibreOffice.
- *
- * Development fallback here: if conversion is unavailable, uses static PDF + overlay (lower fidelity).
- *
  * Other template types use DOCX placeholders replaced server-side, then converted to PDF via LibreOffice
  * (local `soffice` or remote Gotenberg — see `/api/application-preview-docx`).
  * On Vercel, set DOCX_CONVERTER_URL to your self-hosted Gotenberg `/forms/libreoffice/convert`.
@@ -661,6 +430,7 @@ export async function generateApplicationPreviewPdf(
       body: JSON.stringify({
         templateType,
         fields: formValues,
+        ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
       }),
     });
 
@@ -704,14 +474,6 @@ export async function generateApplicationPreviewPdf(
     typeof payload?.error === "string"
       ? payload.error
       : `Preview conversion failed (${docxResponse.status}).`;
-
-  if (process.env.NODE_ENV === "development") {
-    console.warn(
-      "[application preview] DOCX→PDF unavailable, using PDF overlay fallback:",
-      message
-    );
-    return generatePreviewPdfOverlayFallback(templateType, formValues);
-  }
 
   throw new Error(message);
 }

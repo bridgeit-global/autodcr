@@ -30,7 +30,16 @@ type PreviewProjectData = {
   applicant_details?: {
     applicants?: Array<{
       user_id?: string;
+      userId?: string;
+      id?: string;
       applicantType?: string;
+      applicant_type?: string;
+      email?: string;
+      entity_name?: string;
+      entityName?: string;
+      name?: string;
+      entity_type?: string;
+      entityType?: string;
       residentialAddress?: string;
     }>;
   } | null;
@@ -56,6 +65,83 @@ function pickCoaExpiryFromMeta(meta: unknown): string | undefined {
   return undefined;
 }
 
+function pickAddressLineFromMeta(meta: unknown, index: 1 | 2 | 3): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  const keys =
+    index === 1
+      ? ["address_line1", "addressLine1", "AddressLine1"]
+      : index === 2
+        ? ["address_line2", "addressLine2", "AddressLine2"]
+        : ["address_line3", "addressLine3", "AddressLine3"];
+  for (const key of keys) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickConsultantCompanyFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["entity_name", "firm_name", "company_name", "name"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickConsultantNameFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  const explicit =
+    (typeof m.name === "string" && m.name.trim()) ? m.name.trim() : "";
+  if (explicit) return explicit;
+  const first = typeof m.first_name === "string" ? m.first_name.trim() : "";
+  const middle = typeof m.middle_name === "string" ? m.middle_name.trim() : "";
+  const last = typeof m.last_name === "string" ? m.last_name.trim() : "";
+  const full = [first, middle, last].filter(Boolean).join(" ").trim();
+  return full || undefined;
+}
+
+function pickEntityNameFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["entity_name", "entityName", "company_name", "companyName", "firm_name"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickEntityTypeFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["entity_type", "entityType"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickPersonFullNameFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  const first = typeof m.first_name === "string" ? m.first_name.trim() : "";
+  const middle = typeof m.middle_name === "string" ? m.middle_name.trim() : "";
+  const last = typeof m.last_name === "string" ? m.last_name.trim() : "";
+  const full = [first, middle, last].filter(Boolean).join(" ").trim();
+  if (full) return full;
+  const fallback = typeof m.name === "string" ? m.name.trim() : "";
+  return fallback || undefined;
+}
+
+function normalizeLookupId(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const s = String(value).trim();
+  return s;
+}
+
 function readLocalStoredUserMetadata(): unknown | null {
   if (typeof window === "undefined") return null;
   try {
@@ -69,7 +155,8 @@ function readLocalStoredUserMetadata(): unknown | null {
 
 async function fetchRawUserMetadataFromApi(
   userMetadata: unknown,
-  preferredPortalIds?: string[]
+  preferredPortalIds?: string[],
+  preferredEmail?: string
 ): Promise<unknown | null> {
   const portalFromMeta =
     typeof userMetadata === "object" &&
@@ -99,7 +186,10 @@ async function fetchRawUserMetadataFromApi(
       const res = await fetch("/api/get-user-metadata", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id }),
+        body: JSON.stringify({
+          user_id,
+          ...(preferredEmail?.trim() ? { email: preferredEmail.trim() } : {}),
+        }),
       });
       if (!res.ok) continue;
       const payload = (await res.json()) as { metadata?: unknown };
@@ -183,10 +273,45 @@ export default function ApplicationDetailsPage() {
       let coaExpiryDate =
         pickCoaExpiryFromMeta(userMetadata) ||
         pickCoaExpiryFromMeta(localMeta);
+      let consultantAddressLine1 =
+        pickAddressLineFromMeta(userMetadata, 1) ||
+        pickAddressLineFromMeta(localMeta, 1);
+      let consultantAddressLine2 =
+        pickAddressLineFromMeta(userMetadata, 2) ||
+        pickAddressLineFromMeta(localMeta, 2);
+      let consultantAddressLine3 =
+        pickAddressLineFromMeta(userMetadata, 3) ||
+        pickAddressLineFromMeta(localMeta, 3);
+      let consultantCompanyName =
+        pickConsultantCompanyFromMeta(userMetadata) ||
+        pickConsultantCompanyFromMeta(localMeta);
+      let consultantName =
+        pickConsultantNameFromMeta(userMetadata) ||
+        pickConsultantNameFromMeta(localMeta);
+      const ownerApplicants = (projectData?.applicant_details?.applicants || []).filter((a) =>
+        (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
+      );
+      const ownerApplicant = ownerApplicants[0];
+      let clientCompanyName =
+        ownerApplicant?.entity_name?.trim() ||
+        ownerApplicant?.entityName?.trim() ||
+        pickEntityNameFromMeta(ownerApplicant);
+      let clientName =
+        (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
+        pickPersonFullNameFromMeta(ownerApplicant);
+      let clientCompanyDesignation =
+        ownerApplicant?.entity_type?.trim() ||
+        ownerApplicant?.entityType?.trim() ||
+        pickEntityTypeFromMeta(ownerApplicant);
 
       const mergeConsultantMeta = (meta: unknown) => {
         if (!coaRegNo) coaRegNo = pickCoaRegNoFromMeta(meta);
         if (!coaExpiryDate) coaExpiryDate = pickCoaExpiryFromMeta(meta);
+        if (!consultantAddressLine1) consultantAddressLine1 = pickAddressLineFromMeta(meta, 1);
+        if (!consultantAddressLine2) consultantAddressLine2 = pickAddressLineFromMeta(meta, 2);
+        if (!consultantAddressLine3) consultantAddressLine3 = pickAddressLineFromMeta(meta, 3);
+        if (!consultantCompanyName) consultantCompanyName = pickConsultantCompanyFromMeta(meta);
+        if (!consultantName) consultantName = pickConsultantNameFromMeta(meta);
       };
 
       const templateType = mapSelectedApplicationToTemplate(selectedApplication);
@@ -230,12 +355,69 @@ export default function ApplicationDetailsPage() {
         if (serverMeta) mergeConsultantMeta(serverMeta);
       }
 
+      const ownerLookupUserIds = [
+        ...new Set(
+          ownerApplicants
+            .flatMap((owner) => [
+              normalizeLookupId(owner.user_id),
+              normalizeLookupId(owner.userId),
+              normalizeLookupId(owner.id),
+              normalizeLookupId((owner as { owner_id?: unknown }).owner_id),
+              normalizeLookupId((owner as { ownerId?: unknown }).ownerId),
+            ])
+            .filter(Boolean)
+        ),
+      ];
+      let ownerMetaSnapshot: unknown = null;
+      for (const ownerLookupUserId of ownerLookupUserIds) {
+        const ownerMeta = await fetchRawUserMetadataFromApi(
+          userMetadata,
+          [ownerLookupUserId],
+          ownerApplicant?.email
+        );
+        if (!ownerMeta) continue;
+        ownerMetaSnapshot = ownerMeta;
+        if (!clientCompanyDesignation) {
+          const resolvedType = pickEntityTypeFromMeta(ownerMeta);
+          if (resolvedType) clientCompanyDesignation = resolvedType;
+        }
+        if (!clientName) {
+          const resolvedClientName = pickPersonFullNameFromMeta(ownerMeta);
+          if (resolvedClientName) clientName = resolvedClientName;
+        }
+        const resolved = pickEntityNameFromMeta(ownerMeta);
+        if (resolved) {
+          clientCompanyName = resolved;
+          if (clientCompanyDesignation && clientName) break;
+        }
+      }
+
+      if (process.env.NODE_ENV === "development") {
+        console.log("[preview-owner-debug]", {
+          ownerApplicants,
+          ownerLookupUserIds,
+          clientCompanyName,
+          clientName,
+          clientCompanyDesignation,
+          ownerMeta: ownerMetaSnapshot,
+        });
+        console.log("[preview-owner-raw_user_meta_data]", ownerMetaSnapshot);
+      }
+
       const fields = mapApplicationPreviewFields({
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
         coaRegNo,
         coaExpiryDate,
+        consultantAddressLine1,
+        consultantAddressLine2,
+        consultantAddressLine3,
+        consultantName,
+        consultantCompanyName,
+        clientCompanyName,
+        clientName,
+        clientCompanyDesignation,
         projectData,
       });
       const blob = await generateApplicationPreviewPdf(fields, templateType, {
@@ -244,6 +426,22 @@ export default function ApplicationDetailsPage() {
         applicationCreatedAt,
         coaRegNo,
         coaExpiryDate,
+        consultantAddressLine1,
+        consultantAddressLine2,
+        consultantAddressLine3,
+        consultantName,
+        consultantCompanyName,
+        clientCompanyName,
+        clientName,
+        clientCompanyDesignation,
+        ownerDebug: {
+          ownerApplicants,
+          ownerLookupUserIds,
+          ownerMetaSnapshot,
+          resolvedClientCompanyName: clientCompanyName,
+          resolvedClientName: clientName,
+          resolvedClientCompanyDesignation: clientCompanyDesignation,
+        },
         consultantLookupUserIds,
         projectData,
       });

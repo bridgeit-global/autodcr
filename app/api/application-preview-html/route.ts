@@ -84,6 +84,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       templateType?: TemplateType;
       fields?: Record<string, string | undefined>;
+      owner_debug?: unknown;
     };
 
     if (!body.templateType || !body.fields) {
@@ -96,6 +97,23 @@ export async function POST(request: NextRequest) {
     const htmlPath = await resolveHtmlTemplate(body.templateType);
     const htmlTemplate = await fs.readFile(htmlPath, "utf8");
     const finalHtml = replaceTemplateTokens(htmlTemplate, body.fields);
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[application-preview-html] owner/company debug", {
+        project_Client_Company_Name: body.fields["project_Client_Company_Name"] ?? "",
+        project_Client_Name: body.fields["project_Client_Name"] ?? "",
+        project_Name_Architect_LS: body.fields["project_Name_Architect/L.S"] ?? "",
+        owner_debug: body.owner_debug ?? null,
+      });
+      try {
+        console.log(
+          "[application-preview-html] owner/company debug full",
+          JSON.stringify(body.owner_debug ?? null, null, 2)
+        );
+      } catch {
+        // ignore
+      }
+    }
 
     browser = await launchForPdf();
     const page = await browser.newPage();
@@ -110,7 +128,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": 'inline; filename="application-preview.pdf"',
-        "Cache-Control": "private, max-age=120",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
       },
     });
   } catch (error) {
