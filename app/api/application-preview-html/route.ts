@@ -21,6 +21,10 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function replaceTemplateTokens(
   html: string,
   fields: Record<string, string | undefined>
@@ -29,7 +33,15 @@ function replaceTemplateTokens(
   for (const [key, raw] of Object.entries(fields)) {
     if (raw === undefined) continue;
     const token = key.startsWith("$") ? key : `$${key}`;
-    out = out.split(token).join(escapeHtml(raw));
+    const escaped = escapeHtml(raw);
+    // First try fast exact replacement.
+    out = out.split(token).join(escaped);
+    // Then replace whitespace-variant tokens often produced by Word HTML exports.
+    const whitespaceTolerantTokenRegex = new RegExp(
+      escapeRegex(token).replace(/\\ /g, "\\s+"),
+      "g"
+    );
+    out = out.replace(whitespaceTolerantTokenRegex, escaped);
   }
   return out;
 }
