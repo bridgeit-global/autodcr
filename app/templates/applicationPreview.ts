@@ -330,7 +330,13 @@ export function mapToPdfFieldValues(
   const displayClientCompanyDesignation =
     normalizedClientEntityType === "proprietorship / individual"
       ? "Director"
-      : clientCompanyDesignation;
+      : normalizedClientEntityType === "llp"
+        ? "Designated Partner"
+        : normalizedClientEntityType === "trust / society"
+          ? "Trustee"
+          : normalizedClientEntityType === "partnership firm"
+            ? "Partner"
+            : clientCompanyDesignation;
   const buildingProposalAddress = resolveBuildingProposalAddress(
     regionForProjectToken,
     wardForProjectToken
