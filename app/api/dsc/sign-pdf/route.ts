@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-// @ts-ignore - Native modules, server-only
-import dscService from '../../../../lib/dsc/dsc-service';
-// @ts-ignore - Native modules, server-only
-import pdfSignerPKCS11 from '../../../../lib/dsc/pdf-signer-pkcs11';
+import { isRemoteDSCEnabled, remoteDscPostFormData } from '@/lib/dsc/remote-dsc';
 
 export async function POST(request: NextRequest) {
   try {
+    if (isRemoteDSCEnabled()) {
+      const formData = await request.formData();
+      const remoteResponse = await remoteDscPostFormData('/api/dsc/sign-pdf', formData);
+      const data = await remoteResponse.json();
+      return NextResponse.json(data, { status: remoteResponse.status });
+    }
+
+    // @ts-ignore - Native modules, server-only
+    const dscService = (await import('../../../../lib/dsc/dsc-service')).default;
+    // @ts-ignore - Native modules, server-only
+    const pdfSignerPKCS11 = (await import('../../../../lib/dsc/pdf-signer-pkcs11')).default;
+
     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });

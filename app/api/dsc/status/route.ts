@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-// @ts-ignore - Native module, server-only
-import dscService from '../../../../lib/dsc/dsc-service';
+import { isRemoteDSCEnabled, remoteDscGet } from '@/lib/dsc/remote-dsc';
 
 export async function GET(request: NextRequest) {
   try {
+    if (isRemoteDSCEnabled()) {
+      const remoteResponse = await remoteDscGet('/api/dsc/status');
+      const data = await remoteResponse.json();
+      return NextResponse.json(data, { status: remoteResponse.status });
+    }
+
+    // @ts-ignore - Native module, server-only
+    const dscService = (await import('../../../../lib/dsc/dsc-service')).default;
     const status = await dscService.checkStatus();
     return NextResponse.json(status);
   } catch (error: any) {
