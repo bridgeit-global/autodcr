@@ -9,6 +9,19 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData();
       const remoteResponse = await remoteDscPostFormData('/api/dsc/sign-pdf', formData);
       const data = await remoteResponse.json();
+      const baseUrl = process.env.DSC_SERVICE_URL?.trim().replace(/\/$/, '');
+
+      // In remote mode, signed files are written on the remote DSC host.
+      // Rewrite relative signed URLs to absolute remote URLs so frontend can fetch them.
+      if (
+        baseUrl &&
+        data &&
+        typeof data.signedUrl === 'string' &&
+        data.signedUrl.startsWith('/')
+      ) {
+        data.signedUrl = `${baseUrl}${data.signedUrl}`;
+      }
+
       return NextResponse.json(data, { status: remoteResponse.status });
     }
 
