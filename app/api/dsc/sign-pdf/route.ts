@@ -19,7 +19,8 @@ export async function POST(request: NextRequest) {
         typeof data.signedUrl === 'string' &&
         data.signedUrl.startsWith('/')
       ) {
-        data.signedUrl = `${baseUrl}${data.signedUrl}`;
+        const absoluteSignedUrl = `${baseUrl}${data.signedUrl}`;
+        data.signedUrl = `/api/dsc/file?url=${encodeURIComponent(absoluteSignedUrl)}`;
       }
 
       return NextResponse.json(data, { status: remoteResponse.status });
