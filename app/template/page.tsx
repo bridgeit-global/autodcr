@@ -426,16 +426,14 @@ export default function TemplatePage() {
       formData.append("pin", dscPin);
       formData.append("certificateIndex", selectedDsc.certIndex.toString());
       formData.append("slotIndex", selectedDsc.slotIndex.toString());
-      const pdfWidth = 612;
       const defaultWidth = 230;
       const defaultHeight = 90;
-      const marginRight = 40;
-      // Leave more space below for owner name text so it doesn't sit behind the signature box
-      const marginBottom = 180;
+      // Keep signature after "For ... LLP" and before "Designated Partner".
+      const marginBottom = 78;
 
       const targetRect = rect ?? {
-        // Right-bottom corner, above signature text area
-        x: pdfWidth - marginRight - defaultWidth,
+        // Left-aligned between company name and designation lines.
+        x: 65,
         y: marginBottom,
         width: defaultWidth,
         height: defaultHeight,

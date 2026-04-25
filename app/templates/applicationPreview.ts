@@ -31,6 +31,7 @@ type ApplicationPreviewSource = {
       propertyAddress?: string;
     } | null;
     save_plot_details?: {
+      planningAuthority?: string;
       region?: string;
       ward?: string;
       zone?: string;
@@ -92,10 +93,9 @@ const BP_WESTERN_II: BuildingProposalAddressBlock = {
 
 const BP_EASTERN: BuildingProposalAddressBlock = {
   officerName: "SHRI. MEHUL PAINTER",
-  line1:
-    "Dy. Chief Engineer, Building Proposals (E. S.) Near Raj Legacy (Residential Complex)",
-  line2: "Paper Mill Compound, L. B. S. Marg,",
-  line3: "Vikhroli (West), Mumbai - 400 083",
+  line1: "",
+  line2: "Near Raj Legacy (Residential Complex), Paper Mill Compound,",
+  line3: "L. B. S. Marg, Vikhroli (West), Mumbai - 400 083",
 };
 
 const BP_SPECIAL_CELL: BuildingProposalAddressBlock = {
@@ -305,6 +305,8 @@ export function mapToPdfFieldValues(
   const architectAddressLine3 =
     source?.consultantAddressLine3?.trim() || "";
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
+  const planningAuthority =
+    source?.projectData?.save_plot_details?.planningAuthority?.trim() || "BMC";
   const propertyAddress = source?.projectData?.project_info?.propertyAddress?.trim();
   const street = source?.projectData?.save_plot_details?.roadName?.trim();
   const divisionVillage = source?.projectData?.save_plot_details?.villageName?.trim();
@@ -313,6 +315,17 @@ export function mapToPdfFieldValues(
   const documentNumber = source?.applicationNo?.trim();
   const csCtsToken = formatCsCtsSurveyToken(source).trim();
   const csCtsNos = csCtsToken || undefined;
+  const rawSurveyList = joinProposedCsOrCtsNos(source).trim();
+  const plotBelongs = source?.projectData?.save_plot_details?.plotBelongsTo;
+  const surveyLabelForSubject =
+    plotBelongs === "CS No."
+      ? "C.S. No(s)."
+      : plotBelongs === "F.P.No"
+        ? "F.P. No(s)."
+        : "C.T.S. No(s).";
+  const csCtsNosSubjectDisplay = rawSurveyList
+    ? `${surveyLabelForSubject} ${rawSurveyList}`
+    : csCtsNos;
   const architectCoaRegNo = source?.coaRegNo?.trim() ?? "";
   const architectValidityDisplay = formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "";
   const clientName =
@@ -341,10 +354,13 @@ export function mapToPdfFieldValues(
     regionForProjectToken,
     wardForProjectToken
   );
-  const buildingProposalBaseDesignation =
-    wardForProjectToken
-      ? `The Executive Engineer (${wardForProjectToken}) Ward`
-      : "The Executive Engineer (Ward) Ward";
+  const officerDesignationDisplay =
+    "O/o The Dy. Ch. Eng. (B.P.)";
+  const officerZoneSuffix =
+    (regionForProjectToken || "").trim().toLowerCase() === "eastern"
+      ? "(E. S.),"
+      : "";
+  const buildingProposalBaseDesignation = "The Executive Engineer (E.S.) - I";
 
   return {
     CurrentDate: fields.CurrentDate,
@@ -366,18 +382,19 @@ export function mapToPdfFieldValues(
     CouncilRegNo: fields.CouncilRegNo,
     RegValidityDate: fields.RegValidityDate,
     project_date_generation: fields.CurrentDate,
-    // Title line: "1. APPOINTMENT LETTER FOR ARCHITECT" (this template is architect-only)
-    "project_Consultant_Architect/L.S._Type": "ARCHITECT",
-    "project_Consultant_Architect/L.S.": "ARCHITECT",
+    // Title and consultant labels for architect template.
+    "project_Consultant_Architect/L.S._Type": "Architect",
+    "project_Consultant_Architect/L.S.": "Architect",
     // Subject line: CTS/CS survey numbers from project save_plot_details (same as CTS No. in Project Details).
-    "project_CS/CTSNos": csCtsNos,
-    "project_CS/CTSNos.": csCtsNos,
+    "project_CS/CTSNos": csCtsNosSubjectDisplay,
+    "project_CS/CTSNos.": csCtsNosSubjectDisplay,
     // Village/Division line comes directly from Project Details form field value.
     "project_Division/Village": divisionVillage || undefined,
     project_Street: street || undefined,
     // Ward line (e.g. "L Ward") — same as Project Details → Ward.
     "project_Ward.": wardForProjectToken || undefined,
-    // Proposal number from project_info (e.g. BMC/123/WS/337).
+    // Re line format in template: "<Authority> Proposal No. <reference-no>".
+    project_Planning_Authority: planningAuthority,
     project_Proposal_Number: proposalNumber || undefined,
     project_Document_Number: documentNumber || undefined,
     "project_Name_Architect/L.S": architectName || undefined,
@@ -392,8 +409,7 @@ export function mapToPdfFieldValues(
     "project_Address_line2_Architect/L.S": architectAddressLine2,
     "project_Address_line3Architect/L.S": architectAddressLine3,
     // Building Proposal address lines from region/ward mapping.
-    "project_ addressline1_BuildingProposal":
-      buildingProposalAddress?.line1 || propertyAddress || "",
+    "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
     "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
     "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
     // Always send a string: JSON.stringify drops `undefined`, so the API would skip replacement and leave `$project_RegNo_...` in the DOCX.
@@ -407,7 +423,8 @@ export function mapToPdfFieldValues(
     "project_Client_Company_Designation": displayClientCompanyDesignation,
     "project_Client_Name": clientName,
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
-    project_BuildingProposal_OfficerDesignation: "",
+    project_BuildingProposal_OfficerDesignation: officerDesignationDisplay,
+    project_BuildingProposal_ZoneSuffix: officerZoneSuffix,
   };
 }
 

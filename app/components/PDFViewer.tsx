@@ -51,7 +51,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ fileUrl }) => {
         <Viewer 
           fileUrl={fileUrl} 
           plugins={[defaultLayoutPluginInstance]}
-          defaultScale={1.0}
+          defaultScale={1.2}
           renderPage={renderPage}
         />
       </div>
