@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "autodcr-local",
-      cwd: "/Users/munib/Documents/DD",
+      cwd: "/Users/munib/Documents/abhi abhi",
       script: "npm",
       args: "run dev -- -p 3001",
       autorestart: true,
@@ -13,9 +13,9 @@ module.exports = {
     },
     {
       name: "autodcr-ngrok",
-      cwd: "/Users/munib/Documents/DD",
-      script: "npx",
-      args: "-y ngrok http 3001",
+      cwd: "/Users/munib/Documents/abhi abhi",
+      script: "ngrok",
+      args: "http 3001",
       autorestart: true,
       watch: false,
     },

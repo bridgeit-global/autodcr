@@ -17,7 +17,7 @@ export default function PlainPDFViewer({ fileUrl }: PlainPDFViewerProps) {
   return (
     <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
       <div style={{ height: "80vh" }}>
-        <Viewer fileUrl={fileUrl} plugins={[defaultLayoutPluginInstance]} defaultScale={1.0} />
+        <Viewer fileUrl={fileUrl} plugins={[defaultLayoutPluginInstance]} defaultScale={1.2} />
       </div>
     </Worker>
   );

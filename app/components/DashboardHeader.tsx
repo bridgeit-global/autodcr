@@ -76,17 +76,34 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
 
   const handleLogout = async () => {
     try {
-      // Sign out from Supabase
-      await supabase.auth.signOut();
+      // Sign out from Supabase across all devices/sessions for this user.
+      await supabase.auth.signOut({ scope: "global" });
       
       // Clear user metadata from context
       clearUserMetadata();
       
-      // Clear localStorage items
-      localStorage.removeItem('consultantId');
-      localStorage.removeItem('consultantUserId');
-      localStorage.removeItem('consultantType');
-      localStorage.removeItem('userMetadata');
+      // Clear known auth/session keys and any Supabase session cache keys.
+      const explicitSessionKeys = [
+        "consultantId",
+        "consultantUserId",
+        "consultantType",
+        "userMetadata",
+      ];
+      explicitSessionKeys.forEach((key) => localStorage.removeItem(key));
+
+      Object.keys(localStorage).forEach((key) => {
+        if (
+          key.startsWith("sb-") ||
+          key.startsWith("draft-") ||
+          key.startsWith("saved-") ||
+          key.startsWith("baseline-") ||
+          key.startsWith("dirty-")
+        ) {
+          localStorage.removeItem(key);
+        }
+      });
+
+      sessionStorage.clear();
       
       // Close the dropdown menu
       setUserMenuOpen(false);
