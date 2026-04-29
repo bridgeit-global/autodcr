@@ -23,10 +23,16 @@ const nextConfig: NextConfig = {
 	},
 	// Exclude native modules from client-side bundling
 	webpack: (config, { isServer }) => {
+		config.resolve.alias = {
+			...(config.resolve.alias || {}),
+			canvas: false,
+		};
+
 		if (!isServer) {
 			// Exclude native modules from client bundle
 			config.resolve.fallback = {
 				...config.resolve.fallback,
+				canvas: false,
 				fs: false,
 				path: false,
 				crypto: false,
