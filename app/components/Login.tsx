@@ -48,10 +48,11 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
   const [loginError, setLoginError] = useState<string>("");
 
-  // Generate captcha on mount
+  // Generate captcha on mount; prefetch dashboard so navigation after login feels instant
   useEffect(() => {
     setCaptcha(generateCaptcha());
-  }, []);
+    router.prefetch("/userdashboard");
+  }, [router]);
 
   const regenerateCaptcha = () => {
     setCaptcha(generateCaptcha());
@@ -70,72 +71,66 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
     }
 
     try {
-      // Step 1: Look up user by user_id from raw_user_meta_data to get their email
-      // Use API route to query auth.users (which requires admin access)
-      const response = await fetch('/api/get-user-email', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ user_id: data.username }),
+      // Talk straight to Supabase (no Next.js API = no serverless cold start; signIn sets session — no setSession round trip).
+      const { data: rows, error: rpcError } = await supabase.rpc("get_user_email_by_user_id", {
+        lookup_user_id: data.username.trim(),
       });
 
-      if (!response.ok) {
+      if (rpcError || !rows || !Array.isArray(rows) || rows.length === 0) {
         setLoginError("Invalid username or password. Please try again.");
         regenerateCaptcha();
         setIsLoading(false);
         return;
       }
 
-      const userData = await response.json();
+      const row = rows[0] as {
+        email?: string | null;
+        user_id?: string | null;
+        consultant_type?: string | null;
+        raw_user_meta_data?: Record<string, unknown> | null;
+        metadata?: Record<string, unknown> | null;
+      };
 
-      if (!userData.email) {
+      if (!row.email) {
         setLoginError("Invalid username or password. Please try again.");
         regenerateCaptcha();
         setIsLoading(false);
         return;
       }
 
-      const userEmail = userData.email;
-      const userId = userData.user_id;
-      const consultantType = userData.consultant_type;
-
-      // Step 2: Use the user's email to authenticate with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: userEmail,
+        email: row.email,
         password: data.password,
       });
 
-      if (authError) {
+      if (authError || !authData.user) {
         setLoginError("Invalid username or password. Please try again.");
         regenerateCaptcha();
         setIsLoading(false);
         return;
       }
 
-      if (authData.user) {
-        // Store user info in localStorage
-        localStorage.setItem('consultantId', authData.user.id);
-        localStorage.setItem('consultantUserId', userId || data.username);
-        localStorage.setItem('consultantType', consultantType || '');
-        
-        // Merge JWT claims with RPC `raw_user_meta_data` from get-user-email. JWT alone often omits
-        // `coa_reg_no` / `coa_expiry_date`; DB metadata must win for those fields.
-        const jwtMeta =
-          authData.user.user_metadata && typeof authData.user.user_metadata === "object"
-            ? authData.user.user_metadata
+      localStorage.setItem("consultantId", authData.user.id);
+      localStorage.setItem("consultantUserId", row.user_id || data.username);
+      localStorage.setItem("consultantType", row.consultant_type || "");
+
+      const jwtMeta =
+        authData.user.user_metadata && typeof authData.user.user_metadata === "object"
+          ? authData.user.user_metadata
+          : {};
+      const rpcMeta =
+        row.raw_user_meta_data && typeof row.raw_user_meta_data === "object"
+          ? row.raw_user_meta_data
+          : row.metadata && typeof row.metadata === "object"
+            ? row.metadata
             : {};
-        const rpcMeta =
-          userData.metadata && typeof userData.metadata === "object" ? userData.metadata : {};
-        const metadataToStore = { ...jwtMeta, ...rpcMeta };
-        if (Object.keys(metadataToStore).length > 0) {
-          localStorage.setItem("userMetadata", JSON.stringify(metadataToStore));
-        }
-        
-        // Navigate to dashboard on successful login
-        router.push("/userdashboard");
-        reset();
+      const metadataToStore = { ...jwtMeta, ...rpcMeta };
+      if (Object.keys(metadataToStore).length > 0) {
+        localStorage.setItem("userMetadata", JSON.stringify(metadataToStore));
       }
+
+      router.push("/userdashboard");
+      reset();
     } catch (err) {
       setLoginError("An error occurred during login. Please try again.");
       regenerateCaptcha();

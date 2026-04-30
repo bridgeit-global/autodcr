@@ -10,6 +10,7 @@ interface Props {
   onVerified: (userId?: string) => void;
   email?: string;
   title?: string;
+  shouldCreateUser?: boolean;
 }
 
 // Helper function to mask email for display
@@ -25,6 +26,7 @@ const EmailOTPVerificationModal: React.FC<Props> = ({
   onClose, 
   onVerified, 
   email: initialEmail,
+  shouldCreateUser = true,
 }) => {
   const [step, setStep] = useState<'sending' | 'otp' | 'no_email' | 'error'>('sending');
   const [email, setEmail] = useState(initialEmail || '');
@@ -62,7 +64,7 @@ const EmailOTPVerificationModal: React.FC<Props> = ({
       const { data, error: otpError } = await supabase.auth.signInWithOtp({
         email: emailAddr,
         options: {
-          shouldCreateUser: true,
+          shouldCreateUser,
         }
       });
 
@@ -173,7 +175,7 @@ const EmailOTPVerificationModal: React.FC<Props> = ({
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: email,
         options: {
-          shouldCreateUser: true,
+          shouldCreateUser,
         }
       });
 
