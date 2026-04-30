@@ -428,11 +428,332 @@ export function mapToPdfFieldValues(
   };
 }
 
+// A4 page size in points (jsPDF unit).
+const A4_PAGE_WIDTH_PT = 595.28;
+const A4_PAGE_HEIGHT_PT = 841.89;
+
+// Page margins in points. Tighter than the original Word `@page` rule (which
+// used 113.4pt / 56.7pt) so the appointment letter fits in 2 pages even when
+// the user's browser renders fonts wider than the original Chromium output.
+const PDF_MARGIN_TOP_PT = 48;
+const PDF_MARGIN_BOTTOM_PT = 36;
+const PDF_MARGIN_SIDE_PT = 36;
+
+const PDF_CONTENT_WIDTH_PT = A4_PAGE_WIDTH_PT - PDF_MARGIN_SIDE_PT * 2;
+const PDF_CONTENT_HEIGHT_PT = A4_PAGE_HEIGHT_PT - PDF_MARGIN_TOP_PT - PDF_MARGIN_BOTTOM_PT;
+
+// Safety cap: if browser rendering still produces more than this many pages,
+// the image is proportionally shrunk so it fits exactly within the cap.
+const MAX_PAGES = 2;
+
+// Render the host at the same width as the PDF content area so html2canvas
+// produces an image that maps 1:1 onto the page's content rectangle. Using
+// the natural Word width keeps line-wrapping identical to the original.
+// 1pt = 96/72 px at 96 dpi → multiply by 1.3333 to get CSS pixels.
+const HOST_WIDTH_PX = Math.round(PDF_CONTENT_WIDTH_PT * (96 / 72));
+
+/**
+ * Mounts a hidden host in the main document with the parsed Word HTML's
+ * `<style>` blocks plus its body content. Same-document mounting is required
+ * because html2canvas can't reliably traverse cross-document trees (iframes).
+ *
+ * The host has NO padding — page margins are applied later in `addImage`
+ * positioning so they stay consistent across every PDF page.
+ */
+function mountHtmlIntoHiddenHost(html: string): HTMLDivElement {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.position = "absolute";
+  host.style.left = "-10000px";
+  host.style.top = "0";
+  host.style.width = `${HOST_WIDTH_PX}px`;
+  host.style.boxSizing = "border-box";
+  host.style.padding = "0";
+  host.style.background = "#ffffff";
+  host.style.color = "#000000";
+  host.style.pointerEvents = "none";
+
+  parsed.head.querySelectorAll("style").forEach((styleNode) => {
+    host.appendChild(styleNode.cloneNode(true));
+  });
+
+  // Re-parent body children so all Word styles still apply via class selectors.
+  const bodyChildren = Array.from(parsed.body.childNodes);
+  bodyChildren.forEach((node) => host.appendChild(node.cloneNode(true)));
+
+  document.body.appendChild(host);
+  return host;
+}
+
+// Cache the dynamic imports so the second preview pays zero module-load cost.
+let cachedPdfDeps:
+  | Promise<{
+      html2canvas: typeof import("html2canvas").default;
+      JsPdfCtor: typeof import("jspdf").jsPDF;
+    }>
+  | null = null;
+
+function loadPdfDeps() {
+  if (!cachedPdfDeps) {
+    cachedPdfDeps = Promise.all([import("html2canvas"), import("jspdf")]).then(
+      ([h2c, jsp]) => ({ html2canvas: h2c.default, JsPdfCtor: jsp.jsPDF })
+    );
+  }
+  return cachedPdfDeps;
+}
+
+/**
+ * Pre-warms the html2canvas + jsPDF chunks so the first Preview click after
+ * page load doesn't pay the dynamic-import cost. Safe to call multiple times.
+ * Schedule via `requestIdleCallback` from a top-level component if desired.
+ */
+export function prewarmPreviewPdfRuntime(): void {
+  if (typeof window === "undefined") return;
+  void loadPdfDeps();
+}
+
+async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
+  if (typeof window === "undefined") {
+    throw new Error("HTML→PDF conversion can only run in the browser.");
+  }
+
+  // Kick off the heavy dynamic imports in parallel with DOM mount + layout so
+  // module loading overlaps with rendering instead of running sequentially.
+  const depsPromise = loadPdfDeps();
+  const host = mountHtmlIntoHiddenHost(html);
+
+  try {
+    // Single RAF is enough — html2canvas re-reads layout itself before capture.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    const { html2canvas, JsPdfCtor } = await depsPromise;
+
+    // Capture scale chosen as a balance: 2.5-3× lands at ~190-225 dpi which
+    // stays crisp at modal zoom levels but keeps html2canvas + JPEG encoding
+    // fast enough to feel instant. (Going to 4× ~doubles generation time for
+    // a barely-perceptible sharpness gain after PDF.js downscales it.)
+    const dpr = window.devicePixelRatio || 1;
+    const captureScale = dpr >= 2 ? 2.5 : 3;
+    // `letterRendering` is a non-typed html2canvas option that forces per-character
+    // text rendering rather than batched word-level rendering — produces sharper
+    // text edges for small font sizes.
+    const canvas = await html2canvas(host, {
+      scale: captureScale,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      windowWidth: HOST_WIDTH_PX,
+      letterRendering: true,
+    } as Parameters<typeof html2canvas>[1]);
+
+    const pdf = new JsPdfCtor({ unit: "pt", format: "a4", orientation: "portrait" });
+
+    // Map canvas pixels to PDF points using the content rectangle width.
+    const naturalPxPerPt = canvas.width / PDF_CONTENT_WIDTH_PT;
+    const naturalContentHeightPt = canvas.height / naturalPxPerPt;
+    const naturalPages = Math.ceil(naturalContentHeightPt / PDF_CONTENT_HEIGHT_PT);
+
+    // If content overflows MAX_PAGES, proportionally shrink the rendered image
+    // so it fits exactly within MAX_PAGES (text gets slightly smaller, but
+    // the layout stays intact).
+    const fitScale =
+      naturalPages > MAX_PAGES
+        ? (MAX_PAGES * PDF_CONTENT_HEIGHT_PT) / naturalContentHeightPt
+        : 1;
+
+    const effectiveContentWidthPt = PDF_CONTENT_WIDTH_PT * fitScale;
+    const effectivePxPerPt = canvas.width / effectiveContentWidthPt;
+    const pageContentCanvasHeightPx = Math.floor(
+      PDF_CONTENT_HEIGHT_PT * effectivePxPerPt
+    );
+    // Center horizontally if shrunk so the page doesn't look left-biased.
+    const xOffsetPt =
+      PDF_MARGIN_SIDE_PT + (PDF_CONTENT_WIDTH_PT - effectiveContentWidthPt) / 2;
+
+    let consumed = 0;
+    let pageIndex = 0;
+    while (consumed < canvas.height) {
+      const sliceHeightPx = Math.min(
+        pageContentCanvasHeightPx,
+        canvas.height - consumed
+      );
+      const sliceCanvas = document.createElement("canvas");
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = sliceHeightPx;
+      const ctx = sliceCanvas.getContext("2d");
+      if (!ctx) break;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+      ctx.drawImage(
+        canvas,
+        0, consumed, canvas.width, sliceHeightPx,
+        0, 0, canvas.width, sliceHeightPx
+      );
+      // JPEG q=0.95 is ~5× faster to encode than PNG and produces roughly
+      // 4-5× smaller PDFs at near-identical visual quality for text on white.
+      const dataUrl = sliceCanvas.toDataURL("image/jpeg", 0.95);
+      const sliceHeightPt = sliceHeightPx / effectivePxPerPt;
+      if (pageIndex > 0) pdf.addPage();
+      pdf.addImage(
+        dataUrl,
+        "JPEG",
+        xOffsetPt,
+        PDF_MARGIN_TOP_PT,
+        effectiveContentWidthPt,
+        sliceHeightPt,
+        undefined,
+        "FAST"
+      );
+      consumed += sliceHeightPx;
+      pageIndex += 1;
+    }
+
+    return pdf.output("blob");
+  } finally {
+    host.remove();
+  }
+}
+
+/**
+ * Wraps the populated HTML with a `@page` margin override + Paged.js
+ * (loaded from a CDN inside the iframe so it costs nothing in the app bundle).
+ *
+ * Paged.js is a CSS Paged Media polyfill: it interprets `@page` rules and
+ * splits the document into actual A4 page boxes (`.pagedjs_page`), which we
+ * then style as white sheets with drop shadow so the preview looks like the
+ * reference `architect appointment letter.pdf` (multiple pages, not one
+ * scrolling document). Native browser text rendering = razor-sharp at any
+ * zoom; Print/Save as PDF uses the same `@page` rules → vector PDF output
+ * matches the on-screen pagination exactly.
+ */
+function injectPaginatedStyles(html: string): string {
+  const head = `
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* A4 with tight vertical margins (36pt top + bottom) and demo-matching
+     horizontal margins (56.7pt sides). The slim vertical margins give us
+     ~196pt extra content height across the 2 pages so all content fits.
+     Paged.js requires shorthand margin inside @page (longhand variants are
+     ignored), so override both the unnamed default and the named
+     @page WordSection1 rule that the Word HTML binds the body to. */
+  @page {
+    size: A4;
+    margin: 36pt 56.7pt;
+  }
+  @page WordSection1 {
+    size: A4;
+    margin: 36pt 56.7pt;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #f3f4f6;
+  }
+
+  /* Carlito is metric-compatible with Calibri (Google's open-source clone).
+     Forcing it everywhere gives consistent line widths regardless of which
+     fonts the user has installed locally — without this the browser's
+     default fallback (Times/Arial) wraps wider and overflows to 3 pages. */
+  body, body * {
+    font-family: 'Carlito', 'Calibri', 'Helvetica', sans-serif !important;
+  }
+
+  /* The Word template has a 80pt top gap before the signature block which,
+     combined with page-break-inside:avoid, can shove the block onto a fresh
+     page and create a wasted 3rd page. Squash that gap. */
+  div[style*="margin-top:80.0pt"],
+  div[style*="margin-top: 80.0pt"] {
+    margin-top: 24pt !important;
+  }
+
+  /* Keep the closing italic line ("For information & record please.") with
+     the C.C. block above it instead of letting Paged.js push it to a 3rd
+     page. We target the last paragraph inside the WordSection1 wrapper. */
+  div.WordSection1 > p:last-child,
+  div.WordSection1 > p.MsoNormal:last-of-type {
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+
+  /* Collapse empty Word paragraph spacers so the final line has more room
+     to fit on page 2. (These are <p>...&nbsp;</p> rhythm fillers.) */
+  div.WordSection1 > p.MsoNormal:nth-last-child(2) {
+    margin: 0 !important;
+    line-height: 1 !important;
+    font-size: 0 !important;
+  }
+
+  /* Paged.js page boxes — styled to look like real sheets of A4 paper. */
+  .pagedjs_pages {
+    padding: 12px 0;
+  }
+  .pagedjs_page {
+    background: #ffffff;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    margin: 0 auto 16px auto;
+  }
+
+  /* During print, drop the shadow / background — only the actual content. */
+  @media print {
+    html, body { background: #ffffff; }
+    .pagedjs_pages { padding: 0; }
+    .pagedjs_page { box-shadow: none; margin: 0; }
+  }
+</style>
+<script src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></script>`;
+  // Insert before </head>; if no head tag, prepend so styles still parse.
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${head}</head>`);
+  }
+  return head + html;
+}
+
+/**
+ * Architect Licensed Surveyor: fetch populated HTML for direct iframe rendering.
+ * Native browser text = razor-sharp preview at any zoom, instant load (no
+ * html2canvas / jsPDF cost). Vector PDF output via the modal's Print/Save action.
+ */
+export async function generateApplicationPreviewHtml(
+  fields: TemplateFields,
+  templateType: TemplateType,
+  source?: ApplicationPreviewSource
+): Promise<string> {
+  const formValues = mapToPdfFieldValues(fields, source);
+
+  const response = await fetch("/api/application-preview-html", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templateType,
+      fields: formValues,
+      ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
+    }),
+  });
+
+  if (response.ok) {
+    const rawHtml = await response.text();
+    return injectPaginatedStyles(rawHtml);
+  }
+
+  const payload = await response.json().catch(() => null);
+  throw new Error(
+    typeof payload?.error === "string"
+      ? payload.error
+      : `HTML preview load failed (${response.status}).`
+  );
+}
+
 /**
  * Primary path: DOCX placeholders replaced server-side, then converted to PDF.
  *
- * Converter order in `/api/application-preview-docx`:
- * `docx-pdf-converter` package first, then external converter (if configured), then local LibreOffice.
+ * Architect Licensed Surveyor uses an HTML template — the API returns populated
+ * HTML and the browser renders it to a PDF blob via `html2canvas` + `jspdf`.
+ * This avoids shipping Chromium/Puppeteer in the server bundle.
+ *
  * Other template types use DOCX placeholders replaced server-side, then converted to PDF via LibreOffice
  * (local `soffice` or remote Gotenberg — see `/api/application-preview-docx`).
  * On Vercel, set DOCX_CONVERTER_URL to your self-hosted Gotenberg `/forms/libreoffice/convert`.
@@ -458,7 +779,8 @@ export async function generateApplicationPreviewPdf(
     });
 
     if (htmlResponse.ok) {
-      return htmlResponse.blob();
+      const html = await htmlResponse.text();
+      return convertHtmlToPdfBlobInBrowser(html);
     }
 
     const htmlPayload = await htmlResponse.json().catch(() => null);

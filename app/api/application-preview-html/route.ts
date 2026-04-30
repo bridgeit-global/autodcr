@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
 import type { TemplateType } from "@/app/templates/templateGenerators";
 
 export const runtime = "nodejs";
@@ -67,31 +65,7 @@ async function resolveHtmlTemplate(templateType: TemplateType): Promise<string> 
   throw new Error(`HTML template not found: ${fileName}`);
 }
 
-async function launchForPdf() {
-  if (process.env.VERCEL) {
-    const executablePath = await chromium.executablePath();
-    return puppeteer.launch({
-      args: chromium.args,
-      executablePath,
-      headless: true,
-    });
-  }
-
-  const localChromiumPath = process.env.CHROME_EXECUTABLE_PATH?.trim();
-  if (localChromiumPath) {
-    return puppeteer.launch({
-      executablePath: localChromiumPath,
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-  }
-
-  const puppeteerPkg = await import("puppeteer");
-  return puppeteerPkg.launch({ headless: true });
-}
-
 export async function POST(request: NextRequest) {
-  let browser: Awaited<ReturnType<typeof launchForPdf>> | null = null;
   try {
     const body = (await request.json()) as {
       templateType?: TemplateType;
@@ -117,38 +91,18 @@ export async function POST(request: NextRequest) {
         project_Name_Architect_LS: body.fields["project_Name_Architect/L.S"] ?? "",
         owner_debug: body.owner_debug ?? null,
       });
-      try {
-        console.log(
-          "[application-preview-html] owner/company debug full",
-          JSON.stringify(body.owner_debug ?? null, null, 2)
-        );
-      } catch {
-        // ignore
-      }
     }
 
-    browser = await launchForPdf();
-    const page = await browser.newPage();
-    await page.setContent(finalHtml, { waitUntil: "networkidle0" });
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      preferCSSPageSize: true,
-    });
-
-    return new NextResponse(new Uint8Array(pdfBuffer), {
+    // Return the populated HTML; the client converts it to PDF using html2pdf.js
+    // (no server-side Chromium / Puppeteer needed).
+    return new NextResponse(finalHtml, {
       headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": 'inline; filename="application-preview.pdf"',
+        "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store, no-cache, must-revalidate",
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to generate PDF from HTML.";
+    const message = error instanceof Error ? error.message : "Failed to render HTML preview.";
     return NextResponse.json({ error: message }, { status: 500 });
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => undefined);
-    }
   }
 }
