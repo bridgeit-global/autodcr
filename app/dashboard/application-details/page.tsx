@@ -6,10 +6,12 @@ import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import {
+  generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
   mapSelectedApplicationToTemplate,
   pickConsultantLookupUserIdsFromProject,
+  prewarmPreviewPdfRuntime,
 } from "@/app/templates/applicationPreview";
 
 type PreviewProjectData = {
@@ -215,6 +217,7 @@ export default function ApplicationDetailsPage() {
   const [applicationCreatedAt, setApplicationCreatedAt] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
@@ -259,6 +262,26 @@ export default function ApplicationDetailsPage() {
       }
     };
   }, [previewUrl]);
+
+  // Pre-load the html2canvas + jsPDF chunks while the user reads the page so
+  // the first Preview click feels instant rather than spending ~300-500ms on
+  // dynamic imports.
+  useEffect(() => {
+    if (!isReadOnlyMode) return;
+    type IdleHandle = number;
+    type IdleWindow = Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, opts?: { timeout: number }) => IdleHandle;
+      cancelIdleCallback?: (handle: IdleHandle) => void;
+    };
+    const w = window as IdleWindow;
+    const handle = w.requestIdleCallback
+      ? w.requestIdleCallback(() => prewarmPreviewPdfRuntime(), { timeout: 2000 })
+      : (window.setTimeout(prewarmPreviewPdfRuntime, 800) as unknown as IdleHandle);
+    return () => {
+      if (w.cancelIdleCallback) w.cancelIdleCallback(handle);
+      else window.clearTimeout(handle as unknown as number);
+    };
+  }, [isReadOnlyMode]);
 
   const handlePreview = async () => {
     try {
@@ -420,7 +443,7 @@ export default function ApplicationDetailsPage() {
         clientCompanyDesignation,
         projectData,
       });
-      const blob = await generateApplicationPreviewPdf(fields, templateType, {
+      const previewSource = {
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
@@ -444,13 +467,35 @@ export default function ApplicationDetailsPage() {
         },
         consultantLookupUserIds,
         projectData,
-      });
+      };
+
+      // Always release the previous blob URL before opening a new preview.
       if (previewUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-      setPreviewOpen(true);
+
+      if (templateType === "Architect Licensed Surveyor") {
+        // HTML iframe path: razor-sharp native rendering, instant load,
+        // vector PDF available via the modal's Print/Save button.
+        const html = await generateApplicationPreviewHtml(
+          fields,
+          templateType,
+          previewSource
+        );
+        setPreviewUrl(null);
+        setPreviewHtml(html);
+        setPreviewOpen(true);
+      } else {
+        const blob = await generateApplicationPreviewPdf(
+          fields,
+          templateType,
+          previewSource
+        );
+        const url = URL.createObjectURL(blob);
+        setPreviewHtml(null);
+        setPreviewUrl(url);
+        setPreviewOpen(true);
+      }
     } catch (error: unknown) {
       console.error("Preview generation failed:", error);
       const message = error instanceof Error ? error.message : "Failed to generate preview.";
@@ -520,6 +565,7 @@ export default function ApplicationDetailsPage() {
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
         fileUrl={previewUrl}
+        htmlContent={previewHtml}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
       />
     </div>
