@@ -44,6 +44,8 @@ export default function DocumentPreviewModal({
   if (!open || !hasContent) return null;
   if (typeof window === "undefined") return null;
 
+  const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
+
   const handlePrint = () => {
     const win = iframeRef.current?.contentWindow;
     if (!win) return;
@@ -74,7 +76,11 @@ export default function DocumentPreviewModal({
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
+            className={
+              isHtmlPreview
+                ? "bg-white w-fit max-w-[calc(100vw-2rem)] rounded-2xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
+                : "bg-white w-full max-w-5xl rounded-2xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
+            }
             onClick={(e) => e.stopPropagation()}
             initial={{ y: -20, opacity: 0, scale: 0.98 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
@@ -122,23 +128,30 @@ export default function DocumentPreviewModal({
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 bg-gray-50">
-              <div
-                className="rounded-xl bg-white border border-gray-200 overflow-hidden"
-                style={{ minHeight: "600px" }}
-              >
-                {htmlContent && !fileUrl ? (
-                  <iframe
-                    ref={iframeRef}
-                    title={title || "Document Preview"}
-                    srcDoc={htmlContent}
-                    className="block w-full bg-white border-0"
-                    style={{ height: "78vh" }}
-                  />
-                ) : fileUrl ? (
+            <div className="flex-1 overflow-auto p-3 bg-gray-50">
+              {htmlContent && !fileUrl ? (
+                <div className="flex justify-center">
+                  <div
+                    className="rounded-xl bg-white border border-gray-200 overflow-hidden"
+                    style={{ width: "min(800px, calc(100vw - 2rem))", minHeight: "600px" }}
+                  >
+                    <iframe
+                      ref={iframeRef}
+                      title={title || "Document Preview"}
+                      srcDoc={htmlContent}
+                      className="block w-full bg-white border-0"
+                      style={{ height: "78vh" }}
+                    />
+                  </div>
+                </div>
+              ) : fileUrl ? (
+                <div
+                  className="rounded-xl bg-white border border-gray-200 overflow-hidden"
+                  style={{ minHeight: "600px" }}
+                >
                   <PlainPDFViewer fileUrl={fileUrl} />
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>
           </motion.div>
         </motion.div>
