@@ -380,6 +380,8 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
                       type={showConfirmPassword ? "text" : "password"}
                       className="border rounded-lg px-3 py-2 w-full pr-10 text-black focus:ring-2 focus:ring-blue-500 outline-none"
                       placeholder="Re-enter new password"
+                      onPaste={(e) => e.preventDefault()}
+                      onDrop={(e) => e.preventDefault()}
                     />
                     <button
                       type="button"
