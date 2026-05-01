@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { isExtensionAvailable, sendBridgeCommand } from "@/app/lib/bridge/bridgeClient";
 import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import {
-  CertInfo,
   ListCertsPayload,
   ListCertsResult,
   ListSlotsPayload,
@@ -89,7 +88,6 @@ export default function BridgePocPage() {
   const [signedPdfUrl, setSignedPdfUrl] = useState<string>("");
 
   const [availableSlots, setAvailableSlots] = useState<ListSlotsResult["slots"]>([]);
-  const [availableCerts, setAvailableCerts] = useState<CertInfo[]>([]);
   const [selectedSlotId, setSelectedSlotId] = useState("");
   const [selectedCertId, setSelectedCertId] = useState("");
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -215,31 +213,26 @@ export default function BridgePocPage() {
     }
   };
 
-  const fetchCertsForSlot = async (slotId: number) => {
-    if (certsLoading) return;
+  const fetchCertsForSlot = async (slotId: number): Promise<string> => {
+    if (certsLoading) return selectedCertId;
     setCertsLoading(true);
     const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId });
     if (!certsResponse.ok || !certsResponse.result) {
-      setAvailableCerts([]);
       setSelectedCertId("");
       setCertsLoading(false);
-      return;
+      return "";
     }
 
     const certs = certsResponse.result.certs ?? [];
-    setAvailableCerts(certs);
     const resolvedCertId = certs[0]?.id || "";
     setSelectedCertId(resolvedCertId);
     setCertsLoading(false);
+    return resolvedCertId;
   };
 
   const runUploadedPdfSigningFlow = async () => {
     if (!pdfToSignFile) {
       setPdfFlowResult("Please choose a PDF file first.");
-      return;
-    }
-    if (!selectedCertId.trim()) {
-      setPdfFlowResult("Please select certId before starting signing.");
       return;
     }
     const selectedSlotIdNumber = Number(selectedSlotId);
@@ -257,6 +250,15 @@ export default function BridgePocPage() {
     }
 
     try {
+      let resolvedCertId = selectedCertId.trim();
+      if (!resolvedCertId) {
+        resolvedCertId = (await fetchCertsForSlot(selectedSlotIdNumber)).trim();
+      }
+      if (!resolvedCertId) {
+        setPdfFlowResult("No certificate available for selected slot.");
+        return;
+      }
+
       const pdfBase64 = await blobToBase64(pdfToSignFile);
       const chunks = splitBase64ToChunks(pdfBase64);
       if (chunks.length === 0) {
@@ -269,7 +271,7 @@ export default function BridgePocPage() {
         jobId,
         totalChunks: chunks.length,
         slotId: selectedSlotIdNumber,
-        certId: selectedCertId.trim(),
+        certId: resolvedCertId,
         fileName: pdfToSignFile.name || startFileName || undefined,
         contentType: pdfToSignFile.type || startContentType || "application/pdf",
         pin: startPinHint || undefined,
@@ -316,6 +318,8 @@ export default function BridgePocPage() {
           status: "success",
           fileName: `signed-${pdfToSignFile.name || "document.pdf"}`,
           sizeBytes: signedBlob.size,
+          slotId: selectedSlotIdNumber,
+          certId: resolvedCertId,
           jobId: end.result.jobId || jobId,
         })
       );
@@ -461,7 +465,7 @@ export default function BridgePocPage() {
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Upload PDF and Auto-Sign (DSC)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Click the slot dropdown to load slots, then click certificate dropdown to load certs for that slot.
+            Select slotId. certId is auto-derived from slot metadata in the background.
           </p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="text-sm md:col-span-2">
@@ -491,7 +495,6 @@ export default function BridgePocPage() {
                   const raw = e.target.value;
                   if (!raw) {
                     setSelectedSlotId("");
-                    setAvailableCerts([]);
                     setSelectedCertId("");
                     return;
                   }
@@ -512,41 +515,13 @@ export default function BridgePocPage() {
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">certId (required)</span>
-              <select
-                value={selectedCertId}
-                onFocus={() => {
-                  const parsed = Number(selectedSlotId);
-                  if (selectedSlotId && !Number.isNaN(parsed) && availableCerts.length === 0) {
-                    void fetchCertsForSlot(parsed);
-                  }
-                }}
-                onClick={() => {
-                  const parsed = Number(selectedSlotId);
-                  if (selectedSlotId && !Number.isNaN(parsed) && availableCerts.length === 0) {
-                    void fetchCertsForSlot(parsed);
-                  }
-                }}
-                onChange={(e) => {
-                  setSelectedCertId(e.target.value);
-                }}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              >
-                <option value="">
-                  {!selectedSlotId
-                    ? "Select slot first"
-                    : certsLoading
-                      ? "Loading certificates..."
-                      : "Select certificate"}
-                </option>
-                {availableCerts.map((cert) => (
-                  <option key={`${cert.slotId}-${cert.id}`} value={cert.id}>
-                    {cert.label || cert.subject || cert.id}
-                  </option>
-                ))}
-              </select>
+              <span className="mt-1 block text-xs text-gray-600">
+                {certsLoading
+                  ? "Loading certificate metadata..."
+                  : selectedCertId
+                    ? "certId auto-selected for this slot."
+                    : "certId will be resolved automatically when signing."}
+              </span>
             </label>
             <label className="text-sm md:col-span-2">
               <span className="mb-1 block font-medium text-gray-700">PIN (optional)</span>
