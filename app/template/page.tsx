@@ -59,6 +59,12 @@ type PendingBridgeRequest = {
   timeoutId: number;
 };
 
+const mapBridgeError = (error: unknown): Error => {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error);
+  return new Error("Connector request failed.");
+};
+
 const PlainPDFViewer = dynamic(() => import("../components/PlainPDFViewer"), {
   ssr: false,
 }) as React.ComponentType<{ fileUrl: string }>;
@@ -387,6 +393,24 @@ export default function TemplatePage() {
     }
   };
 
+  const cancelPendingBridgeRequests = (reason: string) => {
+    const pendingRequests = pendingBridgeRequestsRef.current;
+    pendingRequests.forEach((pending) => {
+      window.clearTimeout(pending.timeoutId);
+      pending.reject(new Error(reason));
+    });
+    pendingRequests.clear();
+  };
+
+  const closeDscModal = () => {
+    if (isSigning) return;
+    setIsDscModalOpen(false);
+    setIsSelectingArea(false);
+    setSelectionRect(null);
+    setSelectionPdfRect(null);
+    cancelPendingBridgeRequests("Bridge request cancelled.");
+  };
+
   useEffect(() => {
     const pendingRequests = pendingBridgeRequestsRef.current;
 
@@ -409,11 +433,7 @@ export default function TemplatePage() {
 
     return () => {
       window.removeEventListener("message", handleBridgeResponse);
-      pendingRequests.forEach((pending) => {
-        window.clearTimeout(pending.timeoutId);
-        pending.reject(new Error("Bridge request cancelled."));
-      });
-      pendingRequests.clear();
+      cancelPendingBridgeRequests("Bridge request cancelled.");
     };
   }, []);
 
@@ -447,8 +467,9 @@ export default function TemplatePage() {
     });
 
     if (!response.ok) {
-      const message = response.error?.message || "Connector request failed.";
-      throw new Error(message);
+      const errorCode = response.error?.code?.trim();
+      const message = response.error?.message?.trim() || "Connector request failed.";
+      throw new Error(errorCode ? `${message} (${errorCode})` : message);
     }
 
     return response.result;
@@ -512,8 +533,8 @@ export default function TemplatePage() {
     setSelectionPdfRect(null);
     try {
       const [pingResult, certsResult] = await Promise.all([
-        sendBridgeRequest("PING"),
-        sendBridgeRequest("LIST_CERTS"),
+        sendBridgeRequest("PING", { v: BRIDGE_VERSION }),
+        sendBridgeRequest("LIST_CERTS", { v: BRIDGE_VERSION }),
       ]);
 
       const pingMessage =
@@ -534,7 +555,7 @@ export default function TemplatePage() {
         setDscError("No DSC certificates were returned by the connector.");
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to load connector info.";
+      const message = mapBridgeError(error).message || "Failed to load connector info.";
       console.error("Failed to load connector info:", error);
       setDscStatus({
         connected: false,
@@ -577,10 +598,7 @@ export default function TemplatePage() {
         `Connector is reachable.${tokenHint ? ` ${tokenHint}` : ""}`
       );
     } catch (error: unknown) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Connector check failed. Install extension/native host and retry.";
+      const message = mapBridgeError(error).message || "Connector check failed. Install extension/native host and retry.";
       setDscStatus({
         connected: false,
         message: "Connector unavailable",
@@ -653,13 +671,10 @@ export default function TemplatePage() {
         URL.revokeObjectURL(generatedPdfUrl);
       }
       setGeneratedPdfUrl(signedPdfUrl);
-      setIsDscModalOpen(false);
-      setIsSelectingArea(false);
-      setSelectionRect(null);
-      setSelectionPdfRect(null);
+      closeDscModal();
       setDscPin("");
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Error while signing PDF.";
+      const message = mapBridgeError(error).message || "Error while signing PDF.";
       console.error("Error signing PDF:", error);
       setDscError(
         message ||
@@ -1131,10 +1146,7 @@ export default function TemplatePage() {
               <button
                 className="text-gray-400 hover:text-gray-600"
                 onClick={() => {
-                  if (!isSigning) {
-                    setIsDscModalOpen(false);
-                    setIsSelectingArea(false);
-                  }
+                  closeDscModal();
                 }}
               >
                 ✕
@@ -1276,12 +1288,7 @@ export default function TemplatePage() {
                   <button
                     className="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-800"
                     onClick={() => {
-                      if (!isSigning) {
-                        setIsDscModalOpen(false);
-                        setIsSelectingArea(false);
-                        setSelectionRect(null);
-                        setSelectionPdfRect(null);
-                      }
+                      closeDscModal();
                     }}
                     disabled={isSigning}
                   >
@@ -1294,9 +1301,3 @@ export default function TemplatePage() {
     </div>
   );
 }
-
-// import DSCSigner from '../components/DSCSigner';
-   
-// export default function MyPage() {
-//   return <DSCSigner />;
-// }
