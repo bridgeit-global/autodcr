@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 
 import { isExtensionAvailable, sendBridgeCommand } from "@/app/lib/bridge/bridgeClient";
-import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
+import { mapBridgeError, mappedErrorForCode } from "@/app/lib/bridge/errorMapper";
 import {
+  CertInfo,
   ListCertsPayload,
   ListCertsResult,
   ListSlotsPayload,
@@ -19,7 +20,12 @@ import {
   SignPdfStartPayload,
   SignPdfStartResult,
 } from "@/app/lib/bridge/protocol";
-import { base64ToBlob, blobToBase64, chunkBase64 as splitBase64ToChunks } from "@/app/lib/bridge/pdfChunker";
+import {
+  CHUNK_SIZE,
+  base64ToBlob,
+  blobToBase64,
+  chunkBase64 as splitBase64ToChunks,
+} from "@/app/lib/bridge/pdfChunker";
 
 const pretty = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -57,6 +63,11 @@ interface RunResult<T> {
   result: T | null;
 }
 
+interface FlowErrorDisplay {
+  title: string;
+  detail: string;
+}
+
 const makeDefaultApiState = (): ApiState => ({
   loading: false,
   status: "idle",
@@ -90,18 +101,23 @@ export default function BridgePocPage() {
   const [signedPdfUrl, setSignedPdfUrl] = useState<string>("");
 
   const [listCertsSlotId, setListCertsSlotId] = useState(0);
+  const [availableSlots, setAvailableSlots] = useState<ListSlotsResult["slots"]>([]);
+  const [availableCerts, setAvailableCerts] = useState<CertInfo[]>([]);
+  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
+  const [selectedCertId, setSelectedCertId] = useState("");
+  const [discoverLoading, setDiscoverLoading] = useState(false);
 
   const [startJobId, setStartJobId] = useState(createJobId);
-  const [startTotalChunks, setStartTotalChunks] = useState(1);
+  const [startTotalChunks] = useState(1);
   const [startSlotId, setStartSlotId] = useState(0);
   const [startCertId, setStartCertId] = useState("");
-  const [startFileName, setStartFileName] = useState("generated.pdf");
-  const [startContentType, setStartContentType] = useState("application/pdf");
+  const [startFileName] = useState("generated.pdf");
+  const [startContentType] = useState("application/pdf");
   const [startPinHint, setStartPinHint] = useState("");
 
   const [chunkJobId, setChunkJobId] = useState("");
-  const [chunkIndex, setChunkIndex] = useState(0);
-  const [chunkBase64, setChunkBase64] = useState(DEFAULT_SAMPLE_CHUNK);
+  const [chunkIndex] = useState(0);
+  const [chunkBase64] = useState(DEFAULT_SAMPLE_CHUNK);
 
   const [endJobId, setEndJobId] = useState("");
 
@@ -217,37 +233,20 @@ export default function BridgePocPage() {
     });
   };
 
-  const runSignStart = async () => {
-    const payload: SignPdfStartPayload = {
-      jobId: startJobId,
-      totalChunks: Number(startTotalChunks),
-      slotId: Number(startSlotId),
-      certId: startCertId.trim(),
-      fileName: startFileName || undefined,
-      contentType: startContentType || undefined,
-      pin: startPinHint || undefined,
-    };
-    const outcome = await runCommand<SignPdfStartPayload, SignPdfStartResult>("SIGN_PDF_START", payload);
-    if (outcome.ok) {
-      setChunkJobId(startJobId);
-      setEndJobId(startJobId);
+  const fetchCertsForSlot = async (slotId: number) => {
+    const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId });
+    if (!certsResponse.ok || !certsResponse.result) {
+      setAvailableCerts([]);
+      setSelectedCertId("");
+      setStartCertId("");
+      return;
     }
-  };
 
-  const runSignChunk = async () => {
-    const payload: SignPdfChunkPayload = {
-      jobId: chunkJobId,
-      index: Number(chunkIndex),
-      chunkBase64: chunkBase64.trim(),
-    };
-    await runCommand<SignPdfChunkPayload, SignPdfChunkResult>("SIGN_PDF_CHUNK", payload);
-  };
-
-  const runSignEnd = async () => {
-    const payload: SignPdfEndPayload = {
-      jobId: endJobId,
-    };
-    await runCommand<SignPdfEndPayload, SignPdfFinalResult>("SIGN_PDF_END", payload);
+    const certs = certsResponse.result.certs ?? [];
+    setAvailableCerts(certs);
+    const resolvedCertId = certs[0]?.id || "";
+    setSelectedCertId(resolvedCertId);
+    setStartCertId(resolvedCertId);
   };
 
   const runAllChecks = async () => {
@@ -342,8 +341,12 @@ export default function BridgePocPage() {
       setPdfFlowResult("Please choose a PDF file first.");
       return;
     }
-    if (!startCertId.trim()) {
-      setPdfFlowResult("Please provide certId before starting signing.");
+    if (!selectedCertId.trim()) {
+      setPdfFlowResult("Please select certId before starting signing.");
+      return;
+    }
+    if (selectedSlotId === null) {
+      setPdfFlowResult("Please select slotId before starting signing.");
       return;
     }
 
@@ -370,8 +373,8 @@ export default function BridgePocPage() {
       const startPayload: SignPdfStartPayload = {
         jobId,
         totalChunks: chunks.length,
-        slotId: Number(startSlotId),
-        certId: startCertId.trim(),
+        slotId: Number(selectedSlotId),
+        certId: selectedCertId.trim(),
         fileName: pdfToSignFile.name || startFileName || undefined,
         contentType: pdfToSignFile.type || startContentType || "application/pdf",
         pin: startPinHint || undefined,
@@ -395,7 +398,9 @@ export default function BridgePocPage() {
           chunkBase64: chunks[index],
         });
         if (!chunk.ok) {
-          setPdfFlowResult(`Signing failed at chunk ${index + 1}/${chunks.length}.`);
+          setPdfFlowResult(
+            `Signing failed at chunk ${index + 1}/${chunks.length}. Restart with a new jobId.`
+          );
           return;
         }
       }
@@ -420,8 +425,9 @@ export default function BridgePocPage() {
         })
       );
     } catch (error: unknown) {
+      const display = toFlowError(error);
       setPdfFlowProgress("Failed.");
-      setPdfFlowResult(pretty({ status: "failed", error: mapBridgeError(error) }));
+      setPdfFlowResult(pretty({ status: "failed", title: display.title, detail: display.detail }));
     } finally {
       setPdfFlowLoading(false);
     }
@@ -437,6 +443,118 @@ export default function BridgePocPage() {
     if (status === "success") return "text-emerald-700";
     if (status === "error") return "text-red-700";
     return "text-gray-600";
+  };
+
+  const toFlowError = (error: unknown): FlowErrorDisplay => {
+    const mapped = mapBridgeError(error);
+    if (
+      mapped.code === "NO_EXTENSION" ||
+      mapped.code === "NATIVE_DISCONNECTED" ||
+      mapped.code === "NATIVE_SEND_FAILED" ||
+      mapped.code === "NATIVE_TIMEOUT"
+    ) {
+      return {
+        title: "Bridge setup issue",
+        detail:
+          "Install or reconnect the AutoDCR extension/native host, then reload this page and retry.",
+      };
+    }
+    if (mapped.code === "PIN_CANCELLED") {
+      return {
+        title: mapped.message,
+        detail: "PIN entry was cancelled. Retry signing and enter PIN to continue.",
+      };
+    }
+    if (mapped.code === "UNKNOWN_JOB" || mapped.code === "INVALID_CHUNK_INDEX") {
+      return {
+        title: mapped.message,
+        detail: "Chunk/job mismatch detected. Restart signing with a fresh job.",
+      };
+    }
+    if (mapped.code === "CERT_NOT_FOUND" || mapped.code?.startsWith("PKCS11_")) {
+      return {
+        title: mapped.message,
+        detail: "Refresh slot/certificate selection and retry signing.",
+      };
+    }
+    return {
+      title: mapped.message,
+      detail: mapped.hint || "Please retry signing.",
+    };
+  };
+
+  const runDiscovery = async () => {
+    if (!isExtensionAvailable()) {
+      setPdfFlowResult(pretty(mappedErrorForCode("NO_EXTENSION")));
+      return;
+    }
+
+    setDiscoverLoading(true);
+    setPdfFlowProgress("Checking bridge readiness (PING)...");
+    setPdfFlowResult("(discovering)");
+
+    try {
+      const ping = await runCommand<PingPayload, PingResult>("PING", { v: PROTOCOL_VERSION });
+      if (!ping.ok) {
+        setPdfFlowResult("PING failed. Check extension/native host setup.");
+        return;
+      }
+
+      setPdfFlowProgress("Fetching slots...");
+      const slotsResponse = await runCommand<ListSlotsPayload, ListSlotsResult>("LIST_SLOTS", {
+        v: PROTOCOL_VERSION,
+      });
+      if (!slotsResponse.ok || !slotsResponse.result) {
+        setPdfFlowResult("LIST_SLOTS failed.");
+        return;
+      }
+
+      const slots = slotsResponse.result.slots ?? [];
+      setAvailableSlots(slots);
+      if (slots.length === 0) {
+        setAvailableCerts([]);
+        setSelectedSlotId(null);
+        setSelectedCertId("");
+        setPdfFlowProgress("No slots found.");
+        setPdfFlowResult("No token slot found. Insert token and retry discovery.");
+        return;
+      }
+
+      const resolvedSlotId = selectedSlotId ?? slots[0].slotId;
+      setSelectedSlotId(resolvedSlotId);
+      setStartSlotId(resolvedSlotId);
+      setListCertsSlotId(resolvedSlotId);
+
+      setPdfFlowProgress(`Fetching certs for slot ${resolvedSlotId}...`);
+      const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId: resolvedSlotId });
+      if (!certsResponse.ok || !certsResponse.result) {
+        setPdfFlowResult("LIST_CERTS failed.");
+        return;
+      }
+      const certs = certsResponse.result.certs ?? [];
+      setAvailableCerts(certs);
+      const resolvedCertId = selectedCertId || certs[0]?.id || "";
+      setSelectedCertId(resolvedCertId);
+      setStartCertId(resolvedCertId);
+      setPdfFlowProgress("Discovery completed.");
+      setPdfFlowResult(
+        pretty({
+          status: "ready",
+          tokenPresent: ping.result?.tokenPresent ?? null,
+          slots: slots.length,
+          certs: certs.length,
+          selectedSlotId: resolvedSlotId,
+          selectedCertId: resolvedCertId || null,
+          chunkSizeCap: CHUNK_SIZE,
+        })
+      );
+    } catch (error: unknown) {
+      const display = toFlowError(error);
+      setPdfFlowProgress("Discovery failed.");
+      setPdfFlowResult(pretty({ status: "failed", title: display.title, detail: display.detail }));
+    } finally {
+      setDiscoverLoading(false);
+    }
   };
 
   const renderApiPanel = (cmd: BridgeCommand) => {
@@ -570,8 +688,17 @@ export default function BridgePocPage() {
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Upload PDF and Auto-Sign (DSC)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            This runs the full bridge sequence automatically: SIGN_PDF_START, SIGN_PDF_CHUNK(s), SIGN_PDF_END.
+            Discovery: PING {">"} LIST_SLOTS {">"} LIST_CERTS. Signing: START {">"} CHUNKs {">"} END.
           </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button
+              onClick={() => void runDiscovery()}
+              disabled={discoverLoading || pdfFlowLoading}
+              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {discoverLoading ? "Discovering..." : "Discover Slot/Cert"}
+            </button>
+          </div>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="text-sm md:col-span-2">
               <span className="mb-1 block font-medium text-gray-700">PDF file</span>
@@ -583,20 +710,61 @@ export default function BridgePocPage() {
               />
             </label>
             <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">certId (required)</span>
-              <input
-                value={startCertId}
-                onChange={(e) => setStartCertId(e.target.value)}
-                placeholder="Hex CKA_ID"
+              <span className="mb-1 block font-medium text-gray-700">slotId (required)</span>
+              <select
+                value={selectedSlotId ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (!raw) {
+                    setSelectedSlotId(null);
+                    setAvailableCerts([]);
+                    setSelectedCertId("");
+                    setStartCertId("");
+                    return;
+                  }
+                  const value = Number(raw);
+                  setSelectedSlotId(value);
+                  setStartSlotId(value);
+                  setListCertsSlotId(value);
+                  if (!Number.isNaN(value)) {
+                    void fetchCertsForSlot(value);
+                  }
+                }}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
+              >
+                <option value="">Select slot</option>
+                {availableSlots.map((slot) => (
+                  <option key={slot.slotId} value={slot.slotId}>
+                    {slot.slotId} - {slot.label || "Unnamed slot"}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">slotId</span>
+              <span className="mb-1 block font-medium text-gray-700">certId (required)</span>
+              <select
+                value={selectedCertId}
+                onChange={(e) => {
+                  setSelectedCertId(e.target.value);
+                  setStartCertId(e.target.value);
+                }}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
+              >
+                <option value="">Select certificate</option>
+                {availableCerts.map((cert) => (
+                  <option key={`${cert.slotId}-${cert.id}`} value={cert.id}>
+                    {cert.label || cert.subject || cert.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm md:col-span-2">
+              <span className="mb-1 block font-medium text-gray-700">PIN (optional)</span>
               <input
-                type="number"
-                value={startSlotId}
-                onChange={(e) => setStartSlotId(Number(e.target.value))}
+                type="password"
+                value={startPinHint}
+                onChange={(e) => setStartPinHint(e.target.value)}
+                placeholder="Enter DSC PIN if host supports inline pin"
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               />
             </label>

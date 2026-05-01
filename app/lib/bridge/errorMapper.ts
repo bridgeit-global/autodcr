@@ -13,10 +13,16 @@ export type BridgeErrorCode =
   | "ABORTED"
   | "NATIVE_TIMEOUT"
   | "NATIVE_DISCONNECTED"
+  | "NATIVE_SEND_FAILED"
+  | "INVALID_REQUEST"
   | "INVALID_PAYLOAD"
   | "UNKNOWN_JOB"
+  | "INVALID_CHUNK_INDEX"
+  | "CERT_NOT_FOUND"
   | "PIN_CANCELLED"
   | "PIN_INCORRECT"
+  | "PDF_INVALID"
+  | "CMS_BUILD_FAILED"
   | "NO_TOKEN"
   | "NO_CERT_SELECTED"
   | `PKCS11_${string}`;
@@ -52,6 +58,16 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
     hint: "Reinstall or restart the AutoDCR native host, then retry.",
     retryable: true,
   },
+  NATIVE_SEND_FAILED: {
+    message: "Failed to send request to the native host.",
+    hint: "Check extension/native-host installation and retry signing.",
+    retryable: true,
+  },
+  INVALID_REQUEST: {
+    message: "The bridge rejected this request format.",
+    hint: "Reload the page and retry. If it persists, update extension and app together.",
+    retryable: false,
+  },
   INVALID_PAYLOAD: {
     message: "The signing request was rejected by the native host.",
     hint: "Reload the page and try again. If this persists, report the issue.",
@@ -60,6 +76,16 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   UNKNOWN_JOB: {
     message: "The native host could not find this signing job.",
     hint: "Start a fresh signing attempt.",
+    retryable: true,
+  },
+  INVALID_CHUNK_INDEX: {
+    message: "A PDF chunk arrived out of sequence.",
+    hint: "Restart signing to create a new job and resend chunks in order.",
+    retryable: true,
+  },
+  CERT_NOT_FOUND: {
+    message: "Selected certificate is no longer available on this token.",
+    hint: "Refresh certificates and select a valid certificate again.",
     retryable: true,
   },
   PIN_CANCELLED: {
@@ -75,6 +101,16 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   NO_TOKEN: {
     message: "No DSC token detected.",
     hint: "Insert your USB token or configure the PKCS#11 module, then retry.",
+    retryable: true,
+  },
+  PDF_INVALID: {
+    message: "The uploaded PDF is invalid or unsupported for signing.",
+    hint: "Try a standard PDF file and ensure it is not corrupted.",
+    retryable: true,
+  },
+  CMS_BUILD_FAILED: {
+    message: "Could not build CMS signature payload.",
+    hint: "Retry once. If it persists, reselect certificate/token and try again.",
     retryable: true,
   },
   NO_CERT_SELECTED: {
