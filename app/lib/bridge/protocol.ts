@@ -73,9 +73,12 @@ export interface ListCertsPayload {
 /**
  * One certificate as exposed by the native host.
  *
- * `id` is the hex-encoded PKCS#11 CKA_ID and is the canonical selector when
- * starting a signing job. `slotId` is injected by the orchestrator (the host's
- * LIST_CERTS response is per-slot, but downstream code wants a single flat list).
+ * `id` is the canonical selector for signing and MUST be the certificate's
+ * PKCS#11 `CKA_ID` encoded as a plain hex string (no separators, no `0x` prefix).
+ * The same `CKA_ID` must resolve to a private key object in the selected slot.
+ *
+ * `slotId` is injected by the orchestrator (the host's LIST_CERTS response is
+ * per-slot, but downstream code wants a single flat list).
  */
 export interface CertInfo {
   id: string;
@@ -96,6 +99,7 @@ export interface SignPdfStartPayload {
   jobId: string;
   totalChunks: number;
   slotId: number;
+  /** Hex PKCS#11 CKA_ID, normalized (no 0x prefix, even-length). */
   certId: string;
   fileName?: string;
   contentType?: string;

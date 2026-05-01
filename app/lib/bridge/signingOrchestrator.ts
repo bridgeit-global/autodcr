@@ -44,7 +44,18 @@ export interface SignPdfArgs {
   /** Optional PIN forwarded to the host as a hint (host may still prompt). */
   pinHint?: string;
   onProgress?: (sent: number, total: number) => void;
+  onDebugEvent?: (event: SignPdfDebugEvent) => void;
   signal?: AbortSignal;
+}
+
+export interface SignPdfDebugEvent {
+  phase: "start" | "chunk" | "end" | "error";
+  jobId: string;
+  slotId: number;
+  certId: string;
+  totalChunks: number;
+  chunkIndex?: number;
+  detail?: string;
 }
 
 export const pingHost = (signal?: AbortSignal): Promise<PingResult> =>
@@ -104,6 +115,7 @@ export const signPdf = async ({
   contentType,
   pinHint,
   onProgress,
+  onDebugEvent,
   signal,
 }: SignPdfArgs): Promise<SignPdfFinalResult> => {
   if (!pdfBase64) {
@@ -122,41 +134,86 @@ export const signPdf = async ({
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `job-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const totalChunks = chunks.length;
+  let currentPhase: SignPdfDebugEvent["phase"] = "start";
 
-  await sendBridgeCommand<SignPdfStartPayload, SignPdfStartResult>(
-    "SIGN_PDF_START",
-    {
+  try {
+    onDebugEvent?.({
+      phase: "start",
       jobId,
-      totalChunks: chunks.length,
       slotId,
       certId,
-      fileName,
-      contentType: contentType ?? "application/pdf",
-      pin: pinHint,
-    },
-    { timeoutMs: CHUNK_TIMEOUT_MS, signal }
-  );
-
-  for (let index = 0; index < chunks.length; index += 1) {
-    if (signal?.aborted) {
-      throw new Error("Signing cancelled.");
-    }
-    await sendBridgeCommand<SignPdfChunkPayload, SignPdfChunkResult>(
-      "SIGN_PDF_CHUNK",
-      { jobId, index, chunkBase64: chunks[index] },
+      totalChunks,
+      detail: "Dispatching SIGN_PDF_START",
+    });
+    await sendBridgeCommand<SignPdfStartPayload, SignPdfStartResult>(
+      "SIGN_PDF_START",
+      {
+        jobId,
+        totalChunks,
+        slotId,
+        certId,
+        fileName,
+        contentType: contentType ?? "application/pdf",
+        pin: pinHint,
+      },
       { timeoutMs: CHUNK_TIMEOUT_MS, signal }
     );
-    onProgress?.(index + 1, chunks.length);
-  }
 
-  const final = await sendBridgeCommand<SignPdfEndPayload, SignPdfFinalResult>(
-    "SIGN_PDF_END",
-    { jobId },
-    { timeoutMs: SIGN_END_TIMEOUT_MS, signal }
-  );
+    for (let index = 0; index < chunks.length; index += 1) {
+      if (signal?.aborted) {
+        throw new Error("Signing cancelled.");
+      }
+      currentPhase = "chunk";
+      onDebugEvent?.({
+        phase: "chunk",
+        jobId,
+        slotId,
+        certId,
+        totalChunks,
+        chunkIndex: index,
+        detail: "Dispatching SIGN_PDF_CHUNK",
+      });
+      await sendBridgeCommand<SignPdfChunkPayload, SignPdfChunkResult>(
+        "SIGN_PDF_CHUNK",
+        { jobId, index, chunkBase64: chunks[index] },
+        { timeoutMs: CHUNK_TIMEOUT_MS, signal }
+      );
+      onProgress?.(index + 1, chunks.length);
+    }
 
-  if (!final?.signedPdfBase64) {
-    throw new Error("Native host did not return a signed PDF.");
+    currentPhase = "end";
+    onDebugEvent?.({
+      phase: "end",
+      jobId,
+      slotId,
+      certId,
+      totalChunks,
+      detail: "Dispatching SIGN_PDF_END",
+    });
+    const final = await sendBridgeCommand<SignPdfEndPayload, SignPdfFinalResult>(
+      "SIGN_PDF_END",
+      { jobId },
+      { timeoutMs: SIGN_END_TIMEOUT_MS, signal }
+    );
+
+    if (!final?.signedPdfBase64) {
+      throw new Error("Native host did not return a signed PDF.");
+    }
+    return final;
+  } catch (error) {
+    const detail = `phase=${currentPhase} jobId=${jobId} slotId=${slotId} certId=${certId} totalChunks=${totalChunks}`;
+    onDebugEvent?.({
+      phase: "error",
+      jobId,
+      slotId,
+      certId,
+      totalChunks,
+      detail,
+    });
+    if (error instanceof Error) {
+      throw new Error(`${error.message} (${detail})`);
+    }
+    throw new Error(`Signing failed (${detail})`);
   }
-  return final;
 };

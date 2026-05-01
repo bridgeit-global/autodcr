@@ -59,6 +59,12 @@ interface FlowErrorDisplay {
   detail: string;
 }
 
+interface CertIdValidation {
+  looksHex: boolean;
+  evenLength: boolean;
+  normalizedHex: string;
+}
+
 const makeDefaultApiState = (): ApiState => ({
   loading: false,
   status: "idle",
@@ -76,6 +82,13 @@ const createApiStates = (): Record<BridgeCommand, ApiState> => ({
   SIGN_PDF_CHUNK: makeDefaultApiState(),
   SIGN_PDF_END: makeDefaultApiState(),
 });
+
+const validateCertId = (rawCertId: string): CertIdValidation => {
+  const normalizedHex = rawCertId.trim().replace(/^0x/i, "");
+  const looksHex = /^[0-9a-fA-F]+$/.test(normalizedHex);
+  const evenLength = normalizedHex.length % 2 === 0;
+  return { looksHex, evenLength, normalizedHex };
+};
 
 export default function BridgePocPage() {
   const [timeoutMs, setTimeoutMs] = useState(30000);
@@ -321,6 +334,30 @@ export default function BridgePocPage() {
       }
 
       const jobId = createJobId();
+      const certValidation = validateCertId(resolvedCertId);
+      const signingContext = {
+        jobId,
+        slotId: selectedSlotIdNumber,
+        certId: resolvedCertId,
+        certIdLength: resolvedCertId.length,
+        certIdNormalizedHex: certValidation.normalizedHex,
+        certIdNormalizedHexLength: certValidation.normalizedHex.length,
+        totalChunks: chunks.length,
+      };
+      setPdfFlowResult(pretty({ status: "preflight", signingContext }));
+      if (!certValidation.looksHex || !certValidation.evenLength) {
+        setPdfFlowProgress("Failed.");
+        setPdfFlowResult(
+          pretty({
+            status: "failed",
+            title: "Malformed certificate identifier",
+            detail:
+              "certId must be a hex-encoded PKCS#11 CKA_ID with even length. Reselect the certificate and retry.",
+            signingContext,
+          })
+        );
+        return;
+      }
 
       const startPayload: SignPdfStartPayload = {
         jobId,

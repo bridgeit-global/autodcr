@@ -110,7 +110,8 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   },
   CMS_BUILD_FAILED: {
     message: "Could not build CMS signature payload.",
-    hint: "Retry once. If it persists, reselect certificate/token and try again.",
+    hint:
+      "Likely certificate/private-key CKA_ID mismatch. Reselect slot and certificate, then retry. If it persists, verify token private key exists for the selected certId.",
     retryable: true,
   },
   NO_CERT_SELECTED: {
