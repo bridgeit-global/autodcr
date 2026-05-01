@@ -19,6 +19,7 @@ import {
   SignPdfStartPayload,
   SignPdfStartResult,
 } from "@/app/lib/bridge/protocol";
+import { base64ToBlob, blobToBase64, chunkBase64 as splitBase64ToChunks } from "@/app/lib/bridge/pdfChunker";
 
 const pretty = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -82,6 +83,11 @@ export default function BridgePocPage() {
   const [apiStates, setApiStates] = useState<Record<BridgeCommand, ApiState>>(createApiStates);
   const [contractRunnerOutput, setContractRunnerOutput] = useState<string>("(not run)");
   const [contractRunnerLoading, setContractRunnerLoading] = useState(false);
+  const [pdfToSignFile, setPdfToSignFile] = useState<File | null>(null);
+  const [pdfFlowLoading, setPdfFlowLoading] = useState(false);
+  const [pdfFlowProgress, setPdfFlowProgress] = useState<string>("(idle)");
+  const [pdfFlowResult, setPdfFlowResult] = useState<string>("(none)");
+  const [signedPdfUrl, setSignedPdfUrl] = useState<string>("");
 
   const [listCertsSlotId, setListCertsSlotId] = useState(0);
 
@@ -118,6 +124,15 @@ export default function BridgePocPage() {
 
     return () => observer.disconnect();
   }, []);
+
+  useEffect(
+    () => () => {
+      if (signedPdfUrl) {
+        URL.revokeObjectURL(signedPdfUrl);
+      }
+    },
+    [signedPdfUrl]
+  );
 
   const updateApiState = (cmd: BridgeCommand, patch: Partial<ApiState>) => {
     setApiStates((current) => ({
@@ -322,6 +337,96 @@ export default function BridgePocPage() {
     setContractRunnerLoading(false);
   };
 
+  const runUploadedPdfSigningFlow = async () => {
+    if (!pdfToSignFile) {
+      setPdfFlowResult("Please choose a PDF file first.");
+      return;
+    }
+    if (!startCertId.trim()) {
+      setPdfFlowResult("Please provide certId before starting signing.");
+      return;
+    }
+
+    setPdfFlowLoading(true);
+    setPdfFlowProgress("Reading PDF...");
+    setPdfFlowResult("(running)");
+    if (signedPdfUrl) {
+      URL.revokeObjectURL(signedPdfUrl);
+      setSignedPdfUrl("");
+    }
+
+    try {
+      const pdfBase64 = await blobToBase64(pdfToSignFile);
+      const chunks = splitBase64ToChunks(pdfBase64);
+      if (chunks.length === 0) {
+        throw new Error("Selected PDF is empty after base64 encoding.");
+      }
+
+      const jobId = createJobId();
+      setStartJobId(jobId);
+      setChunkJobId(jobId);
+      setEndJobId(jobId);
+
+      const startPayload: SignPdfStartPayload = {
+        jobId,
+        totalChunks: chunks.length,
+        slotId: Number(startSlotId),
+        certId: startCertId.trim(),
+        fileName: pdfToSignFile.name || startFileName || undefined,
+        contentType: pdfToSignFile.type || startContentType || "application/pdf",
+        pin: startPinHint || undefined,
+      };
+
+      setPdfFlowProgress(`Sending SIGN_PDF_START (1/${chunks.length + 2})...`);
+      const start = await runCommand<SignPdfStartPayload, SignPdfStartResult>(
+        "SIGN_PDF_START",
+        startPayload
+      );
+      if (!start.ok) {
+        setPdfFlowResult("Signing failed at SIGN_PDF_START. See API panel for details.");
+        return;
+      }
+
+      for (let index = 0; index < chunks.length; index += 1) {
+        setPdfFlowProgress(`Sending SIGN_PDF_CHUNK ${index + 1}/${chunks.length}...`);
+        const chunk = await runCommand<SignPdfChunkPayload, SignPdfChunkResult>("SIGN_PDF_CHUNK", {
+          jobId,
+          index,
+          chunkBase64: chunks[index],
+        });
+        if (!chunk.ok) {
+          setPdfFlowResult(`Signing failed at chunk ${index + 1}/${chunks.length}.`);
+          return;
+        }
+      }
+
+      setPdfFlowProgress(`Sending SIGN_PDF_END (${chunks.length + 2}/${chunks.length + 2})...`);
+      const end = await runCommand<SignPdfEndPayload, SignPdfFinalResult>("SIGN_PDF_END", { jobId });
+      if (!end.ok || !end.result?.signedPdfBase64) {
+        setPdfFlowResult("Signing failed at SIGN_PDF_END or returned empty signed PDF.");
+        return;
+      }
+
+      const signedBlob = base64ToBlob(end.result.signedPdfBase64, "application/pdf");
+      const downloadUrl = URL.createObjectURL(signedBlob);
+      setSignedPdfUrl(downloadUrl);
+      setPdfFlowProgress("Completed.");
+      setPdfFlowResult(
+        pretty({
+          status: "success",
+          fileName: `signed-${pdfToSignFile.name || "document.pdf"}`,
+          sizeBytes: signedBlob.size,
+          jobId: end.result.jobId || jobId,
+        })
+      );
+    } catch (error: unknown) {
+      setPdfFlowProgress("Failed.");
+      setPdfFlowResult(pretty({ status: "failed", error: mapBridgeError(error) }));
+    } finally {
+      setPdfFlowLoading(false);
+    }
+  };
+
   const statusText = (status: ApiState["status"]): string => {
     if (status === "success") return "Success";
     if (status === "error") return "Failed";
@@ -463,23 +568,26 @@ export default function BridgePocPage() {
         </section>
 
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">SIGN_PDF_START</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Upload PDF and Auto-Sign (DSC)</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            This runs the full bridge sequence automatically: SIGN_PDF_START, SIGN_PDF_CHUNK(s), SIGN_PDF_END.
+          </p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">jobId</span>
+            <label className="text-sm md:col-span-2">
+              <span className="mb-1 block font-medium text-gray-700">PDF file</span>
               <input
-                value={startJobId}
-                onChange={(e) => setStartJobId(e.target.value)}
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={(e) => setPdfToSignFile(e.target.files?.[0] ?? null)}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               />
             </label>
             <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">totalChunks</span>
+              <span className="mb-1 block font-medium text-gray-700">certId (required)</span>
               <input
-                type="number"
-                min={1}
-                value={startTotalChunks}
-                onChange={(e) => setStartTotalChunks(Number(e.target.value))}
+                value={startCertId}
+                onChange={(e) => setStartCertId(e.target.value)}
+                placeholder="Hex CKA_ID"
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               />
             </label>
@@ -492,111 +600,31 @@ export default function BridgePocPage() {
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               />
             </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">certId (hex CKA_ID)</span>
-              <input
-                value={startCertId}
-                onChange={(e) => setStartCertId(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">fileName (optional)</span>
-              <input
-                value={startFileName}
-                onChange={(e) => setStartFileName(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">contentType (optional)</span>
-              <input
-                value={startContentType}
-                onChange={(e) => setStartContentType(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-            <label className="text-sm md:col-span-2">
-              <span className="mb-1 block font-medium text-gray-700">PIN hint (optional)</span>
-              <input
-                type="password"
-                value={startPinHint}
-                onChange={(e) => setStartPinHint(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
           </div>
           <button
-            onClick={() => void runSignStart()}
-            disabled={apiStates.SIGN_PDF_START.loading}
-            className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void runUploadedPdfSigningFlow()}
+            disabled={pdfFlowLoading}
+            className="mt-3 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {apiStates.SIGN_PDF_START.loading ? "Sending..." : "Send SIGN_PDF_START"}
+            {pdfFlowLoading ? "Signing uploaded PDF..." : "Sign Uploaded PDF with DSC"}
           </button>
-          {renderApiPanel("SIGN_PDF_START")}
-        </section>
-
-        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">SIGN_PDF_CHUNK</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">jobId</span>
-              <input
-                value={chunkJobId}
-                onChange={(e) => setChunkJobId(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">index</span>
-              <input
-                type="number"
-                min={0}
-                value={chunkIndex}
-                onChange={(e) => setChunkIndex(Number(e.target.value))}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-            <label className="text-sm md:col-span-2">
-              <span className="mb-1 block font-medium text-gray-700">chunkBase64</span>
-              <textarea
-                rows={6}
-                value={chunkBase64}
-                onChange={(e) => setChunkBase64(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs text-black"
-              />
-            </label>
+          <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3">
+            <div className="text-xs font-semibold text-gray-700">Flow Progress</div>
+            <div className="mt-1 text-sm text-gray-800">{pdfFlowProgress}</div>
+            <div className="mt-3 text-xs font-semibold text-gray-700">Flow Output</div>
+            <pre className="mt-2 max-h-56 overflow-auto rounded bg-gray-900 p-2 text-xs text-emerald-300">
+              {pdfFlowResult}
+            </pre>
+            {signedPdfUrl ? (
+              <a
+                href={signedPdfUrl}
+                download={`signed-${pdfToSignFile?.name || "document.pdf"}`}
+                className="mt-3 inline-block rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                Download Signed PDF
+              </a>
+            ) : null}
           </div>
-          <button
-            onClick={() => void runSignChunk()}
-            disabled={apiStates.SIGN_PDF_CHUNK.loading}
-            className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {apiStates.SIGN_PDF_CHUNK.loading ? "Sending..." : "Send SIGN_PDF_CHUNK"}
-          </button>
-          {renderApiPanel("SIGN_PDF_CHUNK")}
-        </section>
-
-        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">SIGN_PDF_END</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">jobId</span>
-              <input
-                value={endJobId}
-                onChange={(e) => setEndJobId(e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-          </div>
-          <button
-            onClick={() => void runSignEnd()}
-            disabled={apiStates.SIGN_PDF_END.loading}
-            className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {apiStates.SIGN_PDF_END.loading ? "Sending..." : "Send SIGN_PDF_END"}
-          </button>
-          {renderApiPanel("SIGN_PDF_END")}
         </section>
 
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
