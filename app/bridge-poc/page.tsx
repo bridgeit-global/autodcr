@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { isExtensionAvailable, sendBridgeCommand } from "@/app/lib/bridge/bridgeClient";
-import { mapBridgeError, mappedErrorForCode } from "@/app/lib/bridge/errorMapper";
+import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import {
   CertInfo,
   ListCertsPayload,
@@ -20,17 +20,9 @@ import {
   SignPdfStartPayload,
   SignPdfStartResult,
 } from "@/app/lib/bridge/protocol";
-import {
-  CHUNK_SIZE,
-  base64ToBlob,
-  blobToBase64,
-  chunkBase64 as splitBase64ToChunks,
-} from "@/app/lib/bridge/pdfChunker";
+import { base64ToBlob, blobToBase64, chunkBase64 as splitBase64ToChunks } from "@/app/lib/bridge/pdfChunker";
 
 const pretty = (value: unknown): string => JSON.stringify(value, null, 2);
-
-const DEFAULT_SAMPLE_CHUNK =
-  "JVBERi0xLjQKJcfs... (paste base64 chunk here for manual testing)";
 
 const createJobId = (): string => {
   const globalCrypto = globalThis.crypto as Crypto | undefined;
@@ -42,7 +34,6 @@ const createJobId = (): string => {
 
 type BridgeCommand =
   | "PING"
-  | "LIST_USB_TOKENS"
   | "LIST_SLOTS"
   | "LIST_CERTS"
   | "SIGN_PDF_START"
@@ -79,7 +70,6 @@ const makeDefaultApiState = (): ApiState => ({
 
 const createApiStates = (): Record<BridgeCommand, ApiState> => ({
   PING: makeDefaultApiState(),
-  LIST_USB_TOKENS: makeDefaultApiState(),
   LIST_SLOTS: makeDefaultApiState(),
   LIST_CERTS: makeDefaultApiState(),
   SIGN_PDF_START: makeDefaultApiState(),
@@ -92,34 +82,22 @@ export default function BridgePocPage() {
   const [extensionDetected, setExtensionDetected] = useState(false);
   const [bridgeHealthy, setBridgeHealthy] = useState(false);
   const [apiStates, setApiStates] = useState<Record<BridgeCommand, ApiState>>(createApiStates);
-  const [contractRunnerOutput, setContractRunnerOutput] = useState<string>("(not run)");
-  const [contractRunnerLoading, setContractRunnerLoading] = useState(false);
   const [pdfToSignFile, setPdfToSignFile] = useState<File | null>(null);
   const [pdfFlowLoading, setPdfFlowLoading] = useState(false);
   const [pdfFlowProgress, setPdfFlowProgress] = useState<string>("(idle)");
   const [pdfFlowResult, setPdfFlowResult] = useState<string>("(none)");
   const [signedPdfUrl, setSignedPdfUrl] = useState<string>("");
 
-  const [listCertsSlotId, setListCertsSlotId] = useState(0);
   const [availableSlots, setAvailableSlots] = useState<ListSlotsResult["slots"]>([]);
   const [availableCerts, setAvailableCerts] = useState<CertInfo[]>([]);
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [selectedCertId, setSelectedCertId] = useState("");
-  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [certsLoading, setCertsLoading] = useState(false);
 
-  const [startJobId, setStartJobId] = useState(createJobId);
-  const [startTotalChunks] = useState(1);
-  const [startSlotId, setStartSlotId] = useState(0);
-  const [startCertId, setStartCertId] = useState("");
   const [startFileName] = useState("generated.pdf");
   const [startContentType] = useState("application/pdf");
   const [startPinHint, setStartPinHint] = useState("");
-
-  const [chunkJobId, setChunkJobId] = useState("");
-  const [chunkIndex] = useState(0);
-  const [chunkBase64] = useState(DEFAULT_SAMPLE_CHUNK);
-
-  const [endJobId, setEndJobId] = useState("");
 
   useEffect(() => {
     const refreshDetected = () => {
@@ -219,26 +197,32 @@ export default function BridgePocPage() {
     await runCommand<PingPayload, PingResult>("PING", { v: PROTOCOL_VERSION });
   };
 
-  const runListUsbTokens = async () => {
-    await runCommand<{ v: number }, unknown>("LIST_USB_TOKENS", { v: PROTOCOL_VERSION });
-  };
-
-  const runListSlots = async () => {
-    await runCommand<ListSlotsPayload, ListSlotsResult>("LIST_SLOTS", { v: PROTOCOL_VERSION });
-  };
-
-  const runListCerts = async () => {
-    await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", {
-      slotId: Number(listCertsSlotId),
-    });
+  const loadSlotsForDropdown = async () => {
+    if (slotsLoading) return;
+    setSlotsLoading(true);
+    try {
+      const slotsResponse = await runCommand<ListSlotsPayload, ListSlotsResult>("LIST_SLOTS", {
+        v: PROTOCOL_VERSION,
+      });
+      if (!slotsResponse.ok || !slotsResponse.result) return;
+      const slots = slotsResponse.result.slots ?? [];
+      setAvailableSlots(slots);
+      if (slots.length > 0 && selectedSlotId === null) {
+        setSelectedSlotId(slots[0].slotId);
+      }
+    } finally {
+      setSlotsLoading(false);
+    }
   };
 
   const fetchCertsForSlot = async (slotId: number) => {
+    if (certsLoading) return;
+    setCertsLoading(true);
     const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId });
     if (!certsResponse.ok || !certsResponse.result) {
       setAvailableCerts([]);
       setSelectedCertId("");
-      setStartCertId("");
+      setCertsLoading(false);
       return;
     }
 
@@ -246,94 +230,7 @@ export default function BridgePocPage() {
     setAvailableCerts(certs);
     const resolvedCertId = certs[0]?.id || "";
     setSelectedCertId(resolvedCertId);
-    setStartCertId(resolvedCertId);
-  };
-
-  const runAllChecks = async () => {
-    setContractRunnerLoading(true);
-    const checks: Array<{ cmd: BridgeCommand; passed: boolean; detail: string }> = [];
-
-    const ping = await runCommand<PingPayload, PingResult>("PING", { v: PROTOCOL_VERSION });
-    checks.push({
-      cmd: "PING",
-      passed: ping.ok,
-      detail: ping.ok ? "Host protocol handshake succeeded." : "Failed handshake/timeout.",
-    });
-
-    const usb = await runCommand<{ v: number }, unknown>("LIST_USB_TOKENS", { v: PROTOCOL_VERSION });
-    checks.push({
-      cmd: "LIST_USB_TOKENS",
-      passed: usb.ok,
-      detail: usb.ok ? "Token list channel returned data." : "Command failed or not implemented downstream.",
-    });
-
-    const slots = await runCommand<ListSlotsPayload, ListSlotsResult>("LIST_SLOTS", {
-      v: PROTOCOL_VERSION,
-    });
-    checks.push({
-      cmd: "LIST_SLOTS",
-      passed: slots.ok,
-      detail: slots.ok ? "Slot inventory returned successfully." : "Slot query failed.",
-    });
-
-    const certs = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", {
-      slotId: Number(listCertsSlotId),
-    });
-    checks.push({
-      cmd: "LIST_CERTS",
-      passed: certs.ok,
-      detail: certs.ok ? "Certificate list returned for selected slot." : "Certificate query failed.",
-    });
-
-    const startPayload: SignPdfStartPayload = {
-      jobId: startJobId,
-      totalChunks: Number(startTotalChunks),
-      slotId: Number(startSlotId),
-      certId: startCertId.trim(),
-      fileName: startFileName || undefined,
-      contentType: startContentType || undefined,
-      pin: startPinHint || undefined,
-    };
-    const start = await runCommand<SignPdfStartPayload, SignPdfStartResult>("SIGN_PDF_START", startPayload);
-    checks.push({
-      cmd: "SIGN_PDF_START",
-      passed: start.ok,
-      detail: start.ok ? "Signing session initialized." : "Signing session init failed.",
-    });
-
-    const chunkPayload: SignPdfChunkPayload = {
-      jobId: chunkJobId || startJobId,
-      index: Number(chunkIndex),
-      chunkBase64: chunkBase64.trim(),
-    };
-    const chunk = await runCommand<SignPdfChunkPayload, SignPdfChunkResult>(
-      "SIGN_PDF_CHUNK",
-      chunkPayload
-    );
-    checks.push({
-      cmd: "SIGN_PDF_CHUNK",
-      passed: chunk.ok,
-      detail: chunk.ok ? "PDF chunk accepted." : "Chunk rejected or job mismatch.",
-    });
-
-    const end = await runCommand<SignPdfEndPayload, SignPdfFinalResult>("SIGN_PDF_END", {
-      jobId: endJobId || chunkJobId || startJobId,
-    });
-    checks.push({
-      cmd: "SIGN_PDF_END",
-      passed: end.ok,
-      detail: end.ok ? "Signing finalized and result returned." : "Signing finalization failed.",
-    });
-
-    const passedCount = checks.filter((check) => check.passed).length;
-    setContractRunnerOutput(
-      pretty({
-        generatedAt: new Date().toISOString(),
-        passed: `${passedCount}/${checks.length}`,
-        checks,
-      })
-    );
-    setContractRunnerLoading(false);
+    setCertsLoading(false);
   };
 
   const runUploadedPdfSigningFlow = async () => {
@@ -366,9 +263,6 @@ export default function BridgePocPage() {
       }
 
       const jobId = createJobId();
-      setStartJobId(jobId);
-      setChunkJobId(jobId);
-      setEndJobId(jobId);
 
       const startPayload: SignPdfStartPayload = {
         jobId,
@@ -483,79 +377,6 @@ export default function BridgePocPage() {
     };
   };
 
-  const runDiscovery = async () => {
-    if (!isExtensionAvailable()) {
-      setPdfFlowResult(pretty(mappedErrorForCode("NO_EXTENSION")));
-      return;
-    }
-
-    setDiscoverLoading(true);
-    setPdfFlowProgress("Checking bridge readiness (PING)...");
-    setPdfFlowResult("(discovering)");
-
-    try {
-      const ping = await runCommand<PingPayload, PingResult>("PING", { v: PROTOCOL_VERSION });
-      if (!ping.ok) {
-        setPdfFlowResult("PING failed. Check extension/native host setup.");
-        return;
-      }
-
-      setPdfFlowProgress("Fetching slots...");
-      const slotsResponse = await runCommand<ListSlotsPayload, ListSlotsResult>("LIST_SLOTS", {
-        v: PROTOCOL_VERSION,
-      });
-      if (!slotsResponse.ok || !slotsResponse.result) {
-        setPdfFlowResult("LIST_SLOTS failed.");
-        return;
-      }
-
-      const slots = slotsResponse.result.slots ?? [];
-      setAvailableSlots(slots);
-      if (slots.length === 0) {
-        setAvailableCerts([]);
-        setSelectedSlotId(null);
-        setSelectedCertId("");
-        setPdfFlowProgress("No slots found.");
-        setPdfFlowResult("No token slot found. Insert token and retry discovery.");
-        return;
-      }
-
-      const resolvedSlotId = selectedSlotId ?? slots[0].slotId;
-      setSelectedSlotId(resolvedSlotId);
-      setStartSlotId(resolvedSlotId);
-      setListCertsSlotId(resolvedSlotId);
-
-      setPdfFlowProgress(`Fetching certs for slot ${resolvedSlotId}...`);
-      const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId: resolvedSlotId });
-      if (!certsResponse.ok || !certsResponse.result) {
-        setPdfFlowResult("LIST_CERTS failed.");
-        return;
-      }
-      const certs = certsResponse.result.certs ?? [];
-      setAvailableCerts(certs);
-      const resolvedCertId = selectedCertId || certs[0]?.id || "";
-      setSelectedCertId(resolvedCertId);
-      setStartCertId(resolvedCertId);
-      setPdfFlowProgress("Discovery completed.");
-      setPdfFlowResult(
-        pretty({
-          status: "ready",
-          tokenPresent: ping.result?.tokenPresent ?? null,
-          slots: slots.length,
-          certs: certs.length,
-          selectedSlotId: resolvedSlotId,
-          selectedCertId: resolvedCertId || null,
-          chunkSizeCap: CHUNK_SIZE,
-        })
-      );
-    } catch (error: unknown) {
-      const display = toFlowError(error);
-      setPdfFlowProgress("Discovery failed.");
-      setPdfFlowResult(pretty({ status: "failed", title: display.title, detail: display.detail }));
-    } finally {
-      setDiscoverLoading(false);
-    }
-  };
 
   const renderApiPanel = (cmd: BridgeCommand) => {
     const state = apiStates[cmd];
@@ -634,71 +455,13 @@ export default function BridgePocPage() {
             </button>
             {renderApiPanel("PING")}
           </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900">LIST_USB_TOKENS</h2>
-            <p className="mt-1 text-sm text-gray-600">Payload: {"{ v: PROTOCOL_VERSION }"}</p>
-            <button
-              onClick={() => void runListUsbTokens()}
-              disabled={apiStates.LIST_USB_TOKENS.loading}
-              className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {apiStates.LIST_USB_TOKENS.loading ? "Sending..." : "Send LIST_USB_TOKENS"}
-            </button>
-            {renderApiPanel("LIST_USB_TOKENS")}
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">LIST_SLOTS</h2>
-          <p className="mt-1 text-sm text-gray-600">Payload: {"{ v: PROTOCOL_VERSION }"}</p>
-          <button
-            onClick={() => void runListSlots()}
-            disabled={apiStates.LIST_SLOTS.loading}
-            className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {apiStates.LIST_SLOTS.loading ? "Sending..." : "Send LIST_SLOTS"}
-          </button>
-          {renderApiPanel("LIST_SLOTS")}
-        </section>
-
-        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">LIST_CERTS</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-gray-700">slotId</span>
-              <input
-                type="number"
-                value={listCertsSlotId}
-                onChange={(e) => setListCertsSlotId(Number(e.target.value))}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
-              />
-            </label>
-          </div>
-          <button
-            onClick={() => void runListCerts()}
-            disabled={apiStates.LIST_CERTS.loading}
-            className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {apiStates.LIST_CERTS.loading ? "Sending..." : "Send LIST_CERTS"}
-          </button>
-          {renderApiPanel("LIST_CERTS")}
         </section>
 
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Upload PDF and Auto-Sign (DSC)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Discovery: PING {">"} LIST_SLOTS {">"} LIST_CERTS. Signing: START {">"} CHUNKs {">"} END.
+            Click the slot dropdown to load slots, then click certificate dropdown to load certs for that slot.
           </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <button
-              onClick={() => void runDiscovery()}
-              disabled={discoverLoading || pdfFlowLoading}
-              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {discoverLoading ? "Discovering..." : "Discover Slot/Cert"}
-            </button>
-          </div>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="text-sm md:col-span-2">
               <span className="mb-1 block font-medium text-gray-700">PDF file</span>
@@ -713,26 +476,35 @@ export default function BridgePocPage() {
               <span className="mb-1 block font-medium text-gray-700">slotId (required)</span>
               <select
                 value={selectedSlotId ?? ""}
+                onFocus={() => {
+                  if (availableSlots.length === 0) {
+                    void loadSlotsForDropdown();
+                  }
+                }}
+                onClick={() => {
+                  if (availableSlots.length === 0) {
+                    void loadSlotsForDropdown();
+                  }
+                }}
                 onChange={(e) => {
                   const raw = e.target.value;
                   if (!raw) {
                     setSelectedSlotId(null);
                     setAvailableCerts([]);
                     setSelectedCertId("");
-                    setStartCertId("");
                     return;
                   }
                   const value = Number(raw);
                   setSelectedSlotId(value);
-                  setStartSlotId(value);
-                  setListCertsSlotId(value);
                   if (!Number.isNaN(value)) {
                     void fetchCertsForSlot(value);
                   }
                 }}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               >
-                <option value="">Select slot</option>
+                <option value="">
+                  {slotsLoading ? "Loading slots..." : "Select slot"}
+                </option>
                 {availableSlots.map((slot) => (
                   <option key={slot.slotId} value={slot.slotId}>
                     {slot.slotId} - {slot.label || "Unnamed slot"}
@@ -744,13 +516,28 @@ export default function BridgePocPage() {
               <span className="mb-1 block font-medium text-gray-700">certId (required)</span>
               <select
                 value={selectedCertId}
+                onFocus={() => {
+                  if (selectedSlotId !== null && availableCerts.length === 0) {
+                    void fetchCertsForSlot(selectedSlotId);
+                  }
+                }}
+                onClick={() => {
+                  if (selectedSlotId !== null && availableCerts.length === 0) {
+                    void fetchCertsForSlot(selectedSlotId);
+                  }
+                }}
                 onChange={(e) => {
                   setSelectedCertId(e.target.value);
-                  setStartCertId(e.target.value);
                 }}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               >
-                <option value="">Select certificate</option>
+                <option value="">
+                  {selectedSlotId === null
+                    ? "Select slot first"
+                    : certsLoading
+                      ? "Loading certificates..."
+                      : "Select certificate"}
+                </option>
                 {availableCerts.map((cert) => (
                   <option key={`${cert.slotId}-${cert.id}`} value={cert.id}>
                     {cert.label || cert.subject || cert.id}
@@ -793,59 +580,6 @@ export default function BridgePocPage() {
               </a>
             ) : null}
           </div>
-        </section>
-
-        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">API Contract Check Runner</h2>
-          <p className="mt-1 text-sm text-gray-600">
-            Runs all bridge APIs sequentially and prints pass/fail diagnostics per command.
-          </p>
-          <button
-            onClick={() => void runAllChecks()}
-            disabled={contractRunnerLoading}
-            className="mt-3 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {contractRunnerLoading ? "Running checks..." : "Run Full API Contract Check"}
-          </button>
-          <pre className="mt-3 max-h-96 overflow-auto rounded bg-gray-900 p-3 text-xs text-amber-200">
-            {contractRunnerOutput}
-          </pre>
-        </section>
-
-        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h3 className="text-base font-semibold text-gray-900">Protocol Checklist</h3>
-          <p className="mt-1 text-sm text-gray-600">
-            Use this as a parity checklist for extension/service-worker/native-host handlers.
-          </p>
-          <pre className="mt-2 max-h-96 overflow-auto rounded bg-gray-900 p-3 text-xs text-green-300">
-            {pretty({
-              commandPayloadRequirements: {
-                PING: ["v"],
-                LIST_USB_TOKENS: ["v"],
-                LIST_SLOTS: ["v"],
-                LIST_CERTS: ["slotId"],
-                SIGN_PDF_START: ["jobId", "totalChunks", "slotId", "certId", "fileName?", "contentType?", "pin?"],
-                SIGN_PDF_CHUNK: ["jobId", "index", "chunkBase64"],
-                SIGN_PDF_END: ["jobId"],
-              },
-              commandResultExpectations: {
-                PING: ["hostVersion", "protocolVersion", "tokenPresent"],
-                LIST_USB_TOKENS: ["implementation-specific result structure"],
-                LIST_SLOTS: ["slots[]"],
-                LIST_CERTS: ["certs[]"],
-                SIGN_PDF_START: ["jobId"],
-                SIGN_PDF_CHUNK: ["jobId", "index", "received"],
-                SIGN_PDF_END: ["signedPdfBase64", "jobId"],
-              },
-              responseEnvelopeExpectedByBridgeClient: {
-                source: "AUTODCR_SIGN_BRIDGE",
-                type: "RESPONSE",
-                requestId: "must match request",
-                ok: "boolean",
-                error: "{ code?, message } when ok=false",
-              },
-            })}
-          </pre>
         </section>
       </div>
     </main>
