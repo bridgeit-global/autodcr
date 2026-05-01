@@ -90,7 +90,7 @@ export default function BridgePocPage() {
 
   const [availableSlots, setAvailableSlots] = useState<ListSlotsResult["slots"]>([]);
   const [availableCerts, setAvailableCerts] = useState<CertInfo[]>([]);
-  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState("");
   const [selectedCertId, setSelectedCertId] = useState("");
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [certsLoading, setCertsLoading] = useState(false);
@@ -207,8 +207,8 @@ export default function BridgePocPage() {
       if (!slotsResponse.ok || !slotsResponse.result) return;
       const slots = slotsResponse.result.slots ?? [];
       setAvailableSlots(slots);
-      if (slots.length > 0 && selectedSlotId === null) {
-        setSelectedSlotId(slots[0].slotId);
+      if (slots.length > 0 && !selectedSlotId) {
+        setSelectedSlotId(String(slots[0].slotId));
       }
     } finally {
       setSlotsLoading(false);
@@ -242,7 +242,8 @@ export default function BridgePocPage() {
       setPdfFlowResult("Please select certId before starting signing.");
       return;
     }
-    if (selectedSlotId === null) {
+    const selectedSlotIdNumber = Number(selectedSlotId);
+    if (!selectedSlotId || Number.isNaN(selectedSlotIdNumber)) {
       setPdfFlowResult("Please select slotId before starting signing.");
       return;
     }
@@ -267,7 +268,7 @@ export default function BridgePocPage() {
       const startPayload: SignPdfStartPayload = {
         jobId,
         totalChunks: chunks.length,
-        slotId: Number(selectedSlotId),
+        slotId: selectedSlotIdNumber,
         certId: selectedCertId.trim(),
         fileName: pdfToSignFile.name || startFileName || undefined,
         contentType: pdfToSignFile.type || startContentType || "application/pdf",
@@ -475,7 +476,7 @@ export default function BridgePocPage() {
             <label className="text-sm">
               <span className="mb-1 block font-medium text-gray-700">slotId (required)</span>
               <select
-                value={selectedSlotId ?? ""}
+                value={selectedSlotId}
                 onFocus={() => {
                   if (availableSlots.length === 0) {
                     void loadSlotsForDropdown();
@@ -489,15 +490,15 @@ export default function BridgePocPage() {
                 onChange={(e) => {
                   const raw = e.target.value;
                   if (!raw) {
-                    setSelectedSlotId(null);
+                    setSelectedSlotId("");
                     setAvailableCerts([]);
                     setSelectedCertId("");
                     return;
                   }
-                  const value = Number(raw);
-                  setSelectedSlotId(value);
-                  if (!Number.isNaN(value)) {
-                    void fetchCertsForSlot(value);
+                  setSelectedSlotId(raw);
+                  const parsed = Number(raw);
+                  if (!Number.isNaN(parsed)) {
+                    void fetchCertsForSlot(parsed);
                   }
                 }}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
@@ -517,13 +518,15 @@ export default function BridgePocPage() {
               <select
                 value={selectedCertId}
                 onFocus={() => {
-                  if (selectedSlotId !== null && availableCerts.length === 0) {
-                    void fetchCertsForSlot(selectedSlotId);
+                  const parsed = Number(selectedSlotId);
+                  if (selectedSlotId && !Number.isNaN(parsed) && availableCerts.length === 0) {
+                    void fetchCertsForSlot(parsed);
                   }
                 }}
                 onClick={() => {
-                  if (selectedSlotId !== null && availableCerts.length === 0) {
-                    void fetchCertsForSlot(selectedSlotId);
+                  const parsed = Number(selectedSlotId);
+                  if (selectedSlotId && !Number.isNaN(parsed) && availableCerts.length === 0) {
+                    void fetchCertsForSlot(parsed);
                   }
                 }}
                 onChange={(e) => {
@@ -532,7 +535,7 @@ export default function BridgePocPage() {
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
               >
                 <option value="">
-                  {selectedSlotId === null
+                  {!selectedSlotId
                     ? "Select slot first"
                     : certsLoading
                       ? "Loading certificates..."
