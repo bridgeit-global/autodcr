@@ -11,59 +11,10 @@ import {
   TemplateFields,
   TemplateType,
 } from "../templates/templateGenerators";
+import { useSigningStore } from "@/app/lib/bridge/signingStore";
+import { base64ToBlob } from "@/app/lib/bridge/pdfChunker";
 
-const BRIDGE_SOURCE = "AUTODCR_SIGN_BRIDGE";
-const BRIDGE_VERSION = 1;
-const BRIDGE_TIMEOUT_MS = 20000;
 const MAX_SIGN_PDF_BASE64_SIZE = 8 * 1024 * 1024;
-
-type BridgeCommand = "PING" | "LIST_CERTS" | "SIGN_PDF";
-
-type BridgeError = {
-  code?: string;
-  message: string;
-};
-
-type BridgeRequest = {
-  source: typeof BRIDGE_SOURCE;
-  type: "REQUEST";
-  requestId: string;
-  cmd: BridgeCommand;
-  payload: Record<string, unknown>;
-};
-
-type BridgeResponse = {
-  source: typeof BRIDGE_SOURCE;
-  type: "RESPONSE";
-  requestId: string;
-  ok: boolean;
-  result?: unknown;
-  error?: BridgeError | null;
-};
-
-type DscStatus = {
-  connected: boolean;
-  message: string;
-};
-
-type DscCertificate = {
-  slotIndex: number;
-  certIndex: number;
-  cn?: string;
-  label?: string;
-};
-
-type PendingBridgeRequest = {
-  resolve: (response: BridgeResponse) => void;
-  reject: (error: Error) => void;
-  timeoutId: number;
-};
-
-const mapBridgeError = (error: unknown): Error => {
-  if (error instanceof Error) return error;
-  if (typeof error === "string" && error.trim()) return new Error(error);
-  return new Error("Connector request failed.");
-};
 
 const PlainPDFViewer = dynamic(() => import("../components/PlainPDFViewer"), {
   ssr: false,
@@ -297,16 +248,25 @@ export default function TemplatePage() {
   const [letterheadBytes, setLetterheadBytes] = useState<ArrayBuffer | null>(null);
   const [letterheadError, setLetterheadError] = useState<string | null>(null);
   const [isDscModalOpen, setIsDscModalOpen] = useState(false);
-  const [dscStatus, setDscStatus] = useState<DscStatus | null>(null);
-  const [dscCertificates, setDscCertificates] = useState<DscCertificate[]>([]);
-  const [selectedDsc, setSelectedDsc] = useState<{ slotIndex: number; certIndex: number } | null>(null);
-  const [dscPin, setDscPin] = useState("");
-  const [dscError, setDscError] = useState<string | null>(null);
-  const [dscLoading, setDscLoading] = useState(false);
-  const [isPingingConnector, setIsPingingConnector] = useState(false);
-  const [connectorPingMessage, setConnectorPingMessage] = useState<string | null>(null);
+  const {
+    dscStatus,
+    dscCertificates,
+    selectedDsc,
+    dscPin,
+    dscError,
+    dscLoading,
+    isSigning,
+    isPingingConnector,
+    connectorPingMessage,
+    setSelectedDsc,
+    setDscPin,
+    setDscError,
+    initialize: initializeSigning,
+    checkConnectorHealth,
+    signCurrentPdf,
+    cancelPending: cancelPendingBridgeRequests,
+  } = useSigningStore();
   const [isSelectingArea, setIsSelectingArea] = useState(false);
-  const [isSigning, setIsSigning] = useState(false);
   const pdfViewerRef = useRef<HTMLDivElement | null>(null);
   const [selectionRect, setSelectionRect] = useState<{
     left: number;
@@ -314,16 +274,8 @@ export default function TemplatePage() {
     width: number;
     height: number;
   } | null>(null);
-  const [selectionPdfRect, setSelectionPdfRect] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    pageIndex: number;
-  } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragOffsetRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
-  const pendingBridgeRequestsRef = useRef<Map<string, PendingBridgeRequest>>(new Map());
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -393,111 +345,12 @@ export default function TemplatePage() {
     }
   };
 
-  const cancelPendingBridgeRequests = (reason: string) => {
-    const pendingRequests = pendingBridgeRequestsRef.current;
-    pendingRequests.forEach((pending) => {
-      window.clearTimeout(pending.timeoutId);
-      pending.reject(new Error(reason));
-    });
-    pendingRequests.clear();
-  };
-
   const closeDscModal = () => {
     if (isSigning) return;
     setIsDscModalOpen(false);
     setIsSelectingArea(false);
     setSelectionRect(null);
-    setSelectionPdfRect(null);
-    cancelPendingBridgeRequests("Bridge request cancelled.");
-  };
-
-  useEffect(() => {
-    const pendingRequests = pendingBridgeRequestsRef.current;
-
-    const handleBridgeResponse = (event: MessageEvent) => {
-      if (event.source !== window) return;
-      if (event.origin !== window.location.origin) return;
-      const data = event.data as BridgeResponse | undefined;
-      if (!data || data.source !== BRIDGE_SOURCE || data.type !== "RESPONSE") return;
-      if (!data.requestId) return;
-
-      const pending = pendingRequests.get(data.requestId);
-      if (!pending) return;
-
-      window.clearTimeout(pending.timeoutId);
-      pendingRequests.delete(data.requestId);
-      pending.resolve(data);
-    };
-
-    window.addEventListener("message", handleBridgeResponse);
-
-    return () => {
-      window.removeEventListener("message", handleBridgeResponse);
-      cancelPendingBridgeRequests("Bridge request cancelled.");
-    };
-  }, []);
-
-  const sendBridgeRequest = async (
-    cmd: BridgeCommand,
-    payload: Record<string, unknown> = {}
-  ): Promise<unknown> => {
-    const requestId = crypto.randomUUID();
-
-    const response = await new Promise<BridgeResponse>((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        pendingBridgeRequestsRef.current.delete(requestId);
-        reject(
-          new Error(
-            "Connector did not respond in time. Ensure the extension and native host are installed and running."
-          )
-        );
-      }, BRIDGE_TIMEOUT_MS);
-
-      pendingBridgeRequestsRef.current.set(requestId, { resolve, reject, timeoutId });
-
-      const request: BridgeRequest = {
-        source: BRIDGE_SOURCE,
-        type: "REQUEST",
-        requestId,
-        cmd,
-        payload,
-      };
-
-      window.postMessage(request, window.location.origin);
-    });
-
-    if (!response.ok) {
-      const errorCode = response.error?.code?.trim();
-      const message = response.error?.message?.trim() || "Connector request failed.";
-      throw new Error(errorCode ? `${message} (${errorCode})` : message);
-    }
-
-    return response.result;
-  };
-
-  const blobToBase64 = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result;
-        if (typeof dataUrl !== "string") {
-          reject(new Error("Unable to encode PDF payload."));
-          return;
-        }
-        const [, base64 = ""] = dataUrl.split(",");
-        resolve(base64);
-      };
-      reader.onerror = () => reject(new Error("Failed to read PDF data."));
-      reader.readAsDataURL(blob);
-    });
-
-  const base64ToBlob = (base64: string, mimeType: string): Blob => {
-    const byteChars = atob(base64);
-    const byteNumbers = new Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i += 1) {
-      byteNumbers[i] = byteChars.charCodeAt(i);
-    }
-    return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+    cancelPendingBridgeRequests();
   };
 
   const FieldCard = ({ label, value, fieldName }: { label: string; value: string; fieldName: string }) => (
@@ -526,90 +379,12 @@ export default function TemplatePage() {
       return;
     }
     setIsDscModalOpen(true);
-    setDscError(null);
-    setDscLoading(true);
     setIsSelectingArea(false);
     setSelectionRect(null);
-    setSelectionPdfRect(null);
-    try {
-      const [pingResult, certsResult] = await Promise.all([
-        sendBridgeRequest("PING", { v: BRIDGE_VERSION }),
-        sendBridgeRequest("LIST_CERTS", { v: BRIDGE_VERSION }),
-      ]);
-
-      const pingMessage =
-        typeof (pingResult as { hostVersion?: string })?.hostVersion === "string"
-          ? `Connected (Host ${(pingResult as { hostVersion: string }).hostVersion})`
-          : "Connected to extension and native host.";
-      setDscStatus({ connected: true, message: pingMessage });
-
-      const certs =
-        (certsResult as { certificates?: DscCertificate[] })?.certificates ||
-        ((Array.isArray(certsResult) ? certsResult : []) as DscCertificate[]);
-      if (certs.length > 0) {
-        setDscCertificates(certs);
-        setSelectedDsc(null);
-      } else {
-        setDscCertificates([]);
-        setSelectedDsc(null);
-        setDscError("No DSC certificates were returned by the connector.");
-      }
-    } catch (error: unknown) {
-      const message = mapBridgeError(error).message || "Failed to load connector info.";
-      console.error("Failed to load connector info:", error);
-      setDscStatus({
-        connected: false,
-        message: "Connector unavailable",
-      });
-      setDscCertificates([]);
-      setSelectedDsc(null);
-      setDscError(
-        message ||
-          "Unable to reach extension connector. Install the connector extension and native host, then retry."
-      );
-    } finally {
-      setDscLoading(false);
-    }
+    await initializeSigning();
   };
 
-  const checkConnectorHealth = async () => {
-    setIsPingingConnector(true);
-    setConnectorPingMessage(null);
-
-    try {
-      const pingResult = (await sendBridgeRequest("PING", {
-        v: BRIDGE_VERSION,
-      })) as { hostVersion?: string; tokenPresent?: boolean };
-
-      const hostVersion =
-        typeof pingResult?.hostVersion === "string" ? pingResult.hostVersion : "unknown";
-      const tokenHint =
-        typeof pingResult?.tokenPresent === "boolean"
-          ? pingResult.tokenPresent
-            ? "Token detected."
-            : "Token not detected."
-          : "";
-
-      setDscStatus({
-        connected: true,
-        message: `Connected (Host ${hostVersion})${tokenHint ? ` ${tokenHint}` : ""}`,
-      });
-      setConnectorPingMessage(
-        `Connector is reachable.${tokenHint ? ` ${tokenHint}` : ""}`
-      );
-    } catch (error: unknown) {
-      const message = mapBridgeError(error).message || "Connector check failed. Install extension/native host and retry.";
-      setDscStatus({
-        connected: false,
-        message: "Connector unavailable",
-      });
-      setConnectorPingMessage(message);
-    } finally {
-      setIsPingingConnector(false);
-    }
-  };
-
-  const signWithDsc = async (rect?: { x: number; y: number; width: number; height: number; pageIndex: number }) => {
+  const signWithDsc = async () => {
     if (!generatedPdfUrl) {
       setDscError("Please generate the PDF first.");
       return;
@@ -623,90 +398,26 @@ export default function TemplatePage() {
       return;
     }
 
-    try {
-      setIsSigning(true);
-      setDscError(null);
-
-      const pdfResponse = await fetch(generatedPdfUrl);
-      const pdfBlob = await pdfResponse.blob();
-      const pdfFile = new File([pdfBlob], "generated.pdf", { type: "application/pdf" });
-      const defaultWidth = 230;
-      const defaultHeight = 90;
-      // Keep signature after "For ... LLP" and before "Designated Partner".
-      const marginBottom = 78;
-
-      const targetRect = rect ?? {
-        // Left-aligned between company name and designation lines.
-        x: 65,
-        y: marginBottom,
-        width: defaultWidth,
-        height: defaultHeight,
-        pageIndex: 0,
-      };
-
-      const pdfBase64 = await blobToBase64(pdfFile);
-      if (pdfBase64.length > MAX_SIGN_PDF_BASE64_SIZE) {
-        setDscError("PDF is too large for connector transport. Please reduce size and retry.");
-        return;
-      }
-
-      const result = (await sendBridgeRequest("SIGN_PDF", {
-        v: BRIDGE_VERSION,
-        certificateIndex: selectedDsc.certIndex,
-        slotIndex: selectedDsc.slotIndex,
-        pin: dscPin,
-        pdfBase64,
-        signatureRect: targetRect,
-      })) as { signedPdfBase64?: string; signedPdf?: string };
-
-      const signedPdfBase64 = result.signedPdfBase64 || result.signedPdf;
-      if (!signedPdfBase64) {
-        setDscError("Connector response did not include signed PDF data.");
-        return;
-      }
-
-      const signedPdfBlob = base64ToBlob(signedPdfBase64, "application/pdf");
-      const signedPdfUrl = URL.createObjectURL(signedPdfBlob);
-      if (generatedPdfUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(generatedPdfUrl);
-      }
-      setGeneratedPdfUrl(signedPdfUrl);
-      closeDscModal();
-      setDscPin("");
-    } catch (error: unknown) {
-      const message = mapBridgeError(error).message || "Error while signing PDF.";
-      console.error("Error signing PDF:", error);
-      setDscError(
-        message ||
-          "Failed to sign via connector. Ensure extension/native host are active and retry."
-      );
-    } finally {
-      setIsSigning(false);
+    const pdfResponse = await fetch(generatedPdfUrl);
+    const pdfBlob = await pdfResponse.blob();
+    if (pdfBlob.size > MAX_SIGN_PDF_BASE64_SIZE) {
+      setDscError("PDF is too large for connector transport. Please reduce size and retry.");
+      return;
     }
-  };
 
-  const updatePdfRectFromSelection = (containerRect: DOMRect, sel: { left: number; top: number; width: number; height: number }) => {
-    const pdfWidth = 612;
-    const pdfHeight = 792;
-    const scaleX = pdfWidth / containerRect.width;
-    const scaleY = pdfHeight / containerRect.height;
+    const result = await signCurrentPdf(pdfBlob, "generated.pdf");
+    if (!result?.signedPdfBase64) {
+      return;
+    }
 
-    const sigWidth = sel.width * scaleX;
-    const sigHeight = sel.height * scaleY;
-
-    const centerX = sel.left + sel.width / 2;
-    const centerY = sel.top + sel.height / 2;
-
-    const pdfX = centerX * scaleX - sigWidth / 2;
-    const pdfY = pdfHeight - centerY * scaleY - sigHeight / 2;
-
-    setSelectionPdfRect({
-      x: pdfX,
-      y: pdfY,
-      width: sigWidth,
-      height: sigHeight,
-      pageIndex: 0,
-    });
+    const signedPdfBlob = base64ToBlob(result.signedPdfBase64, "application/pdf");
+    const signedPdfUrl = URL.createObjectURL(signedPdfBlob);
+    if (generatedPdfUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(generatedPdfUrl);
+    }
+    setGeneratedPdfUrl(signedPdfUrl);
+    closeDscModal();
+    setDscPin("");
   };
 
   const handlePdfClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -730,7 +441,6 @@ export default function TemplatePage() {
         height: boxHeightPx,
       };
       setSelectionRect(sel);
-      updatePdfRectFromSelection(rect, sel);
     }
   };
 
@@ -776,7 +486,6 @@ export default function TemplatePage() {
       top: newTop,
     };
     setSelectionRect(updatedSel);
-    updatePdfRectFromSelection(rect, updatedSel);
   };
 
   const handlePdfMouseUp = () => {
@@ -1227,7 +936,7 @@ export default function TemplatePage() {
                         <button
                           className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400"
                           onClick={() => {
-                            void signWithDsc(selectionPdfRect || undefined);
+                            void signWithDsc();
                           }}
                           disabled={
                             isSigning ||
