@@ -19,7 +19,8 @@ import {
   SignPdfStartPayload,
   SignPdfStartResult,
 } from "@/app/lib/bridge/protocol";
-import { base64ToBlob, blobToBase64, chunkBase64 as splitBase64ToChunks } from "@/app/lib/bridge/pdfChunker";
+import { assertPdfHasSigningMarkers, preparePdfForNativeSigning } from "@/app/lib/bridge/pdfSigningPrep";
+import { base64ToBlob, chunkBase64 as splitBase64ToChunks } from "@/app/lib/bridge/pdfChunker";
 
 const pretty = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -88,7 +89,7 @@ export default function BridgePocPage() {
   const [signedPdfUrl, setSignedPdfUrl] = useState<string>("");
 
   const [availableSlots, setAvailableSlots] = useState<ListSlotsResult["slots"]>([]);
-  const [selectedSlotId, setSelectedSlotId] = useState("");
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState("");
   const [selectedCertId, setSelectedCertId] = useState("");
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [certsLoading, setCertsLoading] = useState(false);
@@ -195,19 +196,35 @@ export default function BridgePocPage() {
     await runCommand<PingPayload, PingResult>("PING", { v: PROTOCOL_VERSION });
   };
 
-  const loadSlotsForDropdown = async () => {
-    if (slotsLoading) return;
+  const getSlotIdForSigning = (slot: ListSlotsResult["slots"][number] | undefined): number | null => {
+    if (!slot) return null;
+    const candidate = slot as ListSlotsResult["slots"][number] & {
+      id?: unknown;
+      slot?: unknown;
+      slotID?: unknown;
+    };
+    const rawValue: unknown = candidate.slotId ?? candidate.id ?? candidate.slot ?? candidate.slotID;
+    if (typeof rawValue === "number" && Number.isFinite(rawValue)) return rawValue;
+    if (typeof rawValue === "string" && rawValue.trim() && !Number.isNaN(Number(rawValue))) {
+      return Number(rawValue);
+    }
+    return null;
+  };
+
+  const loadSlotsForDropdown = async (): Promise<ListSlotsResult["slots"]> => {
+    if (slotsLoading) return availableSlots;
     setSlotsLoading(true);
     try {
       const slotsResponse = await runCommand<ListSlotsPayload, ListSlotsResult>("LIST_SLOTS", {
         v: PROTOCOL_VERSION,
       });
-      if (!slotsResponse.ok || !slotsResponse.result) return;
+      if (!slotsResponse.ok || !slotsResponse.result) return [];
       const slots = slotsResponse.result.slots ?? [];
       setAvailableSlots(slots);
-      if (slots.length > 0 && !selectedSlotId) {
-        setSelectedSlotId(String(slots[0].slotId));
+      if (slots.length > 0 && !selectedSlotIndex) {
+        setSelectedSlotIndex("0");
       }
+      return slots;
     } finally {
       setSlotsLoading(false);
     }
@@ -235,8 +252,22 @@ export default function BridgePocPage() {
       setPdfFlowResult("Please choose a PDF file first.");
       return;
     }
-    const selectedSlotIdNumber = Number(selectedSlotId);
-    if (!selectedSlotId || Number.isNaN(selectedSlotIdNumber)) {
+    let resolvedIndex = selectedSlotIndex;
+    if (!resolvedIndex && availableSlots.length > 0) {
+      resolvedIndex = "0";
+      setSelectedSlotIndex("0");
+    }
+    if (!resolvedIndex) {
+      const slots = await loadSlotsForDropdown();
+      if (slots.length > 0) {
+        resolvedIndex = "0";
+        setSelectedSlotIndex("0");
+      }
+    }
+
+    const selectedSlot = availableSlots[Number(resolvedIndex)] ?? availableSlots[0];
+    const selectedSlotIdNumber = getSlotIdForSigning(selectedSlot);
+    if (selectedSlotIdNumber === null) {
       setPdfFlowResult("Please select slotId before starting signing.");
       return;
     }
@@ -259,7 +290,31 @@ export default function BridgePocPage() {
         return;
       }
 
-      const pdfBase64 = await blobToBase64(pdfToSignFile);
+      setPdfFlowProgress("Preparing PDF for signing...");
+      const originalPdfBuffer = await pdfToSignFile.arrayBuffer();
+      const preparedPdfBytes = await preparePdfForNativeSigning(originalPdfBuffer);
+      assertPdfHasSigningMarkers(preparedPdfBytes);
+
+      const preparedPdfBlob = new Blob([new Uint8Array(preparedPdfBytes)], {
+        type: "application/pdf",
+      });
+      const preparedPdfDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Failed to encode prepared PDF to base64."));
+        reader.onload = () => {
+          if (typeof reader.result !== "string") {
+            reject(new Error("Unexpected FileReader result while encoding prepared PDF."));
+            return;
+          }
+          resolve(reader.result);
+        };
+        reader.readAsDataURL(preparedPdfBlob);
+      });
+      const commaIndex = preparedPdfDataUrl.indexOf(",");
+      if (commaIndex === -1) {
+        throw new Error("Unable to parse base64 payload for prepared PDF.");
+      }
+      const pdfBase64 = preparedPdfDataUrl.slice(commaIndex + 1);
       const chunks = splitBase64ToChunks(pdfBase64);
       if (chunks.length === 0) {
         throw new Error("Selected PDF is empty after base64 encoding.");
@@ -480,7 +535,7 @@ export default function BridgePocPage() {
             <label className="text-sm">
               <span className="mb-1 block font-medium text-gray-700">slotId (required)</span>
               <select
-                value={selectedSlotId}
+                value={selectedSlotIndex}
                 onFocus={() => {
                   if (availableSlots.length === 0) {
                     void loadSlotsForDropdown();
@@ -492,15 +547,16 @@ export default function BridgePocPage() {
                   }
                 }}
                 onChange={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) {
-                    setSelectedSlotId("");
+                  const rawIndex = e.target.value;
+                  if (!rawIndex) {
+                    setSelectedSlotIndex("");
                     setSelectedCertId("");
                     return;
                   }
-                  setSelectedSlotId(raw);
-                  const parsed = Number(raw);
-                  if (!Number.isNaN(parsed)) {
+                  setSelectedSlotIndex(rawIndex);
+                  const slot = availableSlots[Number(rawIndex)];
+                  const parsed = getSlotIdForSigning(slot);
+                  if (parsed !== null) {
                     void fetchCertsForSlot(parsed);
                   }
                 }}
@@ -509,8 +565,8 @@ export default function BridgePocPage() {
                 <option value="">
                   {slotsLoading ? "Loading slots..." : "Select slot"}
                 </option>
-                {availableSlots.map((slot) => (
-                  <option key={slot.slotId} value={slot.slotId}>
+                {availableSlots.map((slot, index) => (
+                  <option key={`${String(slot.slotId)}-${index}`} value={String(index)}>
                     {slot.slotId} - {slot.label || "Unnamed slot"}
                   </option>
                 ))}
