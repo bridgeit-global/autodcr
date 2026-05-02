@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { isExtensionAvailable, sendBridgeCommand } from "@/app/lib/bridge/bridgeClient";
 import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import {
+  CertInfo,
   ListCertsPayload,
   ListCertsResult,
   ListSlotsPayload,
@@ -65,6 +66,11 @@ interface CertIdValidation {
   normalizedHex: string;
 }
 
+interface SlotCertSnapshot {
+  certIds: string[];
+  selectedCertId: string;
+}
+
 const makeDefaultApiState = (): ApiState => ({
   loading: false,
   status: "idle",
@@ -103,9 +109,11 @@ export default function BridgePocPage() {
 
   const [availableSlots, setAvailableSlots] = useState<ListSlotsResult["slots"]>([]);
   const [selectedSlotIndex, setSelectedSlotIndex] = useState("");
-  const [selectedCertId, setSelectedCertId] = useState("");
+  const [certsBySlot, setCertsBySlot] = useState<Record<number, CertInfo[]>>({});
+  const [selectedCertIdBySlot, setSelectedCertIdBySlot] = useState<Record<number, string>>({});
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [certsLoading, setCertsLoading] = useState(false);
+  const certFetchesBySlotRef = useRef<Map<number, Promise<SlotCertSnapshot>>>(new Map());
 
   const [startFileName] = useState("generated.pdf");
   const [startContentType] = useState("application/pdf");
@@ -243,21 +251,47 @@ export default function BridgePocPage() {
     }
   };
 
-  const fetchCertsForSlot = async (slotId: number): Promise<string> => {
-    if (certsLoading) return selectedCertId;
-    setCertsLoading(true);
-    const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId });
-    if (!certsResponse.ok || !certsResponse.result) {
-      setSelectedCertId("");
-      setCertsLoading(false);
-      return "";
-    }
+  const formatCertOptionLabel = (cert: CertInfo): string => {
+    const base = cert.label?.trim() || cert.subject?.trim();
+    if (base) return base.length > 72 ? `${base.slice(0, 69)}…` : base;
+    const id = cert.id;
+    if (!id) return "Unknown certificate";
+    if (id.length > 28) return `${id.slice(0, 12)}…${id.slice(-10)}`;
+    return id;
+  };
 
-    const certs = certsResponse.result.certs ?? [];
-    const resolvedCertId = certs[0]?.id || "";
-    setSelectedCertId(resolvedCertId);
-    setCertsLoading(false);
-    return resolvedCertId;
+  const fetchCertsForSlot = async (
+    slotId: number,
+    opts?: { forceRefresh?: boolean; preferredCertId?: string }
+  ): Promise<SlotCertSnapshot> => {
+    const existing = certFetchesBySlotRef.current.get(slotId);
+    if (!opts?.forceRefresh && existing) {
+      return existing;
+    }
+    const request = (async (): Promise<SlotCertSnapshot> => {
+      setCertsLoading(true);
+      try {
+        const certsResponse = await runCommand<ListCertsPayload, ListCertsResult>("LIST_CERTS", { slotId });
+        if (!certsResponse.ok || !certsResponse.result) {
+          setCertsBySlot((current) => ({ ...current, [slotId]: [] }));
+          setSelectedCertIdBySlot((current) => ({ ...current, [slotId]: "" }));
+          return { certIds: [], selectedCertId: "" };
+        }
+        const certs = certsResponse.result.certs ?? [];
+        const certIds = certs.map((cert) => cert.id).filter((id): id is string => Boolean(id));
+        const preferred = opts?.preferredCertId?.trim() ?? "";
+        const resolvedCertId =
+          preferred && certIds.includes(preferred) ? preferred : certIds[0] ?? "";
+        setCertsBySlot((current) => ({ ...current, [slotId]: certs }));
+        setSelectedCertIdBySlot((current) => ({ ...current, [slotId]: resolvedCertId }));
+        return { certIds, selectedCertId: resolvedCertId };
+      } finally {
+        certFetchesBySlotRef.current.delete(slotId);
+        setCertsLoading(false);
+      }
+    })();
+    certFetchesBySlotRef.current.set(slotId, request);
+    return request;
   };
 
   const runUploadedPdfSigningFlow = async () => {
@@ -294,12 +328,29 @@ export default function BridgePocPage() {
     }
 
     try {
-      let resolvedCertId = selectedCertId.trim();
-      if (!resolvedCertId) {
-        resolvedCertId = (await fetchCertsForSlot(selectedSlotIdNumber)).trim();
-      }
+      const slotScopedSelectedCert = selectedCertIdBySlot[selectedSlotIdNumber]?.trim() ?? "";
+      const latestSnapshot = await fetchCertsForSlot(selectedSlotIdNumber, {
+        forceRefresh: true,
+        preferredCertId: slotScopedSelectedCert,
+      });
+      const resolvedCertId = latestSnapshot.selectedCertId.trim();
       if (!resolvedCertId) {
         setPdfFlowResult("No certificate available for selected slot.");
+        return;
+      }
+      if (!latestSnapshot.certIds.includes(resolvedCertId)) {
+        setPdfFlowProgress("Failed.");
+        setPdfFlowResult(
+          pretty({
+            status: "failed",
+            title: "Stale certificate selection detected",
+            detail:
+              "Selected certId is not present in the latest LIST_CERTS response for this slot. Refresh slot/certificate metadata and retry.",
+            slotId: selectedSlotIdNumber,
+            selectedCertId: resolvedCertId,
+            latestCertIds: latestSnapshot.certIds,
+          })
+        );
         return;
       }
 
@@ -504,6 +555,23 @@ export default function BridgePocPage() {
     );
   };
 
+  const signingUiSelectedSlot =
+    selectedSlotIndex === ""
+      ? undefined
+      : (availableSlots[Number(selectedSlotIndex)] ?? availableSlots[0]);
+  const signingUiSlotId =
+    signingUiSelectedSlot === undefined ? null : getSlotIdForSigning(signingUiSelectedSlot);
+  const signingUiCerts = signingUiSlotId === null ? [] : (certsBySlot[signingUiSlotId] ?? []);
+  const signingUiCertValue = signingUiSlotId === null ? "" : (selectedCertIdBySlot[signingUiSlotId] ?? "");
+  const signingUiCertPlaceholderLabel =
+    signingUiSlotId === null
+      ? "Select a slot first"
+      : certsLoading
+        ? "Loading certificates..."
+        : signingUiCerts.length === 0
+          ? "No certificates for this slot"
+          : "Select certificate";
+
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-8">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -557,7 +625,8 @@ export default function BridgePocPage() {
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Upload PDF and Auto-Sign (DSC)</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Select slotId. certId is auto-derived from slot metadata in the background.
+            Select PKCS#11 slot, then the signing certificate (CKA_ID). Certificates are loaded with
+            LIST_CERTS for the chosen slot.
           </p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="text-sm md:col-span-2">
@@ -587,14 +656,14 @@ export default function BridgePocPage() {
                   const rawIndex = e.target.value;
                   if (!rawIndex) {
                     setSelectedSlotIndex("");
-                    setSelectedCertId("");
                     return;
                   }
                   setSelectedSlotIndex(rawIndex);
                   const slot = availableSlots[Number(rawIndex)];
                   const parsed = getSlotIdForSigning(slot);
                   if (parsed !== null) {
-                    void fetchCertsForSlot(parsed);
+                    setSelectedCertIdBySlot((current) => ({ ...current, [parsed]: "" }));
+                    void fetchCertsForSlot(parsed, { forceRefresh: true });
                   }
                 }}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black"
@@ -609,11 +678,42 @@ export default function BridgePocPage() {
                 ))}
               </select>
               <span className="mt-1 block text-xs text-gray-600">
-                {certsLoading
-                  ? "Loading certificate metadata..."
-                  : selectedCertId
-                    ? "certId auto-selected for this slot."
-                    : "certId will be resolved automatically when signing."}
+                Slot list comes from LIST_SLOTS. Changing slot reloads certificates for that slot.
+              </span>
+            </label>
+            <label className="text-sm md:col-span-2">
+              <span className="mb-1 block font-medium text-gray-700">Certificate (required)</span>
+              <select
+                value={signingUiCertValue}
+                disabled={signingUiSlotId === null || signingUiCerts.length === 0}
+                onFocus={() => {
+                  if (
+                    signingUiSlotId !== null &&
+                    (certsBySlot[signingUiSlotId] ?? []).length === 0 &&
+                    !certsLoading
+                  ) {
+                    void fetchCertsForSlot(signingUiSlotId, { forceRefresh: true });
+                  }
+                }}
+                onChange={(e) => {
+                  if (signingUiSlotId === null) return;
+                  setSelectedCertIdBySlot((current) => ({
+                    ...current,
+                    [signingUiSlotId]: e.target.value,
+                  }));
+                }}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-black disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">{signingUiCertPlaceholderLabel}</option>
+                {signingUiCerts.map((cert, index) => (
+                  <option key={`${cert.id}-${index}`} value={cert.id}>
+                    {formatCertOptionLabel(cert)}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-gray-600">
+                certId is the hex CKA_ID sent in SIGN_PDF_START. Pick the certificate that matches your
+                DSC private key in this slot.
               </span>
             </label>
             <label className="text-sm md:col-span-2">

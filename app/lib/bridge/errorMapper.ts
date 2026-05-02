@@ -85,7 +85,8 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   },
   CERT_NOT_FOUND: {
     message: "Selected certificate is no longer available on this token.",
-    hint: "Refresh certificates and select a valid certificate again.",
+    hint:
+      "Refresh LIST_CERTS for the currently selected slot and reselect a valid certId before signing again.",
     retryable: true,
   },
   PIN_CANCELLED: {
@@ -111,7 +112,7 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   CMS_BUILD_FAILED: {
     message: "Could not build CMS signature payload.",
     hint:
-      "Likely certificate/private-key CKA_ID mismatch. Reselect slot and certificate, then retry. If it persists, verify token private key exists for the selected certId.",
+      "Likely certificate/private-key CKA_ID mismatch or stale cert selection. Refresh slot certificates, reselect certId from current slot snapshot, then retry.",
     retryable: true,
   },
   NO_CERT_SELECTED: {

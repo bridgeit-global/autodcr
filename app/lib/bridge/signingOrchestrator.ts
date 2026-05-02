@@ -43,6 +43,8 @@ export interface SignPdfArgs {
   contentType?: string;
   /** Optional PIN forwarded to the host as a hint (host may still prompt). */
   pinHint?: string;
+  /** Whether certId was freshly resolved from LIST_CERTS for this slot. */
+  certSource?: "fresh_slot_lookup" | "cached_ui_state";
   onProgress?: (sent: number, total: number) => void;
   onDebugEvent?: (event: SignPdfDebugEvent) => void;
   signal?: AbortSignal;
@@ -54,6 +56,7 @@ export interface SignPdfDebugEvent {
   slotId: number;
   certId: string;
   totalChunks: number;
+  certSource?: "fresh_slot_lookup" | "cached_ui_state";
   chunkIndex?: number;
   detail?: string;
 }
@@ -114,6 +117,7 @@ export const signPdf = async ({
   fileName,
   contentType,
   pinHint,
+  certSource = "cached_ui_state",
   onProgress,
   onDebugEvent,
   signal,
@@ -144,7 +148,8 @@ export const signPdf = async ({
       slotId,
       certId,
       totalChunks,
-      detail: "Dispatching SIGN_PDF_START",
+      certSource,
+      detail: `Dispatching SIGN_PDF_START certSource=${certSource}`,
     });
     await sendBridgeCommand<SignPdfStartPayload, SignPdfStartResult>(
       "SIGN_PDF_START",
@@ -171,6 +176,7 @@ export const signPdf = async ({
         slotId,
         certId,
         totalChunks,
+        certSource,
         chunkIndex: index,
         detail: "Dispatching SIGN_PDF_CHUNK",
       });
@@ -189,6 +195,7 @@ export const signPdf = async ({
       slotId,
       certId,
       totalChunks,
+      certSource,
       detail: "Dispatching SIGN_PDF_END",
     });
     const final = await sendBridgeCommand<SignPdfEndPayload, SignPdfFinalResult>(
@@ -209,6 +216,7 @@ export const signPdf = async ({
       slotId,
       certId,
       totalChunks,
+      certSource,
       detail,
     });
     if (error instanceof Error) {
