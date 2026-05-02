@@ -217,7 +217,11 @@ export default function BridgePocPage() {
     await runCommand<PingPayload, PingResult>("PING", { v: PROTOCOL_VERSION });
   };
 
-  const getSlotIdForSigning = (slot: ListSlotsResult["slots"][number] | undefined): number | null => {
+  const getSlotIdForSigning = (
+    slot: ListSlotsResult["slots"][number] | undefined,
+    /** When the host omits numeric slotId, many stacks still use LIST_CERTS(slotIndex). */
+    fallbackSlotIndex?: number
+  ): number | null => {
     if (!slot) return null;
     const candidate = slot as ListSlotsResult["slots"][number] & {
       id?: unknown;
@@ -228,6 +232,13 @@ export default function BridgePocPage() {
     if (typeof rawValue === "number" && Number.isFinite(rawValue)) return rawValue;
     if (typeof rawValue === "string" && rawValue.trim() && !Number.isNaN(Number(rawValue))) {
       return Number(rawValue);
+    }
+    if (
+      fallbackSlotIndex !== undefined &&
+      Number.isInteger(fallbackSlotIndex) &&
+      fallbackSlotIndex >= 0
+    ) {
+      return fallbackSlotIndex;
     }
     return null;
   };
@@ -244,6 +255,10 @@ export default function BridgePocPage() {
       setAvailableSlots(slots);
       if (slots.length > 0 && !selectedSlotIndex) {
         setSelectedSlotIndex("0");
+        const firstSlotId = getSlotIdForSigning(slots[0], 0);
+        if (firstSlotId !== null) {
+          void fetchCertsForSlot(firstSlotId, { forceRefresh: true });
+        }
       }
       return slots;
     } finally {
@@ -313,7 +328,7 @@ export default function BridgePocPage() {
     }
 
     const selectedSlot = availableSlots[Number(resolvedIndex)] ?? availableSlots[0];
-    const selectedSlotIdNumber = getSlotIdForSigning(selectedSlot);
+    const selectedSlotIdNumber = getSlotIdForSigning(selectedSlot, Number(resolvedIndex));
     if (selectedSlotIdNumber === null) {
       setPdfFlowResult("Please select slotId before starting signing.");
       return;
@@ -560,7 +575,9 @@ export default function BridgePocPage() {
       ? undefined
       : (availableSlots[Number(selectedSlotIndex)] ?? availableSlots[0]);
   const signingUiSlotId =
-    signingUiSelectedSlot === undefined ? null : getSlotIdForSigning(signingUiSelectedSlot);
+    signingUiSelectedSlot === undefined
+      ? null
+      : getSlotIdForSigning(signingUiSelectedSlot, Number(selectedSlotIndex));
   const signingUiCerts = signingUiSlotId === null ? [] : (certsBySlot[signingUiSlotId] ?? []);
   const signingUiCertValue = signingUiSlotId === null ? "" : (selectedCertIdBySlot[signingUiSlotId] ?? "");
   const signingUiCertPlaceholderLabel =
@@ -660,7 +677,7 @@ export default function BridgePocPage() {
                   }
                   setSelectedSlotIndex(rawIndex);
                   const slot = availableSlots[Number(rawIndex)];
-                  const parsed = getSlotIdForSigning(slot);
+                  const parsed = getSlotIdForSigning(slot, Number(rawIndex));
                   if (parsed !== null) {
                     setSelectedCertIdBySlot((current) => ({ ...current, [parsed]: "" }));
                     void fetchCertsForSlot(parsed, { forceRefresh: true });
@@ -685,8 +702,17 @@ export default function BridgePocPage() {
               <span className="mb-1 block font-medium text-gray-700">Certificate (required)</span>
               <select
                 value={signingUiCertValue}
-                disabled={signingUiSlotId === null || signingUiCerts.length === 0}
+                disabled={signingUiSlotId === null || certsLoading}
                 onFocus={() => {
+                  if (
+                    signingUiSlotId !== null &&
+                    (certsBySlot[signingUiSlotId] ?? []).length === 0 &&
+                    !certsLoading
+                  ) {
+                    void fetchCertsForSlot(signingUiSlotId, { forceRefresh: true });
+                  }
+                }}
+                onClick={() => {
                   if (
                     signingUiSlotId !== null &&
                     (certsBySlot[signingUiSlotId] ?? []).length === 0 &&
