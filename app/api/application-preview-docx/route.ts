@@ -82,6 +82,7 @@ const DOCX_MIME =
 
 const TEMPLATE_DOCX_MAP: Record<TemplateType, string> = {
   "Architect Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).docx",
+  "Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).docx",
   "Structural Engineer": "appointment letter (Structural Engineer).docx",
   "Fire Safety Consultant": "appointment letter (Fire Safety Consultant).docx",
   "M&E Consultant": "appointment letter (M&E Consultant).docx",
@@ -134,6 +135,13 @@ function applyArchitectLetterStaticLabels(xml: string): string {
     .replace(/<w:t([^>]*)>Architect\/L\.S<\/w:t>/gi, "<w:t$1>Architect</w:t>");
 }
 
+/** Same Word-run pattern as architect path, but emit "Licensed Surveyor" for the shared DOCX. */
+function applyLicensedSurveyorLetterStaticLabels(xml: string): string {
+  return xml
+    .replace(/<w:t([^>]*)>Architect\/L\.S\.<\/w:t>/gi, "<w:t$1>Licensed Surveyor</w:t>")
+    .replace(/<w:t([^>]*)>Architect\/L\.S<\/w:t>/gi, "<w:t$1>Licensed Surveyor</w:t>");
+}
+
 function replaceInDocxXml(
   docxBuffer: Buffer,
   fields: Record<string, string | undefined>,
@@ -166,6 +174,8 @@ function replaceInDocxXml(
 
     if (templateType === "Architect Licensed Surveyor") {
       xml = applyArchitectLetterStaticLabels(xml);
+    } else if (templateType === "Licensed Surveyor") {
+      xml = applyLicensedSurveyorLetterStaticLabels(xml);
     }
 
     zip.file(fileName, xml);
@@ -339,7 +349,7 @@ export async function POST(request: NextRequest) {
       consultantLookupIds.length > 0 ? { lookupUserIds: consultantLookupIds } : undefined;
 
     if (token) {
-      await enrichPreviewDocxFields(fields, token, resolveOpts);
+      await enrichPreviewDocxFields(fields, token, resolveOpts, templateType);
     }
 
     const templateFileName = TEMPLATE_DOCX_MAP[templateType];

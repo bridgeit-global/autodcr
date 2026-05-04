@@ -1133,6 +1133,12 @@ export const TEMPLATE_CONFIG = {
     displayName: "Architect Licensed Surveyor",
     fileName: "Appointment_Letter_Architect_Licensed_Surveyor.pdf",
   },
+  "Licensed Surveyor": {
+    generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect Licensed Surveyor"),
+    displayName: "Licensed Surveyor",
+    fileName: "Appointment_Letter_Licensed_Surveyor.pdf",
+  },
   "Structural Engineer": {
     generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) => 
       generateFromDocx(pdfDoc, page, fields, font, boldFont, "Structural Engineer"),

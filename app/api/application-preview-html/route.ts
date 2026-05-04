@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 const TEMPLATE_HTML_MAP: Partial<Record<TemplateType, string>> = {
   "Architect Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).html",
+  "Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).html",
 };
 
 function escapeHtml(value: string): string {
