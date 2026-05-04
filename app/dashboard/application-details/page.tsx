@@ -67,6 +67,26 @@ function pickCoaExpiryFromMeta(meta: unknown): string | undefined {
   return undefined;
 }
 
+function pickLbsLicenseFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["lbs_license_no", "LBS_license_no", "lbsLicenseNo"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickLbsExpiryFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["lbs_expiry_date", "LBS_expiry_date", "lbsExpiryDate"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
 function pickAddressLineFromMeta(meta: unknown, index: 1 | 2 | 3): string | undefined {
   if (!meta || typeof meta !== "object") return undefined;
   const m = meta as Record<string, unknown>;
@@ -289,6 +309,7 @@ export default function ApplicationDetailsPage() {
       setIsPreviewLoading(true);
 
       const localMeta = readLocalStoredUserMetadata();
+      const templateType = mapSelectedApplicationToTemplate(selectedApplication);
 
       let coaRegNo =
         pickCoaRegNoFromMeta(userMetadata) ||
@@ -296,6 +317,10 @@ export default function ApplicationDetailsPage() {
       let coaExpiryDate =
         pickCoaExpiryFromMeta(userMetadata) ||
         pickCoaExpiryFromMeta(localMeta);
+      let lbsLicenseNo =
+        pickLbsLicenseFromMeta(userMetadata) || pickLbsLicenseFromMeta(localMeta);
+      let lbsExpiryDate =
+        pickLbsExpiryFromMeta(userMetadata) || pickLbsExpiryFromMeta(localMeta);
       let consultantAddressLine1 =
         pickAddressLineFromMeta(userMetadata, 1) ||
         pickAddressLineFromMeta(localMeta, 1);
@@ -330,6 +355,8 @@ export default function ApplicationDetailsPage() {
       const mergeConsultantMeta = (meta: unknown) => {
         if (!coaRegNo) coaRegNo = pickCoaRegNoFromMeta(meta);
         if (!coaExpiryDate) coaExpiryDate = pickCoaExpiryFromMeta(meta);
+        if (!lbsLicenseNo) lbsLicenseNo = pickLbsLicenseFromMeta(meta);
+        if (!lbsExpiryDate) lbsExpiryDate = pickLbsExpiryFromMeta(meta);
         if (!consultantAddressLine1) consultantAddressLine1 = pickAddressLineFromMeta(meta, 1);
         if (!consultantAddressLine2) consultantAddressLine2 = pickAddressLineFromMeta(meta, 2);
         if (!consultantAddressLine3) consultantAddressLine3 = pickAddressLineFromMeta(meta, 3);
@@ -337,7 +364,6 @@ export default function ApplicationDetailsPage() {
         if (!consultantName) consultantName = pickConsultantNameFromMeta(meta);
       };
 
-      const templateType = mapSelectedApplicationToTemplate(selectedApplication);
       const consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
         templateType,
         projectData
@@ -368,12 +394,21 @@ export default function ApplicationDetailsPage() {
 
       mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
 
-      if (!coaRegNo || !coaExpiryDate) {
+      const needsConsultantRegRefresh =
+        templateType === "Licensed Surveyor"
+          ? !lbsLicenseNo || !lbsExpiryDate
+          : !coaRegNo || !coaExpiryDate;
+
+      if (needsConsultantRegRefresh) {
         await supabase.auth.refreshSession();
         mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
       }
 
-      if (!coaRegNo || !coaExpiryDate) {
+      if (
+        templateType === "Licensed Surveyor"
+          ? !lbsLicenseNo || !lbsExpiryDate
+          : !coaRegNo || !coaExpiryDate
+      ) {
         const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, consultantLookupUserIds);
         if (serverMeta) mergeConsultantMeta(serverMeta);
       }
@@ -427,28 +462,35 @@ export default function ApplicationDetailsPage() {
         console.log("[preview-owner-raw_user_meta_data]", ownerMetaSnapshot);
       }
 
-      const fields = mapApplicationPreviewFields({
-        selectedApplication,
-        applicationNo,
-        applicationCreatedAt,
-        coaRegNo,
-        coaExpiryDate,
-        consultantAddressLine1,
-        consultantAddressLine2,
-        consultantAddressLine3,
-        consultantName,
-        consultantCompanyName,
-        clientCompanyName,
-        clientName,
-        clientCompanyDesignation,
-        projectData,
-      });
+      const fields = mapApplicationPreviewFields(
+        {
+          selectedApplication,
+          applicationNo,
+          applicationCreatedAt,
+          coaRegNo,
+          coaExpiryDate,
+          lbsLicenseNo,
+          lbsExpiryDate,
+          consultantAddressLine1,
+          consultantAddressLine2,
+          consultantAddressLine3,
+          consultantName,
+          consultantCompanyName,
+          clientCompanyName,
+          clientName,
+          clientCompanyDesignation,
+          projectData,
+        },
+        templateType
+      );
       const previewSource = {
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
         coaRegNo,
         coaExpiryDate,
+        lbsLicenseNo,
+        lbsExpiryDate,
         consultantAddressLine1,
         consultantAddressLine2,
         consultantAddressLine3,
@@ -474,7 +516,7 @@ export default function ApplicationDetailsPage() {
         URL.revokeObjectURL(previewUrl);
       }
 
-      if (templateType === "Architect Licensed Surveyor") {
+      if (templateType === "Architect Licensed Surveyor" || templateType === "Licensed Surveyor") {
         // HTML iframe path: razor-sharp native rendering, instant load,
         // vector PDF available via the modal's Print/Save button.
         const html = await generateApplicationPreviewHtml(

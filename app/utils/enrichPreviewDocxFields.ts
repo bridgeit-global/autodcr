@@ -1,4 +1,5 @@
 import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
+import type { TemplateType } from "@/app/templates/templateGenerators";
 import {
   resolveConsultantMetadata,
   type ResolveConsultantMetadataOptions,
@@ -17,14 +18,20 @@ function pickMetaString(meta: Record<string, unknown>, keys: string[]): string {
 export async function enrichPreviewDocxFields(
   fields: Record<string, string | undefined>,
   access_token: string,
-  options?: ResolveConsultantMetadataOptions
+  options?: ResolveConsultantMetadataOptions,
+  templateType?: TemplateType
 ): Promise<void> {
   try {
     const meta = await resolveConsultantMetadata(access_token.trim(), options);
     if (!meta) return;
 
-    const reg = pickMetaString(meta, ["coa_reg_no", "COA_reg_no", "coaRegNo"]);
-    const expIso = pickMetaString(meta, ["coa_expiry_date", "COA_expiry_date", "coaExpiryDate"]);
+    const useLbs = templateType === "Licensed Surveyor";
+    const reg = useLbs
+      ? pickMetaString(meta, ["lbs_license_no", "LBS_license_no", "lbsLicenseNo"])
+      : pickMetaString(meta, ["coa_reg_no", "COA_reg_no", "coaRegNo"]);
+    const expIso = useLbs
+      ? pickMetaString(meta, ["lbs_expiry_date", "LBS_expiry_date", "lbsExpiryDate"])
+      : pickMetaString(meta, ["coa_expiry_date", "COA_expiry_date", "coaExpiryDate"]);
     const expDisplay = formatCoaExpiryDisplay(expIso);
 
     const regKeys = ["project_RegNo_Architect/L.S.", "project_RegNo_Architect/L.S"] as const;

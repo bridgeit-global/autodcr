@@ -12,6 +12,10 @@ type ApplicationPreviewSource = {
   coaRegNo?: string | null;
   /** COA expiry as stored (e.g. ISO `YYYY-MM-DD` in `coa_expiry_date`). */
   coaExpiryDate?: string | null;
+  /** LBS license no. from `user_metadata.lbs_license_no` — used for Licensed Surveyor appointment preview Reg. No. */
+  lbsLicenseNo?: string | null;
+  /** LBS expiry (e.g. ISO) from `user_metadata.lbs_expiry_date` — used for Licensed Surveyor “Valid upto”. */
+  lbsExpiryDate?: string | null;
   consultantName?: string | null;
   consultantCompanyName?: string | null;
   clientCompanyName?: string | null;
@@ -78,7 +82,7 @@ const BP_CITY: BuildingProposalAddressBlock = {
 
 const BP_WESTERN_I: BuildingProposalAddressBlock = {
   officerName: "SHRI. BAJIRAO PATIL",
-  line1: "Dy. Chief Engineer, Building Proposals (W. S. - I)",
+  line1: "",
   line2: "Hinduhrudaysamrat Balasaheb Thackeray Market, 6th to 9th Floor, New Majas Market,",
   line3: "Poonam Nagar, Opp. J. V. Link Road, Jogeshwari (East), Mumbai - 400 093",
 };
@@ -137,11 +141,14 @@ export function mapSelectedApplicationToTemplate(
   if (value.includes("plumber")) return "Plumber";
   if (value.includes("site supervisor")) return "Site Supervisor";
   if (value.includes("horticulturist")) return "Horticulturist";
+  if (value.includes("licensed surveyor")) return "Licensed Surveyor";
   return "Architect Licensed Surveyor";
 }
 
 function templateConsultantApplicantKeywords(templateType: TemplateType): string[] {
   switch (templateType) {
+    case "Licensed Surveyor":
+      return ["licensed surveyor"];
     case "Structural Engineer":
       return ["structural"];
     case "Fire Safety Consultant":
@@ -254,11 +261,15 @@ function splitAddressLines(address?: string, maxLines = 3): string[] {
   return [...parts, ...Array.from({ length: maxLines - parts.length }, () => "")];
 }
 
-export function mapApplicationPreviewFields(source: ApplicationPreviewSource): TemplateFields {
+export function mapApplicationPreviewFields(
+  source: ApplicationPreviewSource,
+  templateType?: TemplateType
+): TemplateFields {
   const projectInfo = source.projectData?.project_info || {};
   const savePlot = source.projectData?.save_plot_details || {};
   const joined = joinProposedCsOrCtsNos(source).trim();
   const ctsNo = joined ? bracketSurveyNumberList(joined) : source.applicationNo || "-";
+  const isLicensedSurveyorLetter = templateType === "Licensed Surveyor";
 
   return {
     CurrentDate: formatApplicationDate(source.applicationCreatedAt),
@@ -277,8 +288,12 @@ export function mapApplicationPreviewFields(source: ApplicationPreviewSource): T
     FirmName: source.projectData?.title || "-",
     ConsultantName: "-",
     ConsultantType: source.selectedApplication || "-",
-    CouncilRegNo: source.coaRegNo?.trim() || "-",
-    RegValidityDate: formatCoaExpiryDisplay(source.coaExpiryDate) || "-",
+    CouncilRegNo: isLicensedSurveyorLetter
+      ? source.lbsLicenseNo?.trim() || "-"
+      : source.coaRegNo?.trim() || "-",
+    RegValidityDate: isLicensedSurveyorLetter
+      ? formatCoaExpiryDisplay(source.lbsExpiryDate) || "-"
+      : formatCoaExpiryDisplay(source.coaExpiryDate) || "-",
     // TODO: Map final backend fields once mapping contract is finalized:
     // - project_Proposal_Number
     // - consultant registration and validity
@@ -288,15 +303,23 @@ export function mapApplicationPreviewFields(source: ApplicationPreviewSource): T
 
 export function mapToPdfFieldValues(
   fields: TemplateFields,
-  source?: ApplicationPreviewSource
+  source?: ApplicationPreviewSource,
+  templateType?: TemplateType
 ): Record<string, string | undefined> {
   const applicants = source?.projectData?.applicant_details?.applicants || [];
   const ownerApplicant = applicants.find(
     (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("owner")
   );
-  const architectApplicant = applicants.find(
-    (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("architect")
-  );
+  const isLicensedSurveyorLetter = templateType === "Licensed Surveyor";
+  const primaryConsultantApplicant = isLicensedSurveyorLetter
+    ? applicants.find((applicant) =>
+        (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("licensed surveyor")
+      )
+    : applicants.find((applicant) =>
+        (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("architect")
+      );
+  const architectApplicant = primaryConsultantApplicant;
+  const consultantRoleLabel = isLicensedSurveyorLetter ? "Licensed Surveyor" : "Architect";
   const architectName = architectApplicant?.name?.trim() || source?.consultantName?.trim() || "";
   const architectAddressLine1 =
     source?.consultantAddressLine1?.trim() || "";
@@ -326,8 +349,12 @@ export function mapToPdfFieldValues(
   const csCtsNosSubjectDisplay = rawSurveyList
     ? `${surveyLabelForSubject} ${rawSurveyList}`
     : csCtsNos;
-  const architectCoaRegNo = source?.coaRegNo?.trim() ?? "";
-  const architectValidityDisplay = formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "";
+  const consultantRegNo = isLicensedSurveyorLetter
+    ? (source?.lbsLicenseNo?.trim() ?? "")
+    : (source?.coaRegNo?.trim() ?? "");
+  const consultantValidityDisplay = isLicensedSurveyorLetter
+    ? (formatCoaExpiryDisplay(source?.lbsExpiryDate) ?? "")
+    : (formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "");
   const clientName =
     source?.clientName?.trim() ||
     fields.ApplicantName?.trim() ||
@@ -359,8 +386,13 @@ export function mapToPdfFieldValues(
   const officerZoneSuffix =
     (regionForProjectToken || "").trim().toLowerCase() === "eastern"
       ? "(E. S.),"
+      : (regionForProjectToken || "").trim().toLowerCase() === "western"
+        ? "(W. S.),"
       : "";
-  const buildingProposalBaseDesignation = "The Executive Engineer (E.S.) - I";
+  const buildingProposalBaseDesignation =
+    (regionForProjectToken || "").trim().toLowerCase() === "western"
+      ? "The Executive Engineer (W.S.) - I"
+      : "The Executive Engineer (E.S.) - I";
 
   return {
     CurrentDate: fields.CurrentDate,
@@ -382,9 +414,10 @@ export function mapToPdfFieldValues(
     CouncilRegNo: fields.CouncilRegNo,
     RegValidityDate: fields.RegValidityDate,
     project_date_generation: fields.CurrentDate,
-    // Title and consultant labels for architect template.
-    "project_Consultant_Architect/L.S._Type": "Architect",
-    "project_Consultant_Architect/L.S.": "Architect",
+    // Title and consultant labels for architect / licensed surveyor template.
+    "project_Consultant_Architect/L.S._Type": consultantRoleLabel,
+    "project_Consultant_Architect/L.S.": consultantRoleLabel,
+    "project_Letter_Appointment_Role": consultantRoleLabel,
     // Subject line: CTS/CS survey numbers from project save_plot_details (same as CTS No. in Project Details).
     "project_CS/CTSNos": csCtsNosSubjectDisplay,
     "project_CS/CTSNos.": csCtsNosSubjectDisplay,
@@ -413,12 +446,12 @@ export function mapToPdfFieldValues(
     "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
     "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
     // Always send a string: JSON.stringify drops `undefined`, so the API would skip replacement and leave `$project_RegNo_...` in the DOCX.
-    "project_RegNo_Architect/L.S.": architectCoaRegNo,
+    "project_RegNo_Architect/L.S.": consultantRegNo,
     // Template variants (same value).
-    "project_RegNo_Architect/L.S": architectCoaRegNo,
-    // COA validity (from `coa_expiry_date`); always string so JSON body includes the key.
-    "project_Validity_Architect/L.S.": architectValidityDisplay,
-    "project_Validity_Architect/L.S": architectValidityDisplay,
+    "project_RegNo_Architect/L.S": consultantRegNo,
+    // COA or LBS validity; always string so JSON body includes the key.
+    "project_Validity_Architect/L.S.": consultantValidityDisplay,
+    "project_Validity_Architect/L.S": consultantValidityDisplay,
     "project_Client_Company_Name": clientCompanyName,
     "project_Client_Company_Designation": displayClientCompanyDesignation,
     "project_Client_Name": clientName,
@@ -722,7 +755,7 @@ export async function generateApplicationPreviewHtml(
   templateType: TemplateType,
   source?: ApplicationPreviewSource
 ): Promise<string> {
-  const formValues = mapToPdfFieldValues(fields, source);
+  const formValues = mapToPdfFieldValues(fields, source, templateType);
 
   const response = await fetch("/api/application-preview-html", {
     method: "POST",
@@ -763,9 +796,9 @@ export async function generateApplicationPreviewPdf(
   templateType: TemplateType,
   source?: ApplicationPreviewSource
 ): Promise<Blob> {
-  const formValues = mapToPdfFieldValues(fields, source);
+  const formValues = mapToPdfFieldValues(fields, source, templateType);
 
-  if (templateType === "Architect Licensed Surveyor") {
+  if (templateType === "Architect Licensed Surveyor" || templateType === "Licensed Surveyor") {
     const htmlResponse = await fetch("/api/application-preview-html", {
       method: "POST",
       headers: {
