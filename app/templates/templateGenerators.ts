@@ -1127,15 +1127,15 @@ import { generateFromDocx } from "./docxTemplateGenerator";
 
 // Template configuration mapping - now using DOCX files
 export const TEMPLATE_CONFIG = {
-  "Architect Licensed Surveyor": {
+  Architect: {
     generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) => 
-      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect Licensed Surveyor"),
-    displayName: "Architect Licensed Surveyor",
-    fileName: "Appointment_Letter_Architect_Licensed_Surveyor.pdf",
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
+    displayName: "Architect",
+    fileName: "Appointment_Letter_Architect.pdf",
   },
   "Licensed Surveyor": {
     generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
-      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect Licensed Surveyor"),
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
     displayName: "Licensed Surveyor",
     fileName: "Appointment_Letter_Licensed_Surveyor.pdf",
   },
