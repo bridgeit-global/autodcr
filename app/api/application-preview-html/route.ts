@@ -6,11 +6,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "https://mgxbetsxswaislwhtygw.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1neGJldHN4c3dhaXNsd2h0eWd3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2NzcwNjksImV4cCI6MjA4MDI1MzA2OX0.tJPN5_q4EMrQHjAZpGT4_NSzxIvLMyLiotjbkTltavs";
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
 
 const TEMPLATE_BUCKET =
   process.env.SUPABASE_TEMPLATE_BUCKET?.trim() ||
@@ -92,6 +90,13 @@ async function downloadProjectTemplateHtml(opts: {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json(
+        { error: "Supabase environment variables are missing on server." },
+        { status: 500 }
+      );
+    }
+
     const body = (await request.json()) as {
       templateType?: TemplateType;
       fields?: Record<string, string | undefined>;
