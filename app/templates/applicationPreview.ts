@@ -5,6 +5,7 @@ import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
 type ApplicationPreviewSource = {
+  projectId?: string | null;
   selectedApplication?: string | null;
   applicationNo?: string | null;
   applicationCreatedAt?: string | null;
@@ -142,7 +143,7 @@ export function mapSelectedApplicationToTemplate(
   if (value.includes("site supervisor")) return "Site Supervisor";
   if (value.includes("horticulturist")) return "Horticulturist";
   if (value.includes("licensed surveyor")) return "Licensed Surveyor";
-  return "Architect Licensed Surveyor";
+  return "Architect";
 }
 
 function templateConsultantApplicantKeywords(templateType: TemplateType): string[] {
@@ -417,6 +418,9 @@ export function mapToPdfFieldValues(
     // Title and consultant labels for architect / licensed surveyor template.
     "project_Consultant_Architect/L.S._Type": consultantRoleLabel,
     "project_Consultant_Architect/L.S.": consultantRoleLabel,
+    // Architect-only token variants used by owner-provided HTML templates.
+    "project_Consultant_Architect._Type": consultantRoleLabel,
+    "project_Consultant_Architect.": consultantRoleLabel,
     "project_Letter_Appointment_Role": consultantRoleLabel,
     // Subject line: CTS/CS survey numbers from project save_plot_details (same as CTS No. in Project Details).
     "project_CS/CTSNos": csCtsNosSubjectDisplay,
@@ -432,15 +436,24 @@ export function mapToPdfFieldValues(
     project_Document_Number: documentNumber || undefined,
     "project_Name_Architect/L.S": architectName || undefined,
     "project_Name_Architect/L.S.": architectName || undefined,
+    "project_Name_Architect": architectName || undefined,
+    "project_Name_Architect.": architectName || undefined,
     "project_Company_Name_Architect/L.S":
       source?.consultantCompanyName?.trim() || undefined,
     "project_Company_Name_Architect/L.S.":
+      source?.consultantCompanyName?.trim() || undefined,
+    "project_Company_Name_Architect":
+      source?.consultantCompanyName?.trim() || undefined,
+    "project_Company_Name_Architect.":
       source?.consultantCompanyName?.trim() || undefined,
     // Phase-1 approved mapping:
     // Architect/L.S section uses Architect only for this template run.
     "project_Address_line1_Architect/L.S": architectAddressLine1 || undefined,
     "project_Address_line2_Architect/L.S": architectAddressLine2,
     "project_Address_line3Architect/L.S": architectAddressLine3,
+    "project_Address_line1_Architect": architectAddressLine1 || undefined,
+    "project_Address_line2_Architect": architectAddressLine2,
+    "project_Address_line3Architect": architectAddressLine3,
     // Building Proposal address lines from region/ward mapping.
     "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
     "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
@@ -449,9 +462,13 @@ export function mapToPdfFieldValues(
     "project_RegNo_Architect/L.S.": consultantRegNo,
     // Template variants (same value).
     "project_RegNo_Architect/L.S": consultantRegNo,
+    "project_RegNo_Architect.": consultantRegNo,
+    "project_RegNo_Architect": consultantRegNo,
     // COA or LBS validity; always string so JSON body includes the key.
     "project_Validity_Architect/L.S.": consultantValidityDisplay,
     "project_Validity_Architect/L.S": consultantValidityDisplay,
+    "project_Validity_Architect.": consultantValidityDisplay,
+    "project_Validity_Architect": consultantValidityDisplay,
     "project_Client_Company_Name": clientCompanyName,
     "project_Client_Company_Designation": displayClientCompanyDesignation,
     "project_Client_Name": clientName,
@@ -687,6 +704,20 @@ function injectPaginatedStyles(html: string): string {
     background: #f3f4f6;
   }
 
+  /* Some uploaded/Word-exported templates carry explicit widths/offsets on
+     the root wrapper. Normalize that wrapper to fill the printable page area
+     so horizontal spacing is balanced on both sides. */
+  div.WordSection1,
+  main.page {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
   /* Carlito is metric-compatible with Calibri (Google's open-source clone).
      Forcing it everywhere gives consistent line widths regardless of which
      fonts the user has installed locally — without this the browser's
@@ -757,12 +788,20 @@ export async function generateApplicationPreviewHtml(
 ): Promise<string> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
 
+  await supabase.auth.refreshSession();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const access_token = sessionData.session?.access_token;
+
   const response = await fetch("/api/application-preview-html", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(access_token ? { Authorization: `Bearer ${access_token}` } : {}),
+    },
     body: JSON.stringify({
       templateType,
       fields: formValues,
+      ...(source?.projectId ? { projectId: source.projectId } : {}),
       ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
     }),
   });
@@ -798,15 +837,21 @@ export async function generateApplicationPreviewPdf(
 ): Promise<Blob> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
 
-  if (templateType === "Architect Licensed Surveyor" || templateType === "Licensed Surveyor") {
+  if (templateType === "Architect" || templateType === "Licensed Surveyor") {
+    await supabase.auth.refreshSession();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const access_token = sessionData.session?.access_token;
+
     const htmlResponse = await fetch("/api/application-preview-html", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(access_token ? { Authorization: `Bearer ${access_token}` } : {}),
       },
       body: JSON.stringify({
         templateType,
         fields: formValues,
+        ...(source?.projectId ? { projectId: source.projectId } : {}),
         ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
       }),
     });

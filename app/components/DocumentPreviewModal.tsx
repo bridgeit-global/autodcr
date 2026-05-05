@@ -20,6 +20,8 @@ type DocumentPreviewModalProps = {
    * that have a clean HTML source (e.g. the Architect appointment letter).
    */
   htmlContent?: string | null;
+  /** Optional debug: token -> resolved value map used for replacement. */
+  fieldMapping?: Record<string, string | undefined> | null;
   title?: string;
 };
 
@@ -28,6 +30,7 @@ export default function DocumentPreviewModal({
   onClose,
   fileUrl,
   htmlContent,
+  fieldMapping,
   title,
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -129,6 +132,21 @@ export default function DocumentPreviewModal({
             </div>
 
             <div className="flex-1 overflow-auto p-3 bg-gray-50">
+              {fieldMapping && (
+                <details className="mb-3 rounded-xl border border-gray-200 bg-white overflow-hidden">
+                  <summary className="px-4 py-3 cursor-pointer select-none text-sm font-semibold text-gray-900 flex items-center justify-between">
+                    Field mapping (debug)
+                    <span className="text-xs font-medium text-gray-500">
+                      {Object.keys(fieldMapping).length} keys
+                    </span>
+                  </summary>
+                  <div className="px-4 pb-4">
+                    <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-auto max-h-64">
+                      {JSON.stringify(fieldMapping, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
               {htmlContent && !fileUrl ? (
                 <div className="flex justify-center">
                   <div

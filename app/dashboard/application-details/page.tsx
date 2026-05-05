@@ -9,6 +9,7 @@ import {
   generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
+  mapToPdfFieldValues,
   mapSelectedApplicationToTemplate,
   pickConsultantLookupUserIdsFromProject,
   prewarmPreviewPdfRuntime,
@@ -238,6 +239,7 @@ export default function ApplicationDetailsPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewFieldMapping, setPreviewFieldMapping] = useState<Record<string, string | undefined> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
@@ -484,6 +486,7 @@ export default function ApplicationDetailsPage() {
         templateType
       );
       const previewSource = {
+        projectId,
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
@@ -516,9 +519,10 @@ export default function ApplicationDetailsPage() {
         URL.revokeObjectURL(previewUrl);
       }
 
-      if (templateType === "Architect Licensed Surveyor" || templateType === "Licensed Surveyor") {
+      if (templateType === "Architect" || templateType === "Licensed Surveyor") {
         // HTML iframe path: razor-sharp native rendering, instant load,
         // vector PDF available via the modal's Print/Save button.
+        const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
         const html = await generateApplicationPreviewHtml(
           fields,
           templateType,
@@ -526,6 +530,7 @@ export default function ApplicationDetailsPage() {
         );
         setPreviewUrl(null);
         setPreviewHtml(html);
+        setPreviewFieldMapping(fieldMapping);
         setPreviewOpen(true);
       } else {
         const blob = await generateApplicationPreviewPdf(
@@ -536,6 +541,7 @@ export default function ApplicationDetailsPage() {
         const url = URL.createObjectURL(blob);
         setPreviewHtml(null);
         setPreviewUrl(url);
+        setPreviewFieldMapping(null);
         setPreviewOpen(true);
       }
     } catch (error: unknown) {
@@ -608,6 +614,7 @@ export default function ApplicationDetailsPage() {
         onClose={() => setPreviewOpen(false)}
         fileUrl={previewUrl}
         htmlContent={previewHtml}
+        fieldMapping={previewFieldMapping}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
       />
     </div>

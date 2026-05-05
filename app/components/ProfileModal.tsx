@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { uploadFileIdempotent, cleanupOldFile } from "@/app/utils/fileUtils";
+import CustomSelect from "@/app/components/CustomSelect";
 
 interface Props {
   open: boolean;
@@ -27,6 +28,32 @@ type FormValues = {
 const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   const { userMetadata, fetchUserMetadata } = useUserMetadata();
   const [userId, setUserId] = useState<string | null>(null);
+  const [templateUploadError, setTemplateUploadError] = useState<string | null>(null);
+  const [templateUploadSuccess, setTemplateUploadSuccess] = useState<string | null>(null);
+  const [templateUploadBusy, setTemplateUploadBusy] = useState<Record<string, boolean>>({});
+
+  const APPOINTMENT_TEMPLATE_TYPES = [
+    "Architect",
+    "Licensed Surveyor",
+    "Structural Engineer",
+    "Fire Safety Consultant",
+    "M&E Consultant",
+    "Plumber",
+    "Parking Consultant",
+    "Rainwater Consultant",
+    "Site Supervisor",
+    "Horticulturist",
+  ] as const;
+  type AppointmentTemplateType = (typeof APPOINTMENT_TEMPLATE_TYPES)[number];
+
+  const [ownerHtmlTemplates, setOwnerHtmlTemplates] = useState<Record<string, string>>({});
+  const [selectedAppointmentTemplateType, setSelectedAppointmentTemplateType] =
+    useState<AppointmentTemplateType>("Architect");
+
+  const TEMPLATE_BUCKET =
+    process.env.NEXT_PUBLIC_TEMPLATE_BUCKET?.trim() || "consultant-documents";
+
+  const appointmentTemplateTypeLabel = (t: AppointmentTemplateType): string => t;
   
   // Get registration label and value based on role and type
   const getRegistrationInfo = (): { label: string; value: string } => {
@@ -127,6 +154,9 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       setValue("zip", userMetadata.pincode || "");
       setValue("email", userMetadata.email || "");
       setValue("mobile", userMetadata.alternate_phone || userMetadata.mobile || "");
+      setSelectedAppointmentTemplateType((prev) =>
+        APPOINTMENT_TEMPLATE_TYPES.includes(prev) ? prev : "Architect"
+      );
       const existingPhotoUrl = userMetadata.authorized_signatory_photo_url || null;
       setProfilePhoto(existingPhotoUrl);
       setOriginalPhotoUrl(existingPhotoUrl);
@@ -227,6 +257,60 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     }
   }, [open, userMetadata, setValue]);
 
+  // Owner templates are stored ONLY in the projects table (per your requirement).
+  // Load the latest mapping from any one of the owner's projects for display.
+  useEffect(() => {
+    if (!open) return;
+    if (userMetadata?.role !== "Owner") return;
+
+    const loadTemplatesFromProjects = async () => {
+      try {
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        const ownerId = userData.user?.id;
+        if (!ownerId) return;
+
+        const { data, error } = await supabase
+          .from("projects")
+          .select("owner_html_templates")
+          .eq("user_id", ownerId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          const msg = String(error.message || "");
+          if (msg.includes("owner_html_templates")) {
+            setOwnerHtmlTemplates({});
+            return;
+          }
+          throw error;
+        }
+
+        const map = (data as { owner_html_templates?: unknown } | null)?.owner_html_templates;
+        if (map && typeof map === "object") {
+          const obj = map as Record<string, unknown>;
+          const next: Record<string, string> = {};
+          Object.entries(obj).forEach(([k, v]) => {
+            if (typeof v !== "string") return;
+            next[k] = v;
+          });
+          // Keep only latest architect key.
+          if (!next.Architect && typeof obj["Architect Licensed Surveyor"] === "string") {
+            next.Architect = obj["Architect Licensed Surveyor"] as string;
+          }
+          delete next["Architect Licensed Surveyor"];
+          setOwnerHtmlTemplates(next);
+        }
+        else setOwnerHtmlTemplates({});
+      } catch {
+        setOwnerHtmlTemplates({});
+      }
+    };
+
+    void loadTemplatesFromProjects();
+  }, [open, userMetadata?.role]);
+
   useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
@@ -278,6 +362,68 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       }
     };
   }, [letterheadPreviewUrl]);
+
+  const normalizeTemplateFileName = (templateType: string) =>
+    `${templateType.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "")}.html`;
+
+  const uploadOwnerAppointmentTemplate = async (templateType: AppointmentTemplateType, file: File) => {
+    setTemplateUploadError(null);
+    setTemplateUploadSuccess(null);
+    setTemplateUploadBusy((prev) => ({ ...prev, [templateType]: true }));
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Session expired. Please log in again.");
+
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+      const ownerId = userData.user?.id;
+      if (!ownerId) throw new Error("User not found. Please log in again.");
+
+      if (!file.name.toLowerCase().endsWith(".html") && file.type !== "text/html") {
+        throw new Error("Please upload a valid .html file.");
+      }
+
+      const objectPath = `owners/${ownerId}/appointment-letters/${normalizeTemplateFileName(templateType)}`;
+      const { error: uploadError } = await supabase.storage
+        .from(TEMPLATE_BUCKET)
+        .upload(objectPath, file, {
+          upsert: true,
+          cacheControl: "3600",
+          contentType: "text/html",
+        });
+      if (uploadError) throw uploadError;
+
+      const nextMap = {
+        ...ownerHtmlTemplates,
+        [templateType]: objectPath,
+      } as Record<string, string>;
+      // Keep only latest architect key in projects table.
+      delete nextMap["Architect Licensed Surveyor"];
+      setOwnerHtmlTemplates(nextMap);
+
+      // Sync to all projects created by this owner (reuse across projects).
+      const { error: projectUpdateError } = await supabase
+        .from("projects")
+        .update({ owner_html_templates: nextMap })
+        .eq("user_id", ownerId);
+      if (projectUpdateError) {
+        const msg = String(projectUpdateError.message || "");
+        // If migration hasn't been applied yet, don't block uploads.
+        if (!msg.includes("owner_html_templates")) {
+          throw projectUpdateError;
+        }
+      }
+
+      setTemplateUploadSuccess(`Uploaded template for "${templateType}".`);
+      await fetchUserMetadata();
+    } catch (e: any) {
+      setTemplateUploadError(e?.message || "Failed to upload template.");
+    } finally {
+      setTemplateUploadBusy((prev) => ({ ...prev, [templateType]: false }));
+    }
+  };
 
   const onSubmit = async (data: FormValues) => {
     setIsSubmitting(true);
@@ -850,6 +996,95 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                   </div>
                 </div>
               </div>
+
+              {/* Owner: Appointment letter HTML templates */}
+              {userMetadata?.role === "Owner" && (
+                <div className="space-y-3 pt-2">
+                  <h3 className="text-lg font-bold text-gray-900">
+                    Appointment Letter Templates (HTML)
+                  </h3>
+                  <div className="text-xs text-gray-600">
+                    Upload one HTML per appointment type. We’ll reuse these templates across your projects.
+                  </div>
+
+                  {templateUploadSuccess && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-2 text-green-800 text-xs">
+                      {templateUploadSuccess}
+                    </div>
+                  )}
+                  {templateUploadError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-red-800 text-xs">
+                      {templateUploadError}
+                    </div>
+                  )}
+
+                  <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                          Template type
+                        </label>
+                        <CustomSelect
+                          value={selectedAppointmentTemplateType}
+                          onChange={(v) =>
+                            setSelectedAppointmentTemplateType(v as AppointmentTemplateType)
+                          }
+                          disabled={isSubmitting}
+                          options={APPOINTMENT_TEMPLATE_TYPES.map((t) => ({
+                            value: t,
+                              label: appointmentTemplateTypeLabel(t),
+                          }))}
+                          placeholder="Select template type"
+                        />
+                        <div className="text-xs text-gray-500 mt-1 truncate">
+                          {ownerHtmlTemplates[selectedAppointmentTemplateType]
+                            ? `Saved: ${ownerHtmlTemplates[selectedAppointmentTemplateType]}`
+                            : "Not uploaded yet"}
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-1 flex md:justify-end">
+                        {(() => {
+                          const busy = Boolean(templateUploadBusy[selectedAppointmentTemplateType]);
+                          const savedPath = ownerHtmlTemplates[selectedAppointmentTemplateType] || "";
+                          return (
+                            <label className="w-full md:w-auto">
+                              <input
+                                type="file"
+                                accept=".html,text/html"
+                                className="hidden"
+                                disabled={isSubmitting || busy}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  void uploadOwnerAppointmentTemplate(selectedAppointmentTemplateType, file);
+                                  e.currentTarget.value = "";
+                                }}
+                              />
+                              <span
+                                className={
+                                  "inline-flex w-full md:w-auto items-center justify-center h-10 px-4 rounded-lg text-sm font-semibold transition cursor-pointer " +
+                                  (isSubmitting || busy
+                                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                                    : "bg-emerald-600 text-white hover:bg-emerald-700")
+                                }
+                              >
+                                {savedPath
+                                  ? busy
+                                    ? "Uploading..."
+                                    : "Replace HTML"
+                                  : busy
+                                    ? "Uploading..."
+                                    : "Upload HTML"}
+                              </span>
+                            </label>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Action Buttons */}
               {(profilePhotoFile || letterheadFile) && (

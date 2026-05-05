@@ -81,7 +81,7 @@ const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const TEMPLATE_DOCX_MAP: Record<TemplateType, string> = {
-  "Architect Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).docx",
+  Architect: "appointment letter (Architect Licensed Surveyor).docx",
   "Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).docx",
   "Structural Engineer": "appointment letter (Structural Engineer).docx",
   "Fire Safety Consultant": "appointment letter (Fire Safety Consultant).docx",
@@ -172,7 +172,7 @@ function replaceInDocxXml(
       xml = xml.replace(splitTokenRegex, value);
     });
 
-    if (templateType === "Architect Licensed Surveyor") {
+    if (templateType === "Architect") {
       xml = applyArchitectLetterStaticLabels(xml);
     } else if (templateType === "Licensed Surveyor") {
       xml = applyLicensedSurveyorLetterStaticLabels(xml);
