@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
 import type { TemplateType } from "@/app/templates/templateGenerators";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TEMPLATE_HTML_MAP: Partial<Record<TemplateType, string>> = {
-  "Architect Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).html",
-  "Licensed Surveyor": "appointment letter (Architect Licensed Surveyor).html",
-};
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "https://mgxbetsxswaislwhtygw.supabase.co";
+const supabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1neGJldHN4c3dhaXNsd2h0eWd3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2NzcwNjksImV4cCI6MjA4MDI1MzA2OX0.tJPN5_q4EMrQHjAZpGT4_NSzxIvLMyLiotjbkTltavs";
+
+const TEMPLATE_BUCKET =
+  process.env.SUPABASE_TEMPLATE_BUCKET?.trim() ||
+  process.env.NEXT_PUBLIC_TEMPLATE_BUCKET?.trim() ||
+  "consultant-documents";
 
 function escapeHtml(value: string): string {
   return value
@@ -45,25 +51,43 @@ function replaceTemplateTokens(
   return out;
 }
 
-async function resolveHtmlTemplate(templateType: TemplateType): Promise<string> {
-  const fileName = TEMPLATE_HTML_MAP[templateType];
-  if (!fileName) {
-    throw new Error(`No HTML template configured for "${templateType}".`);
-  }
+async function downloadProjectTemplateHtml(opts: {
+  projectId: string;
+  templateType: TemplateType;
+  authorizationToken?: string | null;
+}): Promise<string | null> {
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: opts.authorizationToken
+        ? { Authorization: `Bearer ${opts.authorizationToken}` }
+        : {},
+    },
+  });
 
-  const rootPath = path.join(process.cwd(), fileName);
-  const publicPath = path.join(process.cwd(), "public", fileName);
+  const { data: project, error } = await supabase
+    .from("projects")
+    .select("owner_html_templates")
+    .eq("id", opts.projectId)
+    .maybeSingle();
 
-  for (const candidate of [rootPath, publicPath]) {
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch {
-      // Try next path.
-    }
-  }
+  if (error) throw new Error(error.message);
+  if (!project) return null;
 
-  throw new Error(`HTML template not found: ${fileName}`);
+  const map = (project as { owner_html_templates?: unknown }).owner_html_templates;
+  if (!map || typeof map !== "object") return null;
+
+  const raw = (map as Record<string, unknown>)[opts.templateType];
+  const objectPath = typeof raw === "string" ? raw.trim() : "";
+  if (!objectPath) return null;
+
+  const { data: file, error: downloadError } = await supabase.storage
+    .from(TEMPLATE_BUCKET)
+    .download(objectPath);
+
+  if (downloadError) throw new Error(downloadError.message);
+  if (!file) return null;
+
+  return await file.text();
 }
 
 export async function POST(request: NextRequest) {
@@ -72,6 +96,7 @@ export async function POST(request: NextRequest) {
       templateType?: TemplateType;
       fields?: Record<string, string | undefined>;
       owner_debug?: unknown;
+      projectId?: string;
     };
 
     if (!body.templateType || !body.fields) {
@@ -81,8 +106,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const htmlPath = await resolveHtmlTemplate(body.templateType);
-    const htmlTemplate = await fs.readFile(htmlPath, "utf8");
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader?.replace("Bearer ", "").trim() || null;
+
+    let htmlTemplate: string | null = null;
+    if (typeof body.projectId === "string" && body.projectId.trim()) {
+      htmlTemplate = await downloadProjectTemplateHtml({
+        projectId: body.projectId.trim(),
+        templateType: body.templateType,
+        authorizationToken: token,
+      });
+    }
+
+    if (!htmlTemplate) {
+      return NextResponse.json(
+        { error: `No owner HTML template configured for "${body.templateType}".` },
+        { status: 400 }
+      );
+    }
+
     const finalHtml = replaceTemplateTokens(htmlTemplate, body.fields);
 
     if (process.env.NODE_ENV === "development") {
