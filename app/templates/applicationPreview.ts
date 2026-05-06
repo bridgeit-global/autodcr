@@ -26,6 +26,8 @@ type ApplicationPreviewSource = {
   consultantAddressLine1?: string | null;
   consultantAddressLine2?: string | null;
   consultantAddressLine3?: string | null;
+  consultantMobile?: string | null;
+  consultantEmail?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
   consultantLookupUserIds?: string[];
   projectData?: {
@@ -138,6 +140,13 @@ export function mapSelectedApplicationToTemplate(
 ): TemplateType {
   const value = (selectedApplication || "").toLowerCase();
   if (value.includes("fire")) return "Fire Safety Consultant";
+  if (
+    value.includes("mep") ||
+    value.includes("m&e") ||
+    value.includes("mechanical") ||
+    value.includes("electrical")
+  )
+    return "M&E Consultant";
   if (value.includes("structural")) return "Structural Engineer";
   if (value.includes("plumber")) return "Plumber";
   if (value.includes("site supervisor")) return "Site Supervisor";
@@ -245,23 +254,6 @@ function formatCsCtsSurveyToken(source?: ApplicationPreviewSource): string {
   return kind ? `${kind} ${bracketed}` : bracketed;
 }
 
-function splitAddressLines(address?: string, maxLines = 3): string[] {
-  const raw = (address || "").trim();
-  if (!raw) return Array.from({ length: maxLines }, () => "");
-  const parts = raw
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  if (parts.length >= maxLines) {
-    const head = parts.slice(0, maxLines - 1);
-    const tail = parts.slice(maxLines - 1).join(", ");
-    return [...head, tail];
-  }
-
-  return [...parts, ...Array.from({ length: maxLines - parts.length }, () => "")];
-}
-
 export function mapApplicationPreviewFields(
   source: ApplicationPreviewSource,
   templateType?: TemplateType
@@ -307,38 +299,125 @@ export function mapToPdfFieldValues(
   source?: ApplicationPreviewSource,
   templateType?: TemplateType
 ): Record<string, string | undefined> {
+  const templateTokenSuffix = (type?: TemplateType): string => {
+    switch (type) {
+      case "Architect":
+        return "Architect";
+      case "Licensed Surveyor":
+        return "LS";
+      case "Structural Engineer":
+        return "Structural_Engineer";
+      case "Fire Safety Consultant":
+        return "Fire_Safety";
+      case "M&E Consultant":
+        return "ME_Consultant";
+      case "Plumber":
+        return "Plumber";
+      case "Parking Consultant":
+        return "Parking_Consultant";
+      case "Rainwater Consultant":
+        return "Rainwater_Consultant";
+      case "Site Supervisor":
+        return "Site_Supervisor";
+      case "Horticulturist":
+        return "Horticulturist";
+      default:
+        return "Architect";
+    }
+  };
+
+  const pickText = (...values: Array<unknown>): string => {
+    for (const value of values) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  };
+
   const applicants = source?.projectData?.applicant_details?.applicants || [];
   const ownerApplicant = applicants.find(
     (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("owner")
   );
   const isLicensedSurveyorLetter = templateType === "Licensed Surveyor";
-  const primaryConsultantApplicant = isLicensedSurveyorLetter
-    ? applicants.find((applicant) =>
-        (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("licensed surveyor")
-      )
-    : applicants.find((applicant) =>
-        (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("architect")
-      );
-  const architectApplicant = primaryConsultantApplicant;
-  const consultantRoleLabel = isLicensedSurveyorLetter ? "Licensed Surveyor" : "Architect";
-  const architectName = architectApplicant?.name?.trim() || source?.consultantName?.trim() || "";
-  const architectAddressLine1 =
-    source?.consultantAddressLine1?.trim() || "";
-  const architectAddressLine2 =
-    source?.consultantAddressLine2?.trim() || "";
-  const architectAddressLine3 =
-    source?.consultantAddressLine3?.trim() || "";
+  const consultantKeywords = templateType
+    ? templateConsultantApplicantKeywords(templateType)
+    : templateConsultantApplicantKeywords("Architect");
+  const primaryConsultantApplicant = applicants.find((applicant) => {
+    const type = (applicant.applicantType || applicant.applicant_type || "").toLowerCase();
+    return consultantKeywords.some((keyword) => type.includes(keyword));
+  });
+  const architectApplicant = applicants.find((applicant) =>
+    (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("architect")
+  );
+  const consultantRoleLabel =
+    templateType === "Licensed Surveyor"
+      ? "Licensed Surveyor"
+      : templateType || "Architect";
+  const consultantName =
+    primaryConsultantApplicant?.name?.trim() || source?.consultantName?.trim() || "";
+  // Address resolution priority (per consultant):
+  //   1. The applicant row in projects.applicant_details (per-project source of truth).
+  //   2. source.consultantAddressLine* (the consultant's auth.users.user_metadata).
+  //   3. "" (empty) — we never split combined `address` / `residentialAddress` strings.
+  // This lets the project owner override a consultant's address per-project
+  // by editing the applicant row, while still falling back to the consultant's
+  // own profile when no override is present.
+  const consultantAddressLine1 = pickText(
+    primaryConsultantApplicant?.address_line1,
+    (primaryConsultantApplicant as any)?.addressLine1,
+    source?.consultantAddressLine1
+  );
+  const consultantAddressLine2 = pickText(
+    primaryConsultantApplicant?.address_line2,
+    (primaryConsultantApplicant as any)?.addressLine2,
+    source?.consultantAddressLine2
+  );
+  const consultantAddressLine3 = pickText(
+    primaryConsultantApplicant?.address_line3,
+    (primaryConsultantApplicant as any)?.addressLine3,
+    source?.consultantAddressLine3
+  );
+  const architectName =
+    architectApplicant?.name?.trim() || consultantName;
+  // For the architect block (used by every template either as primary or CC),
+  // the architect's applicant row in `applicant_details` wins. When the
+  // architect is also the logged-in consultant (Architect template), the
+  // applicant row will typically be the *same* row picked as the primary, so
+  // they resolve identically. We fall back to consultantAddressLine* only when
+  // the applicant row has no address_line1/2/3 set.
+  const isArchitectAlsoLoggedInConsultant =
+    Boolean(architectApplicant) &&
+    architectApplicant === primaryConsultantApplicant;
+  const architectFallbackLine1 = isArchitectAlsoLoggedInConsultant
+    ? consultantAddressLine1
+    : "";
+  const architectFallbackLine2 = isArchitectAlsoLoggedInConsultant
+    ? consultantAddressLine2
+    : "";
+  const architectFallbackLine3 = isArchitectAlsoLoggedInConsultant
+    ? consultantAddressLine3
+    : "";
+  const architectAddressLine1 = pickText(
+    architectApplicant?.address_line1,
+    (architectApplicant as any)?.addressLine1,
+    architectFallbackLine1
+  );
+  const architectAddressLine2 = pickText(
+    architectApplicant?.address_line2,
+    (architectApplicant as any)?.addressLine2,
+    architectFallbackLine2
+  );
+  const architectAddressLine3 = pickText(
+    architectApplicant?.address_line3,
+    (architectApplicant as any)?.addressLine3,
+    architectFallbackLine3
+  );
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const planningAuthority =
     source?.projectData?.save_plot_details?.planningAuthority?.trim() || "BMC";
-  const propertyAddress = source?.projectData?.project_info?.propertyAddress?.trim();
   const street = source?.projectData?.save_plot_details?.roadName?.trim();
   const divisionVillage = source?.projectData?.save_plot_details?.villageName?.trim();
   const wardForProjectToken = source?.projectData?.save_plot_details?.ward?.trim();
   const regionForProjectToken = source?.projectData?.save_plot_details?.region?.trim();
-  const documentNumber = source?.applicationNo?.trim();
-  const csCtsToken = formatCsCtsSurveyToken(source).trim();
-  const csCtsNos = csCtsToken || undefined;
   const rawSurveyList = joinProposedCsOrCtsNos(source).trim();
   const plotBelongs = source?.projectData?.save_plot_details?.plotBelongsTo;
   const surveyLabelForSubject =
@@ -349,10 +428,31 @@ export function mapToPdfFieldValues(
         : "C.T.S. No(s).";
   const csCtsNosSubjectDisplay = rawSurveyList
     ? `${surveyLabelForSubject} ${rawSurveyList}`
-    : csCtsNos;
+    : "";
+  const consultantApplicantRegNo =
+    primaryConsultantApplicant?.registrationNumber?.trim() ||
+    primaryConsultantApplicant?.registrationNo?.trim() ||
+    "";
+  const consultantMobile = pickText(
+    source?.consultantMobile,
+    (primaryConsultantApplicant as any)?.alternate_phone,
+    (primaryConsultantApplicant as any)?.alternatePhone,
+    (primaryConsultantApplicant as any)?.mobile,
+    (primaryConsultantApplicant as any)?.phone
+  );
+  const consultantEmail = pickText(
+    source?.consultantEmail,
+    (primaryConsultantApplicant as any)?.email,
+    (primaryConsultantApplicant as any)?.Email
+  );
+  const consultantCompanyName = pickText(
+    primaryConsultantApplicant?.entity_name,
+    primaryConsultantApplicant?.entityName,
+    source?.consultantCompanyName
+  );
   const consultantRegNo = isLicensedSurveyorLetter
     ? (source?.lbsLicenseNo?.trim() ?? "")
-    : (source?.coaRegNo?.trim() ?? "");
+    : consultantApplicantRegNo || (source?.coaRegNo?.trim() ?? "");
   const consultantValidityDisplay = isLicensedSurveyorLetter
     ? (formatCoaExpiryDisplay(source?.lbsExpiryDate) ?? "")
     : (formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "");
@@ -394,87 +494,105 @@ export function mapToPdfFieldValues(
     (regionForProjectToken || "").trim().toLowerCase() === "western"
       ? "The Executive Engineer (W.S.) - I"
       : "The Executive Engineer (E.S.) - I";
+  const suffix = templateTokenSuffix(templateType);
+  const genericConsultantTemplateTokens: Record<string, string> = {
+    [`project_Consultant_${suffix}`]: consultantRoleLabel,
+    [`project_Consultant_${suffix}.`]: consultantRoleLabel,
+    [`project_Consultant_${suffix}._Type`]: consultantRoleLabel,
+    [`project_Name_${suffix}`]: consultantName,
+    [`project_Name_${suffix}.`]: consultantName,
+    [`project_Company_Name_${suffix}`]: consultantCompanyName,
+    [`project_Company_Name_${suffix}.`]: consultantCompanyName,
+    [`project_Address_line1_${suffix}`]: consultantAddressLine1,
+    [`project_Address_line2_${suffix}`]: consultantAddressLine2,
+    [`project_Address_line3_${suffix}`]: consultantAddressLine3,
+    [`project_RegNo_${suffix}`]: consultantRegNo,
+    [`project_RegNo_${suffix}.`]: consultantRegNo,
+    [`project_Validity_${suffix}`]: consultantValidityDisplay,
+    [`project_Validity_${suffix}.`]: consultantValidityDisplay,
+    [`project_Mobile_${suffix}`]: consultantMobile,
+    [`project_Email_${suffix}`]: consultantEmail,
+  };
+
+  if (
+    process.env.NODE_ENV === "development" &&
+    templateType === "Fire Safety Consultant"
+  ) {
+    console.log("[fire-preview-debug]", {
+      templateType,
+      consultantKeywords,
+      primaryConsultantApplicant,
+      consultantAddressLine1,
+      consultantAddressLine2,
+      consultantAddressLine3,
+      sourceConsultantAddressLine1: source?.consultantAddressLine1 || "",
+      sourceConsultantAddressLine2: source?.consultantAddressLine2 || "",
+      sourceConsultantAddressLine3: source?.consultantAddressLine3 || "",
+    });
+  }
 
   return {
-    CurrentDate: fields.CurrentDate,
-    WardName: fields.WardName,
-    ZoneName: fields.ZoneName,
-    OfficeAddress: fields.OfficeAddress,
-    CTSNo: fields.CTSNo,
-    VillageName: fields.VillageName,
-    TalukaName: fields.TalukaName,
-    DistrictName: fields.DistrictName,
-    RoadWidth: fields.RoadWidth,
-    RoadName: fields.RoadName,
-    MainRoadWidth: fields.MainRoadWidth,
-    MainRoadName: fields.MainRoadName,
-    ApplicantName: fields.ApplicantName,
-    FirmName: fields.FirmName,
-    ConsultantName: fields.ConsultantName,
-    ConsultantType: fields.ConsultantType,
-    CouncilRegNo: fields.CouncilRegNo,
-    RegValidityDate: fields.RegValidityDate,
+    // Keep only tokens that are used by current HTML templates:
+    // `architect.html` and `licensed-surveyor.html`.
     project_date_generation: fields.CurrentDate,
-    // Title and consultant labels for architect / licensed surveyor template.
-    "project_Consultant_Architect/L.S._Type": consultantRoleLabel,
-    "project_Consultant_Architect/L.S.": consultantRoleLabel,
-    // Architect-only token variants used by owner-provided HTML templates.
-    "project_Consultant_Architect._Type": consultantRoleLabel,
-    "project_Consultant_Architect.": consultantRoleLabel,
-    "project_Letter_Appointment_Role": consultantRoleLabel,
-    // Subject line: CTS/CS survey numbers from project save_plot_details (same as CTS No. in Project Details).
-    "project_CS/CTSNos": csCtsNosSubjectDisplay,
+    // Common subject + re line fields
+    project_Letter_Appointment_Role: consultantRoleLabel,
     "project_CS/CTSNos.": csCtsNosSubjectDisplay,
-    // Village/Division line comes directly from Project Details form field value.
     "project_Division/Village": divisionVillage || undefined,
     project_Street: street || undefined,
-    // Ward line (e.g. "L Ward") — same as Project Details → Ward.
     "project_Ward.": wardForProjectToken || undefined,
-    // Re line format in template: "<Authority> Proposal No. <reference-no>".
     project_Planning_Authority: planningAuthority,
     project_Proposal_Number: proposalNumber || undefined,
-    project_Document_Number: documentNumber || undefined,
-    "project_Name_Architect/L.S": architectName || undefined,
-    "project_Name_Architect/L.S.": architectName || undefined,
-    "project_Name_Architect": architectName || undefined,
-    "project_Name_Architect.": architectName || undefined,
-    "project_Company_Name_Architect/L.S":
-      source?.consultantCompanyName?.trim() || undefined,
-    "project_Company_Name_Architect/L.S.":
-      source?.consultantCompanyName?.trim() || undefined,
-    "project_Company_Name_Architect":
-      source?.consultantCompanyName?.trim() || undefined,
-    "project_Company_Name_Architect.":
-      source?.consultantCompanyName?.trim() || undefined,
-    // Phase-1 approved mapping:
-    // Architect/L.S section uses Architect only for this template run.
-    "project_Address_line1_Architect/L.S": architectAddressLine1 || undefined,
-    "project_Address_line2_Architect/L.S": architectAddressLine2,
-    "project_Address_line3Architect/L.S": architectAddressLine3,
-    "project_Address_line1_Architect": architectAddressLine1 || undefined,
-    "project_Address_line2_Architect": architectAddressLine2,
-    "project_Address_line3Architect": architectAddressLine3,
-    // Building Proposal address lines from region/ward mapping.
-    "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
-    "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
-    "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
-    // Always send a string: JSON.stringify drops `undefined`, so the API would skip replacement and leave `$project_RegNo_...` in the DOCX.
-    "project_RegNo_Architect/L.S.": consultantRegNo,
-    // Template variants (same value).
-    "project_RegNo_Architect/L.S": consultantRegNo,
-    "project_RegNo_Architect.": consultantRegNo,
-    "project_RegNo_Architect": consultantRegNo,
-    // COA or LBS validity; always string so JSON body includes the key.
-    "project_Validity_Architect/L.S.": consultantValidityDisplay,
-    "project_Validity_Architect/L.S": consultantValidityDisplay,
-    "project_Validity_Architect.": consultantValidityDisplay,
-    "project_Validity_Architect": consultantValidityDisplay,
-    "project_Client_Company_Name": clientCompanyName,
-    "project_Client_Company_Designation": displayClientCompanyDesignation,
-    "project_Client_Name": clientName,
+
+    // Client signature block (common)
+    project_Client_Company_Name: clientCompanyName,
+    project_Client_Company_Designation: displayClientCompanyDesignation,
+    project_Client_Name: clientName,
+
+    // Building proposal CC block (common)
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
     project_BuildingProposal_OfficerDesignation: officerDesignationDisplay,
     project_BuildingProposal_ZoneSuffix: officerZoneSuffix,
+    "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
+    "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
+    "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
+
+    // Architect template tokens
+    "project_Consultant_Architect._Type": consultantRoleLabel,
+    "project_Consultant_Architect.": consultantRoleLabel,
+    "project_Name_Architect.": architectName || undefined,
+    "project_Company_Name_Architect":
+      architectApplicant?.entity_name?.trim() ||
+      architectApplicant?.entityName?.trim() ||
+      consultantCompanyName ||
+      undefined,
+    "project_Address_line1_Architect": architectAddressLine1,
+    "project_Address_line2_Architect": architectAddressLine2,
+    "project_Address_line3Architect": architectAddressLine3,
+    "project_RegNo_Architect.": consultantRegNo,
+    "project_Validity_Architect.": consultantValidityDisplay,
+
+    // Licensed Surveyor template tokens
+    project_Consultant_LS: consultantRoleLabel,
+    "project_Consultant_LS.": consultantRoleLabel,
+    "project_Consultant_LS._Type": consultantRoleLabel,
+    "project_Name_LS.": consultantName || undefined,
+    project_Company_Name_LS: consultantCompanyName || undefined,
+    project_Address_line1_LS: consultantAddressLine1,
+    project_Address_line2_LS: consultantAddressLine2,
+    project_Address_line3_LS: consultantAddressLine3,
+    "project_RegNo_LS.": consultantRegNo,
+    "project_Validity_LS.": consultantValidityDisplay,
+
+    // Fire safety consultant template tokens
+    "project_Name_Fire_Safety.": consultantName || undefined,
+    project_Address_line1_Fire_Safety: consultantAddressLine1,
+    project_Address_line2_Fire_Safety: consultantAddressLine2,
+    project_Address_line3_Fire_Safety: consultantAddressLine3,
+    "project_RegNo_Fire_Safety.": consultantRegNo,
+
+    // Generic consultant tokens for all application types.
+    ...genericConsultantTemplateTokens,
   };
 }
 
@@ -777,9 +895,8 @@ function injectPaginatedStyles(html: string): string {
 }
 
 /**
- * Architect Licensed Surveyor: fetch populated HTML for direct iframe rendering.
- * Native browser text = razor-sharp preview at any zoom, instant load (no
- * html2canvas / jsPDF cost). Vector PDF output via the modal's Print/Save action.
+ * Global HTML preview path for all consultant template types.
+ * Native browser text = razor-sharp preview at any zoom, instant load.
  */
 export async function generateApplicationPreviewHtml(
   fields: TemplateFields,
@@ -820,15 +937,9 @@ export async function generateApplicationPreviewHtml(
 }
 
 /**
- * Primary path: DOCX placeholders replaced server-side, then converted to PDF.
- *
- * Architect Licensed Surveyor uses an HTML template — the API returns populated
- * HTML and the browser renders it to a PDF blob via `html2canvas` + `jspdf`.
- * This avoids shipping Chromium/Puppeteer in the server bundle.
- *
- * Other template types use DOCX placeholders replaced server-side, then converted to PDF via LibreOffice
- * (local `soffice` or remote Gotenberg — see `/api/application-preview-docx`).
- * On Vercel, set DOCX_CONVERTER_URL to your self-hosted Gotenberg `/forms/libreoffice/convert`.
+ * Global HTML path for all consultant template types:
+ * fetch populated HTML from `/api/application-preview-html`, then render to
+ * a PDF blob in the browser via `html2canvas` + `jspdf`.
  */
 export async function generateApplicationPreviewPdf(
   fields: TemplateFields,
@@ -837,66 +948,34 @@ export async function generateApplicationPreviewPdf(
 ): Promise<Blob> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
 
-  if (templateType === "Architect" || templateType === "Licensed Surveyor") {
-    await supabase.auth.refreshSession();
-    const { data: sessionData } = await supabase.auth.getSession();
-    const access_token = sessionData.session?.access_token;
-
-    const htmlResponse = await fetch("/api/application-preview-html", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(access_token ? { Authorization: `Bearer ${access_token}` } : {}),
-      },
-      body: JSON.stringify({
-        templateType,
-        fields: formValues,
-        ...(source?.projectId ? { projectId: source.projectId } : {}),
-        ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
-      }),
-    });
-
-    if (htmlResponse.ok) {
-      const html = await htmlResponse.text();
-      return convertHtmlToPdfBlobInBrowser(html);
-    }
-
-    const htmlPayload = await htmlResponse.json().catch(() => null);
-    const htmlMessage =
-      typeof htmlPayload?.error === "string"
-        ? htmlPayload.error
-        : `HTML preview conversion failed (${htmlResponse.status}).`;
-    throw new Error(htmlMessage);
-  }
-
   await supabase.auth.refreshSession();
   const { data: sessionData } = await supabase.auth.getSession();
   const access_token = sessionData.session?.access_token;
 
-  const docxResponse = await fetch("/api/application-preview-docx", {
+  const htmlResponse = await fetch("/api/application-preview-html", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(access_token ? { Authorization: `Bearer ${access_token}` } : {}),
     },
     body: JSON.stringify({
       templateType,
       fields: formValues,
-      ...(access_token ? { access_token } : {}),
-      ...(source?.consultantLookupUserIds?.length
-        ? { consultant_lookup_user_ids: source.consultantLookupUserIds }
-        : {}),
+      ...(source?.projectId ? { projectId: source.projectId } : {}),
+      ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
     }),
   });
 
-  if (docxResponse.ok) {
-    return docxResponse.blob();
+  if (htmlResponse.ok) {
+    const html = await htmlResponse.text();
+    return convertHtmlToPdfBlobInBrowser(html);
   }
 
-  const payload = await docxResponse.json().catch(() => null);
+  const htmlPayload = await htmlResponse.json().catch(() => null);
   const message =
-    typeof payload?.error === "string"
-      ? payload.error
-      : `Preview conversion failed (${docxResponse.status}).`;
+    typeof htmlPayload?.error === "string"
+      ? htmlPayload.error
+      : `HTML preview conversion failed (${htmlResponse.status}).`;
 
   throw new Error(message);
 }

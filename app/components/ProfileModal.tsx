@@ -998,7 +998,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
               </div>
 
               {/* Owner: Appointment letter HTML templates */}
-              {userMetadata?.role === "Owner" && (
+              {false && userMetadata?.role === "Owner" && (
                 <div className="space-y-3 pt-2">
                   <h3 className="text-lg font-bold text-gray-900">
                     Appointment Letter Templates (HTML)

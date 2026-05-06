@@ -7,6 +7,7 @@ export const APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID: Record<string, string>
   Architect: "Appointment_Letter_for_Architect",
   "Licensed Surveyor": "Appointment_Letter_for_Licensed_Surveyor",
   "Fire Consultant": "Appointment_Letter_for_Fire_Consultant",
+  "MEP Consultant": "Appointment_Letter_for_MEP_Consultant",
   Plumber: "Appointment_Letter_for_Plumber",
   "Town Planner": "Appointment_Letter_for_Town_Planner",
   "Structural Engineer": "Appointment_Letter_for_Structural_Engineer",
