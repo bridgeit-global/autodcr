@@ -354,6 +354,11 @@ const permissionLibrary: Record<string, { title: string; description: string; ic
       description: "Upload and manage fire consultant appointment letter",
       icon: <DocumentIcon />,
     },
+    Appointment_Letter_for_MEP_Consultant: {
+      title: "Appointment Letter for MEP Consultant",
+      description: "Upload and manage MEP consultant appointment letter",
+      icon: <DocumentIcon />,
+    },
     Appointment_Letter_for_Plumber: {
       title: "Appointment Letter for Plumber",
       description: "Upload and manage plumber appointment letter",
@@ -409,6 +414,7 @@ const departmentPermissionMap: Record<string, PermissionKey[]> = {
     "Appointment_Letter_for_Architect",
     "Appointment_Letter_for_Licensed_Surveyor",
     "Appointment_Letter_for_Fire_Consultant",
+    "Appointment_Letter_for_MEP_Consultant",
     "Appointment_Letter_for_Plumber",
     "Appointment_Letter_for_Town_Planner",
     "Appointment_Letter_for_Structural_Engineer",

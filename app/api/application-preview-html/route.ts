@@ -11,9 +11,22 @@ const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
 
 const TEMPLATE_BUCKET =
-  process.env.SUPABASE_TEMPLATE_BUCKET?.trim() ||
-  process.env.NEXT_PUBLIC_TEMPLATE_BUCKET?.trim() ||
-  "consultant-documents";
+  process.env.SUPABASE_APPLICATION_TEMPLATE_BUCKET?.trim() ||
+  process.env.NEXT_PUBLIC_APPLICATION_TEMPLATE_BUCKET?.trim() ||
+  "Application_Templates";
+
+const TEMPLATE_PATH_MAP: Record<TemplateType, string> = {
+  Architect: "architect.html",
+  "Licensed Surveyor": "licensed-surveyor.html",
+  "Structural Engineer": "structural-engineer.html",
+  "Fire Safety Consultant": "fire-safety-consultant.html",
+  "M&E Consultant": "me-consultant.html",
+  Plumber: "plumber.html",
+  "Parking Consultant": "parking-consultant.html",
+  "Rainwater Consultant": "rainwater-consultant.html",
+  "Site Supervisor": "site-supervisor.html",
+  Horticulturist: "horticulturist.html",
+};
 
 function escapeHtml(value: string): string {
   return value
@@ -33,7 +46,9 @@ function replaceTemplateTokens(
   fields: Record<string, string | undefined>
 ): string {
   let out = html;
-  for (const [key, raw] of Object.entries(fields)) {
+  // Replace longer tokens first so `$foo` doesn't partially replace `$foo_bar`.
+  const entries = Object.entries(fields).sort(([a], [b]) => b.length - a.length);
+  for (const [key, raw] of entries) {
     if (raw === undefined) continue;
     const token = key.startsWith("$") ? key : `$${key}`;
     const escaped = escapeHtml(raw);
@@ -49,8 +64,7 @@ function replaceTemplateTokens(
   return out;
 }
 
-async function downloadProjectTemplateHtml(opts: {
-  projectId: string;
+async function downloadGlobalTemplateHtml(opts: {
   templateType: TemplateType;
   authorizationToken?: string | null;
 }): Promise<string | null> {
@@ -62,20 +76,7 @@ async function downloadProjectTemplateHtml(opts: {
     },
   });
 
-  const { data: project, error } = await supabase
-    .from("projects")
-    .select("owner_html_templates")
-    .eq("id", opts.projectId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  if (!project) return null;
-
-  const map = (project as { owner_html_templates?: unknown }).owner_html_templates;
-  if (!map || typeof map !== "object") return null;
-
-  const raw = (map as Record<string, unknown>)[opts.templateType];
-  const objectPath = typeof raw === "string" ? raw.trim() : "";
+  const objectPath = TEMPLATE_PATH_MAP[opts.templateType]?.trim() || "";
   if (!objectPath) return null;
 
   const { data: file, error: downloadError } = await supabase.storage
@@ -84,7 +85,6 @@ async function downloadProjectTemplateHtml(opts: {
 
   if (downloadError) throw new Error(downloadError.message);
   if (!file) return null;
-
   return await file.text();
 }
 
@@ -114,18 +114,16 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "").trim() || null;
 
-    let htmlTemplate: string | null = null;
-    if (typeof body.projectId === "string" && body.projectId.trim()) {
-      htmlTemplate = await downloadProjectTemplateHtml({
-        projectId: body.projectId.trim(),
-        templateType: body.templateType,
-        authorizationToken: token,
-      });
-    }
+    const htmlTemplate = await downloadGlobalTemplateHtml({
+      templateType: body.templateType,
+      authorizationToken: token,
+    });
 
     if (!htmlTemplate) {
       return NextResponse.json(
-        { error: `No owner HTML template configured for "${body.templateType}".` },
+        {
+          error: `No global HTML template found for "${body.templateType}" in bucket "${TEMPLATE_BUCKET}". Expected path: "${TEMPLATE_PATH_MAP[body.templateType]}".`,
+        },
         { status: 400 }
       );
     }
@@ -139,6 +137,24 @@ export async function POST(request: NextRequest) {
         project_Name_Architect_LS: body.fields["project_Name_Architect/L.S"] ?? "",
         owner_debug: body.owner_debug ?? null,
       });
+      if (body.templateType === "Fire Safety Consultant") {
+        console.log("[application-preview-html] fire token debug", {
+          project_Name_Fire_Safety: body.fields["project_Name_Fire_Safety."] ?? "",
+          project_Address_line1_Fire_Safety:
+            body.fields["project_Address_line1_Fire_Safety"] ?? "",
+          project_Address_line2_Fire_Safety:
+            body.fields["project_Address_line2_Fire_Safety"] ?? "",
+          project_Address_line3_Fire_Safety:
+            body.fields["project_Address_line3_Fire_Safety"] ?? "",
+          project_Name_Architect: body.fields["project_Name_Architect."] ?? "",
+          project_Address_line1_Architect:
+            body.fields["project_Address_line1_Architect"] ?? "",
+          project_Address_line2_Architect:
+            body.fields["project_Address_line2_Architect"] ?? "",
+          project_Address_line3Architect:
+            body.fields["project_Address_line3Architect"] ?? "",
+        });
+      }
     }
 
     // Return the populated HTML; the client converts it to PDF using html2pdf.js

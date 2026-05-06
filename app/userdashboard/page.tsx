@@ -97,6 +97,17 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     systemApproved: "-",
   },
   {
+    name: "Appointment Letter for MEP Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
     name: "Appointment Letter for Plumber",
     draft: 0,
     duePayment: "-",

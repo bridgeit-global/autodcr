@@ -7,7 +7,6 @@ import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import {
   generateApplicationPreviewHtml,
-  generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
   mapToPdfFieldValues,
   mapSelectedApplicationToTemplate,
@@ -91,6 +90,11 @@ function pickLbsExpiryFromMeta(meta: unknown): string | undefined {
 function pickAddressLineFromMeta(meta: unknown, index: 1 | 2 | 3): string | undefined {
   if (!meta || typeof meta !== "object") return undefined;
   const m = meta as Record<string, unknown>;
+
+  // Address is read strictly from explicit address_line1/2/3 keys
+  // (with camelCase / PascalCase variants). We deliberately do NOT split
+  // combined `address` / `residentialAddress` strings — the data layer is
+  // expected to store each line separately.
   const keys =
     index === 1
       ? ["address_line1", "addressLine1", "AddressLine1"]
@@ -125,6 +129,26 @@ function pickConsultantNameFromMeta(meta: unknown): string | undefined {
   const last = typeof m.last_name === "string" ? m.last_name.trim() : "";
   const full = [first, middle, last].filter(Boolean).join(" ").trim();
   return full || undefined;
+}
+
+function pickConsultantMobileFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["alternate_phone", "alternatePhone", "mobile", "phone"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickConsultantEmailFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["email", "Email"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
 }
 
 function pickEntityNameFromMeta(meta: unknown): string | undefined {
@@ -338,6 +362,12 @@ export default function ApplicationDetailsPage() {
       let consultantName =
         pickConsultantNameFromMeta(userMetadata) ||
         pickConsultantNameFromMeta(localMeta);
+      let consultantMobile =
+        pickConsultantMobileFromMeta(userMetadata) ||
+        pickConsultantMobileFromMeta(localMeta);
+      let consultantEmail =
+        pickConsultantEmailFromMeta(userMetadata) ||
+        pickConsultantEmailFromMeta(localMeta);
       const ownerApplicants = (projectData?.applicant_details?.applicants || []).filter((a) =>
         (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
       );
@@ -354,16 +384,30 @@ export default function ApplicationDetailsPage() {
         ownerApplicant?.entityType?.trim() ||
         pickEntityTypeFromMeta(ownerApplicant);
 
-      const mergeConsultantMeta = (meta: unknown) => {
-        if (!coaRegNo) coaRegNo = pickCoaRegNoFromMeta(meta);
-        if (!coaExpiryDate) coaExpiryDate = pickCoaExpiryFromMeta(meta);
-        if (!lbsLicenseNo) lbsLicenseNo = pickLbsLicenseFromMeta(meta);
-        if (!lbsExpiryDate) lbsExpiryDate = pickLbsExpiryFromMeta(meta);
-        if (!consultantAddressLine1) consultantAddressLine1 = pickAddressLineFromMeta(meta, 1);
-        if (!consultantAddressLine2) consultantAddressLine2 = pickAddressLineFromMeta(meta, 2);
-        if (!consultantAddressLine3) consultantAddressLine3 = pickAddressLineFromMeta(meta, 3);
-        if (!consultantCompanyName) consultantCompanyName = pickConsultantCompanyFromMeta(meta);
-        if (!consultantName) consultantName = pickConsultantNameFromMeta(meta);
+      const mergeConsultantMeta = (meta: unknown, prefer = false) => {
+        const nextCoaRegNo = pickCoaRegNoFromMeta(meta);
+        const nextCoaExpiryDate = pickCoaExpiryFromMeta(meta);
+        const nextLbsLicenseNo = pickLbsLicenseFromMeta(meta);
+        const nextLbsExpiryDate = pickLbsExpiryFromMeta(meta);
+        const nextAddressLine1 = pickAddressLineFromMeta(meta, 1);
+        const nextAddressLine2 = pickAddressLineFromMeta(meta, 2);
+        const nextAddressLine3 = pickAddressLineFromMeta(meta, 3);
+        const nextCompanyName = pickConsultantCompanyFromMeta(meta);
+        const nextConsultantName = pickConsultantNameFromMeta(meta);
+        const nextConsultantMobile = pickConsultantMobileFromMeta(meta);
+        const nextConsultantEmail = pickConsultantEmailFromMeta(meta);
+
+        if ((prefer || !coaRegNo) && nextCoaRegNo) coaRegNo = nextCoaRegNo;
+        if ((prefer || !coaExpiryDate) && nextCoaExpiryDate) coaExpiryDate = nextCoaExpiryDate;
+        if ((prefer || !lbsLicenseNo) && nextLbsLicenseNo) lbsLicenseNo = nextLbsLicenseNo;
+        if ((prefer || !lbsExpiryDate) && nextLbsExpiryDate) lbsExpiryDate = nextLbsExpiryDate;
+        if ((prefer || !consultantAddressLine1) && nextAddressLine1) consultantAddressLine1 = nextAddressLine1;
+        if ((prefer || !consultantAddressLine2) && nextAddressLine2) consultantAddressLine2 = nextAddressLine2;
+        if ((prefer || !consultantAddressLine3) && nextAddressLine3) consultantAddressLine3 = nextAddressLine3;
+        if ((prefer || !consultantCompanyName) && nextCompanyName) consultantCompanyName = nextCompanyName;
+        if ((prefer || !consultantName) && nextConsultantName) consultantName = nextConsultantName;
+        if ((prefer || !consultantMobile) && nextConsultantMobile) consultantMobile = nextConsultantMobile;
+        if ((prefer || !consultantEmail) && nextConsultantEmail) consultantEmail = nextConsultantEmail;
       };
 
       const consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
@@ -387,7 +431,13 @@ export default function ApplicationDetailsPage() {
           });
           if (res.ok) {
             const payload = (await res.json()) as { metadata?: unknown };
-            if (payload.metadata) mergeConsultantMeta(payload.metadata);
+            if (
+              process.env.NODE_ENV === "development" &&
+              templateType === "Fire Safety Consultant"
+            ) {
+              console.log("[fire-preview-metadata-api]", payload.metadata ?? null);
+            }
+            if (payload.metadata) mergeConsultantMeta(payload.metadata, true);
           }
         }
       } catch {
@@ -478,6 +528,8 @@ export default function ApplicationDetailsPage() {
           consultantAddressLine3,
           consultantName,
           consultantCompanyName,
+          consultantMobile,
+          consultantEmail,
           clientCompanyName,
           clientName,
           clientCompanyDesignation,
@@ -499,6 +551,8 @@ export default function ApplicationDetailsPage() {
         consultantAddressLine3,
         consultantName,
         consultantCompanyName,
+        consultantMobile,
+        consultantEmail,
         clientCompanyName,
         clientName,
         clientCompanyDesignation,
@@ -519,31 +573,17 @@ export default function ApplicationDetailsPage() {
         URL.revokeObjectURL(previewUrl);
       }
 
-      if (templateType === "Architect" || templateType === "Licensed Surveyor") {
-        // HTML iframe path: razor-sharp native rendering, instant load,
-        // vector PDF available via the modal's Print/Save button.
-        const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
-        const html = await generateApplicationPreviewHtml(
-          fields,
-          templateType,
-          previewSource
-        );
-        setPreviewUrl(null);
-        setPreviewHtml(html);
-        setPreviewFieldMapping(fieldMapping);
-        setPreviewOpen(true);
-      } else {
-        const blob = await generateApplicationPreviewPdf(
-          fields,
-          templateType,
-          previewSource
-        );
-        const url = URL.createObjectURL(blob);
-        setPreviewHtml(null);
-        setPreviewUrl(url);
-        setPreviewFieldMapping(null);
-        setPreviewOpen(true);
-      }
+      // Global HTML iframe path for all consultant templates.
+      const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
+      const html = await generateApplicationPreviewHtml(
+        fields,
+        templateType,
+        previewSource
+      );
+      setPreviewUrl(null);
+      setPreviewHtml(html);
+      setPreviewFieldMapping(fieldMapping);
+      setPreviewOpen(true);
     } catch (error: unknown) {
       console.error("Preview generation failed:", error);
       const message = error instanceof Error ? error.message : "Failed to generate preview.";
