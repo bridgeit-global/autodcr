@@ -151,6 +151,39 @@ const GENERAL_APPLICATION_DATA: ApplicationType[] = [
     approvedOrVerified: 0,
     systemApproved: "-",
   },
+{
+    name: "Appointment Letter for Landscape Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Appointment Letter for Geotechnical Consultant",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
+  {
+    name: "Appointment Letter for PMC / Project Manager",
+    draft: 0,
+    duePayment: "-",
+    inProcess: 0,
+    needClarification: "-",
+    withdrawn: "-",
+    rejectedOrCancelled: 0,
+    approvedOrVerified: 0,
+    systemApproved: "-",
+  },
 ];
 
 const APPLICATION_DATA: ApplicationType[] = [
@@ -531,7 +564,7 @@ function UserDashboardContent() {
     }[]
   >([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
-  const [selectedApplicationType, setSelectedApplicationType] = useState("Building Permission");
+  const [selectedApplicationType, setSelectedApplicationType] = useState("General");
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
   const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);

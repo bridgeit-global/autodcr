@@ -148,6 +148,15 @@ export function mapSelectedApplicationToTemplate(
   )
     return "M&E Consultant";
   if (value.includes("structural")) return "Structural Engineer";
+  if (value.includes("parking")) return "Parking Consultant";
+  if (value.includes("rain")) return "Rainwater Consultant";
+  if (value.includes("site supervisor")) return "Site Supervisor";
+  if (value.includes("horticulturist")) return "Horticulturist";
+  if (value.includes("landscape")) return "Landscape Consultant";
+  if (value.includes("geotechnical")) return "Geotechnical Consultant";
+  if (value.includes("environment")) return "Environmental Consultant";
+  if (value.includes("town planner") || value.includes("townplanner")) return "Town Planner";
+  if (value.includes("pmc") || value.includes("project manager")) return "PMC / Project Manager";
   if (value.includes("plumber")) return "Plumber";
   if (value.includes("site supervisor")) return "Site Supervisor";
   if (value.includes("horticulturist")) return "Horticulturist";
@@ -169,6 +178,16 @@ function templateConsultantApplicantKeywords(templateType: TemplateType): string
       return ["plumb"];
     case "Parking Consultant":
       return ["parking"];
+    case "Landscape Consultant":
+      return ["landscape"];
+    case "Geotechnical Consultant":
+      return ["geotechnical"];
+    case "Environmental Consultant":
+      return ["environment"];
+    case "Town Planner":
+      return ["town planner", "townplanner"];
+    case "PMC / Project Manager":
+      return ["pmc", "project manager"];
     case "Rainwater Consultant":
       return ["rain", "rainwater"];
     case "Site Supervisor":
@@ -187,7 +206,7 @@ export function pickConsultantLookupUserIdsFromProject(
   const applicants = projectData?.applicant_details?.applicants || [];
   const keywords = templateConsultantApplicantKeywords(templateType);
   const row = applicants.find((a) => {
-    const t = (a.applicantType || "").toLowerCase();
+    const t = (a.applicantType || a.applicant_type || "").toLowerCase();
     return keywords.some((k) => t.includes(k));
   });
   const uid =
@@ -315,6 +334,16 @@ export function mapToPdfFieldValues(
         return "Plumber";
       case "Parking Consultant":
         return "Parking_Consultant";
+      case "Landscape Consultant":
+        return "Landscape_Consultant";
+      case "Geotechnical Consultant":
+        return "Geotechnical_Consultant";
+      case "Environmental Consultant":
+        return "Environmental_Consultant";
+      case "Town Planner":
+        return "Town_Planner";
+      case "PMC / Project Manager":
+        return "PMC_Project_Manager";
       case "Rainwater Consultant":
         return "Rainwater_Consultant";
       case "Site Supervisor":
@@ -332,6 +361,8 @@ export function mapToPdfFieldValues(
     }
     return "";
   };
+  const sanitizeAddressLine = (value: string): string =>
+    value.replace(/[,\s]+$/g, "").trim();
 
   const applicants = source?.projectData?.applicant_details?.applicants || [];
   const ownerApplicant = applicants.find(
@@ -361,23 +392,29 @@ export function mapToPdfFieldValues(
   // This lets the project owner override a consultant's address per-project
   // by editing the applicant row, while still falling back to the consultant's
   // own profile when no override is present.
-  const consultantAddressLine1 = pickText(
+  const consultantAddressLine1 = sanitizeAddressLine(
+    pickText(
     primaryConsultantApplicant?.address_line1,
     (primaryConsultantApplicant as any)?.addressLine1,
     source?.consultantAddressLine1
+    )
   );
-  const consultantAddressLine2 = pickText(
+  const consultantAddressLine2 = sanitizeAddressLine(
+    pickText(
     primaryConsultantApplicant?.address_line2,
     (primaryConsultantApplicant as any)?.addressLine2,
     source?.consultantAddressLine2
+    )
   );
-  const consultantAddressLine3 = pickText(
+  const consultantAddressLine3 = sanitizeAddressLine(
+    pickText(
     primaryConsultantApplicant?.address_line3,
     (primaryConsultantApplicant as any)?.addressLine3,
     source?.consultantAddressLine3
+    )
   );
   const architectName =
-    architectApplicant?.name?.trim() || consultantName;
+    architectApplicant?.name?.trim() || (templateType === "Architect" ? consultantName : "");
   // For the architect block (used by every template either as primary or CC),
   // the architect's applicant row in `applicant_details` wins. When the
   // architect is also the logged-in consultant (Architect template), the
@@ -396,20 +433,26 @@ export function mapToPdfFieldValues(
   const architectFallbackLine3 = isArchitectAlsoLoggedInConsultant
     ? consultantAddressLine3
     : "";
-  const architectAddressLine1 = pickText(
+  const architectAddressLine1 = sanitizeAddressLine(
+    pickText(
     architectApplicant?.address_line1,
     (architectApplicant as any)?.addressLine1,
     architectFallbackLine1
+    )
   );
-  const architectAddressLine2 = pickText(
+  const architectAddressLine2 = sanitizeAddressLine(
+    pickText(
     architectApplicant?.address_line2,
     (architectApplicant as any)?.addressLine2,
     architectFallbackLine2
+    )
   );
-  const architectAddressLine3 = pickText(
+  const architectAddressLine3 = sanitizeAddressLine(
+    pickText(
     architectApplicant?.address_line3,
     (architectApplicant as any)?.addressLine3,
     architectFallbackLine3
+    )
   );
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const planningAuthority =

@@ -4,6 +4,31 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
 
+const pickText = (...values: Array<unknown>): string | undefined => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
+const normalizeApplicantDetails = (raw: any) => {
+  if (!raw || typeof raw !== "object") return raw;
+  const applicants = Array.isArray(raw.applicants) ? raw.applicants : [];
+  const normalizedApplicants = applicants.map((applicant: any) => {
+    if (!applicant || typeof applicant !== "object") return applicant;
+    const address_line1 = pickText(applicant.address_line1, applicant.addressLine1);
+    const address_line2 = pickText(applicant.address_line2, applicant.addressLine2);
+    const address_line3 = pickText(applicant.address_line3, applicant.addressLine3);
+    return {
+      ...applicant,
+      ...(address_line1 ? { address_line1 } : {}),
+      ...(address_line2 ? { address_line2 } : {}),
+      ...(address_line3 ? { address_line3 } : {}),
+    };
+  });
+  return { ...raw, applicants: normalizedApplicants };
+};
+
 // Update a project by ID
 // Supports partial updates - only updates fields that are provided
 export async function PUT(
@@ -112,7 +137,7 @@ export async function PUT(
     }
 
     if (body.applicant_details !== undefined) {
-      updateData.applicant_details = body.applicant_details;
+      updateData.applicant_details = normalizeApplicantDetails(body.applicant_details);
     }
 
     if (body.building_details !== undefined) {
