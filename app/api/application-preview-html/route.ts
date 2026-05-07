@@ -26,6 +26,11 @@ const TEMPLATE_PATH_MAP: Record<TemplateType, string> = {
   "Rainwater Consultant": "rainwater-consultant.html",
   "Site Supervisor": "site-supervisor.html",
   Horticulturist: "horticulturist.html",
+  "Landscape Consultant": "landscape-consultant.html",
+  "Geotechnical Consultant": "geotechnical-consultant.html",
+  "Environmental Consultant": "environmental-consultant.html",
+  "Town Planner": "town-planner.html",
+  "PMC / Project Manager": "pmc-project-manager.html",
 };
 
 function escapeHtml(value: string): string {
@@ -49,9 +54,9 @@ function replaceTemplateTokens(
   // Replace longer tokens first so `$foo` doesn't partially replace `$foo_bar`.
   const entries = Object.entries(fields).sort(([a], [b]) => b.length - a.length);
   for (const [key, raw] of entries) {
-    if (raw === undefined) continue;
+    const safeRaw = raw ?? "";
     const token = key.startsWith("$") ? key : `$${key}`;
-    const escaped = escapeHtml(raw);
+    const escaped = escapeHtml(safeRaw);
     // First try fast exact replacement.
     out = out.split(token).join(escaped);
     // Then replace whitespace-variant tokens often produced by Word HTML exports.
@@ -61,6 +66,8 @@ function replaceTemplateTokens(
     );
     out = out.replace(whitespaceTolerantTokenRegex, escaped);
   }
+  // Final safety: remove any leftover $project_* tokens so placeholders never leak.
+  out = out.replace(/\$project_[A-Za-z0-9_./-]+/g, "");
   return out;
 }
 

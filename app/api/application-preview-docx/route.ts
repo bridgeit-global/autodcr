@@ -91,6 +91,11 @@ const TEMPLATE_DOCX_MAP: Record<TemplateType, string> = {
   "Rainwater Consultant": "appointment letter (Rainwater Consultant).docx",
   "Site Supervisor": "appointment letter (Site Supervisor).docx",
   Horticulturist: "appointment letter (Horticulturist).docx",
+  "Landscape Consultant": "appointment letter (Architect Licensed Surveyor).docx",
+  "Geotechnical Consultant": "appointment letter (Architect Licensed Surveyor).docx",
+  "Environmental Consultant": "appointment letter (Architect Licensed Surveyor).docx",
+  "Town Planner": "appointment letter (Architect Licensed Surveyor).docx",
+  "PMC / Project Manager": "appointment letter (Architect Licensed Surveyor).docx",
 };
 
 function escapeXml(value: string): string {

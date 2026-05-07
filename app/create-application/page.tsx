@@ -379,6 +379,21 @@ const permissionLibrary: Record<string, { title: string; description: string; ic
       description: "Upload and manage environmental consultant appointment letter",
       icon: <DocumentIcon />,
     },
+    Appointment_Letter_for_Landscape_Consultant: {
+      title: "Appointment Letter for Landscape Consultant",
+      description: "Upload and manage landscape consultant appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_Geotechnical_Consultant: {
+      title: "Appointment Letter for Geotechnical Consultant",
+      description: "Upload and manage geotechnical consultant appointment letter",
+      icon: <DocumentIcon />,
+    },
+    Appointment_Letter_for_PMC_Project_Manager: {
+      title: "Appointment Letter for PMC / Project Manager",
+      description: "Upload and manage PMC / project manager appointment letter",
+      icon: <DocumentIcon />,
+    },
   };
 
 type PermissionKey = keyof typeof permissionLibrary;
@@ -419,6 +434,9 @@ const departmentPermissionMap: Record<string, PermissionKey[]> = {
     "Appointment_Letter_for_Town_Planner",
     "Appointment_Letter_for_Structural_Engineer",
     "Appointment_Letter_for_Environmental_Consultant",
+    "Appointment_Letter_for_Landscape_Consultant",
+    "Appointment_Letter_for_Geotechnical_Consultant",
+    "Appointment_Letter_for_PMC_Project_Manager",
   ],
   Fire: ["Provisional_Fire_NOC", "CFO_Refund_Process", "Final_Fire_NOC"],
   "Traffic and Co-ordination": ["Parking_Layout_Remarks"],
@@ -591,7 +609,7 @@ export default function CreateApplicationPage() {
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
-  const [selectedDepartment, setSelectedDepartment] = useState("");
+  const [selectedDepartment, setSelectedDepartment] = useState("General");
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
   const [proposalSubmission, setProposalSubmission] = useState(proposalSubmissionOptions[0]);
   const [typeOfNotice, setTypeOfNotice] = useState("");
@@ -793,13 +811,13 @@ export default function CreateApplicationPage() {
 
   useEffect(() => {
     if (!departments.includes(selectedDepartment)) {
-      setSelectedDepartment("");
+      setSelectedDepartment("General");
     }
   }, [selectedAuthority, selectedDepartment]);
 
   useEffect(() => {
     if (!selectedProject) {
-      setSelectedDepartment("");
+      setSelectedDepartment("General");
     }
   }, [selectedProject]);
 

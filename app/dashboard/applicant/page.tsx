@@ -34,6 +34,9 @@ type ApplicantRow = {
   licenseIssueDate: string;
   residentialAddress: string;
   officeAddress: string;
+  address_line1?: string;
+  address_line2?: string;
+  address_line3?: string;
 };
 
 type ConsultantDirectoryEntry = {
@@ -43,6 +46,9 @@ type ConsultantDirectoryEntry = {
   contactNumber: string;
   pan: string;
   address: string;
+  address_line1?: string;
+  address_line2?: string;
+  address_line3?: string;
   registrationNumber: string;
   licenseIssueDate: string;
 };
@@ -183,6 +189,27 @@ const CONSULTANTS: ApplicantDirectoryEntry[] = [
 
 // Legacy static directories retained for reference but no longer used for the Name dropdown
 const FIRE_AGENCIES: ApplicantDirectoryEntry[] = [];
+
+const pickText = (...values: Array<unknown>): string => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+};
+
+const composeAddress = (
+  line1?: string,
+  line2?: string,
+  line3?: string,
+  fallback?: string
+): string => {
+  const joined = [line1, line2, line3]
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter(Boolean)
+    .join(", ");
+  return joined || (fallback?.trim() || "");
+};
+
 export default function ApplicantDetailsPage() {
   const { userMetadata } = useUserMetadata();
   const { isEditMode, isLoading, projectData } = useProjectData();
@@ -274,6 +301,9 @@ export default function ApplicantDetailsPage() {
           licenseIssueDate: app.licenseIssueDate || app.license_issue_date || "",
           residentialAddress: app.residentialAddress || app.residential_address || "",
           officeAddress: app.officeAddress || app.office_address || "",
+          address_line1: pickText(app.address_line1, app.addressLine1),
+          address_line2: pickText(app.address_line2, app.addressLine2),
+          address_line3: pickText(app.address_line3, app.addressLine3),
         }));
         
         console.log("[Applicant Details] Mapped applicants:", mappedApplicants);
@@ -338,7 +368,15 @@ export default function ApplicantDetailsPage() {
           email: row.email || "",
           contactNumber: row.contact_number || "",
           pan: row.pan || "",
-          address: row.address || "",
+          address_line1: pickText(row.address_line1, row.addressLine1, row.user_metadata?.address_line1),
+          address_line2: pickText(row.address_line2, row.addressLine2, row.user_metadata?.address_line2),
+          address_line3: pickText(row.address_line3, row.addressLine3, row.user_metadata?.address_line3),
+          address: composeAddress(
+            pickText(row.address_line1, row.addressLine1, row.user_metadata?.address_line1),
+            pickText(row.address_line2, row.addressLine2, row.user_metadata?.address_line2),
+            pickText(row.address_line3, row.addressLine3, row.user_metadata?.address_line3),
+            pickText(row.address, row.user_metadata?.address)
+          ),
           registrationNumber: row.registration_number || "",
           licenseIssueDate: row.license_issue_date || "",
         })) ?? [];
@@ -374,6 +412,9 @@ export default function ApplicantDetailsPage() {
       const userContact = userMetadata.alternate_phone || userMetadata.mobile || "-";
       const userEmail = userMetadata.email || "-";
       const userAddress = userMetadata.address || "-";
+      const userAddressLine1 = pickText(userMetadata.address_line1, userMetadata.addressLine1);
+      const userAddressLine2 = pickText(userMetadata.address_line2, userMetadata.addressLine2);
+      const userAddressLine3 = pickText(userMetadata.address_line3, userMetadata.addressLine3);
       const userPanNo = userMetadata.pan_no || userMetadata.pan || "-";
 
       let registrationNo = "";
@@ -465,8 +506,12 @@ export default function ApplicantDetailsPage() {
         registrationNo: registrationNo,
         panNo: userPanNo,
         licenseIssueDate: licenseIssueDate || "-",
-        residentialAddress: userAddress,
+        residentialAddress:
+          composeAddress(userAddressLine1, userAddressLine2, userAddressLine3, userAddress) || "-",
         officeAddress: userAddress,
+        address_line1: userAddressLine1 || undefined,
+        address_line2: userAddressLine2 || undefined,
+        address_line3: userAddressLine3 || undefined,
       };
 
       // Shift existing IDs so logged-in user stays first with id 1
@@ -517,10 +562,22 @@ export default function ApplicantDetailsPage() {
     const selectedEntry = directoryOptions.find((entry) => entry.id === selectedDirectoryId);
     if (selectedEntry) {
       const opts = { shouldValidate: true, shouldDirty: true, shouldTouch: true } as const;
+      const selectedAddressLine1 = pickText(selectedEntry.address_line1);
+      const selectedAddressLine2 = pickText(selectedEntry.address_line2);
+      const selectedAddressLine3 = pickText(selectedEntry.address_line3);
       setValue("name", selectedEntry.fullName, opts);
       setValue("contactNumber", selectedEntry.contactNumber, opts);
       setValue("emailAddress", selectedEntry.email, opts);
-      setValue("residentialAddress", selectedEntry.address, opts);
+      setValue(
+        "residentialAddress",
+        composeAddress(
+          selectedAddressLine1,
+          selectedAddressLine2,
+          selectedAddressLine3,
+          selectedEntry.address
+        ),
+        opts
+      );
       setValue("registrationNumber", selectedEntry.registrationNumber, opts);
       setValue("panNo", selectedEntry.pan, opts);
       setValue("licenseIssueDate", selectedEntry.licenseIssueDate, opts);
@@ -579,6 +636,12 @@ export default function ApplicantDetailsPage() {
     // All entries come from directory dropdown (consultants or owners), use their auth user id
     const userId = (showDirectoryDropdown && selectedDirectoryId) ? selectedDirectoryId : undefined;
 
+    const selectedDirectoryEntry = showDirectoryDropdown && selectedDirectoryId
+      ? directoryOptions.find((entry) => entry.id === selectedDirectoryId)
+      : undefined;
+    const addressLine1 = pickText(selectedDirectoryEntry?.address_line1);
+    const addressLine2 = pickText(selectedDirectoryEntry?.address_line2);
+    const addressLine3 = pickText(selectedDirectoryEntry?.address_line3);
     const newApplicant = {
       id: nextId,
       user_id: userId,
@@ -589,8 +652,12 @@ export default function ApplicantDetailsPage() {
       registrationNo: data.registrationNumber || "-",
       panNo: data.panNo || "-",
       licenseIssueDate: data.licenseIssueDate || "-",
-      residentialAddress: data.residentialAddress || "-",
+      residentialAddress:
+        composeAddress(addressLine1, addressLine2, addressLine3, data.residentialAddress) || "-",
       officeAddress: "-", // Not collected from form anymore
+      address_line1: addressLine1 || undefined,
+      address_line2: addressLine2 || undefined,
+      address_line3: addressLine3 || undefined,
     };
     const nextApplicants = [...applicants, newApplicant];
     setApplicants(nextApplicants);

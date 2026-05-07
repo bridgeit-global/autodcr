@@ -1187,6 +1187,37 @@ export const TEMPLATE_CONFIG = {
     displayName: "Horticulturist",
     fileName: "Appointment_Letter_Horticulturist.pdf",
   },
+
+  "Landscape Consultant": {
+    generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
+    displayName: "Landscape Consultant",
+    fileName: "Appointment_Letter_Landscape_Consultant.pdf",
+  },
+  "Geotechnical Consultant": {
+    generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
+    displayName: "Geotechnical Consultant",
+    fileName: "Appointment_Letter_Geotechnical_Consultant.pdf",
+  },
+  "Environmental Consultant": {
+    generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
+    displayName: "Environmental Consultant",
+    fileName: "Appointment_Letter_Environmental_Consultant.pdf",
+  },
+  "Town Planner": {
+    generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
+    displayName: "Town Planner",
+    fileName: "Appointment_Letter_Town_Planner.pdf",
+  },
+  "PMC / Project Manager": {
+    generator: (pdfDoc: any, page: any, fields: TemplateFields, font: any, boldFont: any) =>
+      generateFromDocx(pdfDoc, page, fields, font, boldFont, "Architect"),
+    displayName: "PMC / Project Manager",
+    fileName: "Appointment_Letter_PMC_Project_Manager.pdf",
+  },
 } as const;
 
 export type TemplateType = keyof typeof TEMPLATE_CONFIG;
