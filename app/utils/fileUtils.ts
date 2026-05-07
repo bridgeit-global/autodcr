@@ -58,7 +58,10 @@ export async function uploadFileIdempotent(
     
     // Determine file extension and folder based on type
     const folder = fileType === 'photo' ? 'photos' : 'letterheads';
-    const extension = fileType === 'photo' ? fileExt : 'pdf';
+    // Keep the original extension for both photos and letterheads.
+    // Letterhead validation in the UI only allows image types, so forcing ".pdf"
+    // causes downstream URL validation to fail.
+    const extension = fileExt;
     
     // Validate extension
     if (!extension || extension.length === 0) {
