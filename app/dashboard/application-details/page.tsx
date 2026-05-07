@@ -39,6 +39,8 @@ type PreviewProjectData = {
       email?: string;
       entity_name?: string;
       entityName?: string;
+      letterhead_url?: string;
+      letterheadUrl?: string;
       name?: string;
       entity_type?: string;
       entityType?: string;
@@ -181,6 +183,16 @@ function pickPersonFullNameFromMeta(meta: unknown): string | undefined {
   if (full) return full;
   const fallback = typeof m.name === "string" ? m.name.trim() : "";
   return fallback || undefined;
+}
+
+function pickLetterheadUrlFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["letterhead_url", "letterheadUrl"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
 }
 
 function normalizeLookupId(value: unknown): string {
@@ -383,6 +395,10 @@ export default function ApplicationDetailsPage() {
         ownerApplicant?.entity_type?.trim() ||
         ownerApplicant?.entityType?.trim() ||
         pickEntityTypeFromMeta(ownerApplicant);
+      let ownerLetterheadUrl =
+        ownerApplicant?.letterhead_url?.trim() ||
+        ownerApplicant?.letterheadUrl?.trim() ||
+        pickLetterheadUrlFromMeta(ownerApplicant);
 
       const mergeConsultantMeta = (meta: unknown, prefer = false) => {
         const nextCoaRegNo = pickCoaRegNoFromMeta(meta);
@@ -495,6 +511,10 @@ export default function ApplicationDetailsPage() {
           const resolvedClientName = pickPersonFullNameFromMeta(ownerMeta);
           if (resolvedClientName) clientName = resolvedClientName;
         }
+        if (!ownerLetterheadUrl) {
+          const resolvedLetterheadUrl = pickLetterheadUrlFromMeta(ownerMeta);
+          if (resolvedLetterheadUrl) ownerLetterheadUrl = resolvedLetterheadUrl;
+        }
         const resolved = pickEntityNameFromMeta(ownerMeta);
         if (resolved) {
           clientCompanyName = resolved;
@@ -556,6 +576,7 @@ export default function ApplicationDetailsPage() {
         clientCompanyName,
         clientName,
         clientCompanyDesignation,
+        ownerLetterheadUrl,
         ownerDebug: {
           ownerApplicants,
           ownerLookupUserIds,
@@ -563,6 +584,7 @@ export default function ApplicationDetailsPage() {
           resolvedClientCompanyName: clientCompanyName,
           resolvedClientName: clientName,
           resolvedClientCompanyDesignation: clientCompanyDesignation,
+          resolvedOwnerLetterheadUrl: ownerLetterheadUrl,
         },
         consultantLookupUserIds,
         projectData,

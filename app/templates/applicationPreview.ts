@@ -22,6 +22,7 @@ type ApplicationPreviewSource = {
   clientCompanyName?: string | null;
   clientName?: string | null;
   clientCompanyDesignation?: string | null;
+  ownerLetterheadUrl?: string | null;
   ownerDebug?: unknown;
   consultantAddressLine1?: string | null;
   consultantAddressLine2?: string | null;
@@ -510,6 +511,7 @@ export function mapToPdfFieldValues(
     source?.clientCompanyName?.trim() ||
     "";
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
+  const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
   const normalizedClientEntityType = clientCompanyDesignation.toLowerCase();
   const displayClientCompanyDesignation =
     normalizedClientEntityType === "proprietorship / individual"
@@ -591,6 +593,7 @@ export function mapToPdfFieldValues(
     project_Client_Company_Name: clientCompanyName,
     project_Client_Company_Designation: displayClientCompanyDesignation,
     project_Client_Name: clientName,
+    project_Letterhead_Image_Url: ownerLetterheadUrl || undefined,
 
     // Building proposal CC block (common)
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
@@ -675,6 +678,7 @@ function mountHtmlIntoHiddenHost(html: string): HTMLDivElement {
   const parsed = new DOMParser().parseFromString(html, "text/html");
 
   const host = document.createElement("div");
+  host.className = "pdf-host-root";
   host.setAttribute("aria-hidden", "true");
   host.style.position = "absolute";
   host.style.left = "-10000px";
@@ -687,7 +691,18 @@ function mountHtmlIntoHiddenHost(html: string): HTMLDivElement {
   host.style.pointerEvents = "none";
 
   parsed.head.querySelectorAll("style").forEach((styleNode) => {
-    host.appendChild(styleNode.cloneNode(true));
+    const styleEl = document.createElement("style");
+    const rawCss = styleNode.textContent || "";
+    // The PDF host is a detached <div>, not the real document <body>.
+    // Rewrite body/html selectors so letterhead/background rules still apply
+    // when templates define them on `body`.
+    const rewrittenCss = rawCss
+      .replace(/\bhtml\s*,\s*body\b/gi, ".pdf-host-root, .pdf-host-root")
+      .replace(/\bbody\s*,\s*html\b/gi, ".pdf-host-root, .pdf-host-root")
+      .replace(/\bbody\b/gi, ".pdf-host-root")
+      .replace(/\bhtml\b/gi, ".pdf-host-root");
+    styleEl.textContent = rewrittenCss;
+    host.appendChild(styleEl);
   });
 
   // Re-parent body children so all Word styles still apply via class selectors.
@@ -725,7 +740,10 @@ export function prewarmPreviewPdfRuntime(): void {
   void loadPdfDeps();
 }
 
-async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
+async function convertHtmlToPdfBlobInBrowser(
+  html: string,
+  templateType?: TemplateType
+): Promise<Blob> {
   if (typeof window === "undefined") {
     throw new Error("HTML→PDF conversion can only run in the browser.");
   }
@@ -750,6 +768,18 @@ async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
     // `letterRendering` is a non-typed html2canvas option that forces per-character
     // text rendering rather than batched word-level rendering — produces sharper
     // text edges for small font sizes.
+    const plumberCcBreakPx =
+      templateType === "Plumber"
+        ? (() => {
+            const ccAnchor = host.querySelector(".cc-start") as HTMLElement | null;
+            if (!ccAnchor) return null;
+            const hostRect = host.getBoundingClientRect();
+            const anchorRect = ccAnchor.getBoundingClientRect();
+            const offset = anchorRect.top - hostRect.top;
+            return offset > 0 ? offset : null;
+          })()
+        : null;
+
     const canvas = await html2canvas(host, {
       scale: captureScale,
       backgroundColor: "#ffffff",
@@ -759,24 +789,33 @@ async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
     } as Parameters<typeof html2canvas>[1]);
 
     const pdf = new JsPdfCtor({ unit: "pt", format: "a4", orientation: "portrait" });
+    // Plumber letters are currently tested with heavy letterhead/footer artwork.
+    // Keep a larger reserved bottom band so content spills to page 2 instead of
+    // overlapping the footer graphics/text.
+    const marginTopPt =
+      templateType === "Plumber" ? 60 : PDF_MARGIN_TOP_PT;
+    const marginBottomPt =
+      templateType === "Plumber" ? 90 : PDF_MARGIN_BOTTOM_PT;
+    const contentWidthPt = PDF_CONTENT_WIDTH_PT;
+    const contentHeightPt = A4_PAGE_HEIGHT_PT - marginTopPt - marginBottomPt;
 
     // Map canvas pixels to PDF points using the content rectangle width.
-    const naturalPxPerPt = canvas.width / PDF_CONTENT_WIDTH_PT;
+    const naturalPxPerPt = canvas.width / contentWidthPt;
     const naturalContentHeightPt = canvas.height / naturalPxPerPt;
-    const naturalPages = Math.ceil(naturalContentHeightPt / PDF_CONTENT_HEIGHT_PT);
+    const naturalPages = Math.ceil(naturalContentHeightPt / contentHeightPt);
 
     // If content overflows MAX_PAGES, proportionally shrink the rendered image
     // so it fits exactly within MAX_PAGES (text gets slightly smaller, but
     // the layout stays intact).
     const fitScale =
       naturalPages > MAX_PAGES
-        ? (MAX_PAGES * PDF_CONTENT_HEIGHT_PT) / naturalContentHeightPt
+        ? (MAX_PAGES * contentHeightPt) / naturalContentHeightPt
         : 1;
 
-    const effectiveContentWidthPt = PDF_CONTENT_WIDTH_PT * fitScale;
+    const effectiveContentWidthPt = contentWidthPt * fitScale;
     const effectivePxPerPt = canvas.width / effectiveContentWidthPt;
     const pageContentCanvasHeightPx = Math.floor(
-      PDF_CONTENT_HEIGHT_PT * effectivePxPerPt
+      contentHeightPt * effectivePxPerPt
     );
     // Center horizontally if shrunk so the page doesn't look left-biased.
     const xOffsetPt =
@@ -784,11 +823,24 @@ async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
 
     let consumed = 0;
     let pageIndex = 0;
+    const forcedBreakCanvasPx =
+      plumberCcBreakPx != null ? Math.floor(plumberCcBreakPx * captureScale) : null;
+    let plumberForcedBreakApplied = false;
     while (consumed < canvas.height) {
-      const sliceHeightPx = Math.min(
-        pageContentCanvasHeightPx,
-        canvas.height - consumed
-      );
+      let sliceHeightPx = Math.min(pageContentCanvasHeightPx, canvas.height - consumed);
+      if (
+        templateType === "Plumber" &&
+        !plumberForcedBreakApplied &&
+        forcedBreakCanvasPx != null &&
+        forcedBreakCanvasPx > consumed &&
+        forcedBreakCanvasPx < canvas.height
+      ) {
+        const untilForcedBreak = forcedBreakCanvasPx - consumed;
+        if (untilForcedBreak > 0) {
+          sliceHeightPx = Math.min(sliceHeightPx, untilForcedBreak);
+          plumberForcedBreakApplied = true;
+        }
+      }
       const sliceCanvas = document.createElement("canvas");
       sliceCanvas.width = canvas.width;
       sliceCanvas.height = sliceHeightPx;
@@ -810,7 +862,7 @@ async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
         dataUrl,
         "JPEG",
         xOffsetPt,
-        PDF_MARGIN_TOP_PT,
+        marginTopPt,
         effectiveContentWidthPt,
         sliceHeightPt,
         undefined,
@@ -839,24 +891,24 @@ async function convertHtmlToPdfBlobInBrowser(html: string): Promise<Blob> {
  * matches the on-screen pagination exactly.
  */
 function injectPaginatedStyles(html: string): string {
+  const dataUriMatch = html.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/i);
+  const cssUrlMatch = html.match(/background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i);
+  const letterheadUrl = dataUriMatch?.[0] || cssUrlMatch?.[2] || "";
   const head = `
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
 <style>
-  /* A4 with tight vertical margins (36pt top + bottom) and demo-matching
-     horizontal margins (56.7pt sides). The slim vertical margins give us
-     ~196pt extra content height across the 2 pages so all content fits.
-     Paged.js requires shorthand margin inside @page (longhand variants are
-     ignored), so override both the unnamed default and the named
-     @page WordSection1 rule that the Word HTML binds the body to. */
+  /* Letterhead-safe A4 content frame.
+     Reserve top/footer zones so flowing content does not overlap the printed
+     letterhead branding/footer and naturally continues on page 2. */
   @page {
     size: A4;
-    margin: 36pt 56.7pt;
+    margin: 95pt 42pt 135pt 56pt;
   }
   @page WordSection1 {
     size: A4;
-    margin: 36pt 56.7pt;
+    margin: 95pt 42pt 135pt 56pt;
   }
 
   html, body {
@@ -865,18 +917,30 @@ function injectPaginatedStyles(html: string): string {
     background: #f3f4f6;
   }
 
-  /* Some uploaded/Word-exported templates carry explicit widths/offsets on
-     the root wrapper. Normalize that wrapper to fill the printable page area
-     so horizontal spacing is balanced on both sides. */
+  /* Normalize root wrapper width only (do not zero out paddings/margins that
+     templates may intentionally use for their own sections). */
   div.WordSection1,
   main.page {
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
+  }
+
+  /* Fixed, global page content frame for paged preview (all templates).
+     This avoids per-template padding differences between page 1 and 2. */
+  .pagedjs_page_content {
+    padding: 40pt 42pt 96pt 56pt !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Neutralize template wrapper in paged mode so only the fixed frame above
+     controls spacing consistently on every page. */
+  .pagedjs_page_content .WordSection1,
+  .pagedjs_page_content main.page {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: auto !important;
+    width: 100% !important;
   }
 
   /* Carlito is metric-compatible with Calibri (Google's open-source clone).
@@ -917,7 +981,11 @@ function injectPaginatedStyles(html: string): string {
     padding: 12px 0;
   }
   .pagedjs_page {
-    background: #ffffff;
+    background-color: #ffffff;
+    ${letterheadUrl ? `background-image: url('${letterheadUrl}');` : ""}
+    ${letterheadUrl ? "background-repeat: no-repeat;" : ""}
+    ${letterheadUrl ? "background-size: 210mm 297mm;" : ""}
+    ${letterheadUrl ? "background-position: top center;" : ""}
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     margin: 0 auto 16px auto;
   }
@@ -935,6 +1003,93 @@ function injectPaginatedStyles(html: string): string {
     return html.replace(/<\/head>/i, `${head}</head>`);
   }
   return head + html;
+}
+
+function injectPlumberPreviewPages(
+  html: string,
+  ownerLetterheadUrl?: string | null
+): string {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const marker = parsed.querySelector("p.MsoNormal.cc-start") as HTMLElement | null;
+  const section = parsed.querySelector("div.WordSection1") as HTMLElement | null;
+  if (!marker || !section) return html;
+
+  const children = Array.from(section.childNodes);
+  const markerIndex = children.findIndex((n) => n === marker);
+  if (markerIndex < 0) return html;
+
+  const serializeNodes = (nodes: Node[]) =>
+    nodes
+      .map((n) => {
+        if (n.nodeType === Node.TEXT_NODE) return n.textContent || "";
+        if (n.nodeType === Node.ELEMENT_NODE) return (n as HTMLElement).outerHTML;
+        return "";
+      })
+      .join("");
+
+  const before = serializeNodes(children.slice(0, markerIndex));
+  const after = serializeNodes(children.slice(markerIndex));
+
+  const dataUriMatch = html.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/i);
+  const cssUrlMatch = html.match(/background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i);
+  const letterheadUrl =
+    ownerLetterheadUrl?.trim() ||
+    dataUriMatch?.[0] ||
+    cssUrlMatch?.[2] ||
+    "";
+
+  const plumberHead = `
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #f3f4f6;
+  }
+  .preview-pages {
+    padding: 4px 0;
+  }
+  .preview-sheet {
+    width: 210mm;
+    min-height: 297mm;
+    background: #ffffff;
+    ${letterheadUrl ? `background-image: url('${letterheadUrl}');` : ""}
+    ${letterheadUrl ? "background-repeat: no-repeat;" : ""}
+    ${letterheadUrl ? "background-size: 210mm 297mm;" : ""}
+    ${letterheadUrl ? "background-position: top center;" : ""}
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    margin: 0 auto 8px auto;
+    box-sizing: border-box;
+  }
+  .preview-sheet--first,
+  .preview-sheet--second {
+    padding: 135pt 42pt 120pt 56pt;
+  }
+  .preview-sheet--first .WordSection1,
+  .preview-sheet--second .WordSection1 {
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: auto !important;
+    width: 100% !important;
+  }
+  @media print {
+    html, body { background: #ffffff; }
+    .preview-pages { padding: 0; }
+    .preview-sheet { box-shadow: none; margin: 0; }
+  }
+</style>`;
+
+  const sectionClass = section.className || "WordSection1";
+  const bodyAttrs = Array.from(parsed.body.attributes)
+    .map((attr) => `${attr.name}="${attr.value}"`)
+    .join(" ");
+  const bodyOpen = bodyAttrs ? `<body ${bodyAttrs}>` : "<body>";
+
+  return `<html><head>${parsed.head.innerHTML}${plumberHead}</head>${bodyOpen}
+<div class="preview-pages">
+  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div></div>
+  <div class="preview-sheet preview-sheet--second"><div class="${sectionClass}">${after}</div></div>
+</div>
+</body></html>`;
 }
 
 /**
@@ -968,6 +1123,9 @@ export async function generateApplicationPreviewHtml(
 
   if (response.ok) {
     const rawHtml = await response.text();
+    if (templateType === "Plumber") {
+      return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
+    }
     return injectPaginatedStyles(rawHtml);
   }
 
@@ -1011,7 +1169,7 @@ export async function generateApplicationPreviewPdf(
 
   if (htmlResponse.ok) {
     const html = await htmlResponse.text();
-    return convertHtmlToPdfBlobInBrowser(html);
+    return convertHtmlToPdfBlobInBrowser(html, templateType);
   }
 
   const htmlPayload = await htmlResponse.json().catch(() => null);
