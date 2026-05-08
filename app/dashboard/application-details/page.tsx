@@ -7,6 +7,7 @@ import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import {
   generateApplicationPreviewHtml,
+  generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
   mapToPdfFieldValues,
   mapSelectedApplicationToTemplate,
@@ -278,6 +279,18 @@ export default function ApplicationDetailsPage() {
   const [previewFieldMapping, setPreviewFieldMapping] = useState<Record<string, string | undefined> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  /**
+   * Bound generator that produces a PDF blob equivalent to the currently
+   * shown HTML preview. Set when `handlePreview` succeeds so the
+   * DocumentPreviewModal's "Sign with DSC" button can route the same PDF
+   * through the bridge-poc signing flow.
+   */
+  const [previewPdfBlobGetter, setPreviewPdfBlobGetter] = useState<
+    (() => Promise<Blob>) | null
+  >(null);
+  const [previewSigningFileName, setPreviewSigningFileName] = useState<string>(
+    "application-preview.pdf"
+  );
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -602,6 +615,20 @@ export default function ApplicationDetailsPage() {
         templateType,
         previewSource
       );
+
+      // Bind a closure that lazily produces the same content as a PDF blob
+      // using the existing html2canvas + jsPDF pipeline. We don't pre-generate
+      // here because PDF synthesis is expensive and most preview opens never
+      // hit the "Sign with DSC" path.
+      const boundGetPdfBlob = () =>
+        generateApplicationPreviewPdf(fields, templateType, previewSource);
+      const safeApplicationNo = (applicationNo || "application").replace(
+        /[^a-zA-Z0-9._-]+/g,
+        "-"
+      );
+      setPreviewPdfBlobGetter(() => boundGetPdfBlob);
+      setPreviewSigningFileName(`${safeApplicationNo}-preview.pdf`);
+
       setPreviewUrl(null);
       setPreviewHtml(html);
       setPreviewFieldMapping(fieldMapping);
@@ -678,6 +705,8 @@ export default function ApplicationDetailsPage() {
         htmlContent={previewHtml}
         fieldMapping={previewFieldMapping}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
+        getPdfBlob={previewPdfBlobGetter ?? undefined}
+        signingFileName={previewSigningFileName}
       />
     </div>
   );
