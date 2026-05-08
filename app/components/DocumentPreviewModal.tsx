@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
@@ -8,6 +8,10 @@ import { createPortal } from "react-dom";
 const PlainPDFViewer = dynamic(() => import("./PlainPDFViewer"), {
   ssr: false,
 }) as React.ComponentType<{ fileUrl: string }>;
+
+const BridgeSignModal = dynamic(() => import("./BridgeSignModal"), {
+  ssr: false,
+});
 
 type DocumentPreviewModalProps = {
   open: boolean;
@@ -23,6 +27,16 @@ type DocumentPreviewModalProps = {
   /** Optional debug: token -> resolved value map used for replacement. */
   fieldMapping?: Record<string, string | undefined> | null;
   title?: string;
+  /**
+   * Optional async generator that produces the PDF blob to sign. When
+   * provided, the modal exposes a "Sign with DSC" button that lazily
+   * resolves the PDF and routes it through the bridge-poc signing flow.
+   * Used by the application creation / draft preview to demo signing the
+   * generated application PDF.
+   */
+  getPdfBlob?: () => Promise<Blob>;
+  /** File name forwarded to the native host when signing. */
+  signingFileName?: string;
 };
 
 export default function DocumentPreviewModal({
@@ -32,8 +46,11 @@ export default function DocumentPreviewModal({
   htmlContent,
   fieldMapping,
   title,
+  getPdfBlob,
+  signingFileName,
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [signModalOpen, setSignModalOpen] = useState(false);
 
   useEffect(() => {
     if (open) document.body.style.overflow = "hidden";
@@ -48,6 +65,12 @@ export default function DocumentPreviewModal({
   if (typeof window === "undefined") return null;
 
   const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
+  const canSign = Boolean(getPdfBlob);
+
+  const handleCloseAll = () => {
+    setSignModalOpen(false);
+    onClose();
+  };
 
   const handlePrint = () => {
     const win = iframeRef.current?.contentWindow;
@@ -73,7 +96,7 @@ export default function DocumentPreviewModal({
       {open && (
         <motion.div
           className="fixed inset-0 z-[9999] flex justify-center items-start bg-black/50 backdrop-blur-sm p-4 pt-10"
-          onClick={onClose}
+          onClick={handleCloseAll}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -95,6 +118,32 @@ export default function DocumentPreviewModal({
                 {title || "Document Preview"}
               </div>
               <div className="flex items-center gap-2">
+                {canSign && (
+                  <button
+                    onClick={() => setSignModalOpen(true)}
+                    className="h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5"
+                    aria-label="Sign with DSC"
+                    type="button"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 2v8" />
+                      <path d="M5 10h14" />
+                      <path d="M5 14a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4" />
+                      <path d="M9 22h6" />
+                    </svg>
+                    Sign with DSC
+                  </button>
+                )}
                 {htmlContent && !fileUrl && (
                   <button
                     onClick={handlePrint}
@@ -121,7 +170,7 @@ export default function DocumentPreviewModal({
                   </button>
                 )}
                 <button
-                  onClick={onClose}
+                  onClick={handleCloseAll}
                   className="h-9 w-9 rounded-lg hover:bg-gray-100 text-gray-700 transition-colors flex items-center justify-center"
                   aria-label="Close preview"
                   type="button"
@@ -162,5 +211,18 @@ export default function DocumentPreviewModal({
     </AnimatePresence>
   );
 
-  return createPortal(modalContent, document.body);
+  return (
+    <>
+      {createPortal(modalContent, document.body)}
+      {canSign && (
+        <BridgeSignModal
+          open={signModalOpen}
+          onClose={() => setSignModalOpen(false)}
+          getPdfBlob={getPdfBlob}
+          fileName={signingFileName || "application-preview.pdf"}
+          title={title ? `Sign "${title}" with DSC` : "Sign Document with DSC"}
+        />
+      )}
+    </>
+  );
 }
