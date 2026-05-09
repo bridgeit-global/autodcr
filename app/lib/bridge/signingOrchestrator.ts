@@ -110,6 +110,19 @@ export const listAllCerts = async (signal?: AbortSignal): Promise<CertInfo[]> =>
   return all;
 };
 
+/**
+ * Normalize a certId so it matches the protocol contract:
+ * `Hex PKCS#11 CKA_ID, normalized (no 0x prefix, even-length)`.
+ *
+ * Whitespace and an optional `0x` prefix are stripped. The result is
+ * lower-cased to keep host comparisons case-insensitive friendly.
+ */
+const normalizeCertIdHex = (raw: string): string =>
+  raw.trim().replace(/^0x/i, "").toLowerCase();
+
+const isHexEvenLength = (value: string): boolean =>
+  value.length > 0 && value.length % 2 === 0 && /^[0-9a-f]+$/.test(value);
+
 export const signPdf = async ({
   pdfBase64,
   slotId,
@@ -129,6 +142,14 @@ export const signPdf = async ({
     throw new Error("Missing certId for signing.");
   }
 
+  const normalizedCertId = normalizeCertIdHex(certId);
+  if (!isHexEvenLength(normalizedCertId)) {
+    throw new Error(
+      "Malformed certId: must be a hex-encoded PKCS#11 CKA_ID with even length. " +
+        "Reload slot/certs and reselect the certificate, then retry."
+    );
+  }
+
   const chunks = chunkBase64(pdfBase64);
   if (chunks.length === 0) {
     throw new Error("PDF chunking produced no chunks.");
@@ -146,7 +167,7 @@ export const signPdf = async ({
       phase: "start",
       jobId,
       slotId,
-      certId,
+      certId: normalizedCertId,
       totalChunks,
       certSource,
       detail: `Dispatching SIGN_PDF_START certSource=${certSource}`,
@@ -157,7 +178,7 @@ export const signPdf = async ({
         jobId,
         totalChunks,
         slotId,
-        certId,
+        certId: normalizedCertId,
         fileName,
         contentType: contentType ?? "application/pdf",
         pin: pinHint,
@@ -174,7 +195,7 @@ export const signPdf = async ({
         phase: "chunk",
         jobId,
         slotId,
-        certId,
+        certId: normalizedCertId,
         totalChunks,
         certSource,
         chunkIndex: index,
@@ -193,7 +214,7 @@ export const signPdf = async ({
       phase: "end",
       jobId,
       slotId,
-      certId,
+      certId: normalizedCertId,
       totalChunks,
       certSource,
       detail: "Dispatching SIGN_PDF_END",
@@ -209,12 +230,12 @@ export const signPdf = async ({
     }
     return final;
   } catch (error) {
-    const detail = `phase=${currentPhase} jobId=${jobId} slotId=${slotId} certId=${certId} totalChunks=${totalChunks}`;
+    const detail = `phase=${currentPhase} jobId=${jobId} slotId=${slotId} certId=${normalizedCertId} totalChunks=${totalChunks}`;
     onDebugEvent?.({
       phase: "error",
       jobId,
       slotId,
-      certId,
+      certId: normalizedCertId,
       totalChunks,
       certSource,
       detail,

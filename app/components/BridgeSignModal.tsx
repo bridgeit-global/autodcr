@@ -1,18 +1,8 @@
 "use client";
 
 /**
- * Reusable DSC signing modal that drives the bridge-poc signing flow
- * (PING / LIST_SLOTS / LIST_CERTS / SIGN_PDF_*) for any PDF blob produced
- * elsewhere in the app (e.g. an application preview PDF generated from the
- * draft / application creation flow).
- *
- * Caller responsibilities:
- *   - Generate the PDF and pass it as `pdfBlob` (or pass `getPdfBlob` and
- *     this modal will resolve the blob lazily after it opens).
- *   - Decide what to do with the signed blob via `onSigned` (typically
- *     download or replace the preview).
- *
- * This is a demo wrapper; it does not implement visible DSC stamp placement.
+ * DSC signing modal: PING → LIST_SLOTS → pick slot → LIST_CERTS → pick cert →
+ * optional visible stamp on PDF preview → SIGN_PDF_* (chunked).
  */
 
 import React, { useEffect, useState } from "react";
@@ -20,27 +10,50 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 
 import CustomSelect from "@/app/components/CustomSelect";
+import DscStampPdfViewer, { StampRect } from "@/app/components/DscStampPdfViewer";
 import { base64ToBlob } from "@/app/lib/bridge/pdfChunker";
-import { useSigningStore } from "@/app/lib/bridge/signingStore";
+import { CertInfo } from "@/app/lib/bridge/protocol";
+import { useStepwiseSigning } from "@/app/lib/bridge/useStepwiseSigning";
 
 const MAX_SIGN_PDF_BLOB_SIZE = 8 * 1024 * 1024;
+
+const CN_RE = /CN\s*=\s*([^,]+)/i;
+
+function certDisplayLabel(cert: CertInfo): string {
+  if (cert.subject) {
+    const match = CN_RE.exec(cert.subject);
+    if (match?.[1]) return match[1].trim();
+    return cert.subject.length > 72 ? `${cert.subject.slice(0, 69)}…` : cert.subject;
+  }
+  if (cert.label?.trim()) return cert.label.trim();
+  const id = cert.id;
+  if (id.length > 28) return `${id.slice(0, 12)}…${id.slice(-10)}`;
+  return id || "Certificate";
+}
+
+function extractCommonName(subject?: string): string | undefined {
+  if (!subject) return undefined;
+  const match = subject.match(/CN\s*=\s*([^,]+)/i);
+  return match?.[1]?.trim();
+}
+
+function resolveSignerLabel(cert: CertInfo | undefined): string {
+  if (!cert) return "AutoDCR Signer";
+  return (
+    extractCommonName(cert.subject) ||
+    cert.label?.trim() ||
+    cert.subject?.trim() ||
+    `Cert ${cert.id.slice(0, 8)}`
+  );
+}
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Pre-generated PDF blob to sign. Mutually exclusive with `getPdfBlob`. */
   pdfBlob?: Blob | null;
-  /**
-   * Async generator invoked once the modal opens. Useful when the PDF is
-   * expensive to produce (e.g. html2canvas + jsPDF) and we don't want to
-   * generate it until the user actually intends to sign.
-   */
   getPdfBlob?: () => Promise<Blob>;
-  /** File name forwarded to the native host (SIGN_PDF_START.fileName). */
   fileName?: string;
-  /** Modal title / heading. */
   title?: string;
-  /** Invoked once the signed PDF is ready (in addition to in-modal download). */
   onSigned?: (signedBlob: Blob, fileName: string) => void;
 };
 
@@ -55,29 +68,38 @@ export default function BridgeSignModal({
 }: Props) {
   const {
     dscStatus,
-    dscCertificates,
-    selectedDsc,
-    dscPin,
-    dscError,
-    dscLoading,
+    slots,
+    selectedSlotId,
+    certsForSelectedSlot,
+    selectedCertId,
+    pin,
+    error,
+    isLoadingSlots,
+    isLoadingCerts,
     isSigning,
     isPingingConnector,
     connectorPingMessage,
-    setSelectedDsc,
-    setDscPin,
-    setDscError,
+    setSelectedSlotId,
+    setSelectedCertId,
+    setPin,
+    setError,
     initialize,
+    reloadSlotsAndCerts,
     checkConnectorHealth,
     signCurrentPdf,
     cancelPending,
     reset,
-  } = useSigningStore();
+  } = useStepwiseSigning();
 
   const [resolvedBlob, setResolvedBlob] = useState<Blob | null>(null);
   const [blobError, setBlobError] = useState<string | null>(null);
   const [isResolvingBlob, setIsResolvingBlob] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [signedFileName, setSignedFileName] = useState<string>("signed.pdf");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [stampRect, setStampRect] = useState<StampRect | null>(null);
+
+  const dscBusy = isLoadingSlots || isLoadingCerts;
 
   useEffect(() => {
     if (!open) return;
@@ -114,9 +136,9 @@ export default function BridgeSignModal({
         const blob = await getPdfBlob();
         if (cancelled) return;
         setResolvedBlob(blob);
-      } catch (error: unknown) {
+      } catch (err: unknown) {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Failed to generate PDF.";
+        const message = err instanceof Error ? err.message : "Failed to generate PDF.";
         setBlobError(message);
       } finally {
         if (!cancelled) setIsResolvingBlob(false);
@@ -127,6 +149,20 @@ export default function BridgeSignModal({
       cancelled = true;
     };
   }, [open, pdfBlob, getPdfBlob]);
+
+  useEffect(() => {
+    if (!resolvedBlob || !open) {
+      setPreviewUrl(null);
+      setStampRect(null);
+      return;
+    }
+    const url = URL.createObjectURL(resolvedBlob);
+    setPreviewUrl(url);
+    setStampRect(null);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [resolvedBlob, open]);
 
   useEffect(
     () => () => {
@@ -149,22 +185,40 @@ export default function BridgeSignModal({
 
   const canSign =
     Boolean(dscStatus?.connected) &&
-    Boolean(selectedDsc) &&
+    selectedSlotId !== null &&
+    Boolean(selectedCertId) &&
     Boolean(resolvedBlob) &&
     !isSigning &&
     !blobTooLarge;
 
   const handleSign = async () => {
     if (!resolvedBlob) {
-      setDscError("No PDF available to sign yet.");
+      setError("No PDF available to sign yet.");
       return;
     }
     if (blobTooLarge) {
-      setDscError("PDF is too large for connector transport. Please reduce size and retry.");
+      setError("PDF is too large for connector transport. Please reduce size and retry.");
       return;
     }
 
-    const result = await signCurrentPdf(resolvedBlob, fileName || "generated.pdf");
+    const cert = certsForSelectedSlot.find((c) => c.id === selectedCertId);
+    const stamp =
+      stampRect !== null
+        ? {
+            pageIndex: stampRect.pageIndex,
+            pdfX: stampRect.pdfX,
+            pdfY: stampRect.pdfY,
+            pdfWidth: stampRect.pdfWidth,
+            pdfHeight: stampRect.pdfHeight,
+            signerLabel: resolveSignerLabel(cert),
+            signedAt: new Date(),
+          }
+        : undefined;
+
+    const result = await signCurrentPdf(resolvedBlob, {
+      fileName: fileName || "generated.pdf",
+      stamp,
+    });
     if (!result?.signedPdfBase64) return;
 
     const signedBlob = base64ToBlob(result.signedPdfBase64, "application/pdf");
@@ -185,14 +239,26 @@ export default function BridgeSignModal({
   if (!open) return null;
   if (typeof window === "undefined") return null;
 
-  const certOptions = dscCertificates.map((cert) => ({
-    value: `${cert.slotIndex}-${cert.certIndex}`,
-    label: cert.cn || cert.label || `Slot ${cert.slotIndex} · Cert ${cert.certIndex + 1}`,
+  const slotOptions = slots.map((s) => ({
+    value: String(s.slotId),
+    label: `Slot ${s.slotId} · ${s.label || s.description || "Token"}`,
   }));
 
-  const selectedCertValue = selectedDsc
-    ? `${selectedDsc.slotIndex}-${selectedDsc.certIndex}`
-    : "";
+  const selectedSlotValue = selectedSlotId !== null ? String(selectedSlotId) : "";
+
+  const certOptions = certsForSelectedSlot.map((c) => ({
+    value: c.id,
+    label: certDisplayLabel(c),
+  }));
+
+  const certPlaceholder =
+    selectedSlotId === null
+      ? "Select a slot first"
+      : isLoadingCerts
+        ? "Loading certificates..."
+        : certOptions.length === 0
+          ? "No certificates in this slot"
+          : "Select certificate";
 
   const modal = (
     <AnimatePresence>
@@ -205,18 +271,18 @@ export default function BridgeSignModal({
           onClick={handleClose}
         >
           <motion.div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-gray-200"
             initial={{ y: -20, opacity: 0, scale: 0.98 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: -20, opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 shrink-0">
               <div>
                 <h3 className="text-base font-semibold text-gray-900">{title}</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Bridge POC · PING → LIST_SLOTS → LIST_CERTS → SIGN_PDF_START / CHUNK / END
+                  PING → LIST_SLOTS → LIST_CERTS → optional stamp → SIGN_PDF_START / CHUNK / END
                 </p>
               </div>
               <button
@@ -230,7 +296,7 @@ export default function BridgeSignModal({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 bg-gray-50">
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 bg-gray-50 min-h-0">
               {dscStatus && (
                 <div
                   className={`rounded-lg px-3 py-2 text-sm border ${
@@ -265,10 +331,9 @@ export default function BridgeSignModal({
                 ) : blobError ? (
                   <p className="text-xs text-red-700">{blobError}</p>
                 ) : resolvedBlob ? (
-                  <div className="text-xs text-gray-700">
+                  <div className="text-xs text-gray-700 space-y-1">
                     <p>
-                      <span className="font-medium">File:</span>{" "}
-                      {fileName || "generated.pdf"}
+                      <span className="font-medium">File:</span> {fileName || "generated.pdf"}
                     </p>
                     <p>
                       <span className="font-medium">Size:</span>{" "}
@@ -283,41 +348,59 @@ export default function BridgeSignModal({
                 ) : (
                   <p className="text-xs text-gray-600">No PDF supplied yet.</p>
                 )}
+
+                {previewUrl && !blobError && resolvedBlob && !blobTooLarge ? (
+                  <DscStampPdfViewer
+                    key={previewUrl}
+                    fileUrl={previewUrl}
+                    stampRect={stampRect}
+                    onStampChange={setStampRect}
+                    disabled={isSigning}
+                  />
+                ) : null}
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-gray-800">DSC Certificate</p>
+                  <p className="text-sm font-medium text-gray-800">DSC slot &amp; certificate</p>
                   <button
                     type="button"
-                    onClick={() => void initialize()}
-                    disabled={dscLoading || isSigning}
+                    onClick={() => void reloadSlotsAndCerts()}
+                    disabled={dscBusy || isSigning}
                     className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed"
                   >
-                    {dscLoading ? "Loading..." : "Reload slots / certs"}
+                    {dscBusy ? "Loading..." : "Reload slots / certs"}
                   </button>
                 </div>
 
-                <CustomSelect
-                  value={selectedCertValue}
-                  onChange={(val) => {
-                    if (val === "") {
-                      setSelectedDsc(null);
-                    } else {
-                      const [slot, cert] = val.split("-").map(Number);
-                      setSelectedDsc({ slotIndex: slot, certIndex: cert });
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">PKCS#11 slot</label>
+                  <CustomSelect
+                    value={selectedSlotValue}
+                    onChange={(val) => {
+                      if (val === "") setSelectedSlotId(null);
+                      else setSelectedSlotId(Number(val));
+                    }}
+                    options={slotOptions}
+                    placeholder={
+                      isLoadingSlots ? "Loading slots..." : slotOptions.length === 0 ? "No slots" : "Select slot"
                     }
-                  }}
-                  options={certOptions}
-                  placeholder={
-                    dscLoading
-                      ? "Loading certificates..."
-                      : certOptions.length === 0
-                        ? "No DSC certificates detected"
-                        : "Select DSC certificate"
-                  }
-                  disabled={dscLoading || isSigning || certOptions.length === 0}
-                />
+                    disabled={isLoadingSlots || isSigning || slotOptions.length === 0}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Certificate</label>
+                  <CustomSelect
+                    value={selectedCertId}
+                    onChange={(val) => setSelectedCertId(val)}
+                    options={certOptions}
+                    placeholder={certPlaceholder}
+                    disabled={
+                      selectedSlotId === null || isLoadingCerts || isSigning || certOptions.length === 0
+                    }
+                  />
+                </div>
 
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">
@@ -325,29 +408,27 @@ export default function BridgeSignModal({
                   </label>
                   <input
                     type="password"
-                    value={dscPin}
-                    onChange={(e) => setDscPin(e.target.value)}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
                     disabled={isSigning}
                     placeholder="Enter DSC PIN"
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100"
                   />
                 </div>
 
-                {dscError && (
+                {error && (
                   <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
-                    {dscError}
+                    {error}
                   </div>
                 )}
               </div>
 
               {signedUrl && (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
-                  <p className="text-sm font-semibold text-emerald-900">
-                    Signed PDF ready
-                  </p>
+                  <p className="text-sm font-semibold text-emerald-900">Signed PDF ready</p>
                   <p className="text-xs text-emerald-900">
-                    The native host returned a signed PDF. Use the download link below to
-                    save it locally.
+                    The native host returned a signed PDF. Use the download link below to save it
+                    locally.
                   </p>
                   <a
                     href={signedUrl}
@@ -360,7 +441,7 @@ export default function BridgeSignModal({
               )}
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-white">
+            <div className="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-white shrink-0">
               <button
                 type="button"
                 onClick={() => void checkConnectorHealth()}
