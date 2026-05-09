@@ -101,9 +101,9 @@ const BP_WESTERN_II: BuildingProposalAddressBlock = {
 
 const BP_EASTERN: BuildingProposalAddressBlock = {
   officerName: "SHRI. MEHUL PAINTER",
-  line1: "",
-  line2: "Near Raj Legacy (Residential Complex), Paper Mill Compound,",
-  line3: "L. B. S. Marg, Vikhroli (West), Mumbai - 400 083",
+  line1: "Near Raj Legacy (Residential Complex),",
+  line2: "Paper Mill Compound,L. B. S. Marg,",
+  line3: "Vikhroli (West), Mumbai - 400 083",
 };
 
 const BP_SPECIAL_CELL: BuildingProposalAddressBlock = {
@@ -240,6 +240,37 @@ function joinProposedCsOrCtsNos(source?: ApplicationPreviewSource): string {
   return "";
 }
 
+/** Subject line: village like `KURLA - 4` → `Kurla - 4` (first letter only capitalised on name part). */
+function formatDivisionVillageForSubject(value: string): string {
+  const s = value.trim();
+  if (!s) return s;
+  const parts = s.split(/\s*-\s*/);
+  if (parts.length >= 2) {
+    const head = parts[0].trim();
+    const tail = parts.slice(1).join(" - ").trim();
+    const headFormatted =
+      head.charAt(0).toUpperCase() + head.slice(1).toLowerCase();
+    return `${headFormatted} - ${tail}`;
+  }
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+/**
+ * Subject line survey numbers: two items → `338 & 340`; three or more → `2, 3, 4 & 6`.
+ */
+function formatSurveyNumbersListForSubject(joinedList: string): string {
+  const cleaned = joinedList.replace(/^\(|\)$/g, "").trim();
+  if (!cleaned) return "";
+  const parts = cleaned
+    .split(/[,，]/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} & ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} & ${parts[parts.length - 1]}`;
+}
+
 /** Label before bracketed survey numbers — includes “No.” like Project Details (`plotBelongsTo`). */
 function surveyNumbersKindLabel(plotBelongs?: string): string | undefined {
   switch (plotBelongs) {
@@ -365,6 +396,14 @@ export function mapToPdfFieldValues(
   const sanitizeAddressLine = (value: string): string =>
     value.replace(/[,\s]+$/g, "").trim();
 
+  /** Ends architect address line 3 with a period when DB omits it. */
+  const ensureTrailingPeriodOnFinalAddressLine = (value: string): string => {
+    const s = value.trim();
+    if (!s) return "";
+    if (/[.!?…]\s*$/.test(s)) return s;
+    return `${s}.`;
+  };
+
   const applicants = source?.projectData?.applicant_details?.applicants || [];
   const ownerApplicant = applicants.find(
     (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("owner")
@@ -434,27 +473,25 @@ export function mapToPdfFieldValues(
   const architectFallbackLine3 = isArchitectAlsoLoggedInConsultant
     ? consultantAddressLine3
     : "";
-  const architectAddressLine1 = sanitizeAddressLine(
-    pickText(
+  const architectAddressLine1 = pickText(
     architectApplicant?.address_line1,
     (architectApplicant as any)?.addressLine1,
     architectFallbackLine1
-    )
   );
-  const architectAddressLine2 = sanitizeAddressLine(
-    pickText(
+  const architectAddressLine2 = pickText(
     architectApplicant?.address_line2,
     (architectApplicant as any)?.addressLine2,
     architectFallbackLine2
-    )
   );
-  const architectAddressLine3 = sanitizeAddressLine(
-    pickText(
+  const architectAddressLine3 = pickText(
     architectApplicant?.address_line3,
     (architectApplicant as any)?.addressLine3,
     architectFallbackLine3
-    )
   );
+  const architectAddressLine3ForLetter =
+    architectAddressLine3.trim().length > 0
+      ? ensureTrailingPeriodOnFinalAddressLine(architectAddressLine3)
+      : "";
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const planningAuthority =
     source?.projectData?.save_plot_details?.planningAuthority?.trim() || "BMC";
@@ -471,8 +508,11 @@ export function mapToPdfFieldValues(
         ? "F.P. No(s)."
         : "C.T.S. No(s).";
   const csCtsNosSubjectDisplay = rawSurveyList
-    ? `${surveyLabelForSubject} ${rawSurveyList}`
+    ? `${surveyLabelForSubject} ${formatSurveyNumbersListForSubject(rawSurveyList)}`
     : "";
+  const divisionVillageForSubject = divisionVillage
+    ? formatDivisionVillageForSubject(divisionVillage)
+    : undefined;
   const consultantApplicantRegNo =
     primaryConsultantApplicant?.registrationNumber?.trim() ||
     primaryConsultantApplicant?.registrationNo?.trim() ||
@@ -531,9 +571,9 @@ export function mapToPdfFieldValues(
     "O/o The Dy. Ch. Eng. (B.P.)";
   const officerZoneSuffix =
     (regionForProjectToken || "").trim().toLowerCase() === "eastern"
-      ? "(E. S.),"
+      ? "E. S.,"
       : (regionForProjectToken || "").trim().toLowerCase() === "western"
-        ? "(W. S.),"
+        ? "W. S.,"
       : "";
   const buildingProposalBaseDesignation =
     (regionForProjectToken || "").trim().toLowerCase() === "western"
@@ -583,7 +623,7 @@ export function mapToPdfFieldValues(
     // Common subject + re line fields
     project_Letter_Appointment_Role: consultantRoleLabel,
     "project_CS/CTSNos.": csCtsNosSubjectDisplay,
-    "project_Division/Village": divisionVillage || undefined,
+    "project_Division/Village": divisionVillageForSubject,
     project_Street: street || undefined,
     "project_Ward.": wardForProjectToken || undefined,
     project_Planning_Authority: planningAuthority,
@@ -599,22 +639,41 @@ export function mapToPdfFieldValues(
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
     project_BuildingProposal_OfficerDesignation: officerDesignationDisplay,
     project_BuildingProposal_ZoneSuffix: officerZoneSuffix,
+    project_addressline1_BuildingProposal: buildingProposalAddress?.line1 || "",
+    project_addressline2_BuildingProposal: buildingProposalAddress?.line2 || "",
+    project_addressline3_BuildingProposal: buildingProposalAddress?.line3 || "",
     "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
     "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
     "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
 
+    // Generic consultant tokens for all application types.
+    // Keep this before template-specific blocks so specific mappings can override.
+    ...genericConsultantTemplateTokens,
+
     // Architect template tokens
+    project_Consultant_Architect: consultantRoleLabel,
     "project_Consultant_Architect._Type": consultantRoleLabel,
     "project_Consultant_Architect.": consultantRoleLabel,
+    project_Name_Architect: architectName?.trim()
+      ? `${architectName.trim()},`
+      : undefined,
     "project_Name_Architect.": architectName || undefined,
-    "project_Company_Name_Architect":
-      architectApplicant?.entity_name?.trim() ||
-      architectApplicant?.entityName?.trim() ||
-      consultantCompanyName ||
-      undefined,
-    "project_Address_line1_Architect": architectAddressLine1,
-    "project_Address_line2_Architect": architectAddressLine2,
-    "project_Address_line3Architect": architectAddressLine3,
+    project_Company_Name_Architect: (() => {
+      const company =
+        architectApplicant?.entity_name?.trim() ||
+        architectApplicant?.entityName?.trim() ||
+        consultantCompanyName?.trim() ||
+        "";
+      return company ? `${company},` : undefined;
+    })(),
+    project_RegNo_Architect: consultantRegNo,
+    /** Label for value from `coa_reg_no` (Council of Architecture registration). */
+    project_Architect_COA_Reg_No_Label: "COA Reg. No.:",
+    "project_Address_line1_Architect": architectAddressLine1 || undefined,
+    "project_Address_line2_Architect": architectAddressLine2 || undefined,
+    "project_Address_line3Architect":
+      architectAddressLine3ForLetter || undefined,
+    project_Validity_Architect: consultantValidityDisplay,
     "project_RegNo_Architect.": consultantRegNo,
     "project_Validity_Architect.": consultantValidityDisplay,
 
@@ -637,8 +696,6 @@ export function mapToPdfFieldValues(
     project_Address_line3_Fire_Safety: consultantAddressLine3,
     "project_RegNo_Fire_Safety.": consultantRegNo,
 
-    // Generic consultant tokens for all application types.
-    ...genericConsultantTemplateTokens,
   };
 }
 
@@ -872,6 +929,19 @@ async function convertHtmlToPdfBlobInBrowser(
       pageIndex += 1;
     }
 
+    const totalPages = pdf.getNumberOfPages();
+    const footerY = A4_PAGE_HEIGHT_PT - 26;
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.setTextColor(80, 80, 80);
+    const footerX = A4_PAGE_WIDTH_PT / 2;
+    for (let i = 1; i <= totalPages; i++) {
+      pdf.setPage(i);
+      pdf.text(`Page ${i} of ${totalPages}`, footerX, footerY, {
+        align: "center",
+      });
+    }
+
     return pdf.output("blob");
   } finally {
     host.remove();
@@ -890,10 +960,30 @@ async function convertHtmlToPdfBlobInBrowser(
  * zoom; Print/Save as PDF uses the same `@page` rules → vector PDF output
  * matches the on-screen pagination exactly.
  */
-function injectPaginatedStyles(html: string): string {
+function injectPaginatedStyles(html: string, templateType?: TemplateType): string {
   const dataUriMatch = html.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/i);
-  const cssUrlMatch = html.match(/background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i);
-  const letterheadUrl = dataUriMatch?.[0] || cssUrlMatch?.[2] || "";
+  const cssBackgroundImageMatch = html.match(
+    /background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i
+  );
+  const cssBackgroundShorthandMatch = html.match(
+    /background\s*:\s*[^;]*url\((['"]?)(.*?)\1\)[^;]*;/i
+  );
+  const letterheadUrl =
+    dataUriMatch?.[0] ||
+    cssBackgroundImageMatch?.[2] ||
+    cssBackgroundShorthandMatch?.[2] ||
+    "";
+  const isArchitectTemplate = templateType === "Architect";
+  const pageMarginTop = isArchitectTemplate ? "72pt" : "95pt";
+  const pageMarginBottom = isArchitectTemplate ? "72pt" : "135pt";
+  const contentPaddingTop = isArchitectTemplate ? "22pt" : "40pt";
+  /* No extra inner gap under body copy; @page margin-bottom still clears letterhead/footer. */
+  const contentPaddingBottom = "0";
+  const pageMarginLeft = isArchitectTemplate ? "36pt" : "56pt";
+  const pageMarginRight = isArchitectTemplate ? "30pt" : "42pt";
+  const contentPaddingLeft = isArchitectTemplate ? "36pt" : "56pt";
+  const contentPaddingRight = isArchitectTemplate ? "30pt" : "42pt";
+
   const head = `
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -904,11 +994,28 @@ function injectPaginatedStyles(html: string): string {
      letterhead branding/footer and naturally continues on page 2. */
   @page {
     size: A4;
-    margin: 95pt 42pt 135pt 56pt;
+    margin: ${pageMarginTop} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Carlito', 'Calibri', 'Helvetica', sans-serif;
+      font-size: 9pt;
+      color: rgb(100, 100, 100);
+      vertical-align: bottom;
+      /* Larger inset lifts “Page X of Y” into the white band above the thick gold bar. */
+      padding-bottom: 20pt;
+    }
   }
   @page WordSection1 {
     size: A4;
-    margin: 95pt 42pt 135pt 56pt;
+    margin: ${pageMarginTop} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Carlito', 'Calibri', 'Helvetica', sans-serif;
+      font-size: 9pt;
+      color: rgb(100, 100, 100);
+      vertical-align: bottom;
+      padding-bottom: 20pt;
+    }
   }
 
   html, body {
@@ -929,14 +1036,20 @@ function injectPaginatedStyles(html: string): string {
   /* Fixed, global page content frame for paged preview (all templates).
      This avoids per-template padding differences between page 1 and 2. */
   .pagedjs_page_content {
-    padding: 40pt 42pt 96pt 56pt !important;
+    padding: ${contentPaddingTop} ${contentPaddingRight} ${contentPaddingBottom} ${contentPaddingLeft} !important;
     box-sizing: border-box !important;
+  }
+
+  .pagedjs_page_content ol:last-child,
+  .pagedjs_page_content ul:last-child {
+    margin-bottom: 0 !important;
   }
 
   /* Neutralize template wrapper in paged mode so only the fixed frame above
      controls spacing consistently on every page. */
   .pagedjs_page_content .WordSection1,
-  .pagedjs_page_content main.page {
+  .pagedjs_page_content main.page,
+  .pagedjs_page_content div.page {
     margin: 0 !important;
     padding: 0 !important;
     min-height: auto !important;
@@ -988,6 +1101,20 @@ function injectPaginatedStyles(html: string): string {
     ${letterheadUrl ? "background-position: top center;" : ""}
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     margin: 0 auto 16px auto;
+    overflow: visible;
+  }
+
+  /* Letterhead only on page 1; continuation pages stay plain white. */
+  .pagedjs_pages > .pagedjs_page ~ .pagedjs_page {
+    background-image: none !important;
+  }
+
+  .pagedjs_margin-bottom-center {
+    vertical-align: bottom !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+    overflow: visible !important;
+    padding-bottom: 0pt !important;
   }
 
   /* During print, drop the shadow / background — only the actual content. */
@@ -1052,17 +1179,33 @@ function injectPlumberPreviewPages(
     width: 210mm;
     min-height: 297mm;
     background: #ffffff;
-    ${letterheadUrl ? `background-image: url('${letterheadUrl}');` : ""}
-    ${letterheadUrl ? "background-repeat: no-repeat;" : ""}
-    ${letterheadUrl ? "background-size: 210mm 297mm;" : ""}
-    ${letterheadUrl ? "background-position: top center;" : ""}
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     margin: 0 auto 8px auto;
     box-sizing: border-box;
   }
+  .preview-sheet--first {
+    ${letterheadUrl ? `background-image: url('${letterheadUrl}');` : ""}
+    ${letterheadUrl ? "background-repeat: no-repeat;" : ""}
+    ${letterheadUrl ? "background-size: 210mm 297mm;" : ""}
+    ${letterheadUrl ? "background-position: top center;" : ""}
+  }
   .preview-sheet--first,
   .preview-sheet--second {
+    position: relative;
     padding: 135pt 42pt 120pt 56pt;
+  }
+  .preview-sheet-page-num {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0pt;
+    width: auto;
+    text-align: center;
+    font-family: 'Carlito', 'Calibri', 'Helvetica', sans-serif;
+    font-size: 9pt;
+    color: rgb(100, 100, 100);
+    pointer-events: none;
+    z-index: 2;
   }
   .preview-sheet--first .WordSection1,
   .preview-sheet--second .WordSection1 {
@@ -1086,8 +1229,8 @@ function injectPlumberPreviewPages(
 
   return `<html><head>${parsed.head.innerHTML}${plumberHead}</head>${bodyOpen}
 <div class="preview-pages">
-  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div></div>
-  <div class="preview-sheet preview-sheet--second"><div class="${sectionClass}">${after}</div></div>
+  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div><div class="preview-sheet-page-num" aria-hidden="true">Page 1 of 2</div></div>
+  <div class="preview-sheet preview-sheet--second"><div class="${sectionClass}">${after}</div><div class="preview-sheet-page-num" aria-hidden="true">Page 2 of 2</div></div>
 </div>
 </body></html>`;
 }
@@ -1126,7 +1269,7 @@ export async function generateApplicationPreviewHtml(
     if (templateType === "Plumber") {
       return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
     }
-    return injectPaginatedStyles(rawHtml);
+    return injectPaginatedStyles(rawHtml, templateType);
   }
 
   const payload = await response.json().catch(() => null);
