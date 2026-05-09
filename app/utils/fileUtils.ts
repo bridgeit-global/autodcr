@@ -9,10 +9,24 @@
  */
 export async function generateFileHash(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  return hashHex;
+  const subtle = globalThis?.crypto?.subtle;
+
+  // Preferred path: cryptographic hash for stable idempotent uploads.
+  if (subtle && typeof subtle.digest === "function") {
+    const hashBuffer = await subtle.digest("SHA-256", arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // Fallback path: deterministic non-crypto hash when Web Crypto is unavailable
+  // (e.g. non-secure/in-app browser contexts). This keeps uploads functional.
+  const bytes = new Uint8Array(arrayBuffer);
+  let hash = 2166136261; // FNV-1a 32-bit offset basis
+  for (let i = 0; i < bytes.length; i++) {
+    hash ^= bytes[i];
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fallback-${(hash >>> 0).toString(16).padStart(8, "0")}-${bytes.length}`;
 }
 
 /**
