@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { TemplateType } from "@/app/templates/templateGenerators";
 import { createClient } from "@supabase/supabase-js";
+import QRCode from "qrcode";
 import { readFile } from "fs/promises";
 import path from "path";
+
+/**
+ * Placeholder for HTML templates (bucket `Application_Templates` or `html/architect.html`).
+ * Server replaces this with a QR image encoding `projects.application_urls[templateType]`.
+ * Layout: place beside the client/owner block, e.g. flex row — see comment on `injectSavedPdfQrHtml`.
+ */
+export const PROJECT_SAVED_PDF_QR_SENTINEL = "$project_Saved_Pdf_QR";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +77,129 @@ function replaceTemplateTokens(
     out = out.replace(whitespaceTolerantTokenRegex, escaped);
   }
   // Final safety: remove any leftover $project_* tokens so placeholders never leak.
-  out = out.replace(/\$project_[A-Za-z0-9_./-]+/g, "");
+  // Keep PROJECT_SAVED_PDF_QR_SENTINEL — replaced later with a QR <img> after DB lookup.
+  out = out.replace(/\$project_[A-Za-z0-9_./-]+/g, (match) =>
+    match === PROJECT_SAVED_PDF_QR_SENTINEL ? match : ""
+  );
+  return out;
+}
+
+/**
+ * Places the saved-PDF QR beside the client/owner address on page 1.
+ * Word letters usually look like: `<p>To,</p>` … address lines … `<p><b>Sub :</b>…`.
+ * Fallback injection before `</body>` lands at the document end → last page after Paged.js.
+ */
+function insertSavedPdfQrBesideClientBlock(html: string, qrRightColumn: string): string | null {
+  /* Non-greedy middle captures address lines; third group is first subject / body paragraph.
+     Word often splits “Sub” and “:” across spans — allow markup between. */
+  const subOrSubject =
+    "(?:Sub[\\s\\S]{0,60}:|Subject[\\s\\S]{0,60}:|Letter\\s+of\\s+Appointment)";
+  const letterPatterns: RegExp[] = [
+    new RegExp(
+      `(<p[^>]*>[\\s\\S]*?To\\s*,?\\s*<\\/p>)([\\s\\S]*?)(<p[^>]*>[\\s\\S]*?${subOrSubject})`,
+      "i"
+    ),
+  ];
+  for (const re of letterPatterns) {
+    const m = html.match(re);
+    if (m && typeof m.index === "number") {
+      const full = m[0];
+      const idx = m.index;
+      const before = html.slice(0, idx);
+      const after = html.slice(idx + full.length);
+      const row = `<div class="app-saved-pdf-qr-row" style="display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:flex-start!important;justify-content:space-between!important;gap:16px!important;width:100%!important;max-width:100%!important;box-sizing:border-box!important;page-break-inside:avoid!important;margin:0!important;padding:0!important;"><div style="flex:1!important;min-width:0!important;max-width:none!important;">${m[1]}${m[2]}</div><div style="flex:none!important;flex-shrink:0!important;align-self:flex-start!important;width:auto!important;max-width:140px!important;">${qrRightColumn}</div></div>${m[3]}`;
+      return before + row + after;
+    }
+  }
+  return null;
+}
+
+async function injectSavedPdfQrHtml(
+  html: string,
+  opts: {
+    projectId?: string | null;
+    templateType: TemplateType;
+    authorizationToken: string | null;
+  }
+): Promise<string> {
+  let pdfUrl: string | undefined;
+
+  if (opts.projectId?.trim() && opts.authorizationToken) {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: { Authorization: `Bearer ${opts.authorizationToken}` },
+      },
+    });
+
+    const { data, error } = await supabase
+      .from("projects")
+      .select("application_urls")
+      .eq("id", opts.projectId.trim())
+      .maybeSingle();
+
+    if (!error && data) {
+      const raw = data.application_urls;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        const v = (raw as Record<string, unknown>)[opts.templateType];
+        if (typeof v === "string" && v.trim()) pdfUrl = v.trim();
+      }
+    }
+  }
+
+  const stripSentinel = (s: string) => s.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("");
+
+  if (!pdfUrl) {
+    return stripSentinel(html);
+  }
+
+  let qrDataUrl: string;
+  try {
+    qrDataUrl = await QRCode.toDataURL(pdfUrl, {
+      width: 112,
+      margin: 1,
+      errorCorrectionLevel: "M",
+    });
+  } catch {
+    return stripSentinel(html);
+  }
+
+  /* Word exports often use `img { width:100% !important }`. Use a fixed-size div +
+     background-image so those rules never apply (see injectPaginatedStyles #app-saved-pdf-qr). */
+  const qrBox = `<div id="app-saved-pdf-qr" class="application-saved-pdf-qr-pixel" role="img" aria-label="Scan to open saved application PDF" style='width:112px!important;height:112px!important;max-width:112px!important;max-height:112px!important;min-width:112px!important;min-height:112px!important;flex:none!important;flex-grow:0!important;flex-shrink:0!important;align-self:flex-start!important;box-sizing:border-box!important;display:inline-block!important;overflow:hidden!important;line-height:0!important;background-image:url(${JSON.stringify(qrDataUrl)})!important;background-size:contain!important;background-repeat:no-repeat!important;background-position:center!important;background-color:#ffffff!important;vertical-align:top!important;'></div>`;
+
+  const qrRightColumn = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:0!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
+
+  const hadSentinel = html.includes(PROJECT_SAVED_PDF_QR_SENTINEL);
+
+  /** Match layout on HTML without sentinel / QR — avoids EOF sentinel forcing last page. */
+  const stripExistingQrBlocks = (s: string) =>
+    s
+      .replace(/<div[^>]*\bid\s*=\s*["']app-saved-pdf-qr["'][^>]*>\s*<\/div>/gi, "")
+      .replace(
+        /<div[^>]*class\s*=\s*["'][^"']*application-saved-pdf-qr-fallback[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+        ""
+      );
+
+  const baseForLayout = stripExistingQrBlocks(
+    hadSentinel ? html.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("") : html
+  );
+
+  const beside = insertSavedPdfQrBesideClientBlock(baseForLayout, qrRightColumn);
+  if (beside) {
+    return beside;
+  }
+
+  /* No To/Sub structure found (e.g. Plumber): keep sentinel replacement or append fallback. */
+  let out = hadSentinel ? html.split(PROJECT_SAVED_PDF_QR_SENTINEL).join(qrBox) : html;
+  if (!hadSentinel) {
+    const fallback = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin-top:12px!important;padding:8px 0!important;border-top:1px solid #e5e7eb!important;width:132px!important;max-width:132px!important;min-width:0!important;margin-left:auto!important;margin-right:0!important;clear:both!important;flex-shrink:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
+    if (out.includes("</body>")) {
+      out = out.replace(/<\/body>/i, `${fallback}</body>`);
+    } else {
+      out = `${out}${fallback}`;
+    }
+  }
+
   return out;
 }
 
@@ -155,7 +285,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const finalHtml = replaceTemplateTokens(htmlTemplate, body.fields);
+    let finalHtml = replaceTemplateTokens(htmlTemplate, body.fields);
+    finalHtml = await injectSavedPdfQrHtml(finalHtml, {
+      projectId: body.projectId,
+      templateType: body.templateType,
+      authorizationToken: token,
+    });
 
     if (process.env.NODE_ENV === "development") {
       console.log("[application-preview-html] owner/company debug", {

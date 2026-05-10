@@ -164,6 +164,48 @@ export async function PUT(
       updateData.status = body.status;
     }
 
+    if (body.application_urls !== undefined && body.application_urls !== null) {
+      if (typeof body.application_urls !== "object" || Array.isArray(body.application_urls)) {
+        return NextResponse.json(
+          { error: "application_urls must be a plain object mapping template keys to URL strings." },
+          { status: 400 }
+        );
+      }
+      const { data: urlsRow, error: urlsErr } = await supabase
+        .from("projects")
+        .select("application_urls")
+        .eq("id", projectId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (urlsErr) {
+        console.error("application_urls fetch failed:", urlsErr);
+        return NextResponse.json(
+          { error: "Failed to load application_urls", details: urlsErr.message },
+          { status: 500 }
+        );
+      }
+
+      const prevRaw = urlsRow?.application_urls;
+      const prev: Record<string, string> =
+        prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)
+          ? Object.fromEntries(
+              Object.entries(prevRaw as Record<string, unknown>).filter(
+                ([, v]) => typeof v === "string" && String(v).trim()
+              )
+            ) as Record<string, string>
+          : {};
+
+      const patch = body.application_urls as Record<string, unknown>;
+      const merged: Record<string, string> = { ...prev };
+      for (const [key, value] of Object.entries(patch)) {
+        if (typeof value === "string" && value.trim()) {
+          merged[key] = value.trim();
+        }
+      }
+      updateData.application_urls = merged;
+    }
+
     // Update the project
     const { data, error } = await supabase
       .from("projects")
