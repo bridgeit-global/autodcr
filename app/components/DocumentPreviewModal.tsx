@@ -27,15 +27,18 @@ type DocumentPreviewModalProps = {
   /** Optional debug: token -> resolved value map used for replacement. */
   fieldMapping?: Record<string, string | undefined> | null;
   title?: string;
-  /**
-   * Optional async generator that produces the PDF blob to sign. When
-   * provided, the modal exposes a "Sign with DSC" button that lazily
-   * resolves the PDF and routes it through the bridge-poc signing flow.
-   * Used by the application creation / draft preview to demo signing the
-   * generated application PDF.
-   */
+  /** HTML preview only: persist generated PDF (e.g. upload + DB update). */
+  onSave?: () => void | Promise<void>;
+  isSaving?: boolean;
+  saveDisabled?: boolean;
+  /** After a successful save for this preview — shows “Saved” instead of Save. */
+  saveCompleted?: boolean;
+  /** Shown inside the modal so save errors/success are visible over the backdrop. */
+  saveFeedbackError?: string | null;
+  saveFeedbackSuccess?: string | null;
+  /** When set, enables “Sign with DSC” (same PDF bytes as upload/save flow). */
   getPdfBlob?: () => Promise<Blob>;
-  /** File name forwarded to the native host when signing. */
+  /** Default download/filename for signing (optional). */
   signingFileName?: string;
 };
 
@@ -46,6 +49,12 @@ export default function DocumentPreviewModal({
   htmlContent,
   fieldMapping,
   title,
+  onSave,
+  isSaving,
+  saveDisabled,
+  saveCompleted,
+  saveFeedbackError,
+  saveFeedbackSuccess,
   getPdfBlob,
   signingFileName,
 }: DocumentPreviewModalProps) {
@@ -169,6 +178,66 @@ export default function DocumentPreviewModal({
                     Print / Save as PDF
                   </button>
                 )}
+                {htmlContent && !fileUrl && onSave && (
+                  <button
+                    onClick={() => {
+                      if (saveCompleted || isSaving || saveDisabled) return;
+                      void onSave();
+                    }}
+                    disabled={saveDisabled || isSaving || Boolean(saveCompleted)}
+                    className={
+                      saveCompleted && !isSaving
+                        ? "h-9 px-3 rounded-lg border border-emerald-500 bg-emerald-50 text-emerald-800 text-sm font-semibold flex items-center gap-1.5 cursor-default"
+                        : "h-9 px-3 rounded-lg border border-blue-600 bg-white hover:bg-blue-50 text-blue-700 text-sm font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
+                    }
+                    aria-label={
+                      saveCompleted && !isSaving
+                        ? "Application PDF saved to project"
+                        : "Save PDF to project"
+                    }
+                    type="button"
+                  >
+                    {isSaving ? (
+                      "Saving…"
+                    ) : saveCompleted ? (
+                      <>
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Saved
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                          <polyline points="17 21 17 13 7 13 7 21" />
+                          <polyline points="7 3 7 8 15 8" />
+                        </svg>
+                        Save
+                      </>
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={handleCloseAll}
                   className="h-9 w-9 rounded-lg hover:bg-gray-100 text-gray-700 transition-colors flex items-center justify-center"
@@ -179,6 +248,15 @@ export default function DocumentPreviewModal({
                 </button>
               </div>
             </div>
+            {(saveFeedbackError || saveFeedbackSuccess) && (
+              <div className="px-5 py-2 border-b border-gray-200 bg-white shrink-0">
+                {saveFeedbackError ? (
+                  <p className="text-sm text-red-600">{saveFeedbackError}</p>
+                ) : (
+                  <p className="text-sm text-emerald-700">{saveFeedbackSuccess}</p>
+                )}
+              </div>
+            )}
 
             <div className="flex-1 overflow-auto p-3 bg-gray-50">
               {htmlContent && !fileUrl ? (

@@ -7,6 +7,7 @@ import DashboardHeader from "../components/DashboardHeader";
 import SiteFooter from "../components/SiteFooter";
 import DraftApplicationsModal, { DraftApplication } from "../components/DraftApplicationsModal";
 import CustomSelect from "@/app/components/CustomSelect";
+import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import { supabase } from "@/app/utils/supabase";
 
 type ApplicationType = {
@@ -743,11 +744,64 @@ function UserDashboardContent() {
   }, [loadDraftCounts]);
 
   const handleDeleteApplication = async (applicationId: string) => {
+    const { data: appRow, error: fetchErr } = await supabase
+      .from("applications")
+      .select("project_id, permission_type")
+      .eq("id", applicationId)
+      .single();
+
+    if (fetchErr || !appRow?.project_id) {
+      alert("Could not load application to delete.");
+      return;
+    }
+
     const { error } = await supabase.from("applications").delete().eq("id", applicationId);
     if (error) {
       alert("Failed to delete application. Please try again.");
       return;
     }
+
+    const projectId = String(appRow.project_id);
+    const permissionType = typeof appRow.permission_type === "string" ? appRow.permission_type.trim() : "";
+
+    if (!permissionType) {
+      await loadDraftCounts();
+      return;
+    }
+
+    const { data: siblings } = await supabase
+      .from("applications")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("permission_type", permissionType);
+
+    if ((siblings?.length ?? 0) > 0) {
+      await loadDraftCounts();
+      return;
+    }
+
+    const templateKey = mapSelectedApplicationToTemplate(permissionType);
+
+    const { data: proj, error: projErr } = await supabase
+      .from("projects")
+      .select("application_urls")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (projErr || !proj?.application_urls || typeof proj.application_urls !== "object" || Array.isArray(proj.application_urls)) {
+      await loadDraftCounts();
+      return;
+    }
+
+    const urls = { ...(proj.application_urls as Record<string, unknown>) };
+    delete urls[templateKey];
+
+    const { error: updErr } = await supabase.from("projects").update({ application_urls: urls }).eq("id", projectId);
+
+    if (updErr) {
+      console.error("Failed to update application_urls after application delete:", updErr);
+    }
+
     await loadDraftCounts();
   };
 

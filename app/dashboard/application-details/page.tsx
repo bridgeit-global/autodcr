@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
+import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
+  type ApplicationPreviewSource,
   generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
@@ -279,18 +281,16 @@ export default function ApplicationDetailsPage() {
   const [previewFieldMapping, setPreviewFieldMapping] = useState<Record<string, string | undefined> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  /**
-   * Bound generator that produces a PDF blob equivalent to the currently
-   * shown HTML preview. Set when `handlePreview` succeeds so the
-   * DocumentPreviewModal's "Sign with DSC" button can route the same PDF
-   * through the bridge-poc signing flow.
-   */
-  const [previewPdfBlobGetter, setPreviewPdfBlobGetter] = useState<
-    (() => Promise<Blob>) | null
-  >(null);
-  const [previewSigningFileName, setPreviewSigningFileName] = useState<string>(
-    "application-preview.pdf"
-  );
+  const [isSavingPdf, setIsSavingPdf] = useState(false);
+  const [savePdfMessage, setSavePdfMessage] = useState<string | null>(null);
+  const [savePdfError, setSavePdfError] = useState<string | null>(null);
+  const [previewReadyForSave, setPreviewReadyForSave] = useState(false);
+  const [pdfSavedForCurrentPreview, setPdfSavedForCurrentPreview] = useState(false);
+  const previewPdfContextRef = useRef<{
+    fields: TemplateFields;
+    templateType: TemplateType;
+    previewSource: ApplicationPreviewSource;
+  } | null>(null);
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -357,6 +357,11 @@ export default function ApplicationDetailsPage() {
   const handlePreview = async () => {
     try {
       setPreviewError(null);
+      setSavePdfMessage(null);
+      setSavePdfError(null);
+      setPreviewReadyForSave(false);
+      setPdfSavedForCurrentPreview(false);
+      previewPdfContextRef.current = null;
       setIsPreviewLoading(true);
 
       const localMeta = readLocalStoredUserMetadata();
@@ -616,19 +621,24 @@ export default function ApplicationDetailsPage() {
         previewSource
       );
 
-      // Bind a closure that lazily produces the same content as a PDF blob
-      // using the existing html2canvas + jsPDF pipeline. We don't pre-generate
-      // here because PDF synthesis is expensive and most preview opens never
-      // hit the "Sign with DSC" path.
-      const boundGetPdfBlob = () =>
-        generateApplicationPreviewPdf(fields, templateType, previewSource);
-      const safeApplicationNo = (applicationNo || "application").replace(
-        /[^a-zA-Z0-9._-]+/g,
-        "-"
-      );
-      setPreviewPdfBlobGetter(() => boundGetPdfBlob);
-      setPreviewSigningFileName(`${safeApplicationNo}-preview.pdf`);
+      let alreadySavedForTemplate = false;
+      if (projectId) {
+        const { data: urlsRow } = await supabase
+          .from("projects")
+          .select("application_urls")
+          .eq("id", projectId)
+          .maybeSingle();
+        const raw = urlsRow?.application_urls;
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          const entry = (raw as Record<string, unknown>)[templateType];
+          alreadySavedForTemplate =
+            typeof entry === "string" && entry.trim().length > 0;
+        }
+      }
 
+      previewPdfContextRef.current = { fields, templateType, previewSource };
+      setPdfSavedForCurrentPreview(alreadySavedForTemplate);
+      setPreviewReadyForSave(true);
       setPreviewUrl(null);
       setPreviewHtml(html);
       setPreviewFieldMapping(fieldMapping);
@@ -639,6 +649,86 @@ export default function ApplicationDetailsPage() {
       setPreviewError(message);
     } finally {
       setIsPreviewLoading(false);
+    }
+  };
+
+  const handleSaveApplicationPdf = async () => {
+    if (!projectId) {
+      setSavePdfError("Missing project.");
+      return;
+    }
+    const ctx = previewPdfContextRef.current;
+    if (!ctx) {
+      setSavePdfError("Generate a preview first, then save.");
+      return;
+    }
+    setIsSavingPdf(true);
+    setSavePdfMessage(null);
+    setSavePdfError(null);
+    try {
+      const blob = await generateApplicationPreviewPdf(ctx.fields, ctx.templateType, ctx.previewSource);
+      const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+
+      const {
+        data: { user: authUser },
+        error: authUserErr,
+      } = await supabase.auth.getUser();
+      if (authUserErr || !authUser?.id) {
+        throw new Error("Not signed in. Please log in again.");
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData.session?.access_token;
+      if (!authToken) {
+        throw new Error("Missing session token. Please log in again.");
+      }
+
+      const uploadPdfBlob = async (pdfBlob: Blob) => {
+        const formData = new FormData();
+        formData.append("pdf", pdfBlob, `${slug}.pdf`);
+        formData.append("templateType", ctx.templateType);
+        formData.append("user_id", authUser.id);
+
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/save-application-pdf`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: formData,
+          }
+        );
+
+        if (!response.ok) {
+          const errBody = (await response.json().catch(() => null)) as {
+            error?: string;
+            details?: string;
+          } | null;
+          const msg =
+            typeof errBody?.error === "string"
+              ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+              : `Save failed (${response.status}).`;
+          throw new Error(msg);
+        }
+      };
+
+      await uploadPdfBlob(blob);
+
+      const blobWithQr = await generateApplicationPreviewPdf(
+        ctx.fields,
+        ctx.templateType,
+        ctx.previewSource
+      );
+      await uploadPdfBlob(blobWithQr);
+
+      setPdfSavedForCurrentPreview(true);
+      setSavePdfMessage("Application PDF saved to project.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save PDF.";
+      setSavePdfError(message);
+    } finally {
+      setIsSavingPdf(false);
     }
   };
 
@@ -675,6 +765,12 @@ export default function ApplicationDetailsPage() {
         {previewError && (
           <p className="text-sm text-red-600 mt-3">{previewError}</p>
         )}
+        {savePdfMessage && (
+          <p className="text-sm text-emerald-700 mt-2">{savePdfMessage}</p>
+        )}
+        {savePdfError && (
+          <p className="text-sm text-red-600 mt-2">{savePdfError}</p>
+        )}
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -705,8 +801,32 @@ export default function ApplicationDetailsPage() {
         htmlContent={previewHtml}
         fieldMapping={previewFieldMapping}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
-        getPdfBlob={previewPdfBlobGetter ?? undefined}
-        signingFileName={previewSigningFileName}
+        onSave={projectId ? handleSaveApplicationPdf : undefined}
+        isSaving={isSavingPdf}
+        saveDisabled={!projectId || !previewReadyForSave}
+        saveCompleted={pdfSavedForCurrentPreview}
+        saveFeedbackError={savePdfError}
+        saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
+        getPdfBlob={
+          previewHtml
+            ? async () => {
+                const ctx = previewPdfContextRef.current;
+                if (!ctx) {
+                  throw new Error("Preview data is missing. Close the preview and click Preview again.");
+                }
+                return generateApplicationPreviewPdf(
+                  ctx.fields,
+                  ctx.templateType,
+                  ctx.previewSource
+                );
+              }
+            : undefined
+        }
+        signingFileName={
+          previewPdfContextRef.current
+            ? `${previewPdfContextRef.current.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_")}-application.pdf`
+            : undefined
+        }
       />
     </div>
   );

@@ -24,6 +24,7 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
     "pizzip": "^3.2.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-hook-form": "^7.66.0"
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

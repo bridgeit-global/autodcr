@@ -4,7 +4,7 @@ import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
 import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
-type ApplicationPreviewSource = {
+export type ApplicationPreviewSource = {
   projectId?: string | null;
   selectedApplication?: string | null;
   applicationNo?: string | null;
@@ -814,6 +814,19 @@ async function convertHtmlToPdfBlobInBrowser(
     // Single RAF is enough — html2canvas re-reads layout itself before capture.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
 
+    await Promise.all(
+      Array.from(host.querySelectorAll("img")).map(
+        (img) =>
+          img.complete && img.naturalWidth > 0
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                const done = () => resolve();
+                img.addEventListener("load", done, { once: true });
+                img.addEventListener("error", done, { once: true });
+              })
+      )
+    );
+
     const { html2canvas, JsPdfCtor } = await depsPromise;
 
     // Capture scale chosen as a balance: 2.5-3× lands at ~190-225 dpi which
@@ -949,6 +962,175 @@ async function convertHtmlToPdfBlobInBrowser(
 }
 
 /**
+ * Saved-PDF QR sizing:
+ * - Lock stylesheet is appended immediately before `</body>` so it follows Word `<style>` blocks.
+ * - Word often uses `div, img { width:100% !important }` and column flex where `flex: 0 0 112px`
+ *   only fixes the main axis (height), leaving width stretched — use `flex: none`, explicit
+ *   width/height, `align-self: flex-start`, and re-apply after Paged.js (`PagedConfig.after`).
+ */
+const SAVED_PDF_QR_LOCK_FN = `function __lockAppSavedPdfQr(){
+  document.querySelectorAll('[id="app-saved-pdf-qr"]').forEach(function(el){
+    el.style.setProperty("width","112px","important");
+    el.style.setProperty("height","112px","important");
+    el.style.setProperty("max-width","112px","important");
+    el.style.setProperty("max-height","112px","important");
+    el.style.setProperty("min-width","112px","important");
+    el.style.setProperty("min-height","112px","important");
+    el.style.setProperty("flex","none","important");
+    el.style.setProperty("flex-grow","0","important");
+    el.style.setProperty("flex-shrink","0","important");
+    el.style.setProperty("align-self","flex-start","important");
+    el.style.setProperty("box-sizing","border-box","important");
+    el.style.setProperty("display","inline-block","important");
+    el.style.setProperty("overflow","hidden","important");
+    el.style.setProperty("background-size","contain","important");
+    el.style.setProperty("background-repeat","no-repeat","important");
+    el.style.setProperty("background-position","center","important");
+  });
+}`;
+
+const SAVED_PDF_QR_LOCK_SCRIPT_PAGED = `<script>
+${SAVED_PDF_QR_LOCK_FN}
+(function(){
+  var prev = window.PagedConfig || {};
+  var pa = prev.after;
+  window.PagedConfig = Object.assign({}, prev, {
+    after: async function(done){
+      __lockAppSavedPdfQr();
+      if (typeof pa === "function") await pa(done);
+      __lockAppSavedPdfQr();
+    }
+  });
+})();
+(function(){
+  __lockAppSavedPdfQr();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", __lockAppSavedPdfQr);
+  }
+  window.addEventListener("load", function(){
+    __lockAppSavedPdfQr();
+    setTimeout(__lockAppSavedPdfQr, 50);
+    setTimeout(__lockAppSavedPdfQr, 300);
+  });
+})();
+</script>`;
+
+const SAVED_PDF_QR_LOCK_SCRIPT_INLINE = `<script>
+${SAVED_PDF_QR_LOCK_FN}
+(function(){
+  __lockAppSavedPdfQr();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", __lockAppSavedPdfQr);
+  }
+  window.addEventListener("load", function(){
+    __lockAppSavedPdfQr();
+    setTimeout(__lockAppSavedPdfQr, 50);
+    setTimeout(__lockAppSavedPdfQr, 300);
+  });
+})();
+</script>`;
+
+const SAVED_PDF_QR_LOCK_STYLE = `<style id="app-saved-pdf-qr-lock" type="text/css">
+html body div#app-saved-pdf-qr.application-saved-pdf-qr-pixel {
+  width: 112px !important;
+  height: 112px !important;
+  max-width: 112px !important;
+  max-height: 112px !important;
+  min-width: 112px !important;
+  min-height: 112px !important;
+  flex: none !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  align-self: flex-start !important;
+  box-sizing: border-box !important;
+  display: inline-block !important;
+  overflow: hidden !important;
+  line-height: 0 !important;
+  vertical-align: top !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center center !important;
+  transform: none !important;
+}
+html body .application-saved-pdf-qr-fallback {
+  width: 132px !important;
+  max-width: 132px !important;
+  flex-grow: 0 !important;
+  align-self: flex-end !important;
+}
+</style>`;
+
+/**
+ * Remove injected saved-PDF QR markup before scanning HTML for letterhead URLs.
+ * The QR is a PNG data URI; `injectPaginatedStyles` picks the first `data:image`
+ * for `.pagedjs_page` letterhead. When the real letterhead is JPEG/WebP or only
+ * appears after the QR in the string, the QR PNG was wrongly stretched to full A4.
+ */
+function htmlWithoutSavedPdfQrInjection(html: string): string {
+  return html
+    .replace(/<div[^>]*\bid\s*=\s*["']app-saved-pdf-qr["'][^>]*>\s*<\/div>/gi, "")
+    .replace(
+      /<div[^>]*class\s*=\s*["'][^"']*application-saved-pdf-qr-fallback[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+      ""
+    );
+}
+
+/** Primary wrapper for Word-export letters (all application templates). */
+function letterRootFromParsed(parsed: Document): Element | null {
+  return (
+    parsed.querySelector("div.WordSection1") ||
+    parsed.querySelector("main.page") ||
+    null
+  );
+}
+
+/**
+ * Saved-PDF QR appended before `</body>` sits after the letter wrapper. Paged.js
+ * then flows it after all letter pages (often last page). Hoist into the letter
+ * root as the first child so it appears on page 1 (all non–special-case previews).
+ */
+function prependFloatingSavedPdfQrIntoLetterRoot(html: string): string {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return html;
+  }
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const root = letterRootFromParsed(parsed);
+  const qrFallback = parsed.body.querySelector(".application-saved-pdf-qr-fallback");
+  const qrStandalone = parsed.body.querySelector("#app-saved-pdf-qr");
+  let node: Element | null = null;
+  if (root && qrFallback && !root.contains(qrFallback)) node = qrFallback;
+  else if (root && qrStandalone && !root.contains(qrStandalone)) node = qrStandalone;
+
+  if (!root || !node) return html;
+
+  const wrap = parsed.createElement("div");
+  wrap.className = "application-saved-pdf-qr-firstpage-wrap";
+  wrap.setAttribute(
+    "style",
+    "display:flex!important;justify-content:flex-end!important;width:100%!important;margin:0 0 10px 0!important;clear:both!important;"
+  );
+  node.parentNode?.removeChild(node);
+  wrap.appendChild(node);
+  root.insertBefore(wrap, root.firstChild);
+  return parsed.documentElement.outerHTML;
+}
+
+/** Read QR markup that lives outside the letter root (used by Plumber sheet rebuild). */
+function getSavedPdfQrMarkupOutsideLetterRoot(html: string): string {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return "";
+  }
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const root = letterRootFromParsed(parsed);
+  const qrFallback = parsed.body.querySelector(".application-saved-pdf-qr-fallback");
+  const qrStandalone = parsed.body.querySelector("#app-saved-pdf-qr");
+  if (!root) return "";
+  if (qrFallback && !root.contains(qrFallback)) return qrFallback.outerHTML;
+  if (qrStandalone && !root.contains(qrStandalone)) return qrStandalone.outerHTML;
+  return "";
+}
+
+/**
  * Wraps the populated HTML with a `@page` margin override + Paged.js
  * (loaded from a CDN inside the iframe so it costs nothing in the app bundle).
  *
@@ -961,11 +1143,15 @@ async function convertHtmlToPdfBlobInBrowser(
  * matches the on-screen pagination exactly.
  */
 function injectPaginatedStyles(html: string, templateType?: TemplateType): string {
-  const dataUriMatch = html.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/i);
-  const cssBackgroundImageMatch = html.match(
+  html = prependFloatingSavedPdfQrIntoLetterRoot(html);
+  const metaHtml = htmlWithoutSavedPdfQrInjection(html);
+  const dataUriMatch = metaHtml.match(
+    /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
+  );
+  const cssBackgroundImageMatch = metaHtml.match(
     /background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i
   );
-  const cssBackgroundShorthandMatch = html.match(
+  const cssBackgroundShorthandMatch = metaHtml.match(
     /background\s*:\s*[^;]*url\((['"]?)(.*?)\1\)[^;]*;/i
   );
   const letterheadUrl =
@@ -1064,6 +1250,35 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     font-family: 'Carlito', 'Calibri', 'Helvetica', sans-serif !important;
   }
 
+  /* Saved PDF QR: use a background div in HTML, not <img> — Word sets img{width:100%}. */
+  #app-saved-pdf-qr.application-saved-pdf-qr-pixel,
+  div.application-saved-pdf-qr-pixel {
+    width: 112px !important;
+    height: 112px !important;
+    max-width: 112px !important;
+    max-height: 112px !important;
+    min-width: 112px !important;
+    min-height: 112px !important;
+    flex: none !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    align-self: flex-start !important;
+    box-sizing: border-box !important;
+    display: inline-block !important;
+    overflow: hidden !important;
+    line-height: 0 !important;
+    vertical-align: top !important;
+  }
+  .application-saved-pdf-qr-fallback {
+    width: 132px !important;
+    max-width: 132px !important;
+    min-width: 0 !important;
+    margin-left: auto !important;
+    margin-right: 0 !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+  }
+
   /* The Word template has a 80pt top gap before the signature block which,
      combined with page-break-inside:avoid, can shove the block onto a fresh
      page and create a wasted 3rd page. Squash that gap. */
@@ -1124,12 +1339,21 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     .pagedjs_page { box-shadow: none; margin: 0; }
   }
 </style>
+${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
 <script src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></script>`;
-  // Insert before </head>; if no head tag, prepend so styles still parse.
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${head}</head>`);
+
+  let out = html;
+  if (/<\/head>/i.test(out)) {
+    out = out.replace(/<\/head>/i, `${head}</head>`);
+  } else {
+    out = head + out;
   }
-  return head + html;
+  if (/<\/body>/i.test(out)) {
+    out = out.replace(/<\/body>/i, `${SAVED_PDF_QR_LOCK_STYLE}</body>`);
+  } else {
+    out = `${out}${SAVED_PDF_QR_LOCK_STYLE}`;
+  }
+  return out;
 }
 
 function injectPlumberPreviewPages(
@@ -1140,6 +1364,9 @@ function injectPlumberPreviewPages(
   const marker = parsed.querySelector("p.MsoNormal.cc-start") as HTMLElement | null;
   const section = parsed.querySelector("div.WordSection1") as HTMLElement | null;
   if (!marker || !section) return html;
+
+  /** API may append QR before `</body>`; rebuild only serializes section children — preserve for sheet 1. */
+  const qrOutsideSection = getSavedPdfQrMarkupOutsideLetterRoot(html);
 
   const children = Array.from(section.childNodes);
   const markerIndex = children.findIndex((n) => n === marker);
@@ -1157,8 +1384,13 @@ function injectPlumberPreviewPages(
   const before = serializeNodes(children.slice(0, markerIndex));
   const after = serializeNodes(children.slice(markerIndex));
 
-  const dataUriMatch = html.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/i);
-  const cssUrlMatch = html.match(/background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i);
+  const metaHtml = htmlWithoutSavedPdfQrInjection(html);
+  const dataUriMatch = metaHtml.match(
+    /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
+  );
+  const cssUrlMatch = metaHtml.match(
+    /background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i
+  );
   const letterheadUrl =
     ownerLetterheadUrl?.trim() ||
     dataUriMatch?.[0] ||
@@ -1214,6 +1446,22 @@ function injectPlumberPreviewPages(
     min-height: auto !important;
     width: 100% !important;
   }
+  #app-saved-pdf-qr.application-saved-pdf-qr-pixel,
+  div.application-saved-pdf-qr-pixel {
+    width: 112px !important;
+    height: 112px !important;
+    max-width: 112px !important;
+    max-height: 112px !important;
+    flex: none !important;
+    align-self: flex-start !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+  .application-saved-pdf-qr-fallback {
+    width: 132px !important;
+    max-width: 132px !important;
+    margin-left: auto !important;
+  }
   @media print {
     html, body { background: #ffffff; }
     .preview-pages { padding: 0; }
@@ -1227,17 +1475,31 @@ function injectPlumberPreviewPages(
     .join(" ");
   const bodyOpen = bodyAttrs ? `<body ${bodyAttrs}>` : "<body>";
 
+  const qrBlock =
+    qrOutsideSection !== ""
+      ? `<div class="application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;justify-content:flex-end!important;width:100%!important;margin-top:12px!important;clear:both!important;">${qrOutsideSection}</div>`
+      : "";
+
   return `<html><head>${parsed.head.innerHTML}${plumberHead}</head>${bodyOpen}
 <div class="preview-pages">
-  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div><div class="preview-sheet-page-num" aria-hidden="true">Page 1 of 2</div></div>
+  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div>${qrBlock}<div class="preview-sheet-page-num" aria-hidden="true">Page 1 of 2</div></div>
   <div class="preview-sheet preview-sheet--second"><div class="${sectionClass}">${after}</div><div class="preview-sheet-page-num" aria-hidden="true">Page 2 of 2</div></div>
 </div>
+${SAVED_PDF_QR_LOCK_STYLE}
+${SAVED_PDF_QR_LOCK_SCRIPT_INLINE}
 </body></html>`;
 }
 
 /**
  * Global HTML preview path for all consultant template types.
  * Native browser text = razor-sharp preview at any zoom, instant load.
+ *
+ * Saved-PDF QR (optional): in Storage bucket `Application_Templates` HTML, place
+ * `$project_Saved_Pdf_QR` (see `PROJECT_SAVED_PDF_QR_SENTINEL` in
+ * `app/api/application-preview-html/constants.ts`) beside the client/owner block, e.g.:
+ * `<div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">`
+ * inner column for client tokens, then a column with only `$project_Saved_Pdf_QR`.
+ * The API replaces the sentinel with a QR image of `application_urls[templateType]`.
  */
 export async function generateApplicationPreviewHtml(
   fields: TemplateFields,
