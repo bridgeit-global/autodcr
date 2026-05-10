@@ -5,12 +5,7 @@ import QRCode from "qrcode";
 import { readFile } from "fs/promises";
 import path from "path";
 
-/**
- * Placeholder for HTML templates (bucket `Application_Templates` or `html/architect.html`).
- * Server replaces this with a QR image encoding `projects.application_urls[templateType]`.
- * Layout: place beside the client/owner block, e.g. flex row — see comment on `injectSavedPdfQrHtml`.
- */
-export const PROJECT_SAVED_PDF_QR_SENTINEL = "$project_Saved_Pdf_QR";
+import { PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
