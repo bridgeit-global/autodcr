@@ -1075,6 +1075,61 @@ function htmlWithoutSavedPdfQrInjection(html: string): string {
     );
 }
 
+/** Primary wrapper for Word-export letters (all application templates). */
+function letterRootFromParsed(parsed: Document): Element | null {
+  return (
+    parsed.querySelector("div.WordSection1") ||
+    parsed.querySelector("main.page") ||
+    null
+  );
+}
+
+/**
+ * Saved-PDF QR appended before `</body>` sits after the letter wrapper. Paged.js
+ * then flows it after all letter pages (often last page). Hoist into the letter
+ * root as the first child so it appears on page 1 (all non–special-case previews).
+ */
+function prependFloatingSavedPdfQrIntoLetterRoot(html: string): string {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return html;
+  }
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const root = letterRootFromParsed(parsed);
+  const qrFallback = parsed.body.querySelector(".application-saved-pdf-qr-fallback");
+  const qrStandalone = parsed.body.querySelector("#app-saved-pdf-qr");
+  let node: Element | null = null;
+  if (root && qrFallback && !root.contains(qrFallback)) node = qrFallback;
+  else if (root && qrStandalone && !root.contains(qrStandalone)) node = qrStandalone;
+
+  if (!root || !node) return html;
+
+  const wrap = parsed.createElement("div");
+  wrap.className = "application-saved-pdf-qr-firstpage-wrap";
+  wrap.setAttribute(
+    "style",
+    "display:flex!important;justify-content:flex-end!important;width:100%!important;margin:0 0 10px 0!important;clear:both!important;"
+  );
+  node.parentNode?.removeChild(node);
+  wrap.appendChild(node);
+  root.insertBefore(wrap, root.firstChild);
+  return parsed.documentElement.outerHTML;
+}
+
+/** Read QR markup that lives outside the letter root (used by Plumber sheet rebuild). */
+function getSavedPdfQrMarkupOutsideLetterRoot(html: string): string {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return "";
+  }
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const root = letterRootFromParsed(parsed);
+  const qrFallback = parsed.body.querySelector(".application-saved-pdf-qr-fallback");
+  const qrStandalone = parsed.body.querySelector("#app-saved-pdf-qr");
+  if (!root) return "";
+  if (qrFallback && !root.contains(qrFallback)) return qrFallback.outerHTML;
+  if (qrStandalone && !root.contains(qrStandalone)) return qrStandalone.outerHTML;
+  return "";
+}
+
 /**
  * Wraps the populated HTML with a `@page` margin override + Paged.js
  * (loaded from a CDN inside the iframe so it costs nothing in the app bundle).
@@ -1088,6 +1143,7 @@ function htmlWithoutSavedPdfQrInjection(html: string): string {
  * matches the on-screen pagination exactly.
  */
 function injectPaginatedStyles(html: string, templateType?: TemplateType): string {
+  html = prependFloatingSavedPdfQrIntoLetterRoot(html);
   const metaHtml = htmlWithoutSavedPdfQrInjection(html);
   const dataUriMatch = metaHtml.match(
     /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
@@ -1309,6 +1365,9 @@ function injectPlumberPreviewPages(
   const section = parsed.querySelector("div.WordSection1") as HTMLElement | null;
   if (!marker || !section) return html;
 
+  /** API may append QR before `</body>`; rebuild only serializes section children — preserve for sheet 1. */
+  const qrOutsideSection = getSavedPdfQrMarkupOutsideLetterRoot(html);
+
   const children = Array.from(section.childNodes);
   const markerIndex = children.findIndex((n) => n === marker);
   if (markerIndex < 0) return html;
@@ -1416,9 +1475,14 @@ function injectPlumberPreviewPages(
     .join(" ");
   const bodyOpen = bodyAttrs ? `<body ${bodyAttrs}>` : "<body>";
 
+  const qrBlock =
+    qrOutsideSection !== ""
+      ? `<div class="application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;justify-content:flex-end!important;width:100%!important;margin-top:12px!important;clear:both!important;">${qrOutsideSection}</div>`
+      : "";
+
   return `<html><head>${parsed.head.innerHTML}${plumberHead}</head>${bodyOpen}
 <div class="preview-pages">
-  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div><div class="preview-sheet-page-num" aria-hidden="true">Page 1 of 2</div></div>
+  <div class="preview-sheet preview-sheet--first"><div class="${sectionClass}">${before}</div>${qrBlock}<div class="preview-sheet-page-num" aria-hidden="true">Page 1 of 2</div></div>
   <div class="preview-sheet preview-sheet--second"><div class="${sectionClass}">${after}</div><div class="preview-sheet-page-num" aria-hidden="true">Page 2 of 2</div></div>
 </div>
 ${SAVED_PDF_QR_LOCK_STYLE}
@@ -1432,7 +1496,7 @@ ${SAVED_PDF_QR_LOCK_SCRIPT_INLINE}
  *
  * Saved-PDF QR (optional): in Storage bucket `Application_Templates` HTML, place
  * `$project_Saved_Pdf_QR` (see `PROJECT_SAVED_PDF_QR_SENTINEL` in
- * `app/api/application-preview-html/route.ts`) beside the client/owner block, e.g.:
+ * `app/api/application-preview-html/constants.ts`) beside the client/owner block, e.g.:
  * `<div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">`
  * inner column for client tokens, then a column with only `$project_Saved_Pdf_QR`.
  * The API replaces the sentinel with a QR image of `application_urls[templateType]`.
