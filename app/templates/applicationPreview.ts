@@ -165,6 +165,44 @@ export function mapSelectedApplicationToTemplate(
   return "Architect";
 }
 
+/** Token suffix segment used in `project_*_${suffix}` placeholders (matches HTML templates). */
+export function templateTypeToPdfTokenSuffix(type?: TemplateType): string {
+  switch (type) {
+    case "Architect":
+      return "Architect";
+    case "Licensed Surveyor":
+      return "LS";
+    case "Structural Engineer":
+      return "Structural_Engineer";
+    case "Fire Safety Consultant":
+      return "Fire_Safety";
+    case "M&E Consultant":
+      return "ME_Consultant";
+    case "Plumber":
+      return "Plumber";
+    case "Parking Consultant":
+      return "Parking_Consultant";
+    case "Landscape Consultant":
+      return "Landscape_Consultant";
+    case "Geotechnical Consultant":
+      return "Geotechnical_Consultant";
+    case "Environmental Consultant":
+      return "Environmental_Consultant";
+    case "Town Planner":
+      return "Town_Planner";
+    case "PMC / Project Manager":
+      return "PMC_Project_Manager";
+    case "Rainwater Consultant":
+      return "Rainwater_Consultant";
+    case "Site Supervisor":
+      return "Site_Supervisor";
+    case "Horticulturist":
+      return "Horticulturist";
+    default:
+      return "Architect";
+  }
+}
+
 function templateConsultantApplicantKeywords(templateType: TemplateType): string[] {
   switch (templateType) {
     case "Licensed Surveyor":
@@ -350,43 +388,6 @@ export function mapToPdfFieldValues(
   source?: ApplicationPreviewSource,
   templateType?: TemplateType
 ): Record<string, string | undefined> {
-  const templateTokenSuffix = (type?: TemplateType): string => {
-    switch (type) {
-      case "Architect":
-        return "Architect";
-      case "Licensed Surveyor":
-        return "LS";
-      case "Structural Engineer":
-        return "Structural_Engineer";
-      case "Fire Safety Consultant":
-        return "Fire_Safety";
-      case "M&E Consultant":
-        return "ME_Consultant";
-      case "Plumber":
-        return "Plumber";
-      case "Parking Consultant":
-        return "Parking_Consultant";
-      case "Landscape Consultant":
-        return "Landscape_Consultant";
-      case "Geotechnical Consultant":
-        return "Geotechnical_Consultant";
-      case "Environmental Consultant":
-        return "Environmental_Consultant";
-      case "Town Planner":
-        return "Town_Planner";
-      case "PMC / Project Manager":
-        return "PMC_Project_Manager";
-      case "Rainwater Consultant":
-        return "Rainwater_Consultant";
-      case "Site Supervisor":
-        return "Site_Supervisor";
-      case "Horticulturist":
-        return "Horticulturist";
-      default:
-        return "Architect";
-    }
-  };
-
   const pickText = (...values: Array<unknown>): string => {
     for (const value of values) {
       if (typeof value === "string" && value.trim()) return value.trim();
@@ -579,7 +580,7 @@ export function mapToPdfFieldValues(
     (regionForProjectToken || "").trim().toLowerCase() === "western"
       ? "The Executive Engineer (W.S.) - I"
       : "The Executive Engineer (E.S.) - I";
-  const suffix = templateTokenSuffix(templateType);
+  const suffix = templateTypeToPdfTokenSuffix(templateType);
   const genericConsultantTemplateTokens: Record<string, string> = {
     [`project_Consultant_${suffix}`]: consultantRoleLabel,
     [`project_Consultant_${suffix}.`]: consultantRoleLabel,
@@ -697,6 +698,223 @@ export function mapToPdfFieldValues(
     "project_RegNo_Fire_Safety.": consultantRegNo,
 
   };
+}
+
+const PDF_FIELD_LABELS: Record<string, string> = {
+  project_date_generation: "Letter date",
+  project_Letter_Appointment_Role: "Consultant role",
+  "project_CS/CTSNos.": "Survey numbers (e.g. C.T.S. No(s). …)",
+  "project_Division/Village": "Division / village",
+  project_Street: "Street / road",
+  "project_Ward.": "Ward",
+  project_Planning_Authority: "Planning authority",
+  project_Proposal_Number: "Proposal number",
+  project_Client_Company_Name: "Client company name",
+  project_Client_Company_Designation: "Client designation",
+  project_Client_Name: "Client name",
+  project_Letterhead_Image_Url: "Letterhead URL",
+  project_BuildingProposal_BaseDesignation: "Building proposal — base designation",
+  project_BuildingProposal_OfficerDesignation: "Building proposal — officer designation",
+  project_BuildingProposal_ZoneSuffix: "Building proposal — zone suffix",
+  project_addressline1_BuildingProposal: "Building proposal — address line 1",
+  project_addressline2_BuildingProposal: "Building proposal — address line 2",
+  project_addressline3_BuildingProposal: "Building proposal — address line 3",
+  project_Architect_COA_Reg_No_Label: "Architect COA registration label",
+  project_Consultant_Architect: "Consultant (architect letter)",
+  project_Name_Architect: "Name of architect (comma form)",
+  "project_Name_Architect.": "Name of architect",
+  project_Company_Name_Architect: "Architect firm name",
+  project_RegNo_Architect: "Architect registration number",
+  "project_RegNo_Architect.": "Architect registration number",
+  project_Validity_Architect: "Architect registration validity",
+  "project_Validity_Architect.": "Architect registration validity",
+  "project_Address_line1_Architect": "Architect address line 1",
+  "project_Address_line2_Architect": "Architect address line 2",
+  "project_Address_line3Architect": "Architect address line 3",
+  project_Consultant_LS: "Consultant (licensed surveyor letter)",
+  "project_Name_LS.": "Name of licensed surveyor",
+  project_Company_Name_LS: "Licensed surveyor firm name",
+  project_Address_line1_LS: "Licensed surveyor address line 1",
+  project_Address_line2_LS: "Licensed surveyor address line 2",
+  project_Address_line3_LS: "Licensed surveyor address line 3",
+  "project_RegNo_LS.": "Licensed surveyor registration number",
+  "project_Validity_LS.": "Licensed surveyor registration validity",
+  "project_Name_Fire_Safety.": "Name of fire safety consultant",
+  project_Address_line1_Fire_Safety: "Fire safety consultant address line 1",
+  project_Address_line2_Fire_Safety: "Fire safety consultant address line 2",
+  project_Address_line3_Fire_Safety: "Fire safety consultant address line 3",
+  "project_RegNo_Fire_Safety.": "Fire safety consultant registration number",
+};
+
+function humanizePdfSuffixSegment(suffix: string): string {
+  const cleaned = suffix.replace(/\.$/, "").trim();
+  if (!cleaned) return "";
+  return cleaned
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function labelForConsultantTokenSuffix(suffixRaw: string, kind: string): string {
+  const h = humanizePdfSuffixSegment(suffixRaw);
+  return h ? `${kind} (${h})` : kind;
+}
+
+/**
+ * Skip redundant Word-style token keys so the Application Details list stays readable.
+ */
+export function shouldSkipFieldKeyForDetailsUi(
+  key: string,
+  mapping: Record<string, string | undefined>
+): boolean {
+  if (/^project_Consultant_.+\._Type$/.test(key)) return true;
+  if (/^project_Consultant_.+\.$/.test(key)) return true;
+  if (/^project_ addressline/.test(key)) return true;
+
+  if (/^project_Name_Architect$/.test(key) && mapping["project_Name_Architect."]?.trim()) {
+    return true;
+  }
+
+  const dupDotted = key.match(/^project_(Name|Company_Name|RegNo|Validity)_(.+)$/);
+  if (dupDotted && !key.endsWith(".")) {
+    const dottedKey = `${key}.`;
+    if (mapping[dottedKey]?.trim()) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Human-readable label for a PDF template token key (Application Details column).
+ */
+export function labelForPdfFieldKey(key: string, templateType: TemplateType): string {
+  const staticLabel = PDF_FIELD_LABELS[key];
+  if (staticLabel) return staticLabel;
+
+  const primarySuffix = templateTypeToPdfTokenSuffix(templateType);
+
+  const nameMatch = key.match(/^project_Name_(.+)$/);
+  if (nameMatch) {
+    const seg = nameMatch[1].replace(/\.$/, "");
+    if (seg === "Architect") return key.endsWith(".") ? "Name of architect" : "Name of architect (comma form)";
+    if (seg === "LS") return "Name of licensed surveyor";
+    if (seg === "Fire_Safety") return "Name of fire safety consultant";
+    return labelForConsultantTokenSuffix(seg, "Name");
+  }
+
+  const companyMatch = key.match(/^project_Company_Name_(.+)$/);
+  if (companyMatch) {
+    const seg = companyMatch[1].replace(/\.$/, "");
+    if (seg === "Architect") return "Architect firm name";
+    if (seg === "LS") return "Licensed surveyor firm name";
+    return labelForConsultantTokenSuffix(seg, "Firm name");
+  }
+
+  const addr = key.match(/^project_Address_line(\d)_(.+)$/);
+  if (addr) {
+    const lineNo = addr[1];
+    const seg = addr[2];
+    if (seg === primarySuffix || seg === "Architect" || seg === "LS" || seg === "Fire_Safety") {
+      if (templateType === "Architect" && seg === "Architect")
+        return `Architect address line ${lineNo}`;
+      if (templateType === "Licensed Surveyor" && seg === "LS")
+        return `Licensed surveyor address line ${lineNo}`;
+      if (templateType === "Fire Safety Consultant" && seg === "Fire_Safety")
+        return `Fire safety consultant address line ${lineNo}`;
+    }
+    return labelForConsultantTokenSuffix(seg, `Address line ${lineNo}`);
+  }
+
+  const line3Arch = key === "project_Address_line3Architect";
+  if (line3Arch) return "Architect address line 3";
+
+  const mobile = key.match(/^project_Mobile_(.+)$/);
+  if (mobile) return labelForConsultantTokenSuffix(mobile[1], "Mobile");
+
+  const email = key.match(/^project_Email_(.+)$/);
+  if (email) return labelForConsultantTokenSuffix(email[1], "Email");
+
+  const reg = key.match(/^project_RegNo_(.+)$/);
+  if (reg) {
+    const seg = reg[1].replace(/\.$/, "");
+    if (seg === "Architect") return "Architect registration number";
+    if (seg === "LS") return "Licensed surveyor registration number";
+    if (seg === "Fire_Safety") return "Fire safety consultant registration number";
+    return labelForConsultantTokenSuffix(seg, "Registration number");
+  }
+
+  const val = key.match(/^project_Validity_(.+)$/);
+  if (val) {
+    const seg = val[1].replace(/\.$/, "");
+    if (seg === "Architect") return "Architect registration validity";
+    if (seg === "LS") return "Licensed surveyor registration validity";
+    return labelForConsultantTokenSuffix(seg, "Registration validity");
+  }
+
+  const consultant = key.match(/^project_Consultant_(.+)$/);
+  if (consultant && !key.includes("._Type") && !key.endsWith(".")) {
+    return labelForConsultantTokenSuffix(consultant[1], "Consultant role");
+  }
+
+  const tail = key.startsWith("project_") ? key.slice("project_".length) : key;
+  return tail
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+}
+
+/** Keys that fill the letter “Sub:” line (see e.g. `html/architect.html`). */
+export const APPLICATION_LETTER_SUBJECT_FIELD_KEYS = [
+  "project_Letter_Appointment_Role",
+  "project_CS/CTSNos.",
+  "project_Division/Village",
+  "project_Street",
+  "project_Ward.",
+] as const;
+
+/** Keys that fill the letter “Re:” line. */
+export const APPLICATION_LETTER_REFERENCE_FIELD_KEYS = [
+  "project_Planning_Authority",
+  "project_Proposal_Number",
+] as const;
+
+export type PdfDetailsFieldRow = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+/**
+ * Subject and reference line placeholders only — same tokens as the appointment
+ * HTML template, in letter order (non-empty values only).
+ */
+export function buildDetailsFieldRowsForUi(
+  fieldMapping: Record<string, string | undefined>,
+  templateType: TemplateType
+): PdfDetailsFieldRow[] {
+  const rows: PdfDetailsFieldRow[] = [];
+
+  const pushKey = (key: string) => {
+    if (shouldSkipFieldKeyForDetailsUi(key, fieldMapping)) return;
+    const raw = fieldMapping[key];
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value) return;
+    rows.push({
+      key,
+      label: labelForPdfFieldKey(key, templateType),
+      value,
+    });
+  };
+
+  for (const key of APPLICATION_LETTER_SUBJECT_FIELD_KEYS) {
+    pushKey(key);
+  }
+  for (const key of APPLICATION_LETTER_REFERENCE_FIELD_KEYS) {
+    pushKey(key);
+  }
+
+  return rows;
 }
 
 // A4 page size in points (jsPDF unit).
