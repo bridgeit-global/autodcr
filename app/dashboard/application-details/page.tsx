@@ -8,6 +8,7 @@ import { supabase } from "@/app/utils/supabase";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
+  buildDetailsFieldRowsForUi,
   generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
   mapApplicationPreviewFields,
@@ -15,6 +16,7 @@ import {
   mapSelectedApplicationToTemplate,
   pickConsultantLookupUserIdsFromProject,
   prewarmPreviewPdfRuntime,
+  type PdfDetailsFieldRow,
 } from "@/app/templates/applicationPreview";
 
 type PreviewProjectData = {
@@ -265,6 +267,281 @@ async function fetchRawUserMetadataFromApi(
   return null;
 }
 
+
+type BuildApplicationPreviewContextInput = {
+  userMetadata: unknown;
+  projectData: PreviewProjectData | null;
+  selectedApplication: string | null;
+  applicationNo: string | null;
+  applicationCreatedAt: string | null;
+  projectId: string | null;
+};
+
+async function buildApplicationPreviewContext(
+  input: BuildApplicationPreviewContextInput
+): Promise<{
+  fields: TemplateFields;
+  previewSource: ApplicationPreviewSource;
+  templateType: TemplateType;
+  fieldMapping: Record<string, string | undefined>;
+}> {
+  const {
+    userMetadata,
+    projectData,
+    selectedApplication,
+    applicationNo,
+    applicationCreatedAt,
+    projectId,
+  } = input;
+
+  const localMeta = readLocalStoredUserMetadata();
+  const templateType = mapSelectedApplicationToTemplate(selectedApplication);
+
+  let coaRegNo =
+    pickCoaRegNoFromMeta(userMetadata) ||
+    pickCoaRegNoFromMeta(localMeta);
+  let coaExpiryDate =
+    pickCoaExpiryFromMeta(userMetadata) ||
+    pickCoaExpiryFromMeta(localMeta);
+  let lbsLicenseNo =
+    pickLbsLicenseFromMeta(userMetadata) || pickLbsLicenseFromMeta(localMeta);
+  let lbsExpiryDate =
+    pickLbsExpiryFromMeta(userMetadata) || pickLbsExpiryFromMeta(localMeta);
+  let consultantAddressLine1 =
+    pickAddressLineFromMeta(userMetadata, 1) ||
+    pickAddressLineFromMeta(localMeta, 1);
+  let consultantAddressLine2 =
+    pickAddressLineFromMeta(userMetadata, 2) ||
+    pickAddressLineFromMeta(localMeta, 2);
+  let consultantAddressLine3 =
+    pickAddressLineFromMeta(userMetadata, 3) ||
+    pickAddressLineFromMeta(localMeta, 3);
+  let consultantCompanyName =
+    pickConsultantCompanyFromMeta(userMetadata) ||
+    pickConsultantCompanyFromMeta(localMeta);
+  let consultantName =
+    pickConsultantNameFromMeta(userMetadata) ||
+    pickConsultantNameFromMeta(localMeta);
+  let consultantMobile =
+    pickConsultantMobileFromMeta(userMetadata) ||
+    pickConsultantMobileFromMeta(localMeta);
+  let consultantEmail =
+    pickConsultantEmailFromMeta(userMetadata) ||
+    pickConsultantEmailFromMeta(localMeta);
+  const ownerApplicants = (projectData?.applicant_details?.applicants || []).filter((a) =>
+    (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
+  );
+  const ownerApplicant = ownerApplicants[0];
+  let clientCompanyName =
+    ownerApplicant?.entity_name?.trim() ||
+    ownerApplicant?.entityName?.trim() ||
+    pickEntityNameFromMeta(ownerApplicant);
+  let clientName =
+    (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
+    pickPersonFullNameFromMeta(ownerApplicant);
+  let clientCompanyDesignation =
+    ownerApplicant?.entity_type?.trim() ||
+    ownerApplicant?.entityType?.trim() ||
+    pickEntityTypeFromMeta(ownerApplicant);
+  let ownerLetterheadUrl =
+    ownerApplicant?.letterhead_url?.trim() ||
+    ownerApplicant?.letterheadUrl?.trim() ||
+    pickLetterheadUrlFromMeta(ownerApplicant);
+
+  const mergeConsultantMeta = (meta: unknown, prefer = false) => {
+    const nextCoaRegNo = pickCoaRegNoFromMeta(meta);
+    const nextCoaExpiryDate = pickCoaExpiryFromMeta(meta);
+    const nextLbsLicenseNo = pickLbsLicenseFromMeta(meta);
+    const nextLbsExpiryDate = pickLbsExpiryFromMeta(meta);
+    const nextAddressLine1 = pickAddressLineFromMeta(meta, 1);
+    const nextAddressLine2 = pickAddressLineFromMeta(meta, 2);
+    const nextAddressLine3 = pickAddressLineFromMeta(meta, 3);
+    const nextCompanyName = pickConsultantCompanyFromMeta(meta);
+    const nextConsultantName = pickConsultantNameFromMeta(meta);
+    const nextConsultantMobile = pickConsultantMobileFromMeta(meta);
+    const nextConsultantEmail = pickConsultantEmailFromMeta(meta);
+
+    if ((prefer || !coaRegNo) && nextCoaRegNo) coaRegNo = nextCoaRegNo;
+    if ((prefer || !coaExpiryDate) && nextCoaExpiryDate) coaExpiryDate = nextCoaExpiryDate;
+    if ((prefer || !lbsLicenseNo) && nextLbsLicenseNo) lbsLicenseNo = nextLbsLicenseNo;
+    if ((prefer || !lbsExpiryDate) && nextLbsExpiryDate) lbsExpiryDate = nextLbsExpiryDate;
+    if ((prefer || !consultantAddressLine1) && nextAddressLine1) consultantAddressLine1 = nextAddressLine1;
+    if ((prefer || !consultantAddressLine2) && nextAddressLine2) consultantAddressLine2 = nextAddressLine2;
+    if ((prefer || !consultantAddressLine3) && nextAddressLine3) consultantAddressLine3 = nextAddressLine3;
+    if ((prefer || !consultantCompanyName) && nextCompanyName) consultantCompanyName = nextCompanyName;
+    if ((prefer || !consultantName) && nextConsultantName) consultantName = nextConsultantName;
+    if ((prefer || !consultantMobile) && nextConsultantMobile) consultantMobile = nextConsultantMobile;
+    if ((prefer || !consultantEmail) && nextConsultantEmail) consultantEmail = nextConsultantEmail;
+  };
+
+  const consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
+    templateType,
+    projectData
+  );
+
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) {
+      const res = await fetch("/api/preview-consultant-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token: token,
+          ...(consultantLookupUserIds.length
+            ? { consultant_lookup_user_ids: consultantLookupUserIds }
+            : {}),
+        }),
+      });
+      if (res.ok) {
+        const payload = (await res.json()) as { metadata?: unknown };
+        if (
+          process.env.NODE_ENV === "development" &&
+          templateType === "Fire Safety Consultant"
+        ) {
+          console.log("[fire-preview-metadata-api]", payload.metadata ?? null);
+        }
+        if (payload.metadata) mergeConsultantMeta(payload.metadata, true);
+      }
+    }
+  } catch {
+    /* fall through to client-only sources */
+  }
+
+  mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
+
+  const needsConsultantRegRefresh =
+    templateType === "Licensed Surveyor"
+      ? !lbsLicenseNo || !lbsExpiryDate
+      : !coaRegNo || !coaExpiryDate;
+
+  if (needsConsultantRegRefresh) {
+    await supabase.auth.refreshSession();
+    mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
+  }
+
+  if (
+    templateType === "Licensed Surveyor"
+      ? !lbsLicenseNo || !lbsExpiryDate
+      : !coaRegNo || !coaExpiryDate
+  ) {
+    const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, consultantLookupUserIds);
+    if (serverMeta) mergeConsultantMeta(serverMeta);
+  }
+
+  const ownerLookupUserIds = [
+    ...new Set(
+      ownerApplicants
+        .flatMap((owner) => [
+          normalizeLookupId(owner.user_id),
+          normalizeLookupId(owner.userId),
+          normalizeLookupId(owner.id),
+          normalizeLookupId((owner as { owner_id?: unknown }).owner_id),
+          normalizeLookupId((owner as { ownerId?: unknown }).ownerId),
+        ])
+        .filter(Boolean)
+    ),
+  ];
+  let ownerMetaSnapshot: unknown = null;
+  for (const ownerLookupUserId of ownerLookupUserIds) {
+    const ownerMeta = await fetchRawUserMetadataFromApi(
+      userMetadata,
+      [ownerLookupUserId],
+      ownerApplicant?.email
+    );
+    if (!ownerMeta) continue;
+    ownerMetaSnapshot = ownerMeta;
+    if (!clientCompanyDesignation) {
+      const resolvedType = pickEntityTypeFromMeta(ownerMeta);
+      if (resolvedType) clientCompanyDesignation = resolvedType;
+    }
+    if (!clientName) {
+      const resolvedClientName = pickPersonFullNameFromMeta(ownerMeta);
+      if (resolvedClientName) clientName = resolvedClientName;
+    }
+    if (!ownerLetterheadUrl) {
+      const resolvedLetterheadUrl = pickLetterheadUrlFromMeta(ownerMeta);
+      if (resolvedLetterheadUrl) ownerLetterheadUrl = resolvedLetterheadUrl;
+    }
+    const resolved = pickEntityNameFromMeta(ownerMeta);
+    if (resolved) {
+      clientCompanyName = resolved;
+      if (clientCompanyDesignation && clientName) break;
+    }
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[preview-owner-debug]", {
+      ownerApplicants,
+      ownerLookupUserIds,
+      clientCompanyName,
+      clientName,
+      clientCompanyDesignation,
+      ownerMeta: ownerMetaSnapshot,
+    });
+    console.log("[preview-owner-raw_user_meta_data]", ownerMetaSnapshot);
+  }
+
+  const fields = mapApplicationPreviewFields(
+    {
+      selectedApplication,
+      applicationNo,
+      applicationCreatedAt,
+      coaRegNo,
+      coaExpiryDate,
+      lbsLicenseNo,
+      lbsExpiryDate,
+      consultantAddressLine1,
+      consultantAddressLine2,
+      consultantAddressLine3,
+      consultantName,
+      consultantCompanyName,
+      consultantMobile,
+      consultantEmail,
+      clientCompanyName,
+      clientName,
+      clientCompanyDesignation,
+      projectData,
+    },
+    templateType
+  );
+  const previewSource = {
+    projectId,
+    selectedApplication,
+    applicationNo,
+    applicationCreatedAt,
+    coaRegNo,
+    coaExpiryDate,
+    lbsLicenseNo,
+    lbsExpiryDate,
+    consultantAddressLine1,
+    consultantAddressLine2,
+    consultantAddressLine3,
+    consultantName,
+    consultantCompanyName,
+    consultantMobile,
+    consultantEmail,
+    clientCompanyName,
+    clientName,
+    clientCompanyDesignation,
+    ownerLetterheadUrl,
+    ownerDebug: {
+      ownerApplicants,
+      ownerLookupUserIds,
+      ownerMetaSnapshot,
+      resolvedClientCompanyName: clientCompanyName,
+      resolvedClientName: clientName,
+      resolvedClientCompanyDesignation: clientCompanyDesignation,
+      resolvedOwnerLetterheadUrl: ownerLetterheadUrl,
+    },
+    consultantLookupUserIds,
+    projectData,
+  };
+
+  const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
+  return { fields, previewSource, templateType, fieldMapping };
+}
+
 export default function ApplicationDetailsPage() {
   const { userMetadata } = useUserMetadata();
   const searchParams = useSearchParams();
@@ -286,6 +563,9 @@ export default function ApplicationDetailsPage() {
   const [savePdfError, setSavePdfError] = useState<string | null>(null);
   const [previewReadyForSave, setPreviewReadyForSave] = useState(false);
   const [pdfSavedForCurrentPreview, setPdfSavedForCurrentPreview] = useState(false);
+  const [detailsFieldRows, setDetailsFieldRows] = useState<PdfDetailsFieldRow[]>([]);
+  const [detailsFieldsLoading, setDetailsFieldsLoading] = useState(false);
+  const [detailsFieldsError, setDetailsFieldsError] = useState<string | null>(null);
   const previewPdfContextRef = useRef<{
     fields: TemplateFields;
     templateType: TemplateType;
@@ -338,6 +618,47 @@ export default function ApplicationDetailsPage() {
   }, [isReadOnlyMode, applicationId]);
 
   useEffect(() => {
+    if (!isReadOnlyMode || !projectId) return;
+    let cancelled = false;
+    setDetailsFieldsLoading(true);
+    setDetailsFieldsError(null);
+    void (async () => {
+      try {
+        const ctx = await buildApplicationPreviewContext({
+          userMetadata,
+          projectData,
+          selectedApplication,
+          applicationNo,
+          applicationCreatedAt,
+          projectId,
+        });
+        if (cancelled) return;
+        setDetailsFieldRows(buildDetailsFieldRowsForUi(ctx.fieldMapping, ctx.templateType));
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : "Failed to resolve application fields.";
+          setDetailsFieldsError(message);
+          setDetailsFieldRows([]);
+        }
+      } finally {
+        if (!cancelled) setDetailsFieldsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isReadOnlyMode,
+    projectId,
+    projectData,
+    applicationCreatedAt,
+    selectedApplication,
+    applicationNo,
+    userMetadata,
+  ]);
+
+  useEffect(() => {
     return () => {
       if (previewUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
@@ -375,257 +696,21 @@ export default function ApplicationDetailsPage() {
       previewPdfContextRef.current = null;
       setIsPreviewLoading(true);
 
-      const localMeta = readLocalStoredUserMetadata();
-      const templateType = mapSelectedApplicationToTemplate(selectedApplication);
-
-      let coaRegNo =
-        pickCoaRegNoFromMeta(userMetadata) ||
-        pickCoaRegNoFromMeta(localMeta);
-      let coaExpiryDate =
-        pickCoaExpiryFromMeta(userMetadata) ||
-        pickCoaExpiryFromMeta(localMeta);
-      let lbsLicenseNo =
-        pickLbsLicenseFromMeta(userMetadata) || pickLbsLicenseFromMeta(localMeta);
-      let lbsExpiryDate =
-        pickLbsExpiryFromMeta(userMetadata) || pickLbsExpiryFromMeta(localMeta);
-      let consultantAddressLine1 =
-        pickAddressLineFromMeta(userMetadata, 1) ||
-        pickAddressLineFromMeta(localMeta, 1);
-      let consultantAddressLine2 =
-        pickAddressLineFromMeta(userMetadata, 2) ||
-        pickAddressLineFromMeta(localMeta, 2);
-      let consultantAddressLine3 =
-        pickAddressLineFromMeta(userMetadata, 3) ||
-        pickAddressLineFromMeta(localMeta, 3);
-      let consultantCompanyName =
-        pickConsultantCompanyFromMeta(userMetadata) ||
-        pickConsultantCompanyFromMeta(localMeta);
-      let consultantName =
-        pickConsultantNameFromMeta(userMetadata) ||
-        pickConsultantNameFromMeta(localMeta);
-      let consultantMobile =
-        pickConsultantMobileFromMeta(userMetadata) ||
-        pickConsultantMobileFromMeta(localMeta);
-      let consultantEmail =
-        pickConsultantEmailFromMeta(userMetadata) ||
-        pickConsultantEmailFromMeta(localMeta);
-      const ownerApplicants = (projectData?.applicant_details?.applicants || []).filter((a) =>
-        (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
-      );
-      const ownerApplicant = ownerApplicants[0];
-      let clientCompanyName =
-        ownerApplicant?.entity_name?.trim() ||
-        ownerApplicant?.entityName?.trim() ||
-        pickEntityNameFromMeta(ownerApplicant);
-      let clientName =
-        (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
-        pickPersonFullNameFromMeta(ownerApplicant);
-      let clientCompanyDesignation =
-        ownerApplicant?.entity_type?.trim() ||
-        ownerApplicant?.entityType?.trim() ||
-        pickEntityTypeFromMeta(ownerApplicant);
-      let ownerLetterheadUrl =
-        ownerApplicant?.letterhead_url?.trim() ||
-        ownerApplicant?.letterheadUrl?.trim() ||
-        pickLetterheadUrlFromMeta(ownerApplicant);
-
-      const mergeConsultantMeta = (meta: unknown, prefer = false) => {
-        const nextCoaRegNo = pickCoaRegNoFromMeta(meta);
-        const nextCoaExpiryDate = pickCoaExpiryFromMeta(meta);
-        const nextLbsLicenseNo = pickLbsLicenseFromMeta(meta);
-        const nextLbsExpiryDate = pickLbsExpiryFromMeta(meta);
-        const nextAddressLine1 = pickAddressLineFromMeta(meta, 1);
-        const nextAddressLine2 = pickAddressLineFromMeta(meta, 2);
-        const nextAddressLine3 = pickAddressLineFromMeta(meta, 3);
-        const nextCompanyName = pickConsultantCompanyFromMeta(meta);
-        const nextConsultantName = pickConsultantNameFromMeta(meta);
-        const nextConsultantMobile = pickConsultantMobileFromMeta(meta);
-        const nextConsultantEmail = pickConsultantEmailFromMeta(meta);
-
-        if ((prefer || !coaRegNo) && nextCoaRegNo) coaRegNo = nextCoaRegNo;
-        if ((prefer || !coaExpiryDate) && nextCoaExpiryDate) coaExpiryDate = nextCoaExpiryDate;
-        if ((prefer || !lbsLicenseNo) && nextLbsLicenseNo) lbsLicenseNo = nextLbsLicenseNo;
-        if ((prefer || !lbsExpiryDate) && nextLbsExpiryDate) lbsExpiryDate = nextLbsExpiryDate;
-        if ((prefer || !consultantAddressLine1) && nextAddressLine1) consultantAddressLine1 = nextAddressLine1;
-        if ((prefer || !consultantAddressLine2) && nextAddressLine2) consultantAddressLine2 = nextAddressLine2;
-        if ((prefer || !consultantAddressLine3) && nextAddressLine3) consultantAddressLine3 = nextAddressLine3;
-        if ((prefer || !consultantCompanyName) && nextCompanyName) consultantCompanyName = nextCompanyName;
-        if ((prefer || !consultantName) && nextConsultantName) consultantName = nextConsultantName;
-        if ((prefer || !consultantMobile) && nextConsultantMobile) consultantMobile = nextConsultantMobile;
-        if ((prefer || !consultantEmail) && nextConsultantEmail) consultantEmail = nextConsultantEmail;
-      };
-
-      const consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
-        templateType,
-        projectData
-      );
-
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData.session?.access_token;
-        if (token) {
-          const res = await fetch("/api/preview-consultant-metadata", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              access_token: token,
-              ...(consultantLookupUserIds.length
-                ? { consultant_lookup_user_ids: consultantLookupUserIds }
-                : {}),
-            }),
-          });
-          if (res.ok) {
-            const payload = (await res.json()) as { metadata?: unknown };
-            if (
-              process.env.NODE_ENV === "development" &&
-              templateType === "Fire Safety Consultant"
-            ) {
-              console.log("[fire-preview-metadata-api]", payload.metadata ?? null);
-            }
-            if (payload.metadata) mergeConsultantMeta(payload.metadata, true);
-          }
-        }
-      } catch {
-        /* fall through to client-only sources */
-      }
-
-      mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
-
-      const needsConsultantRegRefresh =
-        templateType === "Licensed Surveyor"
-          ? !lbsLicenseNo || !lbsExpiryDate
-          : !coaRegNo || !coaExpiryDate;
-
-      if (needsConsultantRegRefresh) {
-        await supabase.auth.refreshSession();
-        mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
-      }
-
-      if (
-        templateType === "Licensed Surveyor"
-          ? !lbsLicenseNo || !lbsExpiryDate
-          : !coaRegNo || !coaExpiryDate
-      ) {
-        const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, consultantLookupUserIds);
-        if (serverMeta) mergeConsultantMeta(serverMeta);
-      }
-
-      const ownerLookupUserIds = [
-        ...new Set(
-          ownerApplicants
-            .flatMap((owner) => [
-              normalizeLookupId(owner.user_id),
-              normalizeLookupId(owner.userId),
-              normalizeLookupId(owner.id),
-              normalizeLookupId((owner as { owner_id?: unknown }).owner_id),
-              normalizeLookupId((owner as { ownerId?: unknown }).ownerId),
-            ])
-            .filter(Boolean)
-        ),
-      ];
-      let ownerMetaSnapshot: unknown = null;
-      for (const ownerLookupUserId of ownerLookupUserIds) {
-        const ownerMeta = await fetchRawUserMetadataFromApi(
+      const { fields, previewSource, templateType, fieldMapping } =
+        await buildApplicationPreviewContext({
           userMetadata,
-          [ownerLookupUserId],
-          ownerApplicant?.email
-        );
-        if (!ownerMeta) continue;
-        ownerMetaSnapshot = ownerMeta;
-        if (!clientCompanyDesignation) {
-          const resolvedType = pickEntityTypeFromMeta(ownerMeta);
-          if (resolvedType) clientCompanyDesignation = resolvedType;
-        }
-        if (!clientName) {
-          const resolvedClientName = pickPersonFullNameFromMeta(ownerMeta);
-          if (resolvedClientName) clientName = resolvedClientName;
-        }
-        if (!ownerLetterheadUrl) {
-          const resolvedLetterheadUrl = pickLetterheadUrlFromMeta(ownerMeta);
-          if (resolvedLetterheadUrl) ownerLetterheadUrl = resolvedLetterheadUrl;
-        }
-        const resolved = pickEntityNameFromMeta(ownerMeta);
-        if (resolved) {
-          clientCompanyName = resolved;
-          if (clientCompanyDesignation && clientName) break;
-        }
-      }
-
-      if (process.env.NODE_ENV === "development") {
-        console.log("[preview-owner-debug]", {
-          ownerApplicants,
-          ownerLookupUserIds,
-          clientCompanyName,
-          clientName,
-          clientCompanyDesignation,
-          ownerMeta: ownerMetaSnapshot,
-        });
-        console.log("[preview-owner-raw_user_meta_data]", ownerMetaSnapshot);
-      }
-
-      const fields = mapApplicationPreviewFields(
-        {
+          projectData,
           selectedApplication,
           applicationNo,
           applicationCreatedAt,
-          coaRegNo,
-          coaExpiryDate,
-          lbsLicenseNo,
-          lbsExpiryDate,
-          consultantAddressLine1,
-          consultantAddressLine2,
-          consultantAddressLine3,
-          consultantName,
-          consultantCompanyName,
-          consultantMobile,
-          consultantEmail,
-          clientCompanyName,
-          clientName,
-          clientCompanyDesignation,
-          projectData,
-        },
-        templateType
-      );
-      const previewSource = {
-        projectId,
-        selectedApplication,
-        applicationNo,
-        applicationCreatedAt,
-        coaRegNo,
-        coaExpiryDate,
-        lbsLicenseNo,
-        lbsExpiryDate,
-        consultantAddressLine1,
-        consultantAddressLine2,
-        consultantAddressLine3,
-        consultantName,
-        consultantCompanyName,
-        consultantMobile,
-        consultantEmail,
-        clientCompanyName,
-        clientName,
-        clientCompanyDesignation,
-        ownerLetterheadUrl,
-        ownerDebug: {
-          ownerApplicants,
-          ownerLookupUserIds,
-          ownerMetaSnapshot,
-          resolvedClientCompanyName: clientCompanyName,
-          resolvedClientName: clientName,
-          resolvedClientCompanyDesignation: clientCompanyDesignation,
-          resolvedOwnerLetterheadUrl: ownerLetterheadUrl,
-        },
-        consultantLookupUserIds,
-        projectData,
-      };
+          projectId,
+        });
 
       // Always release the previous blob URL before opening a new preview.
       if (previewUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
 
-      // Global HTML iframe path for all consultant templates.
-      const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
       const html = await generateApplicationPreviewHtml(
         fields,
         templateType,
@@ -781,6 +866,9 @@ export default function ApplicationDetailsPage() {
         {previewError && (
           <p className="text-sm text-red-600 mt-3">{previewError}</p>
         )}
+        {detailsFieldsError && (
+          <p className="text-sm text-red-600 mt-2">{detailsFieldsError}</p>
+        )}
         {savePdfMessage && (
           <p className="text-sm text-emerald-700 mt-2">{savePdfMessage}</p>
         )}
@@ -788,25 +876,29 @@ export default function ApplicationDetailsPage() {
           <p className="text-sm text-red-600 mt-2">{savePdfError}</p>
         )}
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Application</p>
-            <p className="text-sm font-semibold text-gray-900 mt-1 break-words">
-              {selectedApplication || "-"}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Application No</p>
-            <p className="text-sm font-semibold text-gray-900 mt-1 break-all">
-              {applicationNo || "-"}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 md:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Application ID</p>
-            <p className="text-sm text-gray-800 mt-1 break-all">{applicationId || "-"}</p>
-          </div>
+        <div className="mt-6">
+          {detailsFieldsLoading ? (
+            <p className="text-sm text-gray-500">Resolving fields…</p>
+          ) : detailsFieldRows.length === 0 && !detailsFieldsError ? (
+            <p className="text-sm text-gray-500">No letter fields to show yet.</p>
+          ) : (
+            <div className="rounded-xl border border-gray-200 overflow-hidden bg-white divide-y divide-gray-200">
+              {detailsFieldRows.map((row) => (
+                <div
+                  key={row.key}
+                  className="grid grid-cols-1 sm:grid-cols-[minmax(160px,38%)_1fr] gap-1 sm:gap-4 px-4 py-3"
+                >
+                  <div className="text-sm text-gray-600 font-medium">{row.label}</div>
+                  <div
+                    className="text-sm text-gray-900 break-words sm:break-all sm:min-w-0"
+                    title={row.value.length > 120 ? row.value : undefined}
+                  >
+                    {row.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
