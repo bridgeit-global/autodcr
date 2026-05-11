@@ -291,6 +291,17 @@ export default function ApplicationDetailsPage() {
     templateType: TemplateType;
     previewSource: ApplicationPreviewSource;
   } | null>(null);
+  const buildApplicationPreviewPdfBlob = async (): Promise<Blob> => {
+    const ctx = previewPdfContextRef.current;
+    if (!ctx) {
+      throw new Error("Preview data is missing. Close the preview and click Preview again.");
+    }
+    return generateApplicationPreviewPdf(
+      ctx.fields,
+      ctx.templateType,
+      ctx.previewSource
+    );
+  };
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -666,7 +677,6 @@ export default function ApplicationDetailsPage() {
     setSavePdfMessage(null);
     setSavePdfError(null);
     try {
-      const blob = await generateApplicationPreviewPdf(ctx.fields, ctx.templateType, ctx.previewSource);
       const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
 
       const {
@@ -713,15 +723,21 @@ export default function ApplicationDetailsPage() {
         }
       };
 
+      // First upload writes `application_urls` in DB.
+      const blob = await buildApplicationPreviewPdfBlob();
       await uploadPdfBlob(blob);
 
-      const blobWithQr = await generateApplicationPreviewPdf(
+      // Rebuild PDF so injected QR now targets the saved URL.
+      const blobWithQr = await buildApplicationPreviewPdfBlob();
+      await uploadPdfBlob(blobWithQr);
+
+      // Keep preview paginated in the modal.
+      const htmlWithQr = await generateApplicationPreviewHtml(
         ctx.fields,
         ctx.templateType,
         ctx.previewSource
       );
-      await uploadPdfBlob(blobWithQr);
-
+      setPreviewHtml(htmlWithQr);
       setPdfSavedForCurrentPreview(true);
       setSavePdfMessage("Application PDF saved to project.");
     } catch (err: unknown) {
@@ -807,21 +823,7 @@ export default function ApplicationDetailsPage() {
         saveCompleted={pdfSavedForCurrentPreview}
         saveFeedbackError={savePdfError}
         saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
-        getPdfBlob={
-          previewHtml
-            ? async () => {
-                const ctx = previewPdfContextRef.current;
-                if (!ctx) {
-                  throw new Error("Preview data is missing. Close the preview and click Preview again.");
-                }
-                return generateApplicationPreviewPdf(
-                  ctx.fields,
-                  ctx.templateType,
-                  ctx.previewSource
-                );
-              }
-            : undefined
-        }
+        getPdfBlob={previewHtml ? () => buildApplicationPreviewPdfBlob() : undefined}
         signingFileName={
           previewPdfContextRef.current
             ? `${previewPdfContextRef.current.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_")}-application.pdf`
