@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
@@ -59,6 +59,7 @@ export default function DocumentPreviewModal({
   signingFileName,
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const previewBlobUrlRef = useRef<string | null>(null);
   const [signModalOpen, setSignModalOpen] = useState(false);
 
   useEffect(() => {
@@ -68,6 +69,40 @@ export default function DocumentPreviewModal({
       document.body.style.overflow = "auto";
     };
   }, [open]);
+
+  // Blob URL navigation gives a real `Window` on `contentDocument.defaultView`
+  // (unlike `srcDoc` / `document.write`, which break html2canvas on some browsers).
+  useLayoutEffect(() => {
+    if (!open || !htmlContent || fileUrl) {
+      if (previewBlobUrlRef.current) {
+        URL.revokeObjectURL(previewBlobUrlRef.current);
+        previewBlobUrlRef.current = null;
+      }
+      if (iframeRef.current && !fileUrl) {
+        iframeRef.current.src = "about:blank";
+      }
+      return;
+    }
+    const frame = iframeRef.current;
+    if (!frame) return;
+
+    if (previewBlobUrlRef.current) {
+      URL.revokeObjectURL(previewBlobUrlRef.current);
+      previewBlobUrlRef.current = null;
+    }
+    const url = URL.createObjectURL(
+      new Blob([htmlContent], { type: "text/html;charset=utf-8" })
+    );
+    previewBlobUrlRef.current = url;
+    frame.src = url;
+
+    return () => {
+      URL.revokeObjectURL(url);
+      if (previewBlobUrlRef.current === url) {
+        previewBlobUrlRef.current = null;
+      }
+    };
+  }, [open, htmlContent, fileUrl]);
 
   const hasContent = Boolean(fileUrl) || Boolean(htmlContent);
   if (!open || !hasContent) return null;
@@ -268,7 +303,7 @@ export default function DocumentPreviewModal({
                     <iframe
                       ref={iframeRef}
                       title={title || "Document Preview"}
-                      srcDoc={htmlContent}
+                      src="about:blank"
                       className="block w-full bg-white border-0"
                       style={{ height: "78vh" }}
                     />

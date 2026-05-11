@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import type { TemplateType } from "@/app/templates/templateGenerators";
 import { createClient } from "@supabase/supabase-js";
 import QRCode from "qrcode";
-import { readFile } from "fs/promises";
-import path from "path";
 
 import { PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
 
@@ -222,21 +220,6 @@ async function downloadGlobalTemplateHtml(opts: {
   return await file.text();
 }
 
-async function readLocalTemplateHtml(
-  templateType: TemplateType
-): Promise<string | null> {
-  // Temporary local override for architect preview until template is finalized.
-  if (templateType !== "Architect") return null;
-
-  const localPath = path.join(process.cwd(), "html", "architect.html");
-  try {
-    const html = await readFile(localPath, "utf-8");
-    return html.trim() ? html : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -263,13 +246,10 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "").trim() || null;
 
-    const localHtmlTemplate = await readLocalTemplateHtml(body.templateType);
-    const htmlTemplate =
-      localHtmlTemplate ||
-      (await downloadGlobalTemplateHtml({
-        templateType: body.templateType,
-        authorizationToken: token,
-      }));
+    const htmlTemplate = await downloadGlobalTemplateHtml({
+      templateType: body.templateType,
+      authorizationToken: token,
+    });
 
     if (!htmlTemplate) {
       return NextResponse.json(

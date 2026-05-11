@@ -717,11 +717,10 @@ const PDF_CONTENT_HEIGHT_PT = A4_PAGE_HEIGHT_PT - PDF_MARGIN_TOP_PT - PDF_MARGIN
 // the image is proportionally shrunk so it fits exactly within the cap.
 const MAX_PAGES = 2;
 
-// Render the host at the same width as the PDF content area so html2canvas
-// produces an image that maps 1:1 onto the page's content rectangle. Using
-// the natural Word width keeps line-wrapping identical to the original.
-// 1pt = 96/72 px at 96 dpi → multiply by 1.3333 to get CSS pixels.
-const HOST_WIDTH_PX = Math.round(PDF_CONTENT_WIDTH_PT * (96 / 72));
+// Render host at full A4 width so template backgrounds sized as `210mm 297mm`
+// align to one physical page. Content margins are still applied during
+// PDF composition (`xOffsetPt` / `marginTopPt` / `marginBottomPt`).
+const HOST_WIDTH_PX = Math.round(A4_PAGE_WIDTH_PT * (96 / 72));
 
 /**
  * Mounts a hidden host in the main document with the parsed Word HTML's
@@ -743,7 +742,10 @@ function mountHtmlIntoHiddenHost(html: string): HTMLDivElement {
   host.style.width = `${HOST_WIDTH_PX}px`;
   host.style.boxSizing = "border-box";
   host.style.padding = "0";
-  host.style.background = "#ffffff";
+  // Do not set `background` here: templates put the letterhead on `body` which
+  // we rewrite to `.pdf-host-root`. An inline background would win the cascade
+  // and strip the letterhead in html2canvas captures (Print uses the iframe and
+  // keeps the full `background: #fff url(...)` rule).
   host.style.color = "#000000";
   host.style.pointerEvents = "none";
 
@@ -797,165 +799,225 @@ export function prewarmPreviewPdfRuntime(): void {
   void loadPdfDeps();
 }
 
+type RasterizeDomOptions = {
+  /** Forces html2canvas layout width (hidden host path uses {@link HOST_WIDTH_PX}). */
+  windowWidthPx?: number;
+  /**
+   * Sharper, heavier capture (used for Supabase uploads from the preview iframe).
+   * Higher canvas scale + higher JPEG quality + slower PDF image compression.
+   */
+  highFidelity?: boolean;
+};
+
+type RasterPdfMetrics = {
+  captureScale: number;
+  jpegQuality: number;
+  imageCompression: "MEDIUM" | "FAST";
+  windowWidthPx: number;
+  plumberCcBreakPx: number | null;
+};
+
+function computeRasterPdfMetrics(
+  captureRoot: HTMLElement,
+  templateType: TemplateType | undefined,
+  highFidelity: boolean
+): RasterPdfMetrics {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const captureScale = highFidelity
+    ? Math.min(4, Math.max(3.25, dpr * 2))
+    : dpr >= 2
+      ? 2.5
+      : 3;
+  const jpegQuality = highFidelity ? 0.98 : 0.95;
+  const imageCompression: "MEDIUM" | "FAST" = highFidelity ? "MEDIUM" : "FAST";
+  const windowWidthPx = Math.max(
+    1,
+    Math.ceil(Math.max(captureRoot.scrollWidth, captureRoot.getBoundingClientRect().width))
+  );
+  let plumberCcBreakPx: number | null = null;
+  if (templateType === "Plumber") {
+    const ccAnchor = captureRoot.querySelector(".cc-start") as HTMLElement | null;
+    if (ccAnchor) {
+      const hostRect = captureRoot.getBoundingClientRect();
+      const anchorRect = ccAnchor.getBoundingClientRect();
+      const offset = anchorRect.top - hostRect.top;
+      plumberCcBreakPx = offset > 0 ? offset : null;
+    }
+  }
+  return { captureScale, jpegQuality, imageCompression, windowWidthPx, plumberCcBreakPx };
+}
+
+async function composePdfFromRasterCanvas(
+  canvas: HTMLCanvasElement,
+  templateType: TemplateType | undefined,
+  metrics: RasterPdfMetrics
+): Promise<Blob> {
+  const { JsPdfCtor } = await loadPdfDeps();
+  const captureScale = metrics.captureScale;
+  const jpegQuality = metrics.jpegQuality;
+  const imageCompression = metrics.imageCompression;
+  const plumberCcBreakPx = metrics.plumberCcBreakPx;
+
+  const pdf = new JsPdfCtor({ unit: "pt", format: "a4", orientation: "portrait" });
+  const marginTopPt = templateType === "Plumber" ? 60 : PDF_MARGIN_TOP_PT;
+  const marginBottomPt = templateType === "Plumber" ? 90 : PDF_MARGIN_BOTTOM_PT;
+  const contentWidthPt = PDF_CONTENT_WIDTH_PT;
+  const contentHeightPt = A4_PAGE_HEIGHT_PT - marginTopPt - marginBottomPt;
+
+  const naturalPxPerPt = canvas.width / contentWidthPt;
+  const naturalContentHeightPt = canvas.height / naturalPxPerPt;
+  const naturalPages = Math.ceil(naturalContentHeightPt / contentHeightPt);
+
+  const fitScale =
+    naturalPages > MAX_PAGES ? (MAX_PAGES * contentHeightPt) / naturalContentHeightPt : 1;
+
+  const effectiveContentWidthPt = contentWidthPt * fitScale;
+  const effectivePxPerPt = canvas.width / effectiveContentWidthPt;
+  const pageContentCanvasHeightPx = Math.floor(contentHeightPt * effectivePxPerPt);
+  const xOffsetPt = PDF_MARGIN_SIDE_PT + (PDF_CONTENT_WIDTH_PT - effectiveContentWidthPt) / 2;
+
+  let consumed = 0;
+  let pageIndex = 0;
+  const forcedBreakCanvasPx =
+    plumberCcBreakPx != null ? Math.floor(plumberCcBreakPx * captureScale) : null;
+  let plumberForcedBreakApplied = false;
+  while (consumed < canvas.height) {
+    let sliceHeightPx = Math.min(pageContentCanvasHeightPx, canvas.height - consumed);
+    if (
+      templateType === "Plumber" &&
+      !plumberForcedBreakApplied &&
+      forcedBreakCanvasPx != null &&
+      forcedBreakCanvasPx > consumed &&
+      forcedBreakCanvasPx < canvas.height
+    ) {
+      const untilForcedBreak = forcedBreakCanvasPx - consumed;
+      if (untilForcedBreak > 0) {
+        sliceHeightPx = Math.min(sliceHeightPx, untilForcedBreak);
+        plumberForcedBreakApplied = true;
+      }
+    }
+    const sliceCanvas = document.createElement("canvas");
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = sliceHeightPx;
+    const ctx = sliceCanvas.getContext("2d");
+    if (!ctx) break;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+    ctx.drawImage(canvas, 0, consumed, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+    const dataUrl = sliceCanvas.toDataURL("image/jpeg", jpegQuality);
+    const sliceHeightPt = sliceHeightPx / effectivePxPerPt;
+    if (pageIndex > 0) pdf.addPage();
+    pdf.addImage(
+      dataUrl,
+      "JPEG",
+      xOffsetPt,
+      marginTopPt,
+      effectiveContentWidthPt,
+      sliceHeightPt,
+      undefined,
+      imageCompression
+    );
+    consumed += sliceHeightPx;
+    pageIndex += 1;
+  }
+
+  const totalPages = pdf.getNumberOfPages();
+  const footerY = A4_PAGE_HEIGHT_PT - 26;
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.setTextColor(80, 80, 80);
+  const footerX = A4_PAGE_WIDTH_PT / 2;
+  for (let i = 1; i <= totalPages; i++) {
+    pdf.setPage(i);
+    pdf.text(`Page ${i} of ${totalPages}`, footerX, footerY, {
+      align: "center",
+    });
+  }
+
+  return pdf.output("blob");
+}
+
+/**
+ * Rasterizes an in-document DOM subtree (same pixels as Print when `captureRoot`
+ * is the preview iframe `body` after Paged.js layout).
+ */
+async function rasterizeDomRootToPdfBlob(
+  captureRoot: HTMLElement,
+  templateType?: TemplateType,
+  options?: RasterizeDomOptions
+): Promise<Blob> {
+  await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+  await Promise.all(
+    Array.from(captureRoot.querySelectorAll("img")).map(
+      (img) =>
+        img.complete && img.naturalWidth > 0
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              const done = () => resolve();
+              img.addEventListener("load", done, { once: true });
+              img.addEventListener("error", done, { once: true });
+            })
+    )
+  );
+
+  const highFidelity = Boolean(options?.highFidelity);
+  const baseMetrics = computeRasterPdfMetrics(captureRoot, templateType, highFidelity);
+  const windowWidthPx = options?.windowWidthPx ?? baseMetrics.windowWidthPx;
+  const metrics: RasterPdfMetrics = { ...baseMetrics, windowWidthPx };
+
+  const { html2canvas } = await loadPdfDeps();
+
+  const canvas = await html2canvas(captureRoot, {
+    scale: metrics.captureScale,
+    backgroundColor: "#ffffff",
+    useCORS: true,
+    windowWidth: windowWidthPx,
+    letterRendering: false,
+    ...(highFidelity
+      ? {
+          onclone: (clonedDoc: Document) => {
+            const b = clonedDoc.body;
+            if (!b) return;
+            b.style.setProperty("-webkit-font-smoothing", "antialiased");
+            b.style.setProperty("-moz-osx-font-smoothing", "grayscale");
+          },
+        }
+      : {}),
+  } as Parameters<typeof html2canvas>[1]);
+
+  return composePdfFromRasterCanvas(canvas, templateType, metrics);
+}
+
+/**
+ * Rasterizes a full HTML document string in a hidden host on the **main** `document`
+ * (always has `defaultView`) — reliable for **Save to project** / QR uploads.
+ * Preview iframe capture was removed due to browser `defaultView` / timing issues.
+ */
+export async function applicationPreviewPdfFromFullHtml(
+  html: string,
+  templateType: TemplateType,
+  options?: { highFidelity?: boolean }
+): Promise<Blob> {
+  return convertHtmlToPdfBlobInBrowser(html, templateType, options);
+}
+
 async function convertHtmlToPdfBlobInBrowser(
   html: string,
-  templateType?: TemplateType
+  templateType?: TemplateType,
+  opts?: { highFidelity?: boolean }
 ): Promise<Blob> {
   if (typeof window === "undefined") {
     throw new Error("HTML→PDF conversion can only run in the browser.");
   }
 
-  // Kick off the heavy dynamic imports in parallel with DOM mount + layout so
-  // module loading overlaps with rendering instead of running sequentially.
-  const depsPromise = loadPdfDeps();
   const host = mountHtmlIntoHiddenHost(html);
 
   try {
-    // Single RAF is enough — html2canvas re-reads layout itself before capture.
-    await new Promise((r) => requestAnimationFrame(() => r(null)));
-
-    await Promise.all(
-      Array.from(host.querySelectorAll("img")).map(
-        (img) =>
-          img.complete && img.naturalWidth > 0
-            ? Promise.resolve()
-            : new Promise<void>((resolve) => {
-                const done = () => resolve();
-                img.addEventListener("load", done, { once: true });
-                img.addEventListener("error", done, { once: true });
-              })
-      )
-    );
-
-    const { html2canvas, JsPdfCtor } = await depsPromise;
-
-    // Capture scale chosen as a balance: 2.5-3× lands at ~190-225 dpi which
-    // stays crisp at modal zoom levels but keeps html2canvas + JPEG encoding
-    // fast enough to feel instant. (Going to 4× ~doubles generation time for
-    // a barely-perceptible sharpness gain after PDF.js downscales it.)
-    const dpr = window.devicePixelRatio || 1;
-    const captureScale = dpr >= 2 ? 2.5 : 3;
-    // `letterRendering` is a non-typed html2canvas option that forces per-character
-    // text rendering rather than batched word-level rendering — produces sharper
-    // text edges for small font sizes.
-    const plumberCcBreakPx =
-      templateType === "Plumber"
-        ? (() => {
-            const ccAnchor = host.querySelector(".cc-start") as HTMLElement | null;
-            if (!ccAnchor) return null;
-            const hostRect = host.getBoundingClientRect();
-            const anchorRect = ccAnchor.getBoundingClientRect();
-            const offset = anchorRect.top - hostRect.top;
-            return offset > 0 ? offset : null;
-          })()
-        : null;
-
-    const canvas = await html2canvas(host, {
-      scale: captureScale,
-      backgroundColor: "#ffffff",
-      useCORS: true,
-      windowWidth: HOST_WIDTH_PX,
-      letterRendering: true,
-    } as Parameters<typeof html2canvas>[1]);
-
-    const pdf = new JsPdfCtor({ unit: "pt", format: "a4", orientation: "portrait" });
-    // Plumber letters are currently tested with heavy letterhead/footer artwork.
-    // Keep a larger reserved bottom band so content spills to page 2 instead of
-    // overlapping the footer graphics/text.
-    const marginTopPt =
-      templateType === "Plumber" ? 60 : PDF_MARGIN_TOP_PT;
-    const marginBottomPt =
-      templateType === "Plumber" ? 90 : PDF_MARGIN_BOTTOM_PT;
-    const contentWidthPt = PDF_CONTENT_WIDTH_PT;
-    const contentHeightPt = A4_PAGE_HEIGHT_PT - marginTopPt - marginBottomPt;
-
-    // Map canvas pixels to PDF points using the content rectangle width.
-    const naturalPxPerPt = canvas.width / contentWidthPt;
-    const naturalContentHeightPt = canvas.height / naturalPxPerPt;
-    const naturalPages = Math.ceil(naturalContentHeightPt / contentHeightPt);
-
-    // If content overflows MAX_PAGES, proportionally shrink the rendered image
-    // so it fits exactly within MAX_PAGES (text gets slightly smaller, but
-    // the layout stays intact).
-    const fitScale =
-      naturalPages > MAX_PAGES
-        ? (MAX_PAGES * contentHeightPt) / naturalContentHeightPt
-        : 1;
-
-    const effectiveContentWidthPt = contentWidthPt * fitScale;
-    const effectivePxPerPt = canvas.width / effectiveContentWidthPt;
-    const pageContentCanvasHeightPx = Math.floor(
-      contentHeightPt * effectivePxPerPt
-    );
-    // Center horizontally if shrunk so the page doesn't look left-biased.
-    const xOffsetPt =
-      PDF_MARGIN_SIDE_PT + (PDF_CONTENT_WIDTH_PT - effectiveContentWidthPt) / 2;
-
-    let consumed = 0;
-    let pageIndex = 0;
-    const forcedBreakCanvasPx =
-      plumberCcBreakPx != null ? Math.floor(plumberCcBreakPx * captureScale) : null;
-    let plumberForcedBreakApplied = false;
-    while (consumed < canvas.height) {
-      let sliceHeightPx = Math.min(pageContentCanvasHeightPx, canvas.height - consumed);
-      if (
-        templateType === "Plumber" &&
-        !plumberForcedBreakApplied &&
-        forcedBreakCanvasPx != null &&
-        forcedBreakCanvasPx > consumed &&
-        forcedBreakCanvasPx < canvas.height
-      ) {
-        const untilForcedBreak = forcedBreakCanvasPx - consumed;
-        if (untilForcedBreak > 0) {
-          sliceHeightPx = Math.min(sliceHeightPx, untilForcedBreak);
-          plumberForcedBreakApplied = true;
-        }
-      }
-      const sliceCanvas = document.createElement("canvas");
-      sliceCanvas.width = canvas.width;
-      sliceCanvas.height = sliceHeightPx;
-      const ctx = sliceCanvas.getContext("2d");
-      if (!ctx) break;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
-      ctx.drawImage(
-        canvas,
-        0, consumed, canvas.width, sliceHeightPx,
-        0, 0, canvas.width, sliceHeightPx
-      );
-      // JPEG q=0.95 is ~5× faster to encode than PNG and produces roughly
-      // 4-5× smaller PDFs at near-identical visual quality for text on white.
-      const dataUrl = sliceCanvas.toDataURL("image/jpeg", 0.95);
-      const sliceHeightPt = sliceHeightPx / effectivePxPerPt;
-      if (pageIndex > 0) pdf.addPage();
-      pdf.addImage(
-        dataUrl,
-        "JPEG",
-        xOffsetPt,
-        marginTopPt,
-        effectiveContentWidthPt,
-        sliceHeightPt,
-        undefined,
-        "FAST"
-      );
-      consumed += sliceHeightPx;
-      pageIndex += 1;
-    }
-
-    const totalPages = pdf.getNumberOfPages();
-    const footerY = A4_PAGE_HEIGHT_PT - 26;
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(9);
-    pdf.setTextColor(80, 80, 80);
-    const footerX = A4_PAGE_WIDTH_PT / 2;
-    for (let i = 1; i <= totalPages; i++) {
-      pdf.setPage(i);
-      pdf.text(`Page ${i} of ${totalPages}`, footerX, footerY, {
-        align: "center",
-      });
-    }
-
-    return pdf.output("blob");
+    return await rasterizeDomRootToPdfBlob(host, templateType, {
+      windowWidthPx: HOST_WIDTH_PX,
+      highFidelity: Boolean(opts?.highFidelity),
+    });
   } finally {
     host.remove();
   }
@@ -1329,7 +1391,7 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     box-sizing: border-box !important;
     text-align: center !important;
     overflow: visible !important;
-    padding-bottom: 0pt !important;
+    padding-bottom: 65pt !important;
   }
 
   /* During print, drop the shadow / background — only the actual content. */
@@ -1506,6 +1568,18 @@ export async function generateApplicationPreviewHtml(
   templateType: TemplateType,
   source?: ApplicationPreviewSource
 ): Promise<string> {
+  const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source);
+  if (templateType === "Plumber") {
+    return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
+  }
+  return injectPaginatedStyles(rawHtml, templateType);
+}
+
+export async function fetchApplicationPreviewHtmlRaw(
+  fields: TemplateFields,
+  templateType: TemplateType,
+  source?: ApplicationPreviewSource
+): Promise<string> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
 
   await supabase.auth.refreshSession();
@@ -1526,13 +1600,7 @@ export async function generateApplicationPreviewHtml(
     }),
   });
 
-  if (response.ok) {
-    const rawHtml = await response.text();
-    if (templateType === "Plumber") {
-      return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
-    }
-    return injectPaginatedStyles(rawHtml, templateType);
-  }
+  if (response.ok) return await response.text();
 
   const payload = await response.json().catch(() => null);
   throw new Error(
@@ -1552,37 +1620,23 @@ export async function generateApplicationPreviewPdf(
   templateType: TemplateType,
   source?: ApplicationPreviewSource
 ): Promise<Blob> {
-  const formValues = mapToPdfFieldValues(fields, source, templateType);
-
-  await supabase.auth.refreshSession();
-  const { data: sessionData } = await supabase.auth.getSession();
-  const access_token = sessionData.session?.access_token;
-
-  const htmlResponse = await fetch("/api/application-preview-html", {
+  // Use the exact same HTML contract as preview (Paged.js wrappers/styles),
+  // then let Chromium print that final DOM.
+  const html = await generateApplicationPreviewHtml(fields, templateType, source);
+  const response = await fetch("/api/application-preview-pdf", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(access_token ? { Authorization: `Bearer ${access_token}` } : {}),
-    },
-    body: JSON.stringify({
-      templateType,
-      fields: formValues,
-      ...(source?.projectId ? { projectId: source.projectId } : {}),
-      ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html, templateType }),
   });
-
-  if (htmlResponse.ok) {
-    const html = await htmlResponse.text();
-    return convertHtmlToPdfBlobInBrowser(html, templateType);
+  const contentType = response.headers.get("content-type") || "";
+  if (response.ok && contentType.includes("application/pdf")) {
+    return await response.blob();
   }
-
-  const htmlPayload = await htmlResponse.json().catch(() => null);
+  const payload = await response.json().catch(() => null);
   const message =
-    typeof htmlPayload?.error === "string"
-      ? htmlPayload.error
-      : `HTML preview conversion failed (${htmlResponse.status}).`;
-
+    typeof payload?.error === "string"
+      ? payload.error
+      : `Chromium PDF route failed (${response.status}).`;
   throw new Error(message);
 }
 

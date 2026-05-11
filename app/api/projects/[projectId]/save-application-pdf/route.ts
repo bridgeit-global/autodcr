@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Uploads the appointment PDF to Storage and merges `application_urls` on `projects`.
+ * Uploads the saved appointment PDF to Storage and merges
+ * `application_urls` on `projects`.
  * Uses the service role for Storage/DB so client Storage RLS cannot block saves.
  * Caller must present a valid Bearer token; JWT subject must own the project.
  */
@@ -26,7 +27,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            "Server misconfigured: set SUPABASE_SERVICE_ROLE_KEY to save PDFs (bypasses Storage RLS).",
+            "Server misconfigured: set SUPABASE_SERVICE_ROLE_KEY to save files (bypasses Storage RLS).",
         },
         { status: 500 }
       );
@@ -59,7 +60,7 @@ export async function POST(
     const formData = await request.formData();
     const templateTypeRaw = formData.get("templateType");
     const userIdField = formData.get("user_id");
-    const file = formData.get("pdf");
+    const fileField = formData.get("pdf") ?? formData.get("file");
 
     const templateType = typeof templateTypeRaw === "string" ? templateTypeRaw.trim() : "";
     const claimedUserId = typeof userIdField === "string" ? userIdField.trim() : "";
@@ -75,7 +76,7 @@ export async function POST(
       return NextResponse.json({ error: "Invalid templateType." }, { status: 400 });
     }
 
-    if (!(file instanceof Blob) || file.size < 1) {
+    if (!(fileField instanceof Blob) || fileField.size < 1) {
       return NextResponse.json({ error: "Missing or empty PDF file." }, { status: 400 });
     }
 
@@ -103,7 +104,7 @@ export async function POST(
     const slug = templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
     const path = `${projectId.trim()}/saved-applications/${slug}.pdf`;
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const buffer = Buffer.from(await fileField.arrayBuffer());
 
     const { error: upErr } = await admin.storage.from("project-library").upload(path, buffer, {
       upsert: true,
