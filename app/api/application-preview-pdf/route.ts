@@ -43,6 +43,26 @@ function pickLaunchArgs(): string[] {
   return ["--no-sandbox", "--disable-setuid-sandbox"];
 }
 
+/** `networkidle0` often never settles (fonts/CDN keep-alives) → 30s “Navigation timeout”. */
+const PDF_CONTENT_WAIT = { waitUntil: "load" as const, timeout: 120_000 };
+
+/** Slim doc has no scripts — DOM ready is enough; fonts finish via `fonts.ready`. */
+const PDF_SLIM_WAIT = { waitUntil: "domcontentloaded" as const, timeout: 120_000 };
+
+async function waitFontsAndRasterSettle(page: import("puppeteer-core").Page): Promise<void> {
+  await page.evaluate(async () => {
+    try {
+      await Promise.race([
+        document.fonts.ready,
+        new Promise<void>((r) => setTimeout(() => r(), 900)),
+      ]);
+    } catch {
+      /* ignore */
+    }
+  });
+  await new Promise<void>((r) => setTimeout(() => r(), 100));
+}
+
 export async function POST(request: NextRequest) {
   let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
   try {
@@ -61,17 +81,66 @@ export async function POST(request: NextRequest) {
       headless: true,
     });
     const page = await browser.newPage();
+    await page.setDefaultNavigationTimeout(120_000);
+    await page.setDefaultTimeout(120_000);
     await page.setViewport({ width: 1240, height: 1754 });
-    await page.setContent(html, { waitUntil: "networkidle0" });
-    await page.emulateMediaType("print");
-    // If this is preview-wrapped HTML (Paged.js), wait for pagination output.
-    // This avoids printing pre-pagination state that causes footer/letterhead drift.
+    await page.setContent(html, PDF_CONTENT_WAIT);
+
     const hasPagedScript = html.includes("paged.polyfill.js");
     if (hasPagedScript) {
+      // Let Paged.js (chunker + polisher) finish and paint `.pagedjs_page` boxes.
       await page.waitForSelector(".pagedjs_page", { timeout: 10000 });
+
+      /**
+       * Paged.js often leaves the **original** letter DOM in place (same wrapper as
+       * `.pagedjs_pages`, or as a sibling). Removing only direct `body` children misses that.
+       * Re-mount **only** `.pagedjs_pages` + stylesheets into a fresh document so Puppeteer
+       * prints a single layer (fixes “two PDFs overlapping” in saved bucket objects).
+       */
+      const slimHtml = await page.evaluate(() => {
+        const pagesRoot = document.querySelector(".pagedjs_pages");
+        if (!pagesRoot) return null;
+
+        const headPieces: string[] = [];
+        document.head.querySelectorAll('meta[charset], meta[name="viewport"]').forEach((n) => {
+          headPieces.push(n.outerHTML);
+        });
+        document.head.querySelectorAll('link[rel="preconnect"]').forEach((n) => {
+          headPieces.push(n.outerHTML);
+        });
+        document.head.querySelectorAll('link[rel="stylesheet"]').forEach((n) => {
+          headPieces.push(n.outerHTML);
+        });
+        document.head.querySelectorAll("style").forEach((n) => {
+          headPieces.push(n.outerHTML);
+        });
+
+        const headHtml = headPieces.join("");
+        return `<!DOCTYPE html><html><head><meta charset="utf-8">${headHtml}</head><body style="margin:0;padding:0;background:#ffffff">${pagesRoot.outerHTML}</body></html>`;
+      });
+
+      if (slimHtml) {
+        await page.setContent(slimHtml, PDF_SLIM_WAIT);
+      } else {
+        await page.evaluate(() => {
+          const pagesRoot = document.querySelector(".pagedjs_pages");
+          const body = document.body;
+          if (!pagesRoot || !body) return;
+          const keepTags = new Set(["SCRIPT", "STYLE", "LINK", "NOSCRIPT"]);
+          Array.from(body.children).forEach((child) => {
+            if (keepTags.has(child.tagName)) return;
+            if (child === pagesRoot || child.contains(pagesRoot)) return;
+            child.remove();
+          });
+          document.querySelectorAll(".WordSection1, main.page").forEach((el) => {
+            if (!el.closest(".pagedjs_page")) el.remove();
+          });
+        });
+      }
     }
-    // Let fonts and late layout settle.
-    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    await page.emulateMediaType("print");
+    await waitFontsAndRasterSettle(page);
 
     const pdf = await page.pdf({
       format: "A4",

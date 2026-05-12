@@ -1858,3 +1858,84 @@ export async function generateApplicationPreviewPdf(
   throw new Error(message);
 }
 
+/**
+ * Inserts the mock “Owner” signature block used in {@link DocumentPreviewModal} into a
+ * **fresh** appointment-letter HTML string (before `.signature-line` in the first column).
+ *
+ * Always use this + {@link generateApplicationPreviewHtml} for signed PDFs. Do **not** pass
+ * a live iframe’s `documentElement.outerHTML` after Paged.js has run: the DOM then contains
+ * both the pre-layout source and `.pagedjs_pages`, and Chromium prints overlapping duplicate text.
+ */
+export function injectMockOwnerSignatureIntoPreviewHtml(
+  html: string,
+  _templateType?: TemplateType
+): string {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return html;
+  }
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const firstCell = parsed.querySelector(".signature-table tr td");
+  const signatureLine = firstCell?.querySelector(".signature-line");
+  if (!firstCell || !signatureLine) return html;
+  if (firstCell.querySelector("#preview-dummy-owner-sign")) return html;
+
+  const fontLinkId = "preview-owner-signature-font-link";
+  if (!parsed.getElementById(fontLinkId)) {
+    const link = parsed.createElement("link");
+    link.id = fontLinkId;
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
+    parsed.head.appendChild(link);
+  }
+
+  const wrap = parsed.createElement("div");
+  wrap.id = "preview-dummy-owner-sign";
+  wrap.setAttribute(
+    "style",
+    "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
+  );
+  wrap.innerHTML = `
+        <span style="
+          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
+          font-size:clamp(28px,4.2vw,36px);
+          font-weight:400;
+          line-height:1.15;
+          color:#0f172a;
+          letter-spacing:0.02em;
+          display:inline-block;
+          transform:rotate(-2deg);
+          text-shadow:0 1px 0 rgba(255,255,255,0.6);
+        ">Owner</span>
+      `;
+  firstCell.insertBefore(wrap, signatureLine);
+  (signatureLine as HTMLElement).style.marginTop = "4px";
+  return parsed.documentElement.outerHTML;
+}
+
+/**
+ * Renders arbitrary preview HTML to PDF via the same `/api/application-preview-pdf` pipeline
+ * as {@link generateApplicationPreviewPdf}. Prefer building HTML with
+ * {@link generateApplicationPreviewHtml} + {@link injectMockOwnerSignatureIntoPreviewHtml}
+ * for mock-signed saves (avoid iframe snapshots post-Paged.js).
+ */
+export async function generateApplicationPreviewPdfFromHtml(
+  html: string,
+  templateType: TemplateType
+): Promise<Blob> {
+  const response = await fetch("/api/application-preview-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html, templateType }),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  if (response.ok && contentType.includes("application/pdf")) {
+    return await response.blob();
+  }
+  const payload = await response.json().catch(() => null);
+  const message =
+    typeof payload?.error === "string"
+      ? payload.error
+      : `Chromium PDF route failed (${response.status}).`;
+  throw new Error(message);
+}
+

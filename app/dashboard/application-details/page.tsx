@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import {
+  normalizeApplicationWorkflowStage,
+  type ApplicationWorkflowStage,
+} from "@/app/components/DraftApplicationsModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
@@ -11,6 +15,8 @@ import {
   buildDetailsFieldRowsForUi,
   generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
+  generateApplicationPreviewPdfFromHtml,
+  injectMockOwnerSignatureIntoPreviewHtml,
   mapApplicationPreviewFields,
   mapToPdfFieldValues,
   mapSelectedApplicationToTemplate,
@@ -544,6 +550,7 @@ async function buildApplicationPreviewContext(
 
 export default function ApplicationDetailsPage() {
   const { userMetadata } = useUserMetadata();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const selectedApplication = searchParams.get("selectedApplication");
   const applicationNo = searchParams.get("applicationNo");
@@ -566,6 +573,11 @@ export default function ApplicationDetailsPage() {
   const [detailsFieldRows, setDetailsFieldRows] = useState<PdfDetailsFieldRow[]>([]);
   const [detailsFieldsLoading, setDetailsFieldsLoading] = useState(false);
   const [detailsFieldsError, setDetailsFieldsError] = useState<string | null>(null);
+  const [applicationWorkflowStage, setApplicationWorkflowStage] =
+    useState<ApplicationWorkflowStage>("draft");
+  const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
+  const [signedDocSuccessDialogOpen, setSignedDocSuccessDialogOpen] = useState(false);
+  const [pendingDashboardUrl, setPendingDashboardUrl] = useState<string | null>(null);
   const previewPdfContextRef = useRef<{
     fields: TemplateFields;
     templateType: TemplateType;
@@ -605,14 +617,15 @@ export default function ApplicationDetailsPage() {
     const loadApplication = async () => {
       const { data, error } = await supabase
         .from("applications")
-        .select("created_at")
+        .select("created_at, workflow_stage")
         .eq("id", applicationId)
         .single();
       if (error) {
-        console.error("Failed to load application created_at for preview mapping:", error);
+        console.error("Failed to load application for preview mapping:", error);
         return;
       }
       setApplicationCreatedAt(data?.created_at ?? null);
+      setApplicationWorkflowStage(normalizeApplicationWorkflowStage(data?.workflow_stage));
     };
     void loadApplication();
   }, [isReadOnlyMode, applicationId]);
@@ -696,6 +709,21 @@ export default function ApplicationDetailsPage() {
       previewPdfContextRef.current = null;
       setIsPreviewLoading(true);
 
+      let workflowStageForPreview = applicationWorkflowStage;
+      if (applicationId) {
+        const { data: appRow } = await supabase
+          .from("applications")
+          .select("workflow_stage")
+          .eq("id", applicationId)
+          .maybeSingle();
+        if (appRow?.workflow_stage != null && appRow.workflow_stage !== "") {
+          workflowStageForPreview = normalizeApplicationWorkflowStage(
+            String(appRow.workflow_stage)
+          );
+          setApplicationWorkflowStage(workflowStageForPreview);
+        }
+      }
+
       const { fields, previewSource, templateType, fieldMapping } =
         await buildApplicationPreviewContext({
           userMetadata,
@@ -709,6 +737,31 @@ export default function ApplicationDetailsPage() {
       // Always release the previous blob URL before opening a new preview.
       if (previewUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
+      }
+
+      if (workflowStageForPreview === "approved_verified" && projectId) {
+        const { data: urlsRow } = await supabase
+          .from("projects")
+          .select("application_urls")
+          .eq("id", projectId)
+          .maybeSingle();
+        const raw = urlsRow?.application_urls;
+        const entry =
+          raw && typeof raw === "object" && !Array.isArray(raw)
+            ? (raw as Record<string, unknown>)[templateType]
+            : undefined;
+        const savedPdfUrl =
+          typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
+        if (savedPdfUrl) {
+          previewPdfContextRef.current = { fields, templateType, previewSource };
+          setPdfSavedForCurrentPreview(true);
+          setPreviewReadyForSave(true);
+          setPreviewUrl(savedPdfUrl);
+          setPreviewHtml(null);
+          setPreviewFieldMapping(fieldMapping);
+          setPreviewOpen(true);
+          return;
+        }
       }
 
       const html = await generateApplicationPreviewHtml(
@@ -748,6 +801,169 @@ export default function ApplicationDetailsPage() {
     }
   };
 
+  const handleMockSignComplete = async () => {
+    if (!projectId) {
+      setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
+      return;
+    }
+
+    let resolvedApplicationId = applicationId;
+    if (!resolvedApplicationId?.trim() && selectedApplication) {
+      const { data: appLookup } = await supabase
+        .from("applications")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("permission_type", selectedApplication)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (appLookup?.id) resolvedApplicationId = appLookup.id;
+    }
+
+    if (!resolvedApplicationId?.trim()) {
+      setSavePdfError(
+        "Missing application id. Use Application Details from the user dashboard (application number link) so signing can update your application."
+      );
+      return;
+    }
+
+    const ctx = previewPdfContextRef.current;
+    if (!ctx) {
+      setSavePdfError("Preview context is missing. Close the preview and open Preview again.");
+      return;
+    }
+
+    setIsSavingPdf(true);
+    setSavePdfMessage(null);
+    setSavePdfError(null);
+
+    try {
+      const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+
+      const {
+        data: { user: authUser },
+        error: authUserErr,
+      } = await supabase.auth.getUser();
+      if (authUserErr || !authUser?.id) {
+        throw new Error("Not signed in. Please log in again.");
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData.session?.access_token;
+      if (!authToken) {
+        throw new Error("Missing session token. Please log in again.");
+      }
+
+      const baseHtml = await generateApplicationPreviewHtml(
+        ctx.fields,
+        ctx.templateType,
+        ctx.previewSource
+      );
+      const htmlWithSign = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
+
+      const pdfBlob = await generateApplicationPreviewPdfFromHtml(htmlWithSign, ctx.templateType);
+
+      const formData = new FormData();
+      formData.append("pdf", pdfBlob, `${slug}.pdf`);
+      formData.append("templateType", ctx.templateType);
+      formData.append("user_id", authUser.id);
+
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/save-application-pdf`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errBody = (await response.json().catch(() => null)) as {
+          error?: string;
+          details?: string;
+        } | null;
+        const msg =
+          typeof errBody?.error === "string"
+            ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+            : `Save failed (${response.status}).`;
+        throw new Error(msg);
+      }
+
+      const jsonBody = (await response.json().catch(() => null)) as {
+        publicUrl?: string;
+      } | null;
+      const publicUrl =
+        typeof jsonBody?.publicUrl === "string" && jsonBody.publicUrl.trim()
+          ? jsonBody.publicUrl.trim()
+          : null;
+
+      const { error: stageErr } = await supabase
+        .from("applications")
+        .update({ workflow_stage: "approved_verified" })
+        .eq("id", resolvedApplicationId);
+
+      if (stageErr) {
+        console.error("Failed to update application workflow_stage:", stageErr);
+        setSavePdfError(
+          "Signed PDF was saved, but the application could not be moved to Approved or Verified (check permissions)."
+        );
+        return;
+      }
+
+      setApplicationWorkflowStage("approved_verified");
+      setPdfSavedForCurrentPreview(true);
+      setSavePdfMessage(null);
+
+      if (previewUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      if (publicUrl) {
+        setPreviewUrl(publicUrl);
+        setPreviewHtml(null);
+      }
+
+      const { data: deptRow } = await supabase
+        .from("applications")
+        .select("department")
+        .eq("id", resolvedApplicationId)
+        .maybeSingle();
+      const dept = typeof deptRow?.department === "string" ? deptRow.department.trim() : "";
+      const dashboardUrl =
+        dept.length > 0
+          ? `/userdashboard?department=${encodeURIComponent(dept)}`
+          : "/userdashboard";
+      setPendingDashboardUrl(dashboardUrl);
+      setPreviewOpen(false);
+      setSignedDocSuccessDialogOpen(true);
+
+      if (!publicUrl && projectId) {
+        const { data: urlsRow } = await supabase
+          .from("projects")
+          .select("application_urls")
+          .eq("id", projectId)
+          .maybeSingle();
+        const raw = urlsRow?.application_urls;
+        const entry =
+          raw && typeof raw === "object" && !Array.isArray(raw)
+            ? (raw as Record<string, unknown>)[ctx.templateType]
+            : undefined;
+        const fallback =
+          typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
+        if (fallback) {
+          setPreviewUrl(fallback);
+          setPreviewHtml(null);
+        }
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save signed PDF.";
+      setSavePdfError(message);
+    } finally {
+      setIsSavingPdf(false);
+    }
+  };
+
   const handleSaveApplicationPdf = async () => {
     if (!projectId) {
       setSavePdfError("Missing project.");
@@ -761,6 +977,7 @@ export default function ApplicationDetailsPage() {
     setIsSavingPdf(true);
     setSavePdfMessage(null);
     setSavePdfError(null);
+    const stageBeforeSave = applicationWorkflowStage;
     try {
       const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
 
@@ -808,13 +1025,30 @@ export default function ApplicationDetailsPage() {
         }
       };
 
-      // First upload writes `application_urls` in DB.
-      const blob = await buildApplicationPreviewPdfBlob();
-      await uploadPdfBlob(blob);
+      const { data: urlsBeforeSave } = await supabase
+        .from("projects")
+        .select("application_urls")
+        .eq("id", projectId)
+        .maybeSingle();
+      const urlsRaw = urlsBeforeSave?.application_urls;
+      const hadTemplateUrl =
+        urlsRaw &&
+        typeof urlsRaw === "object" &&
+        !Array.isArray(urlsRaw) &&
+        typeof (urlsRaw as Record<string, unknown>)[ctx.templateType] === "string" &&
+        String((urlsRaw as Record<string, unknown>)[ctx.templateType]).trim().length > 0;
 
-      // Rebuild PDF so injected QR now targets the saved URL.
-      const blobWithQr = await buildApplicationPreviewPdfBlob();
-      await uploadPdfBlob(blobWithQr);
+      if (hadTemplateUrl) {
+        // One Chromium pass: HTML already includes correct QR for the stored URL.
+        const blobWithQr = await buildApplicationPreviewPdfBlob();
+        await uploadPdfBlob(blobWithQr);
+      } else {
+        // First save: need a public URL in DB, then regenerate so QR points at that file.
+        const blob = await buildApplicationPreviewPdfBlob();
+        await uploadPdfBlob(blob);
+        const blobWithQr = await buildApplicationPreviewPdfBlob();
+        await uploadPdfBlob(blobWithQr);
+      }
 
       // Keep preview paginated in the modal.
       const htmlWithQr = await generateApplicationPreviewHtml(
@@ -824,7 +1058,42 @@ export default function ApplicationDetailsPage() {
       );
       setPreviewHtml(htmlWithQr);
       setPdfSavedForCurrentPreview(true);
-      setSavePdfMessage("Application PDF saved to project.");
+
+      if (applicationId) {
+        const { error: stageErr } = await supabase
+          .from("applications")
+          .update({ workflow_stage: "in_process" })
+          .eq("id", applicationId);
+        if (stageErr) {
+          console.error("Failed to update application workflow_stage:", stageErr);
+          setSavePdfMessage(
+            "Application PDF saved. Could not move application to In Process (check DB migration / permissions)."
+          );
+        } else {
+          setApplicationWorkflowStage("in_process");
+          if (stageBeforeSave === "draft") {
+            setPreviewOpen(false);
+            setSavePdfMessage(null);
+            const { data: deptRow } = await supabase
+              .from("applications")
+              .select("department")
+              .eq("id", applicationId)
+              .maybeSingle();
+            const dept =
+              typeof deptRow?.department === "string" ? deptRow.department.trim() : "";
+            const dashboardUrl =
+              dept.length > 0
+                ? `/userdashboard?department=${encodeURIComponent(dept)}`
+                : "/userdashboard";
+            setPendingDashboardUrl(dashboardUrl);
+            setSaveSuccessDialogOpen(true);
+          } else {
+            setSavePdfMessage("Application PDF saved to project.");
+          }
+        }
+      } else {
+        setSavePdfMessage("Application PDF saved to project.");
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save PDF.";
       setSavePdfError(message);
@@ -849,16 +1118,48 @@ export default function ApplicationDetailsPage() {
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       <section className="border border-gray-200 rounded-2xl bg-white shadow-sm p-6">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-xl font-bold text-gray-900">Application Details</h2>
-          <button
-            type="button"
-            onClick={handlePreview}
-            disabled={isPreviewLoading}
-            className="px-4 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition-colors"
-          >
-            {isPreviewLoading ? "Generating..." : "Preview"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={isPreviewLoading}
+              className="px-4 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition-colors"
+            >
+              {isPreviewLoading ? "Generating..." : "Preview"}
+            </button>
+            {projectId && previewReadyForSave && (
+              <button
+                type="button"
+                onClick={() => void handleSaveApplicationPdf()}
+                disabled={
+                  isSavingPdf ||
+                  pdfSavedForCurrentPreview ||
+                  applicationWorkflowStage === "approved_verified"
+                }
+                className={
+                  pdfSavedForCurrentPreview && !isSavingPdf
+                    ? "px-4 py-2 rounded-lg border border-emerald-500 bg-emerald-50 text-emerald-800 text-sm font-semibold cursor-default"
+                    : "px-4 py-2 rounded-lg border border-blue-600 bg-white text-blue-700 text-sm font-semibold hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                }
+              >
+                {isSavingPdf ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-blue-600 border-t-transparent animate-spin"
+                      aria-hidden
+                    />
+                    Saving PDF…
+                  </span>
+                ) : applicationWorkflowStage === "approved_verified"
+                    ? "Signed PDF on file"
+                    : pdfSavedForCurrentPreview
+                      ? "Saved"
+                      : "Save PDF to project"}
+              </button>
+            )}
+          </div>
         </div>
         <p className="text-sm text-gray-600 mt-1">
           Read-only details for the selected application.
@@ -915,13 +1216,96 @@ export default function ApplicationDetailsPage() {
         saveCompleted={pdfSavedForCurrentPreview}
         saveFeedbackError={savePdfError}
         saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
-        getPdfBlob={previewHtml ? () => buildApplicationPreviewPdfBlob() : undefined}
+        getPdfBlob={
+          previewUrl &&
+          (previewUrl.startsWith("https://") ||
+            previewUrl.startsWith("http://") ||
+            previewUrl.startsWith("/"))
+            ? async () => {
+                const res = await fetch(previewUrl);
+                if (!res.ok) throw new Error("Could not load the saved PDF.");
+                return res.blob();
+              }
+            : previewHtml && applicationWorkflowStage !== "draft"
+              ? () => buildApplicationPreviewPdfBlob()
+              : undefined
+        }
         signingFileName={
           previewPdfContextRef.current
             ? `${previewPdfContextRef.current.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_")}-application.pdf`
             : undefined
         }
+        hideSaveButton={applicationWorkflowStage !== "draft"}
+        showMockSignButton={applicationWorkflowStage === "in_process"}
+        onMockSignComplete={handleMockSignComplete}
+        mockSignBusy={isSavingPdf}
       />
+
+      {saveSuccessDialogOpen && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="save-success-title"
+        >
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
+            <h2 id="save-success-title" className="text-lg font-semibold text-gray-900">
+              Saved successfully
+            </h2>
+            <p className="text-sm text-gray-600 mt-3">
+              Your application PDF has been saved. The application is now in{" "}
+              <span className="font-medium text-gray-800">In Process</span>.
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setSaveSuccessDialogOpen(false);
+                  const url = pendingDashboardUrl ?? "/userdashboard";
+                  setPendingDashboardUrl(null);
+                  router.push(url);
+                }}
+                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {signedDocSuccessDialogOpen && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="signed-doc-success-title"
+        >
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
+            <h2 id="signed-doc-success-title" className="text-lg font-semibold text-gray-900">
+              Signed document saved
+            </h2>
+            <p className="text-sm text-gray-600 mt-3">
+              Your signed application PDF has been saved to the project. The application is now in{" "}
+              <span className="font-medium text-gray-800">Approved or Verified</span>.
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setSignedDocSuccessDialogOpen(false);
+                  const url = pendingDashboardUrl ?? "/userdashboard";
+                  setPendingDashboardUrl(null);
+                  router.push(url);
+                }}
+                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

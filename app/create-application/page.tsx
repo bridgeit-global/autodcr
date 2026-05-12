@@ -759,6 +759,7 @@ export default function CreateApplicationPage() {
       project_title: selectedProjectRecord.title,
       department: selectedDepartment,
       permission_type: selectedPermissionRecord.title,
+      workflow_stage: "draft",
     });
     setIsSubmitting(false);
 

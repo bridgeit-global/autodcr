@@ -40,6 +40,14 @@ type DocumentPreviewModalProps = {
   getPdfBlob?: () => Promise<Blob>;
   /** Default download/filename for signing (optional). */
   signingFileName?: string;
+  /** Hide the Save / Saved toolbar control (e.g. preview-only flows). */
+  hideSaveButton?: boolean;
+  /** Show a mock “Sign” control that injects “Owner” + a dummy signature into the HTML iframe (first client signature column). */
+  showMockSignButton?: boolean;
+  /** After mock sign is injected (and fonts settle), parent can persist PDF / update workflow. */
+  onMockSignComplete?: () => void | Promise<void>;
+  /** Disables mock Sign while parent is saving (e.g. generating/uploading PDF). */
+  mockSignBusy?: boolean;
 };
 
 export default function DocumentPreviewModal({
@@ -57,10 +65,17 @@ export default function DocumentPreviewModal({
   saveFeedbackSuccess,
   getPdfBlob,
   signingFileName,
+  hideSaveButton = false,
+  showMockSignButton = false,
+  onMockSignComplete,
+  mockSignBusy = false,
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const previewBlobUrlRef = useRef<string | null>(null);
   const [signModalOpen, setSignModalOpen] = useState(false);
+  const [mockSignApplied, setMockSignApplied] = useState(false);
+  /** Mock Sign: covers inject + fonts + parent upload until the pipeline finishes. */
+  const [signPipelineBusy, setSignPipelineBusy] = useState(false);
 
   useEffect(() => {
     if (open) document.body.style.overflow = "hidden";
@@ -104,6 +119,98 @@ export default function DocumentPreviewModal({
     };
   }, [open, htmlContent, fileUrl]);
 
+  useEffect(() => {
+    if (!open) {
+      setMockSignApplied(false);
+      setSignPipelineBusy(false);
+    }
+  }, [open, htmlContent]);
+
+  const injectMockOwnerSignature = async () => {
+    setSignPipelineBusy(true);
+    try {
+      const tryInject = () => {
+      const doc = iframeRef.current?.contentDocument;
+      if (!doc) return false;
+      const firstCell = doc.querySelector(".signature-table tr td");
+      if (!firstCell) return false;
+      if (firstCell.querySelector("#preview-dummy-owner-sign")) return true;
+      const signatureLine = firstCell.querySelector(".signature-line");
+      if (!signatureLine) return false;
+
+      const fontLinkId = "preview-owner-signature-font-link";
+      if (!doc.getElementById(fontLinkId)) {
+        const link = doc.createElement("link");
+        link.id = fontLinkId;
+        link.rel = "stylesheet";
+        link.href =
+          "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
+        doc.head.appendChild(link);
+      }
+
+      const wrap = doc.createElement("div");
+      wrap.id = "preview-dummy-owner-sign";
+      wrap.setAttribute(
+        "style",
+        "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
+      );
+      wrap.innerHTML = `
+        <span style="
+          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
+          font-size:clamp(28px,4.2vw,36px);
+          font-weight:400;
+          line-height:1.15;
+          color:#0f172a;
+          letter-spacing:0.02em;
+          display:inline-block;
+          transform:rotate(-2deg);
+          text-shadow:0 1px 0 rgba(255,255,255,0.6);
+        ">Owner</span>
+      `;
+      firstCell.insertBefore(wrap, signatureLine);
+      // Template `.signature-line` uses a large margin-top for blank signing space; once
+      // “Owner” is injected above it, that margin reads as an awkward gap before designation.
+      (signatureLine as HTMLElement).style.marginTop = "4px";
+      return true;
+    };
+
+      const afterInject = async () => {
+        setMockSignApplied(true);
+        const doc = iframeRef.current?.contentDocument;
+        if (doc?.fonts?.ready) {
+          try {
+            await doc.fonts.ready;
+          } catch {
+            /* ignore */
+          }
+        }
+        await new Promise<void>((r) => window.setTimeout(() => r(), 250));
+        if (onMockSignComplete) {
+          await onMockSignComplete();
+        }
+      };
+
+      if (tryInject()) {
+        await afterInject();
+        return;
+      }
+      await new Promise<void>((resolve, reject) => {
+        window.setTimeout(() => {
+          void (async () => {
+            try {
+              if (tryInject()) await afterInject();
+              resolve();
+            } catch (e) {
+              reject(e instanceof Error ? e : new Error(String(e)));
+            }
+          })();
+        }, 400);
+      });
+    } finally {
+      setSignPipelineBusy(false);
+    }
+  };
+
   const hasContent = Boolean(fileUrl) || Boolean(htmlContent);
   if (!open || !hasContent) return null;
   if (typeof window === "undefined") return null;
@@ -111,7 +218,10 @@ export default function DocumentPreviewModal({
   const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
   const canSign = Boolean(getPdfBlob);
 
+  const saveUiBusy = Boolean(isSaving) || signPipelineBusy;
+
   const handleCloseAll = () => {
+    if (saveUiBusy) return;
     setSignModalOpen(false);
     onClose();
   };
@@ -165,7 +275,8 @@ export default function DocumentPreviewModal({
                 {canSign && (
                   <button
                     onClick={() => setSignModalOpen(true)}
-                    className="h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5"
+                    disabled={saveUiBusy}
+                    className="h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                     aria-label="Sign with DSC"
                     type="button"
                   >
@@ -191,7 +302,8 @@ export default function DocumentPreviewModal({
                 {htmlContent && !fileUrl && (
                   <button
                     onClick={handlePrint}
-                    className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5"
+                    disabled={saveUiBusy}
+                    className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                     aria-label="Print or save as PDF"
                     type="button"
                   >
@@ -213,13 +325,24 @@ export default function DocumentPreviewModal({
                     Print / Save as PDF
                   </button>
                 )}
-                {htmlContent && !fileUrl && onSave && (
+                {htmlContent && !fileUrl && showMockSignButton && (
+                  <button
+                    type="button"
+                    onClick={() => void injectMockOwnerSignature()}
+                    disabled={mockSignApplied || mockSignBusy || signPipelineBusy}
+                    className="h-9 px-3 rounded-lg border border-violet-600 bg-violet-50 hover:bg-violet-100 text-violet-800 text-sm font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                    aria-label={mockSignApplied ? "Signed" : "Sign preview"}
+                  >
+                    {mockSignApplied ? "Signed" : "Sign"}
+                  </button>
+                )}
+                {htmlContent && !fileUrl && onSave && !hideSaveButton && (
                   <button
                     onClick={() => {
                       if (saveCompleted || isSaving || saveDisabled) return;
                       void onSave();
                     }}
-                    disabled={saveDisabled || isSaving || Boolean(saveCompleted)}
+                    disabled={saveDisabled || isSaving || Boolean(saveCompleted) || signPipelineBusy}
                     className={
                       saveCompleted && !isSaving
                         ? "h-9 px-3 rounded-lg border border-emerald-500 bg-emerald-50 text-emerald-800 text-sm font-semibold flex items-center gap-1.5 cursor-default"
@@ -275,7 +398,8 @@ export default function DocumentPreviewModal({
                 )}
                 <button
                   onClick={handleCloseAll}
-                  className="h-9 w-9 rounded-lg hover:bg-gray-100 text-gray-700 transition-colors flex items-center justify-center"
+                  disabled={saveUiBusy}
+                  className="h-9 w-9 rounded-lg hover:bg-gray-100 text-gray-700 transition-colors flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
                   aria-label="Close preview"
                   type="button"
                 >
@@ -318,6 +442,26 @@ export default function DocumentPreviewModal({
                 </div>
               ) : null}
             </div>
+
+            {saveUiBusy && (
+              <div
+                className="absolute inset-0 z-[70] flex flex-col items-center justify-center rounded-2xl bg-white/90 backdrop-blur-[3px]"
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+              >
+                <div
+                  className="h-10 w-10 rounded-full border-[3px] border-blue-600 border-t-transparent animate-spin"
+                  aria-hidden
+                />
+                <p className="mt-4 text-sm font-semibold text-gray-900">
+                  {isSaving ? "Saving PDF…" : "Preparing signature…"}
+                </p>
+                <p className="mt-1 max-w-[240px] text-center text-xs text-gray-500">
+                  Generating and uploading — this can take a moment
+                </p>
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}
