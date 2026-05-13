@@ -9,6 +9,50 @@ import DraftApplicationsModal, { DraftApplication } from "../components/DraftApp
 import CustomSelect from "@/app/components/CustomSelect";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import { supabase } from "@/app/utils/supabase";
+import {
+  normalizeApplicationWorkflowStage,
+  type ApplicationWorkflowStage,
+} from "@/app/components/DraftApplicationsModal";
+
+/** Maps dashboard column header (when opening the list modal) to DB `workflow_stage`. */
+function dashboardColumnStatusToWorkflowStage(status: string): ApplicationWorkflowStage | null {
+  switch (status) {
+    case "Draft":
+      return "draft";
+    case "In Process":
+      return "in_process";
+    case "Approved or Verified":
+      return "approved_verified";
+    default:
+      return null;
+  }
+}
+
+function workflowStageToModalCurrentStage(stage: ApplicationWorkflowStage): number {
+  switch (stage) {
+    case "draft":
+      return 0;
+    case "in_process":
+      return 1;
+    case "approved_verified":
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+function workflowStageLabel(stage: ApplicationWorkflowStage): string {
+  switch (stage) {
+    case "draft":
+      return "Draft";
+    case "in_process":
+      return "In Process";
+    case "approved_verified":
+      return "Approved or Verified";
+    default:
+      return "Draft";
+  }
+}
 
 type ApplicationType = {
   name: string;
@@ -533,6 +577,7 @@ const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
       status: "Draft",
       startedOn: "10-09-2025",
       currentStage: 0,
+      workflowStage: "draft",
     },
   ],
   "Commencement": [
@@ -543,6 +588,7 @@ const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
       status: "Draft",
       startedOn: "10-09-2025",
       currentStage: 0,
+      workflowStage: "draft",
     },
   ],
 };
@@ -572,6 +618,8 @@ function UserDashboardContent() {
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [selectedDraftApp, setSelectedDraftApp] = useState<{ appType: string; status: string } | null>(null);
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
+  const [inProcessCounts, setInProcessCounts] = useState<Record<string, number>>({});
+  const [approvedCounts, setApprovedCounts] = useState<Record<string, number>>({});
   const [draftApplicationsByType, setDraftApplicationsByType] = useState<Record<string, DraftApplication[]>>({});
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const selectableProjects = projects.filter((project) => project.status !== "draft");
@@ -676,12 +724,15 @@ function UserDashboardContent() {
   const loadDraftCounts = useCallback(async () => {
     if (projects.length === 0) {
       setDraftCounts({});
+      setInProcessCounts({});
+      setApprovedCounts({});
+      setDraftApplicationsByType({});
       return;
     }
 
     let query = supabase
       .from("applications")
-      .select("id,project_id,project_title,permission_type,created_at")
+      .select("id,project_id,project_title,permission_type,created_at,workflow_stage")
       .eq("department", selectedApplicationType);
 
     if (selectedProject === "ALL") {
@@ -694,48 +745,68 @@ function UserDashboardContent() {
     if (error) {
       console.error("Error loading application draft counts:", error);
       setDraftCounts({});
+      setInProcessCounts({});
+      setApprovedCounts({});
       setDraftApplicationsByType({});
       return;
     }
 
-    const counts: Record<string, number> = {};
+    const draftMap: Record<string, number> = {};
+    const inProcessMap: Record<string, number> = {};
+    const approvedMap: Record<string, number> = {};
     const groupedApplications: Record<string, DraftApplication[]> = {};
 
-    (data ?? []).forEach((row: { id?: string; project_id: string; permission_type: string; project_title?: string; created_at?: string }) => {
-      counts[row.permission_type] = (counts[row.permission_type] ?? 0) + 1;
+    (data ?? []).forEach(
+      (row: {
+        id?: string;
+        project_id: string;
+        permission_type: string;
+        project_title?: string;
+        created_at?: string;
+        workflow_stage?: string | null;
+      }) => {
+        const wf = normalizeApplicationWorkflowStage(row.workflow_stage);
+        const perm = row.permission_type;
+        if (wf === "draft") draftMap[perm] = (draftMap[perm] ?? 0) + 1;
+        else if (wf === "in_process") inProcessMap[perm] = (inProcessMap[perm] ?? 0) + 1;
+        else if (wf === "approved_verified") approvedMap[perm] = (approvedMap[perm] ?? 0) + 1;
 
-      const startedOn = row.created_at
-        ? new Date(row.created_at).toLocaleDateString("en-GB")
-        : "-";
-      const matchedProject = projects.find((project) => String(project.id) === String(row.project_id));
-      const proposalNo = matchedProject?.project_info?.proposalNo?.trim();
-      const surveyNo =
-        matchedProject?.save_plot_details?.selectedSurveyNos?.[0] ||
-        matchedProject?.save_plot_details?.plotEntries?.[0]?.ctsNumber;
-      const applicationNo =
-        proposalNo ||
-        surveyNo ||
-        row.project_title ||
-        row.id ||
-        "-";
+        const startedOn = row.created_at
+          ? new Date(row.created_at).toLocaleDateString("en-GB")
+          : "-";
+        const matchedProject = projects.find((project) => String(project.id) === String(row.project_id));
+        const proposalNo = matchedProject?.project_info?.proposalNo?.trim();
+        const surveyNo =
+          matchedProject?.save_plot_details?.selectedSurveyNos?.[0] ||
+          matchedProject?.save_plot_details?.plotEntries?.[0]?.ctsNumber;
+        const applicationNo =
+          proposalNo ||
+          surveyNo ||
+          row.project_title ||
+          row.id ||
+          "-";
 
-      const entry: DraftApplication = {
-        applicationId: row.id,
-        applicationNo,
-        ward: "-",
-        applicationType: row.permission_type,
-        status: "Draft",
-        startedOn,
-        currentStage: 0,
-      };
+        const entry: DraftApplication = {
+          applicationId: row.id,
+          applicationNo,
+          ward: "-",
+          applicationType: row.permission_type,
+          status: workflowStageLabel(wf),
+          startedOn,
+          currentStage: workflowStageToModalCurrentStage(wf),
+          workflowStage: wf,
+        };
 
-      if (!groupedApplications[row.permission_type]) {
-        groupedApplications[row.permission_type] = [];
+        if (!groupedApplications[row.permission_type]) {
+          groupedApplications[row.permission_type] = [];
+        }
+        groupedApplications[row.permission_type].push(entry);
       }
-      groupedApplications[row.permission_type].push(entry);
-    });
+    );
 
-    setDraftCounts(counts);
+    setDraftCounts(draftMap);
+    setInProcessCounts(inProcessMap);
+    setApprovedCounts(approvedMap);
     setDraftApplicationsByType(groupedApplications);
   }, [projects, selectedApplicationType, selectedProject]);
 
@@ -831,7 +902,8 @@ function UserDashboardContent() {
 
     setIsDraftModalOpen(false);
     setSelectedDraftApp(null);
-    router.push(`/dashboard/project-details?${query.toString()}`);
+    // Open Application Details directly so `applicationId` stays in the URL for Preview → Sign → save workflow.
+    router.push(`/dashboard/application-details?${query.toString()}`);
   };
 
   const tableData =
@@ -927,6 +999,8 @@ function UserDashboardContent() {
                   <tbody>
                     {tableData.map((app, index) => {
                       const draftCount = draftCounts[app.name] ?? 0;
+                      const inProcessCount = inProcessCounts[app.name] ?? 0;
+                      const approvedCount = approvedCounts[app.name] ?? 0;
                       return (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="border border-gray-300 px-4 py-3 text-left font-medium text-black">
@@ -945,8 +1019,15 @@ function UserDashboardContent() {
                         <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Due Payment")}>
                           0
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "In Process")}>
-                          0
+                        <td
+                          className={`border border-gray-300 px-4 py-3 text-center ${
+                            inProcessCount > 0
+                              ? "text-blue-600 font-semibold underline cursor-pointer hover:bg-blue-50"
+                              : "text-black"
+                          }`}
+                          onClick={() => handleCellClick(app.name, inProcessCount, "In Process")}
+                        >
+                          {inProcessCount}
                         </td>
                         <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Need Clarification")}>
                           0
@@ -957,8 +1038,15 @@ function UserDashboardContent() {
                         <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
                           0
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Approved or Verified")}>
-                          0
+                        <td
+                          className={`border border-gray-300 px-4 py-3 text-center ${
+                            approvedCount > 0
+                              ? "text-blue-600 font-semibold underline cursor-pointer hover:bg-blue-50"
+                              : "text-black"
+                          }`}
+                          onClick={() => handleCellClick(app.name, approvedCount, "Approved or Verified")}
+                        >
+                          {approvedCount}
                         </td>
                         <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
                           0
@@ -1033,7 +1121,13 @@ function UserDashboardContent() {
           }}
           appType={selectedDraftApp.appType}
           status={selectedDraftApp.status}
-          applications={draftApplicationsByType[selectedDraftApp.appType] || []}
+          applications={(draftApplicationsByType[selectedDraftApp.appType] || []).filter(
+            (a) => {
+              const want = dashboardColumnStatusToWorkflowStage(selectedDraftApp.status);
+              if (want === null) return false;
+              return a.workflowStage === want;
+            }
+          )}
           onDeleteApplication={handleDeleteApplication}
           onOpenApplicationDetails={handleOpenApplicationDetails}
         />

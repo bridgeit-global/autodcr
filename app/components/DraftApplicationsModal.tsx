@@ -2,14 +2,25 @@
 
 import React, { useMemo, useState } from "react";
 
+export type ApplicationWorkflowStage = "draft" | "in_process" | "approved_verified";
+
+export function normalizeApplicationWorkflowStage(value: unknown): ApplicationWorkflowStage {
+  if (value === "in_process" || value === "approved_verified" || value === "draft") {
+    return value;
+  }
+  return "draft";
+}
+
 export type DraftApplication = {
   applicationId?: string;
   applicationNo: string;
   ward: string;
   applicationType: string;
+  /** Legacy display label — prefer deriving from `workflowStage`. */
   status: string;
   startedOn: string;
-  currentStage: number; // 0 = Draft, 1 = Payment Pending, 2 = Proposal Submitted, etc.
+  currentStage: number; // Visual progress (aligned with STAGES strip in modal)
+  workflowStage: ApplicationWorkflowStage;
 };
 
 interface DraftApplicationsModalProps {

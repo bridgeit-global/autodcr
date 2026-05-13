@@ -1,26 +1,23 @@
 "use client";
 
 import React from "react";
-import { Viewer, Worker } from "@react-pdf-viewer/core";
-import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
-import "@react-pdf-viewer/core/lib/styles/index.css";
-import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 
 interface PlainPDFViewerProps {
   fileUrl: string;
 }
 
-// Same viewer stack as `PDFViewer`, but WITHOUT the letterhead overlay.
+/**
+ * Native browser PDF rendering via iframe — matches opening the same Storage URL in a new tab.
+ * Avoids pdf.js canvas path which often omits full-page letterhead in complex PDFs.
+ */
 export default function PlainPDFViewer({ fileUrl }: PlainPDFViewerProps) {
-  const defaultLayoutPluginInstance = defaultLayoutPlugin();
-
   return (
-    <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
-      <div style={{ height: "80vh" }}>
-        <Viewer fileUrl={fileUrl} plugins={[defaultLayoutPluginInstance]} defaultScale={1.2} />
-      </div>
-    </Worker>
+    <div className="w-full bg-neutral-100" style={{ height: "80vh", minHeight: "560px" }}>
+      <iframe
+        title="PDF preview"
+        src={fileUrl}
+        className="block h-full w-full border-0 bg-white"
+      />
+    </div>
   );
 }
-
-
