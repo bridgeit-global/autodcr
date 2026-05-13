@@ -4,9 +4,11 @@ import {
   PDFDict,
   PDFDocument,
   PDFFont,
+  PDFHexString,
   PDFName,
   PDFObject,
   PDFRef,
+  PDFString,
   StandardFonts,
   rgb,
 } from "pdf-lib";
@@ -117,6 +119,14 @@ async function preparePdfIncremental(
   if (targetPageIndex !== 0) {
     relocateLastWidgetToPage(pdfDoc, targetPageIndex);
   }
+
+  // pdflibAddPlaceholder hardcodes the widget's partial field name to
+  // "Signature1". On an already-signed PDF that name collides with the
+  // existing signature field — Adobe sees two AcroForm fields with the same
+  // /T value, treats the duplicate as orphaned, and surfaces the dreaded
+  // "Annotations Deleted: Widget annot on page 1" warning in the signature
+  // panel. Rename the new widget so every signature field carries a unique /T.
+  renameLastWidgetForUniqueness(pdfDoc);
 
   if (options.stamp) {
     await populateLastWidgetAppearance(pdfDoc, options.stamp);
@@ -333,6 +343,56 @@ function relocateLastWidgetToPage(pdfDoc: PDFDocument, targetPageIndex: number):
   if (widgetDict) {
     widgetDict.set(PDFName.of("P"), targetPage.ref);
   }
+}
+
+/**
+ * Reads `/T` from a field dict regardless of whether it was stored as
+ * `PDFString` or `PDFHexString` (different PDF producers pick different
+ * encodings — pdf-lib emits PDFString, real-world signers occasionally emit
+ * PDFHexString for non-ASCII names).
+ */
+function readFieldName(dict: PDFDict): string | undefined {
+  const raw = dict.get(PDFName.of("T"));
+  if (raw instanceof PDFString) return raw.asString();
+  if (raw instanceof PDFHexString) return raw.decodeText();
+  return undefined;
+}
+
+/**
+ * Ensure the newest AcroForm field has a `/T` that doesn't collide with any
+ * pre-existing field name. pdflibAddPlaceholder hardcodes "Signature1"; if
+ * that name is already taken, switch to "Signature2", "Signature3", etc.
+ */
+function renameLastWidgetForUniqueness(pdfDoc: PDFDocument): void {
+  const ctx = pdfDoc.context;
+  const acroForm = pdfDoc.catalog.lookupMaybe(PDFName.of("AcroForm"), PDFDict);
+  if (!acroForm) return;
+  const fields = acroForm.lookupMaybe(PDFName.of("Fields"), PDFArray);
+  if (!fields || fields.size() < 2) return;
+
+  const taken = new Set<string>();
+  for (let i = 0; i < fields.size() - 1; i += 1) {
+    const ref = fields.get(i);
+    const dict = ref instanceof PDFRef ? ctx.lookup(ref, PDFDict) : null;
+    const name = dict ? readFieldName(dict) : undefined;
+    if (name) taken.add(name);
+  }
+
+  const lastRef = fields.get(fields.size() - 1);
+  if (!(lastRef instanceof PDFRef)) return;
+  const lastDict = ctx.lookup(lastRef, PDFDict);
+  if (!lastDict) return;
+
+  const currentName = readFieldName(lastDict) ?? "Signature1";
+  if (!taken.has(currentName)) return;
+
+  let suffix = 2;
+  let candidate = `Signature${suffix}`;
+  while (taken.has(candidate)) {
+    suffix += 1;
+    candidate = `Signature${suffix}`;
+  }
+  lastDict.set(PDFName.of("T"), PDFString.of(candidate));
 }
 
 /**
