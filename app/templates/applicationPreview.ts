@@ -31,12 +31,16 @@ export type ApplicationPreviewSource = {
   consultantEmail?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
   consultantLookupUserIds?: string[];
+  /** Architect only: `appointment` → `architect.html`, `acceptance` → `architect_acceptance.html` in Application_Templates. */
+  architectHtmlVariant?: "appointment" | "acceptance";
   projectData?: {
     title?: string;
     project_info?: {
       proposalNo?: string;
       fullNameOfApplicant?: string;
       propertyAddress?: string;
+      /** Project Details → Pincode (EEBP acceptance letter “Mumbai - …”). */
+      pincode?: string;
     } | null;
     save_plot_details?: {
       planningAuthority?: string;
@@ -709,6 +713,7 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   "project_Ward.": "Ward",
   project_Planning_Authority: "Planning authority",
   project_Proposal_Number: "Proposal number",
+  project_Acceptance_EEBP_Pincode: "Pincode (project info — EEBP acceptance)",
   project_Client_Company_Name: "Client company name",
   project_Client_Company_Designation: "Client designation",
   project_Client_Name: "Client name",
@@ -912,6 +917,10 @@ export function buildDetailsFieldRowsForUi(
   }
   for (const key of APPLICATION_LETTER_REFERENCE_FIELD_KEYS) {
     pushKey(key);
+  }
+
+  if (templateType === "Architect") {
+    pushKey("project_Acceptance_EEBP_Pincode");
   }
 
   return rows;
@@ -1815,17 +1824,29 @@ export async function fetchApplicationPreviewHtmlRaw(
       fields: formValues,
       ...(source?.projectId ? { projectId: source.projectId } : {}),
       ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
+      ...(templateType === "Architect" &&
+      source?.architectHtmlVariant === "acceptance"
+        ? { architectHtmlVariant: "acceptance" as const }
+        : {}),
     }),
   });
 
   if (response.ok) return await response.text();
 
-  const payload = await response.json().catch(() => null);
-  throw new Error(
-    typeof payload?.error === "string"
-      ? payload.error
-      : `HTML preview load failed (${response.status}).`
-  );
+  const payload = (await response.json().catch(() => null)) as {
+    error?: unknown;
+  } | null;
+  const rawErr = payload?.error;
+  const message =
+    typeof rawErr === "string"
+      ? rawErr
+      : rawErr &&
+          typeof rawErr === "object" &&
+          "message" in rawErr &&
+          typeof (rawErr as { message?: unknown }).message === "string"
+        ? (rawErr as { message: string }).message
+        : `HTML preview load failed (${response.status}).`;
+  throw new Error(message);
 }
 
 /**

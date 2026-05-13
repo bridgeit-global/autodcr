@@ -31,6 +31,7 @@ type PreviewProjectData = {
     proposalNo?: string;
     fullNameOfApplicant?: string;
     propertyAddress?: string;
+    pincode?: string;
   } | null;
   save_plot_details?: {
     ward?: string;
@@ -281,6 +282,8 @@ type BuildApplicationPreviewContextInput = {
   applicationNo: string | null;
   applicationCreatedAt: string | null;
   projectId: string | null;
+  /** Architect: `architect.html` vs `architect_acceptance.html` from Application_Templates. */
+  architectHtmlVariant?: "appointment" | "acceptance";
 };
 
 async function buildApplicationPreviewContext(
@@ -298,6 +301,7 @@ async function buildApplicationPreviewContext(
     applicationNo,
     applicationCreatedAt,
     projectId,
+    architectHtmlVariant,
   } = input;
 
   const localMeta = readLocalStoredUserMetadata();
@@ -542,6 +546,11 @@ async function buildApplicationPreviewContext(
     },
     consultantLookupUserIds,
     projectData,
+    ...(templateType === "Architect"
+      ? {
+          architectHtmlVariant: architectHtmlVariant ?? "appointment",
+        }
+      : {}),
   };
 
   const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
@@ -561,6 +570,11 @@ export default function ApplicationDetailsPage() {
   const [applicationCreatedAt, setApplicationCreatedAt] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  /** When Approved preview uses HTML iframe (letterhead), DSC/sign still loads bytes from this Storage URL. */
+  const [storedSigningPdfUrl, setStoredSigningPdfUrl] = useState<string | null>(null);
+  const [architectPreviewVariant, setArchitectPreviewVariant] = useState<
+    "appointment" | "acceptance"
+  >("appointment");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewFieldMapping, setPreviewFieldMapping] = useState<Record<string, string | undefined> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -644,6 +658,10 @@ export default function ApplicationDetailsPage() {
           applicationNo,
           applicationCreatedAt,
           projectId,
+          architectHtmlVariant:
+            mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
+              ? architectPreviewVariant
+              : undefined,
         });
         if (cancelled) return;
         setDetailsFieldRows(buildDetailsFieldRowsForUi(ctx.fieldMapping, ctx.templateType));
@@ -669,6 +687,7 @@ export default function ApplicationDetailsPage() {
     selectedApplication,
     applicationNo,
     userMetadata,
+    architectPreviewVariant,
   ]);
 
   useEffect(() => {
@@ -706,6 +725,7 @@ export default function ApplicationDetailsPage() {
       setSavePdfError(null);
       setPreviewReadyForSave(false);
       setPdfSavedForCurrentPreview(false);
+      setStoredSigningPdfUrl(null);
       previewPdfContextRef.current = null;
       setIsPreviewLoading(true);
 
@@ -732,6 +752,10 @@ export default function ApplicationDetailsPage() {
           applicationNo,
           applicationCreatedAt,
           projectId,
+          architectHtmlVariant:
+            mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
+              ? architectPreviewVariant
+              : undefined,
         });
 
       // Always release the previous blob URL before opening a new preview.
@@ -752,12 +776,23 @@ export default function ApplicationDetailsPage() {
             : undefined;
         const savedPdfUrl =
           typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
+
         if (savedPdfUrl) {
+          // Same HTML path as In process so letterhead (CSS/Paged.js) renders in the iframe.
+          // Stored PDF alone often lacks painted backgrounds; signing still uses `storedSigningPdfUrl`.
+          const rawHtml = await generateApplicationPreviewHtml(
+            fields,
+            templateType,
+            previewSource
+          );
+          // Match the mock-sign save pipeline so the owner script signature appears (fresh HTML omits it).
+          const html = injectMockOwnerSignatureIntoPreviewHtml(rawHtml, templateType);
           previewPdfContextRef.current = { fields, templateType, previewSource };
           setPdfSavedForCurrentPreview(true);
           setPreviewReadyForSave(true);
-          setPreviewUrl(savedPdfUrl);
-          setPreviewHtml(null);
+          setStoredSigningPdfUrl(savedPdfUrl);
+          setPreviewUrl(null);
+          setPreviewHtml(html);
           setPreviewFieldMapping(fieldMapping);
           setPreviewOpen(true);
           return;
@@ -1115,12 +1150,32 @@ export default function ApplicationDetailsPage() {
     );
   }
 
+  const previewTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
+
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       <section className="border border-gray-200 rounded-2xl bg-white shadow-sm p-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-xl font-bold text-gray-900">Application Details</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {previewTemplateType === "Architect" && (
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <span className="whitespace-nowrap">Letter</span>
+                <select
+                  value={architectPreviewVariant}
+                  onChange={(e) =>
+                    setArchitectPreviewVariant(
+                      e.target.value === "acceptance" ? "acceptance" : "appointment"
+                    )
+                  }
+                  className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 min-w-[11rem]"
+                  aria-label="Architect letter type"
+                >
+                  <option value="appointment">Appointment</option>
+                  <option value="acceptance">Acceptance</option>
+                </select>
+              </label>
+            )}
             <button
               type="button"
               onClick={handlePreview}
@@ -1217,18 +1272,27 @@ export default function ApplicationDetailsPage() {
         saveFeedbackError={savePdfError}
         saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
         getPdfBlob={
-          previewUrl &&
-          (previewUrl.startsWith("https://") ||
-            previewUrl.startsWith("http://") ||
-            previewUrl.startsWith("/"))
+          storedSigningPdfUrl &&
+          (storedSigningPdfUrl.startsWith("https://") ||
+            storedSigningPdfUrl.startsWith("http://") ||
+            storedSigningPdfUrl.startsWith("/"))
             ? async () => {
-                const res = await fetch(previewUrl);
+                const res = await fetch(storedSigningPdfUrl);
                 if (!res.ok) throw new Error("Could not load the saved PDF.");
                 return res.blob();
               }
-            : previewHtml && applicationWorkflowStage !== "draft"
-              ? () => buildApplicationPreviewPdfBlob()
-              : undefined
+            : previewUrl &&
+                (previewUrl.startsWith("https://") ||
+                  previewUrl.startsWith("http://") ||
+                  previewUrl.startsWith("/"))
+              ? async () => {
+                  const res = await fetch(previewUrl);
+                  if (!res.ok) throw new Error("Could not load the saved PDF.");
+                  return res.blob();
+                }
+              : previewHtml && applicationWorkflowStage !== "draft"
+                ? () => buildApplicationPreviewPdfBlob()
+                : undefined
         }
         signingFileName={
           previewPdfContextRef.current

@@ -63,6 +63,62 @@ async function waitFontsAndRasterSettle(page: import("puppeteer-core").Page): Pr
   await new Promise<void>((r) => setTimeout(() => r(), 100));
 }
 
+/** Letterhead uses CSS background-image on `.pagedjs_page` — not in `document.images`; preload before print. */
+async function waitCssBackgroundImagesLoaded(
+  page: import("puppeteer-core").Page
+): Promise<void> {
+  await page.evaluate(async () => {
+    const urls = new Set<string>();
+    document.querySelectorAll("*").forEach((el) => {
+      const bg = getComputedStyle(el).backgroundImage;
+      if (!bg || bg === "none") return;
+      const m = bg.match(/url\(\s*["']?([^"')]+)["']?\s*\)/);
+      if (m?.[1]) urls.add(m[1].trim());
+    });
+    await Promise.all(
+      [...urls].map(
+        (src) =>
+          new Promise<void>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+            img.src = src;
+            window.setTimeout(() => resolve(), 12_000);
+          })
+      )
+    );
+  });
+  await new Promise<void>((r) => setTimeout(() => r(), 200));
+}
+
+async function waitImgElementsLoaded(page: import("puppeteer-core").Page): Promise<void> {
+  await page.evaluate(async () => {
+    await Promise.all(
+      Array.from(document.images).map(
+        (img) =>
+          new Promise<void>((resolve) => {
+            if (img.complete && img.naturalWidth > 0) {
+              resolve();
+              return;
+            }
+            img.addEventListener("load", () => resolve(), { once: true });
+            img.addEventListener("error", () => resolve(), { once: true });
+            window.setTimeout(() => resolve(), 12_000);
+          })
+      )
+    );
+  });
+}
+
+async function waitNextPaintFrames(page: import("puppeteer-core").Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      })
+  );
+}
+
 export async function POST(request: NextRequest) {
   let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
   try {
@@ -121,6 +177,7 @@ export async function POST(request: NextRequest) {
 
       if (slimHtml) {
         await page.setContent(slimHtml, PDF_SLIM_WAIT);
+        await page.waitForSelector(".pagedjs_page", { timeout: 10_000 }).catch(() => undefined);
       } else {
         await page.evaluate(() => {
           const pagesRoot = document.querySelector(".pagedjs_pages");
@@ -141,6 +198,9 @@ export async function POST(request: NextRequest) {
 
     await page.emulateMediaType("print");
     await waitFontsAndRasterSettle(page);
+    await waitCssBackgroundImagesLoaded(page);
+    await waitImgElementsLoaded(page);
+    await waitNextPaintFrames(page);
 
     const pdf = await page.pdf({
       format: "A4",

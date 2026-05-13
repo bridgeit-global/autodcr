@@ -36,6 +36,47 @@ const TEMPLATE_PATH_MAP: Record<TemplateType, string> = {
   "PMC / Project Manager": "pmc-project-manager.html",
 };
 
+/** Storage errors sometimes expose `message` as JSON (e.g. `{ "url": "..." }`) — normalize for UI. */
+function describeStorageTemplateDownloadError(
+  err: { message?: string; statusCode?: string },
+  objectPath: string,
+  bucket: string
+): string {
+  const raw = (err.message ?? "").trim();
+  let parsed: Record<string, unknown> | null = null;
+  if (raw.startsWith("{")) {
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      parsed = null;
+    }
+  }
+
+  const status = err.statusCode ?? (parsed?.statusCode as string | undefined);
+  const nestedMsg =
+    parsed && typeof parsed.message === "string" ? parsed.message.trim() : "";
+  const looksLikeJsonOnlyUrl =
+    parsed &&
+    typeof parsed.url === "string" &&
+    Object.keys(parsed).length <= 2 &&
+    !nestedMsg;
+
+  const combined = `${raw} ${nestedMsg}`.toLowerCase();
+  const likelyMissing =
+    status === "404" ||
+    /not\s*found|does\s*not\s*exist|object\s+not\s*found/i.test(combined) ||
+    looksLikeJsonOnlyUrl;
+
+  if (likelyMissing) {
+    return `Missing template "${objectPath}" in Storage bucket "${bucket}". Upload it from your repo (e.g. html/architect_acceptance.html) or confirm the file name matches exactly.`;
+  }
+
+  if (nestedMsg) return nestedMsg;
+  if (raw && !raw.startsWith("{")) return raw;
+
+  return `Could not download "${objectPath}" from bucket "${bucket}". Check Storage policies and that the file exists.`;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -199,6 +240,8 @@ async function injectSavedPdfQrHtml(
 async function downloadGlobalTemplateHtml(opts: {
   templateType: TemplateType;
   authorizationToken?: string | null;
+  /** Architect: load `architect_acceptance.html` instead of `architect.html`. */
+  architectHtmlVariant?: "appointment" | "acceptance";
 }): Promise<string | null> {
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     global: {
@@ -208,14 +251,24 @@ async function downloadGlobalTemplateHtml(opts: {
     },
   });
 
-  const objectPath = TEMPLATE_PATH_MAP[opts.templateType]?.trim() || "";
+  let objectPath = TEMPLATE_PATH_MAP[opts.templateType]?.trim() || "";
+  if (
+    opts.templateType === "Architect" &&
+    opts.architectHtmlVariant === "acceptance"
+  ) {
+    objectPath = "architect_acceptance.html";
+  }
   if (!objectPath) return null;
 
   const { data: file, error: downloadError } = await supabase.storage
     .from(TEMPLATE_BUCKET)
     .download(objectPath);
 
-  if (downloadError) throw new Error(downloadError.message);
+  if (downloadError) {
+    throw new Error(
+      describeStorageTemplateDownloadError(downloadError, objectPath, TEMPLATE_BUCKET)
+    );
+  }
   if (!file) return null;
   return await file.text();
 }
@@ -234,6 +287,7 @@ export async function POST(request: NextRequest) {
       fields?: Record<string, string | undefined>;
       owner_debug?: unknown;
       projectId?: string;
+      architectHtmlVariant?: "appointment" | "acceptance";
     };
 
     if (!body.templateType || !body.fields) {
@@ -246,26 +300,47 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "").trim() || null;
 
+    const architectVariant =
+      body.templateType === "Architect" &&
+      body.architectHtmlVariant === "acceptance"
+        ? "acceptance"
+        : undefined;
+
     const htmlTemplate = await downloadGlobalTemplateHtml({
       templateType: body.templateType,
       authorizationToken: token,
+      architectHtmlVariant: architectVariant,
     });
+
+    const expectedPath =
+      body.templateType === "Architect" && architectVariant === "acceptance"
+        ? "architect_acceptance.html"
+        : TEMPLATE_PATH_MAP[body.templateType];
 
     if (!htmlTemplate) {
       return NextResponse.json(
         {
-          error: `No global HTML template found for "${body.templateType}" in bucket "${TEMPLATE_BUCKET}". Expected path: "${TEMPLATE_PATH_MAP[body.templateType]}".`,
+          error: `No global HTML template found for "${body.templateType}" in bucket "${TEMPLATE_BUCKET}". Expected path: "${expectedPath ?? "(unknown)"}".`,
         },
         { status: 400 }
       );
     }
 
     let finalHtml = replaceTemplateTokens(htmlTemplate, body.fields);
-    finalHtml = await injectSavedPdfQrHtml(finalHtml, {
-      projectId: body.projectId,
-      templateType: body.templateType,
-      authorizationToken: token,
-    });
+
+    /** Architect acceptance letter: hide saved-PDF QR (“scanner”) for now. */
+    const omitSavedPdfQr =
+      body.templateType === "Architect" && architectVariant === "acceptance";
+
+    if (!omitSavedPdfQr) {
+      finalHtml = await injectSavedPdfQrHtml(finalHtml, {
+        projectId: body.projectId,
+        templateType: body.templateType,
+        authorizationToken: token,
+      });
+    } else {
+      finalHtml = finalHtml.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("");
+    }
 
     if (process.env.NODE_ENV === "development") {
       console.log("[application-preview-html] owner/company debug", {
@@ -303,7 +378,12 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to render HTML preview.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Failed to render HTML preview.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
