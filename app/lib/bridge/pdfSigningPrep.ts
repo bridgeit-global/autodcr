@@ -228,9 +228,14 @@ function assembleIncrementalUpdate(input: IncrementalAssemblyInput): Uint8Array 
   if (infoRef) {
     trailer += `/Info ${infoRef.objectNumber} ${infoRef.generationNumber} R `;
   }
-  if (idArray) {
-    trailer += `/ID ${pdfObjectToString(idArray)} `;
-  }
+  // PDF 1.7 §14.4: /ID is a two-element array. The first element is the
+  // permanent document identifier (must NOT change across updates) and the
+  // second is the changing identifier (MUST be regenerated on every save).
+  // Adobe specifically uses /ID[1] to detect tampering on signed documents —
+  // keeping it identical across an incremental update is interpreted as
+  // "file claims unchanged" while bytes have been appended, which Acrobat
+  // surfaces as "Document has been altered or corrupted since it was signed".
+  trailer += `/ID ${rebuildIdArray(idArray)} `;
   trailer += `/Prev ${prevStartxref} >>\n`;
   trailer += `startxref\n${xrefOffset}\n%%EOF\n`;
 
@@ -257,6 +262,41 @@ function serialiseObject(obj: PDFObject): Uint8Array {
   const buf = new Uint8Array(obj.sizeInBytes());
   obj.copyBytesInto(buf, 0);
   return buf;
+}
+
+/**
+ * Build the `[<perm> <changing>]` /ID array for the new trailer. Preserve the
+ * existing permanent ID (first element) verbatim if present; always
+ * regenerate the changing ID (second element) — that's the half whose
+ * stability across an incremental update Acrobat treats as tampering.
+ */
+function rebuildIdArray(prev: PDFArray | null): string {
+  const newChangingHex = randomHex16().toUpperCase();
+  if (prev && prev.size() >= 1) {
+    // PDF spec requires permanent ID stay constant. Read whatever pdf-lib
+    // parsed (PDFHexString or PDFString) and re-emit the raw bytes.
+    const permBuf = new Uint8Array(prev.get(0).sizeInBytes());
+    prev.get(0).copyBytesInto(permBuf, 0);
+    const permLiteral = new TextDecoder("latin1").decode(permBuf);
+    return `[ ${permLiteral} <${newChangingHex}> ]`;
+  }
+  // No prior /ID: generate both halves.
+  const newPermHex = randomHex16().toUpperCase();
+  return `[ <${newPermHex}> <${newChangingHex}> ]`;
+}
+
+function randomHex16(): string {
+  // 16 bytes = 32 hex chars, matching the typical /ID element width.
+  const buf = new Uint8Array(16);
+  const g = globalThis as { crypto?: { getRandomValues?: (b: Uint8Array) => void } };
+  if (g.crypto && typeof g.crypto.getRandomValues === "function") {
+    g.crypto.getRandomValues(buf);
+  } else {
+    for (let i = 0; i < buf.length; i += 1) buf[i] = Math.floor(Math.random() * 256);
+  }
+  let out = "";
+  for (let i = 0; i < buf.length; i += 1) out += buf[i].toString(16).padStart(2, "0");
+  return out;
 }
 
 function pdfObjectToString(obj: PDFObject): string {
