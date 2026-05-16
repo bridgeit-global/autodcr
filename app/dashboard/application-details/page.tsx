@@ -62,6 +62,12 @@ type PreviewProjectData = {
       name?: string;
       entity_type?: string;
       entityType?: string;
+      address_line1?: string;
+      address_line2?: string;
+      address_line3?: string;
+      addressLine1?: string;
+      addressLine2?: string;
+      addressLine3?: string;
       residentialAddress?: string;
     }>;
   } | null;

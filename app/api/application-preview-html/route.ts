@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { TemplateType } from "@/app/templates/templateGenerators";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import QRCode from "qrcode";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -116,7 +116,7 @@ async function readRepoApplicationTemplateHtml(
 }
 
 async function downloadStorageTemplateText(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   objectPath: string
 ): Promise<string | null> {
   const { data: file, error: downloadError } = await supabase.storage
