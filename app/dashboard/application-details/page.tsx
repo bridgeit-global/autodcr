@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
+import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import {
   normalizeApplicationWorkflowStage,
   type ApplicationWorkflowStage,
@@ -16,6 +18,7 @@ import {
   generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
   generateApplicationPreviewPdfFromHtml,
+  injectMockArchitectSignatureIntoPreviewHtml,
   injectMockOwnerSignatureIntoPreviewHtml,
   mapApplicationPreviewFields,
   mapToPdfFieldValues,
@@ -27,6 +30,8 @@ import {
 
 type PreviewProjectData = {
   title?: string;
+  user_id?: string | null;
+  architect_user_id?: string | null;
   project_info?: {
     proposalNo?: string;
     fullNameOfApplicant?: string;
@@ -46,6 +51,7 @@ type PreviewProjectData = {
       user_id?: string;
       userId?: string;
       id?: string;
+      owner_id?: string;
       applicantType?: string;
       applicant_type?: string;
       email?: string;
@@ -60,6 +66,145 @@ type PreviewProjectData = {
     }>;
   } | null;
 };
+
+/** Who may act as “owner” for signing: project row + Owner applicants (auth id may match applicant, not `projects.user_id`). */
+function collectOwnerSignerUserIds(
+  proj: PreviewProjectData | null,
+  projectRowUserId: string | null | undefined
+): string[] {
+  const raw: string[] = [];
+  if (typeof projectRowUserId === "string" && projectRowUserId.trim()) {
+    raw.push(projectRowUserId.trim());
+  }
+  if (typeof proj?.user_id === "string" && proj.user_id.trim()) {
+    raw.push(proj.user_id.trim());
+  }
+  const applicants = proj?.applicant_details?.applicants ?? [];
+  for (const a of applicants) {
+    const type = (a.applicantType || a.applicant_type || "").toLowerCase();
+    if (!type.includes("owner")) continue;
+    for (const v of [a.user_id, a.userId, a.id, a.owner_id]) {
+      if (typeof v === "string" && v.trim()) raw.push(v.trim());
+    }
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of raw) {
+    const k = r.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(r.trim());
+  }
+  return out;
+}
+
+function isAnySameUserId(uid: string, candidates: string[]): boolean {
+  const u = uid.trim().toLowerCase();
+  if (!u) return false;
+  return candidates.some((c) => c.trim().toLowerCase() === u);
+}
+
+function sameUserIdStr(
+  a: string | null | undefined,
+  b: string | null | undefined
+): boolean {
+  const x = typeof a === "string" ? a.trim().toLowerCase() : "";
+  const y = typeof b === "string" ? b.trim().toLowerCase() : "";
+  return x.length > 0 && y.length > 0 && x === y;
+}
+
+type MockSignAvailability = {
+  actionAvailable: boolean;
+  idleReason?: string;
+  subtitle: string;
+};
+
+function computeMockSignAvailability(args: {
+  templateType: TemplateType;
+  authUserId: string | null;
+  ownerSignedAt: string | null;
+  architectSignedAt: string | null;
+  projectData: PreviewProjectData | null;
+  projectRowUserId: string | null | undefined;
+  architectUserId: string | null | undefined;
+}): MockSignAvailability {
+  const {
+    templateType,
+    authUserId,
+    ownerSignedAt,
+    architectSignedAt,
+    projectData,
+    projectRowUserId,
+    architectUserId,
+  } = args;
+  const uid = typeof authUserId === "string" ? authUserId.trim() : "";
+  if (!uid) {
+    return {
+      actionAvailable: false,
+      idleReason: "Sign in to use signing.",
+      subtitle: "Opens preview and saves the signed application (demo).",
+    };
+  }
+
+  const ownerSigned = Boolean(ownerSignedAt?.trim());
+  const architectSigned = Boolean(architectSignedAt?.trim());
+  const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
+  const isOwner = isAnySameUserId(uid, ownerSignerIds);
+  const isArchitect = sameUserIdStr(uid, architectUserId);
+
+  if (templateType === "Architect") {
+    if (ownerSigned && architectSigned) {
+      return {
+        actionAvailable: false,
+        idleReason: "Signing is already complete.",
+        subtitle: "This application has been fully signed.",
+      };
+    }
+    if (!ownerSigned) {
+      if (isOwner) {
+        return {
+          actionAvailable: true,
+          subtitle: "Opens preview, applies mock owner signature, then saves.",
+        };
+      }
+      return {
+        actionAvailable: false,
+        idleReason: "Waiting for the project owner to sign first.",
+        subtitle: "Only the owner signs first on the Architect appointment.",
+      };
+    }
+    if (isArchitect) {
+      return {
+        actionAvailable: true,
+        subtitle: "Opens preview, applies mock architect signature, then saves.",
+      };
+    }
+    return {
+      actionAvailable: false,
+      idleReason: "Waiting for the appointed architect to sign.",
+      subtitle: "Your owner signature is saved. The architect completes the next step.",
+    };
+  }
+
+  if (ownerSigned) {
+    return {
+      actionAvailable: false,
+      idleReason: "This application is already signed.",
+      subtitle: "This application has already been signed.",
+    };
+  }
+  if (isOwner) {
+    return {
+      actionAvailable: true,
+      subtitle: "Opens preview, applies mock owner signature, then saves.",
+    };
+  }
+  return {
+    actionAvailable: false,
+    idleReason: "Only the project owner can sign.",
+    subtitle: "Only the project owner can sign this application.",
+  };
+}
 
 function pickCoaRegNoFromMeta(meta: unknown): string | undefined {
   if (!meta || typeof meta !== "object") return undefined;
@@ -357,6 +502,18 @@ async function buildApplicationPreviewContext(
     ownerApplicant?.letterhead_url?.trim() ||
     ownerApplicant?.letterheadUrl?.trim() ||
     pickLetterheadUrlFromMeta(ownerApplicant);
+  let clientAddressLine1 =
+    ownerApplicant?.address_line1?.trim() ||
+    (ownerApplicant as { addressLine1?: string } | undefined)?.addressLine1?.trim() ||
+    "";
+  let clientAddressLine2 =
+    ownerApplicant?.address_line2?.trim() ||
+    (ownerApplicant as { addressLine2?: string } | undefined)?.addressLine2?.trim() ||
+    "";
+  let clientAddressLine3 =
+    ownerApplicant?.address_line3?.trim() ||
+    (ownerApplicant as { addressLine3?: string } | undefined)?.addressLine3?.trim() ||
+    "";
 
   const mergeConsultantMeta = (meta: unknown, prefer = false) => {
     const nextCoaRegNo = pickCoaRegNoFromMeta(meta);
@@ -473,6 +630,18 @@ async function buildApplicationPreviewContext(
       const resolvedLetterheadUrl = pickLetterheadUrlFromMeta(ownerMeta);
       if (resolvedLetterheadUrl) ownerLetterheadUrl = resolvedLetterheadUrl;
     }
+    if (!clientAddressLine1) {
+      const resolved = pickAddressLineFromMeta(ownerMeta, 1);
+      if (resolved) clientAddressLine1 = resolved;
+    }
+    if (!clientAddressLine2) {
+      const resolved = pickAddressLineFromMeta(ownerMeta, 2);
+      if (resolved) clientAddressLine2 = resolved;
+    }
+    if (!clientAddressLine3) {
+      const resolved = pickAddressLineFromMeta(ownerMeta, 3);
+      if (resolved) clientAddressLine3 = resolved;
+    }
     const resolved = pickEntityNameFromMeta(ownerMeta);
     if (resolved) {
       clientCompanyName = resolved;
@@ -511,6 +680,9 @@ async function buildApplicationPreviewContext(
       clientCompanyName,
       clientName,
       clientCompanyDesignation,
+      clientAddressLine1,
+      clientAddressLine2,
+      clientAddressLine3,
       projectData,
     },
     templateType
@@ -534,6 +706,9 @@ async function buildApplicationPreviewContext(
     clientCompanyName,
     clientName,
     clientCompanyDesignation,
+    clientAddressLine1,
+    clientAddressLine2,
+    clientAddressLine3,
     ownerLetterheadUrl,
     ownerDebug: {
       ownerApplicants,
@@ -557,6 +732,34 @@ async function buildApplicationPreviewContext(
   return { fields, previewSource, templateType, fieldMapping };
 }
 
+const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
+
+function applicationTemplateSavedInUrls(
+  raw: unknown,
+  templateType: TemplateType
+): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const o = raw as Record<string, unknown>;
+  if (templateType === "Architect") {
+    const a = o["Architect"];
+    const b = o[ARCHITECT_ACCEPTANCE_URL_KEY];
+    return (
+      typeof a === "string" &&
+      a.trim().length > 0 &&
+      typeof b === "string" &&
+      b.trim().length > 0
+    );
+  }
+  const e = o[templateType];
+  return typeof e === "string" && e.trim().length > 0;
+}
+
+function hasApplicationUrlKey(raw: unknown, key: string): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const v = (raw as Record<string, unknown>)[key];
+  return typeof v === "string" && v.trim().length > 0;
+}
+
 export default function ApplicationDetailsPage() {
   const { userMetadata } = useUserMetadata();
   const router = useRouter();
@@ -566,6 +769,7 @@ export default function ApplicationDetailsPage() {
   const applicationId = searchParams.get("applicationId");
   const projectId = searchParams.get("projectId");
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
+  const previewTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
   const [projectData, setProjectData] = useState<PreviewProjectData | null>(null);
   const [applicationCreatedAt, setApplicationCreatedAt] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -589,14 +793,23 @@ export default function ApplicationDetailsPage() {
   const [detailsFieldsError, setDetailsFieldsError] = useState<string | null>(null);
   const [applicationWorkflowStage, setApplicationWorkflowStage] =
     useState<ApplicationWorkflowStage>("draft");
+  const [ownerSignedAt, setOwnerSignedAt] = useState<string | null>(null);
+  const [architectSignedAt, setArchitectSignedAt] = useState<string | null>(null);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [signedDocSuccessDialogOpen, setSignedDocSuccessDialogOpen] = useState(false);
   const [pendingDashboardUrl, setPendingDashboardUrl] = useState<string | null>(null);
+  const { setSlot } = useApplicationPdfSaveSlot();
+  const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
+  const [autoMockSignAfterPreviewOpen, setAutoMockSignAfterPreviewOpen] = useState(false);
+  const [sidebarPdfStatus, setSidebarPdfStatus] = useState<string | null>(null);
   const previewPdfContextRef = useRef<{
     fields: TemplateFields;
     templateType: TemplateType;
     previewSource: ApplicationPreviewSource;
   } | null>(null);
+  const saveApplicationPdfRef = useRef<() => Promise<void>>(async () => Promise.resolve());
+  const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const buildApplicationPreviewPdfBlob = async (): Promise<Blob> => {
     const ctx = previewPdfContextRef.current;
     if (!ctx) {
@@ -614,7 +827,7 @@ export default function ApplicationDetailsPage() {
     const loadProject = async () => {
       const { data, error } = await supabase
         .from("projects")
-        .select("title,project_info,save_plot_details,applicant_details")
+        .select("title,project_info,save_plot_details,applicant_details,user_id,architect_user_id")
         .eq("id", projectId)
         .single();
       if (error) {
@@ -631,7 +844,7 @@ export default function ApplicationDetailsPage() {
     const loadApplication = async () => {
       const { data, error } = await supabase
         .from("applications")
-        .select("created_at, workflow_stage")
+        .select("created_at, workflow_stage, owner_signed_at, architect_signed_at")
         .eq("id", applicationId)
         .single();
       if (error) {
@@ -640,9 +853,58 @@ export default function ApplicationDetailsPage() {
       }
       setApplicationCreatedAt(data?.created_at ?? null);
       setApplicationWorkflowStage(normalizeApplicationWorkflowStage(data?.workflow_stage));
+      setOwnerSignedAt(
+        typeof data?.owner_signed_at === "string" && data.owner_signed_at.trim()
+          ? data.owner_signed_at.trim()
+          : null
+      );
+      setArchitectSignedAt(
+        typeof data?.architect_signed_at === "string" && data.architect_signed_at.trim()
+          ? data.architect_signed_at.trim()
+          : null
+      );
     };
     void loadApplication();
   }, [isReadOnlyMode, applicationId]);
+
+  useEffect(() => {
+    if (!isReadOnlyMode || !applicationId) {
+      setAuthUserId(null);
+      return;
+    }
+    let cancelled = false;
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (cancelled) return;
+      if (error || !data.user?.id) {
+        setAuthUserId(null);
+        return;
+      }
+      setAuthUserId(data.user.id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isReadOnlyMode, applicationId]);
+
+  const mockSignAvailability = useMemo(
+    () =>
+      computeMockSignAvailability({
+        templateType: previewTemplateType,
+        authUserId,
+        ownerSignedAt,
+        architectSignedAt,
+        projectData,
+        projectRowUserId: projectData?.user_id,
+        architectUserId: projectData?.architect_user_id,
+      }),
+    [
+      previewTemplateType,
+      authUserId,
+      ownerSignedAt,
+      architectSignedAt,
+      projectData,
+    ]
+  );
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -812,12 +1074,10 @@ export default function ApplicationDetailsPage() {
           .select("application_urls")
           .eq("id", projectId)
           .maybeSingle();
-        const raw = urlsRow?.application_urls;
-        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-          const entry = (raw as Record<string, unknown>)[templateType];
-          alreadySavedForTemplate =
-            typeof entry === "string" && entry.trim().length > 0;
-        }
+        alreadySavedForTemplate = applicationTemplateSavedInUrls(
+          urlsRow?.application_urls,
+          templateType
+        );
       }
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
@@ -835,6 +1095,8 @@ export default function ApplicationDetailsPage() {
       setIsPreviewLoading(false);
     }
   };
+
+  openPreviewForSignRef.current = handlePreview;
 
   const handleMockSignComplete = async () => {
     if (!projectId) {
@@ -872,6 +1134,12 @@ export default function ApplicationDetailsPage() {
     setSavePdfMessage(null);
     setSavePdfError(null);
 
+    const sameUserId = (a: string | null | undefined, b: string | null | undefined) => {
+      const x = typeof a === "string" ? a.trim().toLowerCase() : "";
+      const y = typeof b === "string" ? b.trim().toLowerCase() : "";
+      return x.length > 0 && y.length > 0 && x === y;
+    };
+
     try {
       const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
 
@@ -889,12 +1157,82 @@ export default function ApplicationDetailsPage() {
         throw new Error("Missing session token. Please log in again.");
       }
 
+      const [{ data: appSignRow, error: appSignErr }, { data: projSignRow, error: projSignErr }] =
+        await Promise.all([
+          supabase
+            .from("applications")
+            .select("owner_signed_at, architect_signed_at, workflow_stage")
+            .eq("id", resolvedApplicationId)
+            .single(),
+          supabase.from("projects").select("user_id, architect_user_id").eq("id", projectId).single(),
+        ]);
+
+      if (appSignErr || !appSignRow) {
+        throw new Error("Could not load application signing state.");
+      }
+      if (projSignErr || !projSignRow) {
+        throw new Error("Could not load project for signing permissions.");
+      }
+
+      const ownerSignedAt =
+        typeof appSignRow.owner_signed_at === "string" && appSignRow.owner_signed_at.trim().length > 0
+          ? appSignRow.owner_signed_at
+          : null;
+      const architectSignedAt =
+        typeof appSignRow.architect_signed_at === "string" &&
+        appSignRow.architect_signed_at.trim().length > 0
+          ? appSignRow.architect_signed_at
+          : null;
+      const ownerSigned = Boolean(ownerSignedAt);
+      const architectSigned = Boolean(architectSignedAt);
+      const appointedArchitectId =
+        typeof projSignRow.architect_user_id === "string" ? projSignRow.architect_user_id : null;
+      const ownerSignerIds = collectOwnerSignerUserIds(projectData, projSignRow.user_id);
+
+      const isArchitectLetter = ctx.templateType === "Architect";
+      const uid = authUser.id;
+
+      if (isArchitectLetter && architectSigned) {
+        throw new Error("This application is already fully signed.");
+      }
+
+      if (isArchitectLetter && !ownerSigned) {
+        if (sameUserId(uid, appointedArchitectId) && !isAnySameUserId(uid, ownerSignerIds)) {
+          throw new Error("The owner has not signed yet.");
+        }
+        if (!isAnySameUserId(uid, ownerSignerIds)) {
+          throw new Error("Only the project owner can sign at this step.");
+        }
+      } else if (isArchitectLetter && ownerSigned && !architectSigned) {
+        if (isAnySameUserId(uid, ownerSignerIds) && !sameUserId(uid, appointedArchitectId)) {
+          setSavePdfMessage("Your signature is already saved. The architect will complete the next step.");
+          return;
+        }
+        if (!sameUserId(uid, appointedArchitectId)) {
+          throw new Error("Only the appointed architect can complete this signature step.");
+        }
+        if (!appointedArchitectId?.trim()) {
+          throw new Error("This project has no appointed architect. Assign one before architect signing.");
+        }
+      } else if (!isArchitectLetter) {
+        if (!isAnySameUserId(uid, ownerSignerIds)) {
+          throw new Error("Only the project owner can sign this application.");
+        }
+      }
+
       const baseHtml = await generateApplicationPreviewHtml(
         ctx.fields,
         ctx.templateType,
         ctx.previewSource
       );
-      const htmlWithSign = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
+
+      let htmlWithSign: string;
+      if (isArchitectLetter && ownerSigned && !architectSigned) {
+        const withOwner = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
+        htmlWithSign = injectMockArchitectSignatureIntoPreviewHtml(withOwner, ctx.templateType);
+      } else {
+        htmlWithSign = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
+      }
 
       const pdfBlob = await generateApplicationPreviewPdfFromHtml(htmlWithSign, ctx.templateType);
 
@@ -934,9 +1272,115 @@ export default function ApplicationDetailsPage() {
           ? jsonBody.publicUrl.trim()
           : null;
 
+      const nowIso = new Date().toISOString();
+
+      if (isArchitectLetter && !ownerSigned) {
+        const { error: updErr } = await supabase
+          .from("applications")
+          .update({
+            owner_signed_at: nowIso,
+            owner_signed_by: uid,
+            workflow_stage: "in_process",
+          })
+          .eq("id", resolvedApplicationId);
+        if (updErr) {
+          console.error("Failed to record owner signature:", updErr);
+          throw new Error("PDF saved but owner signature could not be recorded (check permissions).");
+        }
+        setApplicationWorkflowStage("in_process");
+        setOwnerSignedAt(nowIso);
+        setPdfSavedForCurrentPreview(true);
+        setSavePdfMessage(null);
+        if (previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(previewUrl);
+        }
+        if (publicUrl) {
+          setPreviewUrl(publicUrl);
+          setPreviewHtml(null);
+        }
+        setPreviewOpen(false);
+        const { data: deptRowOwner } = await supabase
+          .from("applications")
+          .select("department")
+          .eq("id", resolvedApplicationId)
+          .maybeSingle();
+        const deptOwner =
+          typeof deptRowOwner?.department === "string" ? deptRowOwner.department.trim() : "";
+        const dashboardUrlOwner =
+          deptOwner.length > 0
+            ? `/userdashboard?department=${encodeURIComponent(deptOwner)}`
+            : "/userdashboard";
+        router.push(dashboardUrlOwner);
+        return;
+      }
+
+      if (isArchitectLetter && ownerSigned && !architectSigned) {
+        const { error: updErr } = await supabase
+          .from("applications")
+          .update({
+            architect_signed_at: nowIso,
+            architect_signed_by: uid,
+            workflow_stage: "approved_verified",
+          })
+          .eq("id", resolvedApplicationId);
+        if (updErr) {
+          console.error("Failed to record architect signature / stage:", updErr);
+          throw new Error(
+            "Signed PDF was saved, but the application could not be moved to Approved or Verified (check permissions)."
+          );
+        }
+        setApplicationWorkflowStage("approved_verified");
+        setArchitectSignedAt(nowIso);
+        setPdfSavedForCurrentPreview(true);
+        setSavePdfMessage(null);
+        if (previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(previewUrl);
+        }
+        if (publicUrl) {
+          setPreviewUrl(publicUrl);
+          setPreviewHtml(null);
+        }
+        const { data: deptRow } = await supabase
+          .from("applications")
+          .select("department")
+          .eq("id", resolvedApplicationId)
+          .maybeSingle();
+        const dept = typeof deptRow?.department === "string" ? deptRow.department.trim() : "";
+        const dashboardUrl =
+          dept.length > 0
+            ? `/userdashboard?department=${encodeURIComponent(dept)}`
+            : "/userdashboard";
+        setPendingDashboardUrl(dashboardUrl);
+        setPreviewOpen(false);
+        setSignedDocSuccessDialogOpen(true);
+        if (!publicUrl && projectId) {
+          const { data: urlsRow } = await supabase
+            .from("projects")
+            .select("application_urls")
+            .eq("id", projectId)
+            .maybeSingle();
+          const raw = urlsRow?.application_urls;
+          const entry =
+            raw && typeof raw === "object" && !Array.isArray(raw)
+              ? (raw as Record<string, unknown>)[ctx.templateType]
+              : undefined;
+          const fallback =
+            typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
+          if (fallback) {
+            setPreviewUrl(fallback);
+            setPreviewHtml(null);
+          }
+        }
+        return;
+      }
+
       const { error: stageErr } = await supabase
         .from("applications")
-        .update({ workflow_stage: "approved_verified" })
+        .update({
+          owner_signed_at: nowIso,
+          owner_signed_by: uid,
+          workflow_stage: "approved_verified",
+        })
         .eq("id", resolvedApplicationId);
 
       if (stageErr) {
@@ -948,6 +1392,7 @@ export default function ApplicationDetailsPage() {
       }
 
       setApplicationWorkflowStage("approved_verified");
+      setOwnerSignedAt(nowIso);
       setPdfSavedForCurrentPreview(true);
       setSavePdfMessage(null);
 
@@ -1004,17 +1449,38 @@ export default function ApplicationDetailsPage() {
       setSavePdfError("Missing project.");
       return;
     }
-    const ctx = previewPdfContextRef.current;
-    if (!ctx) {
-      setSavePdfError("Generate a preview first, then save.");
-      return;
-    }
     setIsSavingPdf(true);
     setSavePdfMessage(null);
     setSavePdfError(null);
+    setSidebarPdfStatus(null);
     const stageBeforeSave = applicationWorkflowStage;
     try {
-      const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+      let ctx = previewPdfContextRef.current;
+      if (!ctx) {
+        const built = await buildApplicationPreviewContext({
+          userMetadata,
+          projectData,
+          selectedApplication,
+          applicationNo,
+          applicationCreatedAt,
+          projectId,
+          architectHtmlVariant:
+            mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
+              ? architectPreviewVariant
+              : undefined,
+        });
+        previewPdfContextRef.current = {
+          fields: built.fields,
+          templateType: built.templateType,
+          previewSource: built.previewSource,
+        };
+        setPreviewFieldMapping(built.fieldMapping);
+        setPreviewReadyForSave(true);
+        ctx = previewPdfContextRef.current;
+      }
+      if (!ctx) {
+        throw new Error("Could not prepare application data for saving.");
+      }
 
       const {
         data: { user: authUser },
@@ -1030,10 +1496,12 @@ export default function ApplicationDetailsPage() {
         throw new Error("Missing session token. Please log in again.");
       }
 
-      const uploadPdfBlob = async (pdfBlob: Blob) => {
+      const uploadPdfBlob = async (pdfBlob: Blob, applicationUrlsKey: string) => {
+        const keySlug = applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
         const formData = new FormData();
-        formData.append("pdf", pdfBlob, `${slug}.pdf`);
+        formData.append("pdf", pdfBlob, `${keySlug}.pdf`);
         formData.append("templateType", ctx.templateType);
+        formData.append("applicationUrlsKey", applicationUrlsKey);
         formData.append("user_id", authUser.id);
 
         const response = await fetch(
@@ -1060,39 +1528,106 @@ export default function ApplicationDetailsPage() {
         }
       };
 
-      const { data: urlsBeforeSave } = await supabase
-        .from("projects")
-        .select("application_urls")
-        .eq("id", projectId)
-        .maybeSingle();
-      const urlsRaw = urlsBeforeSave?.application_urls;
-      const hadTemplateUrl =
-        urlsRaw &&
-        typeof urlsRaw === "object" &&
-        !Array.isArray(urlsRaw) &&
-        typeof (urlsRaw as Record<string, unknown>)[ctx.templateType] === "string" &&
-        String((urlsRaw as Record<string, unknown>)[ctx.templateType]).trim().length > 0;
+      const fetchApplicationUrls = async (): Promise<unknown> => {
+        const { data: urlsRow } = await supabase
+          .from("projects")
+          .select("application_urls")
+          .eq("id", projectId)
+          .maybeSingle();
+        return urlsRow?.application_urls;
+      };
 
-      if (hadTemplateUrl) {
-        // One Chromium pass: HTML already includes correct QR for the stored URL.
-        const blobWithQr = await buildApplicationPreviewPdfBlob();
-        await uploadPdfBlob(blobWithQr);
+      if (stageBeforeSave === "draft" && ctx.templateType === "Architect") {
+        const saveArchitectVariant = async (
+          variant: "appointment" | "acceptance",
+          applicationUrlsKey: string
+        ) => {
+          let urlsRaw = await fetchApplicationUrls();
+          const hadKey = hasApplicationUrlKey(urlsRaw, applicationUrlsKey);
+          const built = await buildApplicationPreviewContext({
+            userMetadata,
+            projectData,
+            selectedApplication,
+            applicationNo,
+            applicationCreatedAt,
+            projectId,
+            architectHtmlVariant: variant,
+          });
+          const blob1 = await generateApplicationPreviewPdf(
+            built.fields,
+            built.templateType,
+            built.previewSource
+          );
+          if (hadKey) {
+            await uploadPdfBlob(blob1, applicationUrlsKey);
+          } else {
+            await uploadPdfBlob(blob1, applicationUrlsKey);
+            const blob2 = await generateApplicationPreviewPdf(
+              built.fields,
+              built.templateType,
+              built.previewSource
+            );
+            await uploadPdfBlob(blob2, applicationUrlsKey);
+          }
+        };
+
+        setSidebarPdfStatus("Saving appointment…");
+        await saveArchitectVariant("appointment", "Architect");
+        setSidebarPdfStatus("Saving acceptance…");
+        await saveArchitectVariant("acceptance", ARCHITECT_ACCEPTANCE_URL_KEY);
+
+        const refreshed = await buildApplicationPreviewContext({
+          userMetadata,
+          projectData,
+          selectedApplication,
+          applicationNo,
+          applicationCreatedAt,
+          projectId,
+          architectHtmlVariant: architectPreviewVariant,
+        });
+        previewPdfContextRef.current = {
+          fields: refreshed.fields,
+          templateType: refreshed.templateType,
+          previewSource: refreshed.previewSource,
+        };
+        const htmlWithQr = await generateApplicationPreviewHtml(
+          refreshed.fields,
+          refreshed.templateType,
+          refreshed.previewSource
+        );
+        setPreviewHtml(htmlWithQr);
+        const urlsAfterSave = await fetchApplicationUrls();
+        setPdfSavedForCurrentPreview(
+          applicationTemplateSavedInUrls(urlsAfterSave, "Architect")
+        );
+        setSidebarPdfStatus(null);
       } else {
-        // First save: need a public URL in DB, then regenerate so QR points at that file.
-        const blob = await buildApplicationPreviewPdfBlob();
-        await uploadPdfBlob(blob);
-        const blobWithQr = await buildApplicationPreviewPdfBlob();
-        await uploadPdfBlob(blobWithQr);
-      }
+        const urlsRaw = await fetchApplicationUrls();
+        const hadTemplateUrl =
+          urlsRaw &&
+          typeof urlsRaw === "object" &&
+          !Array.isArray(urlsRaw) &&
+          typeof (urlsRaw as Record<string, unknown>)[ctx.templateType] === "string" &&
+          String((urlsRaw as Record<string, unknown>)[ctx.templateType]).trim().length > 0;
 
-      // Keep preview paginated in the modal.
-      const htmlWithQr = await generateApplicationPreviewHtml(
-        ctx.fields,
-        ctx.templateType,
-        ctx.previewSource
-      );
-      setPreviewHtml(htmlWithQr);
-      setPdfSavedForCurrentPreview(true);
+        if (hadTemplateUrl) {
+          const blobWithQr = await buildApplicationPreviewPdfBlob();
+          await uploadPdfBlob(blobWithQr, ctx.templateType);
+        } else {
+          const blob = await buildApplicationPreviewPdfBlob();
+          await uploadPdfBlob(blob, ctx.templateType);
+          const blobWithQr = await buildApplicationPreviewPdfBlob();
+          await uploadPdfBlob(blobWithQr, ctx.templateType);
+        }
+
+        const htmlWithQr = await generateApplicationPreviewHtml(
+          ctx.fields,
+          ctx.templateType,
+          ctx.previewSource
+        );
+        setPreviewHtml(htmlWithQr);
+        setPdfSavedForCurrentPreview(true);
+      }
 
       if (applicationId) {
         const { error: stageErr } = await supabase
@@ -1134,8 +1669,86 @@ export default function ApplicationDetailsPage() {
       setSavePdfError(message);
     } finally {
       setIsSavingPdf(false);
+      setSidebarPdfStatus(null);
     }
   };
+
+  saveApplicationPdfRef.current = handleSaveApplicationPdf;
+
+  useEffect(() => {
+    if (!isReadOnlyMode || !projectId) {
+      setSlot(null);
+      return;
+    }
+    if (applicationWorkflowStage !== "draft") {
+      setSlot(null);
+      return;
+    }
+    setSlot({
+      onSave: () => saveApplicationPdfRef.current(),
+      disabled: pdfSavedForCurrentPreview,
+      busy: isSavingPdf,
+      done: pdfSavedForCurrentPreview,
+      subtitle:
+        previewTemplateType === "Architect"
+          ? "Saves appointment and acceptance PDFs to the project."
+          : undefined,
+      statusText: sidebarPdfStatus ?? undefined,
+    });
+    return () => {
+      setSlot(null);
+    };
+  }, [
+    isReadOnlyMode,
+    projectId,
+    applicationWorkflowStage,
+    pdfSavedForCurrentPreview,
+    isSavingPdf,
+    previewTemplateType,
+    sidebarPdfStatus,
+    setSlot,
+  ]);
+
+  useEffect(() => {
+    if (!previewOpen) {
+      setAutoMockSignAfterPreviewOpen(false);
+    }
+  }, [previewOpen]);
+
+  useEffect(() => {
+    if (!isReadOnlyMode || !projectId) {
+      setSignApplicationSlot(null);
+      return;
+    }
+    if (applicationWorkflowStage !== "in_process") {
+      setSignApplicationSlot(null);
+      return;
+    }
+    const avail = mockSignAvailability;
+    setSignApplicationSlot({
+      onSign: async () => {
+        if (!avail.actionAvailable) return;
+        setAutoMockSignAfterPreviewOpen(true);
+        await openPreviewForSignRef.current();
+      },
+      disabled: isSavingPdf,
+      busy: isPreviewLoading,
+      subtitle: avail.subtitle,
+      actionAvailable: avail.actionAvailable,
+      unavailableHint: avail.idleReason,
+    });
+    return () => {
+      setSignApplicationSlot(null);
+    };
+  }, [
+    isReadOnlyMode,
+    projectId,
+    applicationWorkflowStage,
+    isPreviewLoading,
+    isSavingPdf,
+    setSignApplicationSlot,
+    mockSignAvailability,
+  ]);
 
   if (!isReadOnlyMode) {
     return (
@@ -1149,8 +1762,6 @@ export default function ApplicationDetailsPage() {
       </div>
     );
   }
-
-  const previewTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
 
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
@@ -1184,7 +1795,9 @@ export default function ApplicationDetailsPage() {
             >
               {isPreviewLoading ? "Generating..." : "Preview"}
             </button>
-            {projectId && previewReadyForSave && (
+            {projectId &&
+              previewReadyForSave &&
+              applicationWorkflowStage !== "draft" && (
               <button
                 type="button"
                 onClick={() => void handleSaveApplicationPdf()}
@@ -1265,6 +1878,7 @@ export default function ApplicationDetailsPage() {
         htmlContent={previewHtml}
         fieldMapping={previewFieldMapping}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
+        autoMockSignAfterOpen={autoMockSignAfterPreviewOpen}
         onSave={projectId ? handleSaveApplicationPdf : undefined}
         isSaving={isSavingPdf}
         saveDisabled={!projectId || !previewReadyForSave}
@@ -1299,8 +1913,10 @@ export default function ApplicationDetailsPage() {
             ? `${previewPdfContextRef.current.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_")}-application.pdf`
             : undefined
         }
-        hideSaveButton={applicationWorkflowStage !== "draft"}
-        showMockSignButton={applicationWorkflowStage === "in_process"}
+        hideSaveButton={applicationWorkflowStage === "draft"}
+        showMockSignButton={
+          applicationWorkflowStage === "in_process" && mockSignAvailability.actionAvailable
+        }
         onMockSignComplete={handleMockSignComplete}
         mockSignBusy={isSavingPdf}
       />

@@ -22,6 +22,9 @@ export type ApplicationPreviewSource = {
   clientCompanyName?: string | null;
   clientName?: string | null;
   clientCompanyDesignation?: string | null;
+  clientAddressLine1?: string | null;
+  clientAddressLine2?: string | null;
+  clientAddressLine3?: string | null;
   ownerLetterheadUrl?: string | null;
   ownerDebug?: unknown;
   consultantAddressLine1?: string | null;
@@ -65,6 +68,9 @@ export type ApplicationPreviewSource = {
         address_line1?: string;
         address_line2?: string;
         address_line3?: string;
+        addressLine1?: string;
+        addressLine2?: string;
+        addressLine3?: string;
         registrationNumber?: string;
         registrationNo?: string;
         residentialAddress?: string;
@@ -550,6 +556,27 @@ export function mapToPdfFieldValues(
     fields.ApplicantName?.trim() ||
     source?.projectData?.title?.trim() ||
     "-";
+  const clientAddressLine1 = sanitizeAddressLine(
+    pickText(
+      ownerApplicant?.address_line1,
+      ownerApplicant?.addressLine1,
+      source?.clientAddressLine1
+    )
+  );
+  const clientAddressLine2 = sanitizeAddressLine(
+    pickText(
+      ownerApplicant?.address_line2,
+      ownerApplicant?.addressLine2,
+      source?.clientAddressLine2
+    )
+  );
+  const clientAddressLine3 = sanitizeAddressLine(
+    pickText(
+      ownerApplicant?.address_line3,
+      ownerApplicant?.addressLine3,
+      source?.clientAddressLine3
+    )
+  );
   const clientCompanyName =
     ownerApplicant?.entity_name?.trim() ||
     ownerApplicant?.entityName?.trim() ||
@@ -638,6 +665,9 @@ export function mapToPdfFieldValues(
     project_Client_Company_Name: clientCompanyName,
     project_Client_Company_Designation: displayClientCompanyDesignation,
     project_Client_Name: clientName,
+    project_addressline1_Client: clientAddressLine1,
+    project_addressline2_Client: clientAddressLine2,
+    project_addressline3_Client: clientAddressLine3,
     project_Letterhead_Image_Url: ownerLetterheadUrl || undefined,
 
     // Building proposal CC block (common)
@@ -717,6 +747,9 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_Client_Company_Name: "Client company name",
   project_Client_Company_Designation: "Client designation",
   project_Client_Name: "Client name",
+  project_addressline1_Client: "Client — address line 1",
+  project_addressline2_Client: "Client — address line 2",
+  project_addressline3_Client: "Client — address line 3",
   project_Letterhead_Image_Url: "Letterhead URL",
   project_BuildingProposal_BaseDesignation: "Building proposal — base designation",
   project_BuildingProposal_OfficerDesignation: "Building proposal — officer designation",
@@ -1459,6 +1492,29 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
   const contentPaddingLeft = isArchitectTemplate ? "36pt" : "56pt";
   const contentPaddingRight = isArchitectTemplate ? "30pt" : "42pt";
 
+  const acceptanceLetterBodyPagedCss =
+    metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body")
+      ? `
+  /* EEBP acceptance: first-line tab only (text-indent). padding-left would inset
+     every wrapped line; continuation lines should align with the salutation. */
+  .pagedjs_page_content .eeb-tab-line {
+    display: block !important;
+    padding-left: 0 !important;
+    text-indent: 0.5in !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    text-align: justify !important;
+    line-height: 1.35 !important;
+  }
+  .pagedjs_page_content .acceptance-letter-body {
+    padding-left: 0 !important;
+    box-sizing: border-box !important;
+  }`
+      : "";
+
   const head = `
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1627,6 +1683,7 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     .pagedjs_pages { padding: 0; }
     .pagedjs_page { box-shadow: none; margin: 0; }
   }
+  ${acceptanceLetterBodyPagedCss}
 </style>
 ${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
 <script src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></script>`;
@@ -1788,7 +1845,8 @@ ${SAVED_PDF_QR_LOCK_SCRIPT_INLINE}
  * `app/api/application-preview-html/constants.ts`) beside the client/owner block, e.g.:
  * `<div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">`
  * inner column for client tokens, then a column with only `$project_Saved_Pdf_QR`.
- * The API replaces the sentinel with a QR image of `application_urls[templateType]`.
+ * The API replaces the sentinel with a QR image of the matching `application_urls` entry
+ * (`templateType`, or `Architect_acceptance` for the Architect acceptance letter).
  */
 export async function generateApplicationPreviewHtml(
   fields: TemplateFields,
@@ -1929,6 +1987,59 @@ export function injectMockOwnerSignatureIntoPreviewHtml(
         ">Owner</span>
       `;
   firstCell.insertBefore(wrap, signatureLine);
+  (signatureLine as HTMLElement).style.marginTop = "4px";
+  return parsed.documentElement.outerHTML;
+}
+
+/**
+ * Mock “Architect” signature in the **second** column of `.signature-table` (Architect appointment HTML).
+ * Call after {@link injectMockOwnerSignatureIntoPreviewHtml} when persisting the architect signing step.
+ */
+export function injectMockArchitectSignatureIntoPreviewHtml(
+  html: string,
+  templateType?: TemplateType
+): string {
+  if (templateType && templateType !== "Architect") return html;
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    return html;
+  }
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const cells = parsed.querySelectorAll(".signature-table tr td");
+  if (cells.length < 2) return html;
+  const architectCell = cells[1];
+  const signatureLine = architectCell?.querySelector(".signature-line");
+  if (!architectCell || !signatureLine) return html;
+  if (architectCell.querySelector("#preview-dummy-architect-sign")) return html;
+
+  const fontLinkId = "preview-owner-signature-font-link";
+  if (!parsed.getElementById(fontLinkId)) {
+    const link = parsed.createElement("link");
+    link.id = fontLinkId;
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
+    parsed.head.appendChild(link);
+  }
+
+  const wrap = parsed.createElement("div");
+  wrap.id = "preview-dummy-architect-sign";
+  wrap.setAttribute(
+    "style",
+    "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
+  );
+  wrap.innerHTML = `
+        <span style="
+          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
+          font-size:clamp(28px,4.2vw,36px);
+          font-weight:400;
+          line-height:1.15;
+          color:#0f172a;
+          letter-spacing:0.02em;
+          display:inline-block;
+          transform:rotate(1.5deg);
+          text-shadow:0 1px 0 rgba(255,255,255,0.6);
+        ">Architect</span>
+      `;
+  architectCell.insertBefore(wrap, signatureLine);
   (signatureLine as HTMLElement).style.marginTop = "4px";
   return parsed.documentElement.outerHTML;
 }

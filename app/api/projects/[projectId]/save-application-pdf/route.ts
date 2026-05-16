@@ -59,10 +59,14 @@ export async function POST(
 
     const formData = await request.formData();
     const templateTypeRaw = formData.get("templateType");
+    const applicationUrlsKeyRaw = formData.get("applicationUrlsKey");
     const userIdField = formData.get("user_id");
     const fileField = formData.get("pdf") ?? formData.get("file");
 
     const templateType = typeof templateTypeRaw === "string" ? templateTypeRaw.trim() : "";
+    const applicationUrlsKeyInput =
+      typeof applicationUrlsKeyRaw === "string" ? applicationUrlsKeyRaw.trim() : "";
+    const applicationUrlsKey = applicationUrlsKeyInput || templateType;
     const claimedUserId = typeof userIdField === "string" ? userIdField.trim() : "";
 
     if (!claimedUserId || claimedUserId !== user.id) {
@@ -74,6 +78,20 @@ export async function POST(
 
     if (!templateType || !(templateType in TEMPLATE_CONFIG)) {
       return NextResponse.json({ error: "Invalid templateType." }, { status: 400 });
+    }
+
+    if (templateType === "Architect") {
+      if (applicationUrlsKey !== "Architect" && applicationUrlsKey !== "Architect_acceptance") {
+        return NextResponse.json(
+          { error: "For Architect, applicationUrlsKey must be Architect or Architect_acceptance." },
+          { status: 400 }
+        );
+      }
+    } else if (applicationUrlsKey !== templateType) {
+      return NextResponse.json(
+        { error: "applicationUrlsKey must match templateType for this consultant type." },
+        { status: 400 }
+      );
     }
 
     if (!(fileField instanceof Blob) || fileField.size < 1) {
@@ -101,8 +119,8 @@ export async function POST(
       return NextResponse.json({ error: "Project not found or access denied." }, { status: 403 });
     }
 
-    const slug = templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-    const path = `${projectId.trim()}/saved-applications/${slug}.pdf`;
+    const storageSlug = applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+    const path = `${projectId.trim()}/saved-applications/${storageSlug}.pdf`;
 
     const buffer = Buffer.from(await fileField.arrayBuffer());
 
@@ -134,7 +152,7 @@ export async function POST(
           ) as Record<string, string>
         : {};
 
-    const nextUrls = { ...prev, [templateType]: publicUrl };
+    const nextUrls = { ...prev, [applicationUrlsKey]: publicUrl };
 
     const { error: updErr } = await admin
       .from("projects")
