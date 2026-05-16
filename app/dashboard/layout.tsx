@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import SiteFooter from "../components/SiteFooter";
 import DashboardHeader from "../components/DashboardHeader";
 import DashboardSidebar from "../components/DashboardSidebar";
+import { ApplicationPdfSaveSlotProvider } from "./context/ApplicationPdfSaveSlotContext";
+import { ApplicationSignSlotProvider } from "./context/ApplicationSignSlotContext";
 import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
 import { isPageSaved, loadDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
 import { supabase } from "../utils/supabase";
@@ -857,6 +859,8 @@ function DashboardLayoutContent({
           <div className="flex flex-1 min-h-0 bg-gray-50">
             {/* Inner padding so sidebar/content look like separate cards */}
             <div className="p-4 md:p-6 flex flex-1 min-h-0 overflow-hidden gap-4">
+              <ApplicationPdfSaveSlotProvider>
+              <ApplicationSignSlotProvider>
               <div className="shrink-0">
                 <div className="h-full rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
                   <Suspense
@@ -882,6 +886,8 @@ function DashboardLayoutContent({
               <main className="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white border border-gray-200 shadow-sm px-4 md:px-6 py-6">
                 {children}
               </main>
+              </ApplicationSignSlotProvider>
+              </ApplicationPdfSaveSlotProvider>
             </div>
           </div>
         </div>

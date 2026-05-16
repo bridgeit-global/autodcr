@@ -732,7 +732,9 @@ function UserDashboardContent() {
 
     let query = supabase
       .from("applications")
-      .select("id,project_id,project_title,permission_type,created_at,workflow_stage")
+      .select(
+        "id,project_id,project_title,permission_type,created_at,workflow_stage,owner_signed_at,architect_signed_at"
+      )
       .eq("department", selectedApplicationType);
 
     if (selectedProject === "ALL") {
@@ -764,12 +766,22 @@ function UserDashboardContent() {
         project_title?: string;
         created_at?: string;
         workflow_stage?: string | null;
+        owner_signed_at?: string | null;
+        architect_signed_at?: string | null;
       }) => {
-        const wf = normalizeApplicationWorkflowStage(row.workflow_stage);
         const perm = row.permission_type;
-        if (wf === "draft") draftMap[perm] = (draftMap[perm] ?? 0) + 1;
-        else if (wf === "in_process") inProcessMap[perm] = (inProcessMap[perm] ?? 0) + 1;
-        else if (wf === "approved_verified") approvedMap[perm] = (approvedMap[perm] ?? 0) + 1;
+        const wfRaw = normalizeApplicationWorkflowStage(row.workflow_stage);
+        const tmpl = mapSelectedApplicationToTemplate(row.permission_type);
+        const isArchitectApp = tmpl === "Architect";
+        const archSigDone =
+          typeof row.architect_signed_at === "string" &&
+          row.architect_signed_at.trim().length > 0;
+        const wfBucket: ApplicationWorkflowStage =
+          wfRaw === "approved_verified" && isArchitectApp && !archSigDone ? "in_process" : wfRaw;
+
+        if (wfBucket === "draft") draftMap[perm] = (draftMap[perm] ?? 0) + 1;
+        else if (wfBucket === "in_process") inProcessMap[perm] = (inProcessMap[perm] ?? 0) + 1;
+        else if (wfBucket === "approved_verified") approvedMap[perm] = (approvedMap[perm] ?? 0) + 1;
 
         const startedOn = row.created_at
           ? new Date(row.created_at).toLocaleDateString("en-GB")
@@ -791,10 +803,10 @@ function UserDashboardContent() {
           applicationNo,
           ward: "-",
           applicationType: row.permission_type,
-          status: workflowStageLabel(wf),
+          status: workflowStageLabel(wfBucket),
           startedOn,
-          currentStage: workflowStageToModalCurrentStage(wf),
-          workflowStage: wf,
+          currentStage: workflowStageToModalCurrentStage(wfBucket),
+          workflowStage: wfBucket,
         };
 
         if (!groupedApplications[row.permission_type]) {
@@ -866,6 +878,9 @@ function UserDashboardContent() {
 
     const urls = { ...(proj.application_urls as Record<string, unknown>) };
     delete urls[templateKey];
+    if (templateKey === "Architect") {
+      delete urls["Architect_acceptance"];
+    }
 
     const { error: updErr } = await supabase.from("projects").update({ application_urls: urls }).eq("id", projectId);
 

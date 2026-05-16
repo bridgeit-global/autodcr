@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { TemplateType } from "@/app/templates/templateGenerators";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import QRCode from "qrcode";
+import path from "node:path";
+import { readFile } from "node:fs/promises";
 
 import { PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
 
@@ -75,6 +77,93 @@ function describeStorageTemplateDownloadError(
   if (raw && !raw.startsWith("{")) return raw;
 
   return `Could not download "${objectPath}" from bucket "${bucket}". Check Storage policies and that the file exists.`;
+}
+
+/**
+ * When true, HTML is loaded from Supabase Storage instead of the repo `html/` folder.
+ * Default: repo (`html/`) first; Storage only if the file is missing locally.
+ */
+function preferSupabaseApplicationTemplates(): boolean {
+  const v = process.env.USE_SUPABASE_APPLICATION_TEMPLATES?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Read `html/<objectPath>` from the repo (committed on GitHub, deployed with the app).
+ */
+async function readRepoApplicationTemplateHtml(
+  objectPath: string
+): Promise<string | null> {
+  const rawBase =
+    process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() ||
+    path.join("html");
+  const base = path.isAbsolute(rawBase)
+    ? path.resolve(rawBase)
+    : path.resolve(process.cwd(), rawBase);
+  const abs = path.resolve(base, objectPath);
+  const rel = path.relative(base, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+
+  try {
+    const text = await readFile(abs, "utf8");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[application-preview-html] using repo template:", abs);
+    }
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+async function downloadStorageTemplateText(
+  supabase: SupabaseClient,
+  objectPath: string
+): Promise<string | null> {
+  const { data: file, error: downloadError } = await supabase.storage
+    .from(TEMPLATE_BUCKET)
+    .download(objectPath);
+
+  if (downloadError) {
+    throw new Error(
+      describeStorageTemplateDownloadError(downloadError, objectPath, TEMPLATE_BUCKET)
+    );
+  }
+  if (!file) return null;
+  return await file.text();
+}
+
+/** Bundled shared CSS shipped with the app (letterhead, layout, typography). */
+async function readBundledSharedApplicationCss(): Promise<string> {
+  const rawBase =
+    process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() ||
+    path.join("html");
+  const base = path.isAbsolute(rawBase)
+    ? path.resolve(rawBase)
+    : path.resolve(process.cwd(), rawBase);
+  const abs = path.resolve(base, "_shared", "application-templates.css");
+  const rel = path.relative(base, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return "";
+  try {
+    return await readFile(abs, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Shared letter chrome for Architect templates — always from repo (`html/_shared/`). */
+async function loadSharedArchitectApplicationCss(): Promise<string> {
+  return readBundledSharedApplicationCss();
+}
+
+/** Insert shared CSS at top of `<head>` so `$project_*` tokens in that file are still replaced later. */
+function injectSharedApplicationTemplateStyle(html: string, css: string): string {
+  const trimmed = css.trim();
+  if (!trimmed) return html;
+  const block = `<style id="application-templates-shared">\n${trimmed}\n</style>`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (open) => `${open}\n${block}\n`);
+  }
+  return `<head>${block}</head>\n${html}`;
 }
 
 function escapeHtml(value: string): string {
@@ -154,9 +243,15 @@ async function injectSavedPdfQrHtml(
     projectId?: string | null;
     templateType: TemplateType;
     authorizationToken: string | null;
+    /** `projects.application_urls` key to encode in the QR (defaults to `templateType`). */
+    applicationUrlsKey?: string;
   }
 ): Promise<string> {
   let pdfUrl: string | undefined;
+  const urlsKey =
+    typeof opts.applicationUrlsKey === "string" && opts.applicationUrlsKey.trim()
+      ? opts.applicationUrlsKey.trim()
+      : opts.templateType;
 
   if (opts.projectId?.trim() && opts.authorizationToken) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -174,7 +269,7 @@ async function injectSavedPdfQrHtml(
     if (!error && data) {
       const raw = data.application_urls;
       if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-        const v = (raw as Record<string, unknown>)[opts.templateType];
+        const v = (raw as Record<string, unknown>)[urlsKey];
         if (typeof v === "string" && v.trim()) pdfUrl = v.trim();
       }
     }
@@ -260,17 +355,30 @@ async function downloadGlobalTemplateHtml(opts: {
   }
   if (!objectPath) return null;
 
-  const { data: file, error: downloadError } = await supabase.storage
-    .from(TEMPLATE_BUCKET)
-    .download(objectPath);
-
-  if (downloadError) {
-    throw new Error(
-      describeStorageTemplateDownloadError(downloadError, objectPath, TEMPLATE_BUCKET)
-    );
+  if (preferSupabaseApplicationTemplates()) {
+    try {
+      const fromStorage = await downloadStorageTemplateText(supabase, objectPath);
+      if (fromStorage !== null) return fromStorage;
+    } catch (error) {
+      const repoHtml = await readRepoApplicationTemplateHtml(objectPath);
+      if (repoHtml !== null) return repoHtml;
+      throw error;
+    }
   }
-  if (!file) return null;
-  return await file.text();
+
+  const repoHtml = await readRepoApplicationTemplateHtml(objectPath);
+  if (repoHtml !== null) return repoHtml;
+
+  try {
+    return await downloadStorageTemplateText(supabase, objectPath);
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        `[application-preview-html] Repo template missing for "${objectPath}"; Storage also failed.`
+      );
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -320,27 +428,34 @@ export async function POST(request: NextRequest) {
     if (!htmlTemplate) {
       return NextResponse.json(
         {
-          error: `No global HTML template found for "${body.templateType}" in bucket "${TEMPLATE_BUCKET}". Expected path: "${expectedPath ?? "(unknown)"}".`,
+          error: `No HTML template found for "${body.templateType}". Expected repo file html/${expectedPath ?? "(unknown)"} or Storage object in bucket "${TEMPLATE_BUCKET}".`,
         },
         { status: 400 }
       );
     }
 
-    let finalHtml = replaceTemplateTokens(htmlTemplate, body.fields);
-
-    /** Architect acceptance letter: hide saved-PDF QR (“scanner”) for now. */
-    const omitSavedPdfQr =
-      body.templateType === "Architect" && architectVariant === "acceptance";
-
-    if (!omitSavedPdfQr) {
-      finalHtml = await injectSavedPdfQrHtml(finalHtml, {
-        projectId: body.projectId,
-        templateType: body.templateType,
-        authorizationToken: token,
-      });
-    } else {
-      finalHtml = finalHtml.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("");
+    let mergedHtml = htmlTemplate;
+    if (body.templateType === "Architect") {
+      const sharedCss = await loadSharedArchitectApplicationCss();
+      mergedHtml = injectSharedApplicationTemplateStyle(htmlTemplate, sharedCss);
+      if (!sharedCss.trim()) {
+        console.error(
+          "[application-preview-html] Missing html/_shared/application-templates.css in repo — Architect letters will render unstyled."
+        );
+      }
     }
+
+    let finalHtml = replaceTemplateTokens(mergedHtml, body.fields);
+
+    finalHtml = await injectSavedPdfQrHtml(finalHtml, {
+      projectId: body.projectId,
+      templateType: body.templateType,
+      authorizationToken: token,
+      applicationUrlsKey:
+        body.templateType === "Architect" && architectVariant === "acceptance"
+          ? "Architect_acceptance"
+          : undefined,
+    });
 
     if (process.env.NODE_ENV === "development") {
       console.log("[application-preview-html] owner/company debug", {

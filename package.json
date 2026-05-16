@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "generate-dp2034-fp": "node scripts/fetch-dp2034-fp-static.mjs",
+    "generate-sql-values": "node scripts/generate-sql-values-from-demo.mjs",
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
@@ -41,6 +42,7 @@
     "eslint-config-next": "^16.0.7",
     "supabase": "^2.65.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "xlsx": "^0.18.5"
   }
 }

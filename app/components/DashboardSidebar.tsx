@@ -3,6 +3,8 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { isPageSaved, loadDraft, saveDraft } from "@/app/utils/draftStorage";
+import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
+import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import { useEffect, useState } from "react";
 
 type DashboardSidebarProps = {
@@ -15,6 +17,8 @@ type DashboardSidebarProps = {
 };
 
 const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, onSaveDraftClick, allPagesSaved, isDraftProject }: DashboardSidebarProps) => {
+  const { slot: applicationPdfSaveSlot } = useApplicationPdfSaveSlot();
+  const { slot: applicationSignSlot } = useApplicationSignSlot();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -596,6 +600,104 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
             </span>
           </button>
         </div>
+
+        {applicationPdfSaveSlot && isReadOnlyMode && (
+          <div className="mb-4 shrink-0 w-full min-w-0">
+            {!collapsed && applicationPdfSaveSlot.subtitle && (
+              <p className="hidden md:block text-[11px] text-gray-600 leading-snug mb-1">
+                {applicationPdfSaveSlot.subtitle}
+              </p>
+            )}
+            {!collapsed && applicationPdfSaveSlot.statusText && (
+              <p className="hidden md:block text-[11px] text-amber-900 mb-1.5">
+                {applicationPdfSaveSlot.statusText}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => void applicationPdfSaveSlot.onSave()}
+              disabled={
+                applicationPdfSaveSlot.disabled ||
+                applicationPdfSaveSlot.busy ||
+                applicationPdfSaveSlot.done
+              }
+              className={
+                applicationPdfSaveSlot.done && !applicationPdfSaveSlot.busy
+                  ? "w-full border-2 border-emerald-500 bg-emerald-50 text-emerald-800 font-semibold py-2 px-4 rounded-xl mb-6 text-xs md:text-sm cursor-default shrink-0 transition-colors shadow-sm"
+                  : "w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50 disabled:pointer-events-none disabled:hover:bg-transparent"
+              }
+              aria-label={
+                applicationPdfSaveSlot.done && !applicationPdfSaveSlot.busy
+                  ? "Application saved"
+                  : "Save application"
+              }
+            >
+              {applicationPdfSaveSlot.busy ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <span
+                    className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
+                    aria-hidden
+                  />
+                  {!collapsed && <span>Saving…</span>}
+                </span>
+              ) : applicationPdfSaveSlot.done ? (
+                collapsed ? "✓" : "Saved"
+              ) : collapsed ? (
+                "Save"
+              ) : (
+                "Save application"
+              )}
+            </button>
+          </div>
+        )}
+
+        {applicationSignSlot && isReadOnlyMode && (() => {
+          const signAllowed = applicationSignSlot.actionAvailable !== false;
+          const signBusy = applicationSignSlot.disabled || applicationSignSlot.busy;
+          const signDisabled = !signAllowed || signBusy;
+          return (
+          <div className="mb-4 shrink-0 w-full min-w-0">
+            {!collapsed && applicationSignSlot.subtitle && (
+              <p className="hidden md:block text-[11px] text-gray-600 leading-snug mb-1">
+                {applicationSignSlot.subtitle}
+              </p>
+            )}
+            {!collapsed && !signAllowed && applicationSignSlot.unavailableHint && (
+              <p className="hidden md:block text-[11px] text-amber-800/90 leading-snug mb-1.5">
+                {applicationSignSlot.unavailableHint}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (!signAllowed) return;
+                void applicationSignSlot.onSign();
+              }}
+              disabled={signDisabled}
+              className={
+                signAllowed
+                  ? "w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50 disabled:pointer-events-none disabled:hover:bg-transparent"
+                  : "w-full border border-gray-200 bg-gray-50 text-gray-400 font-medium py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shrink-0 cursor-not-allowed shadow-none"
+              }
+              aria-label={signAllowed ? "Sign application" : "Sign application — not available for your role or step"}
+            >
+              {applicationSignSlot.busy ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <span
+                    className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
+                    aria-hidden
+                  />
+                  {!collapsed && <span>Opening…</span>}
+                </span>
+              ) : collapsed ? (
+                signAllowed ? "Sign" : "—"
+              ) : (
+                "Sign application"
+              )}
+            </button>
+          </div>
+          );
+        })()}
 
         {/* Action Button (hidden when sidebar is collapsed or on small screens) */}
         {!collapsed && !isReadOnlyMode && (() => {

@@ -1,0 +1,297 @@
+/*
+ * Shared styles for application preview letters (Architect appointment + acceptance).
+ * Injected by app/api/application-preview-html/route.ts before token replacement.
+ * Edit here once; keep per-template <style> blocks for overrides only.
+ */
+
+@page {
+  size: A4;
+  margin-top: 2.5cm;
+  margin-right: 2cm;
+  margin-bottom: 2cm;
+  margin-left: 2cm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #000;
+  background: #fff url('$project_Letterhead_Image_Url') top center / 210mm 297mm no-repeat;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  word-wrap: break-word;
+}
+
+.page {
+  width: 100%;
+  margin: 0 auto;
+  background: transparent;
+  /* Keep first content block below top letterhead artwork/logo. */
+  padding-top: 90px;
+}
+
+.page,
+.page p,
+.page li,
+.page td,
+.page .eeb-tab-line {
+  font-size: 14px;
+}
+
+.top-row,
+.subject-table,
+.signature-table,
+.cc-table,
+.opening,
+.acceptance-body,
+.closing-line,
+.eeb-tab-line,
+.signature-intro,
+.signature-company,
+.signature-line,
+.meta-line,
+.cc-note {
+  font-size: 14px;
+}
+
+.top-row,
+.subject-table,
+.signature-table,
+.cc-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.top-row {
+  margin-bottom: 10px;
+}
+
+.top-row td {
+  vertical-align: top;
+  padding: 0;
+}
+
+/* Date row + “To” / address (left) and saved-PDF QR (right, under Date). */
+.letter-header {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-bottom: 10px;
+  page-break-inside: avoid;
+}
+
+.letter-header td {
+  vertical-align: top;
+  padding: 0;
+}
+
+.letter-header .date-row td {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.letter-header .address-qr-row .to-block {
+  width: 100%;
+  padding-right: 12px;
+}
+
+.letter-header .qr-cell {
+  width: 132px;
+  max-width: 132px;
+  text-align: right;
+  white-space: nowrap;
+  padding-top: 4px;
+}
+
+.saved-pdf-qr-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  box-sizing: border-box;
+}
+
+.right {
+  text-align: right;
+}
+
+.bold {
+  font-weight: bold;
+}
+
+.value-bold {
+  font-weight: bold;
+}
+
+.to-row {
+  margin-bottom: 0;
+}
+
+.to-label {
+  width: 7%;
+  vertical-align: top;
+  padding-right: 4px;
+  padding-bottom: 16px;
+}
+
+.to-content {
+  width: 93%;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  line-height: 1.35;
+}
+
+.to-content p {
+  margin: 0;
+}
+
+.to-content p:empty {
+  display: none;
+}
+
+.subject-box {
+  margin: 8px 0;
+}
+
+.subject-table td {
+  vertical-align: top;
+  padding: 0;
+}
+
+.subject-table tr + tr td {
+  padding-top: 4px;
+}
+
+.re-row td {
+  padding-top: 8px !important;
+}
+
+.label {
+  width: 7%;
+  font-weight: normal;
+  white-space: nowrap;
+  padding-right: 6px;
+}
+
+.subject-text {
+  text-align: justify;
+}
+
+p {
+  margin: 0;
+}
+
+/* Appointment letter body only (avoid styling acceptance div.eeb-tab-line.opening). */
+p.opening {
+  text-align: justify;
+  text-indent: 0.5in;
+}
+
+ol {
+  margin: 0 0 0 18px;
+  padding: 0;
+}
+
+li {
+  margin-bottom: 2px;
+  text-align: justify;
+}
+
+/* Appointment closing lines only */
+p.closing-line {
+  margin-left: 0.25in;
+}
+
+.signature-table {
+  margin-top: 8px;
+  page-break-inside: avoid;
+}
+
+.signature-table td {
+  width: 50%;
+  vertical-align: top;
+  padding-top: 0;
+}
+
+.signature-intro {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.signature-company {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.signature-line {
+  margin-top: 58px;
+  border-top: none;
+  width: 85%;
+  padding-top: 2px;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.architect-block {
+  margin-top: 0;
+  margin-left: 0;
+  width: 100%;
+  page-break-inside: avoid;
+}
+
+.meta-line {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.meta-label {
+  font-weight: normal;
+}
+
+.cc-box {
+  margin-top: 20px;
+  page-break-inside: avoid;
+}
+
+.cc-label {
+  width: 8%;
+  font-weight: normal;
+  vertical-align: top;
+  padding-right: 6px;
+  white-space: nowrap;
+}
+
+.cc-content {
+  width: 92%;
+  vertical-align: top;
+}
+
+.cc-content p {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.cc-note {
+  margin-top: 4px;
+  text-indent: 0.5in;
+  font-style: italic;
+  line-height: 1.2;
+}
+
+p,
+table,
+tr,
+td {
+  break-inside: avoid-page;
+}

@@ -42,11 +42,13 @@ type DocumentPreviewModalProps = {
   signingFileName?: string;
   /** Hide the Save / Saved toolbar control (e.g. preview-only flows). */
   hideSaveButton?: boolean;
+  /** When true with `showMockSignButton`, iframe loads then mock owner sign + `onMockSignComplete` run once (sidebar “Sign application”). */
+  autoMockSignAfterOpen?: boolean;
   /** Show a mock “Sign” control that injects “Owner” + a dummy signature into the HTML iframe (first client signature column). */
   showMockSignButton?: boolean;
   /** After mock sign is injected (and fonts settle), parent can persist PDF / update workflow. */
   onMockSignComplete?: () => void | Promise<void>;
-  /** Disables mock Sign while parent is saving (e.g. generating/uploading PDF). */
+  /** While parent is saving after mock sign (e.g. generating/uploading PDF). */
   mockSignBusy?: boolean;
 };
 
@@ -66,12 +68,18 @@ export default function DocumentPreviewModal({
   getPdfBlob,
   signingFileName,
   hideSaveButton = false,
+  autoMockSignAfterOpen = false,
   showMockSignButton = false,
   onMockSignComplete,
   mockSignBusy = false,
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const injectMockOwnerSignatureRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const previewBlobUrlRef = useRef<string | null>(null);
+  /** Sidebar auto-sign: afterInject / onMockSignComplete ran successfully once for this open+html. */
+  const sidebarAutoCommitDoneRef = useRef(false);
+  /** Prevents parallel afterInject when load + timer both fire. */
+  const sidebarAutoAfterInjectLockRef = useRef(false);
   const [signModalOpen, setSignModalOpen] = useState(false);
   const [mockSignApplied, setMockSignApplied] = useState(false);
   /** Mock Sign: covers inject + fonts + parent upload until the pipeline finishes. */
@@ -123,38 +131,44 @@ export default function DocumentPreviewModal({
     if (!open) {
       setMockSignApplied(false);
       setSignPipelineBusy(false);
+      sidebarAutoCommitDoneRef.current = false;
+      sidebarAutoAfterInjectLockRef.current = false;
+      return;
     }
-  }, [open, htmlContent]);
+    if (autoMockSignAfterOpen) {
+      sidebarAutoCommitDoneRef.current = false;
+    }
+  }, [open, htmlContent, autoMockSignAfterOpen]);
 
   const injectMockOwnerSignature = async () => {
     setSignPipelineBusy(true);
     try {
-      const tryInject = () => {
-      const doc = iframeRef.current?.contentDocument;
-      if (!doc) return false;
-      const firstCell = doc.querySelector(".signature-table tr td");
-      if (!firstCell) return false;
-      if (firstCell.querySelector("#preview-dummy-owner-sign")) return true;
-      const signatureLine = firstCell.querySelector(".signature-line");
-      if (!signatureLine) return false;
+      const tryInject = (): boolean | "already" => {
+        const doc = iframeRef.current?.contentDocument;
+        if (!doc) return false;
+        const firstCell = doc.querySelector(".signature-table tr td");
+        if (!firstCell) return false;
+        if (firstCell.querySelector("#preview-dummy-owner-sign")) return "already";
+        const signatureLine = firstCell.querySelector(".signature-line");
+        if (!signatureLine) return false;
 
-      const fontLinkId = "preview-owner-signature-font-link";
-      if (!doc.getElementById(fontLinkId)) {
-        const link = doc.createElement("link");
-        link.id = fontLinkId;
-        link.rel = "stylesheet";
-        link.href =
-          "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
-        doc.head.appendChild(link);
-      }
+        const fontLinkId = "preview-owner-signature-font-link";
+        if (!doc.getElementById(fontLinkId)) {
+          const link = doc.createElement("link");
+          link.id = fontLinkId;
+          link.rel = "stylesheet";
+          link.href =
+            "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
+          doc.head.appendChild(link);
+        }
 
-      const wrap = doc.createElement("div");
-      wrap.id = "preview-dummy-owner-sign";
-      wrap.setAttribute(
-        "style",
-        "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
-      );
-      wrap.innerHTML = `
+        const wrap = doc.createElement("div");
+        wrap.id = "preview-dummy-owner-sign";
+        wrap.setAttribute(
+          "style",
+          "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
+        );
+        wrap.innerHTML = `
         <span style="
           font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
           font-size:clamp(28px,4.2vw,36px);
@@ -167,38 +181,63 @@ export default function DocumentPreviewModal({
           text-shadow:0 1px 0 rgba(255,255,255,0.6);
         ">Owner</span>
       `;
-      firstCell.insertBefore(wrap, signatureLine);
-      // Template `.signature-line` uses a large margin-top for blank signing space; once
-      // “Owner” is injected above it, that margin reads as an awkward gap before designation.
-      (signatureLine as HTMLElement).style.marginTop = "4px";
-      return true;
-    };
+        firstCell.insertBefore(wrap, signatureLine);
+        // Template `.signature-line` uses a large margin-top for blank signing space; once
+        // “Owner” is injected above it, that margin reads as an awkward gap before designation.
+        (signatureLine as HTMLElement).style.marginTop = "4px";
+        return true;
+      };
 
       const afterInject = async () => {
-        setMockSignApplied(true);
-        const doc = iframeRef.current?.contentDocument;
-        if (doc?.fonts?.ready) {
-          try {
-            await doc.fonts.ready;
-          } catch {
-            /* ignore */
+        if (autoMockSignAfterOpen) {
+          if (sidebarAutoCommitDoneRef.current || sidebarAutoAfterInjectLockRef.current) {
+            return;
           }
+          sidebarAutoAfterInjectLockRef.current = true;
         }
-        await new Promise<void>((r) => window.setTimeout(() => r(), 250));
-        if (onMockSignComplete) {
-          await onMockSignComplete();
+        try {
+          setMockSignApplied(true);
+          const doc = iframeRef.current?.contentDocument;
+          if (doc?.fonts?.ready) {
+            try {
+              await doc.fonts.ready;
+            } catch {
+              /* ignore */
+            }
+          }
+          await new Promise<void>((r) => window.setTimeout(() => r(), 250));
+          if (onMockSignComplete) {
+            await onMockSignComplete();
+          }
+          if (autoMockSignAfterOpen) {
+            sidebarAutoCommitDoneRef.current = true;
+          }
+        } finally {
+          if (autoMockSignAfterOpen) {
+            sidebarAutoAfterInjectLockRef.current = false;
+          }
         }
       };
 
-      if (tryInject()) {
+      const injected = tryInject();
+      if (injected === true) {
         await afterInject();
+        return;
+      }
+      if (injected === "already") {
+        // First inject may have run from another handler; sidebar auto-sign must still persist PDF + DB.
+        if (autoMockSignAfterOpen) {
+          await afterInject();
+        }
         return;
       }
       await new Promise<void>((resolve, reject) => {
         window.setTimeout(() => {
           void (async () => {
             try {
-              if (tryInject()) await afterInject();
+              const r = tryInject();
+              if (r === true) await afterInject();
+              else if (r === "already" && autoMockSignAfterOpen) await afterInject();
               resolve();
             } catch (e) {
               reject(e instanceof Error ? e : new Error(String(e)));
@@ -210,6 +249,42 @@ export default function DocumentPreviewModal({
       setSignPipelineBusy(false);
     }
   };
+
+  injectMockOwnerSignatureRef.current = injectMockOwnerSignature;
+
+  /** Sidebar “Sign application”: after iframe loads, inject mock owner + parent pipeline (no toolbar Sign). */
+  useEffect(() => {
+    if (
+      !open ||
+      !htmlContent ||
+      fileUrl ||
+      !showMockSignButton ||
+      !autoMockSignAfterOpen ||
+      mockSignApplied
+    ) {
+      return;
+    }
+    const frame = iframeRef.current;
+    if (!frame) return;
+
+    let cancelled = false;
+    let fired = false;
+    const runOnce = () => {
+      if (cancelled || fired) return;
+      fired = true;
+      void injectMockOwnerSignatureRef.current();
+    };
+
+    const onLoad = () => window.setTimeout(runOnce, 80);
+    frame.addEventListener("load", onLoad, { once: true });
+    const fallback = window.setTimeout(runOnce, 900);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallback);
+      frame.removeEventListener("load", onLoad);
+    };
+  }, [open, htmlContent, fileUrl, showMockSignButton, autoMockSignAfterOpen, mockSignApplied]);
 
   const hasContent = Boolean(fileUrl) || Boolean(htmlContent);
   if (!open || !hasContent) return null;
@@ -323,17 +398,6 @@ export default function DocumentPreviewModal({
                       <rect x="6" y="14" width="12" height="8" />
                     </svg>
                     Print / Save as PDF
-                  </button>
-                )}
-                {htmlContent && !fileUrl && showMockSignButton && (
-                  <button
-                    type="button"
-                    onClick={() => void injectMockOwnerSignature()}
-                    disabled={mockSignApplied || mockSignBusy || signPipelineBusy}
-                    className="h-9 px-3 rounded-lg border border-violet-600 bg-violet-50 hover:bg-violet-100 text-violet-800 text-sm font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                    aria-label={mockSignApplied ? "Signed" : "Sign preview"}
-                  >
-                    {mockSignApplied ? "Signed" : "Sign"}
                   </button>
                 )}
                 {htmlContent && !fileUrl && onSave && !hideSaveButton && (
