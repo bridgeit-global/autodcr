@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "@/app/utils/supabase";
+import { fetchProjectForEdit, type ProjectRecord } from "@/app/utils/fetchProjectForEdit";
 
 export function useProjectData() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
   const isEditMode = !!projectId;
   const [isLoading, setIsLoading] = useState(isEditMode);
-  const [projectData, setProjectData] = useState<any>(null);
+  const [projectData, setProjectData] = useState<ProjectRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -16,34 +16,26 @@ export function useProjectData() {
       return;
     }
 
-    const fetchProject = async () => {
+    let cancelled = false;
+
+    const load = async () => {
       setIsLoading(true);
       setError(null);
-      try {
-        const { data, error: fetchError } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("id", projectId)
-          .single();
-
-        if (fetchError) {
-          console.error("Error fetching project:", fetchError);
-          setError("Failed to load project data. Please try again.");
-          return;
-        }
-
-        if (data) {
-          setProjectData(data);
-        }
-      } catch (err) {
-        console.error("Error fetching project:", err);
-        setError("Failed to load project data. Please try again.");
-      } finally {
-        setIsLoading(false);
+      const { project, error: loadError } = await fetchProjectForEdit(projectId);
+      if (cancelled) return;
+      if (loadError || !project) {
+        setError(loadError || "Failed to load project data. Please try again.");
+        setProjectData(null);
+      } else {
+        setProjectData(project);
       }
+      setIsLoading(false);
     };
 
-    fetchProject();
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, isEditMode]);
 
   return {
@@ -54,10 +46,3 @@ export function useProjectData() {
     error,
   };
 }
-
-
-
-
-
-
-

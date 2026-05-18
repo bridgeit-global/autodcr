@@ -12,6 +12,7 @@ import {
   type DpZone,
 } from "@/app/utils/dpZoneMajorUseSubUse";
 import { supabase } from "@/app/utils/supabase";
+import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import CustomSelect from "@/app/components/CustomSelect";
 
@@ -263,10 +264,11 @@ export default function ProjectDetailsClient() {
     }),
   });
 
-  // Ensure "DCPR 2034" is selected by default
+  // Default for new projects only (edit mode loads proposalAsPer from the database)
   useEffect(() => {
+    if (isEditMode) return;
     setProjectValue("proposalAsPer", "DCPR 2034");
-  }, [setProjectValue]);
+  }, [isEditMode, setProjectValue]);
 
   // Auto-fill applicant name and address from logged-in user metadata (only for new projects)
   useEffect(() => {
@@ -397,209 +399,175 @@ export default function ProjectDetailsClient() {
     const fetchProject = async () => {
       setIsLoadingProject(true);
       try {
-        const { data, error } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("id", projectId)
-          .single();
+        const { project: data, error: loadError } = await fetchProjectForEdit(projectId);
 
-        if (error) {
-          console.error("Error fetching project:", error);
+        if (loadError || !data) {
+          console.error("Error fetching project:", loadError);
           alert("Failed to load project data. Please try again.");
           return;
         }
 
-        if (data) {
-          setProjectData(data);
-          
-          // Map backend data to ProjectFormData structure
-          const projectInfo = data.project_info || {};
-          const projectFormData: ProjectFormData = {
-            proposalAsPer: projectInfo.proposalAsPer === "DCR 1991" ? "DCPR 2034" : (projectInfo.proposalAsPer || "DCPR 2034"),
-            title: data.title || "",
-            proposalNo: projectInfo.proposalNo || "",
-            propertyAddress: projectInfo.propertyAddress || "",
-            landmark: projectInfo.landmark || "",
-            earlierBuildingProposalFileNo: projectInfo.earlierBuildingProposalFileNo || "",
-            pincode: projectInfo.pincode || "",
-            fullNameOfApplicant: projectInfo.fullNameOfApplicant || "",
-            addressOfApplicant: projectInfo.addressOfApplicant || "",
-            hasPaidLatestPropertyTax: projectInfo.hasPaidLatestPropertyTax || "",
-          };
+        setProjectData(data);
 
-          // Map backend data to SavePlotFormData structure
-          const savePlotDetails = data.save_plot_details || {};
-          
-          // Debug: Log the raw data to see what we're getting
-          console.log("[Edit Mode] Raw save_plot_details:", savePlotDetails);
-          
-          // Derive region from zone if region is missing (backward compatibility)
-          // Also convert old zone format to new format if needed
-          let zone = savePlotDetails.zone || "";
-          zone = convertOldZoneToNew(zone); // Convert old zone names to new format
-          const region = savePlotDetails.region || getRegionFromZone(zone);
+        // Map backend data to ProjectFormData structure
+        const projectInfo = (data.project_info as Record<string, unknown>) || {};
+        const projectFormData: ProjectFormData = {
+          proposalAsPer: "DCPR 2034",
+          title: String(data.title || ""),
+          proposalNo: String(projectInfo.proposalNo || ""),
+          propertyAddress: String(projectInfo.propertyAddress || ""),
+          landmark: String(projectInfo.landmark || ""),
+          earlierBuildingProposalFileNo: String(projectInfo.earlierBuildingProposalFileNo || ""),
+          pincode: String(projectInfo.pincode || ""),
+          fullNameOfApplicant: String(projectInfo.fullNameOfApplicant || ""),
+          addressOfApplicant: String(projectInfo.addressOfApplicant || ""),
+          hasPaidLatestPropertyTax: (projectInfo.hasPaidLatestPropertyTax === "Yes" || projectInfo.hasPaidLatestPropertyTax === "No") ? projectInfo.hasPaidLatestPropertyTax : "",
+        };
 
-          const savePlotFormData: SavePlotFormData = {
-            planningAuthority: normalizePlanningAuthority(savePlotDetails.planningAuthority),
-            projectProponent: savePlotDetails.projectProponent || "",
-            region: region,
-            zone: zone,
-            ward: savePlotDetails.ward || "",
-            proposedCtsNumber: Array.isArray(savePlotDetails.proposedCtsNumber) 
-              ? savePlotDetails.proposedCtsNumber.map(String)
-              : typeof savePlotDetails.proposedCtsNumber === "string" && savePlotDetails.proposedCtsNumber
+        // Map backend data to SavePlotFormData structure
+        const savePlotDetails = (data.save_plot_details as Record<string, unknown>) || {};
+          
+        let zone = String(savePlotDetails.zone || "");
+        zone = convertOldZoneToNew(zone);
+        const region = String(savePlotDetails.region || getRegionFromZone(zone));
+
+        const savePlotFormData: SavePlotFormData = {
+          planningAuthority: normalizePlanningAuthority(
+            String(savePlotDetails.planningAuthority || "")
+          ),
+          projectProponent: String(savePlotDetails.projectProponent || ""),
+          region,
+          zone,
+          ward: String(savePlotDetails.ward || ""),
+          proposedCtsNumber: Array.isArray(savePlotDetails.proposedCtsNumber)
+            ? savePlotDetails.proposedCtsNumber.map(String)
+            : typeof savePlotDetails.proposedCtsNumber === "string" && savePlotDetails.proposedCtsNumber
               ? [savePlotDetails.proposedCtsNumber]
               : [],
-            villageName: savePlotDetails.villageName || "",
-            plotBelongsTo: normalizePlotBelongsForRegion(
-              region,
-              savePlotDetails.ward || undefined,
-              savePlotDetails.plotBelongsTo || ""
-            ),
-            grossPlotArea: savePlotDetails.grossPlotArea || "",
-        sacNo: Array.isArray(savePlotDetails.sacNo)
-          ? savePlotDetails.sacNo.map(String)
-          : typeof savePlotDetails.sacNo === "string" && savePlotDetails.sacNo
-          ? [savePlotDetails.sacNo]
-          : [],
-            roadName: savePlotDetails.roadName || "",
-            dpZone: savePlotDetails.dpZone || "",
-            majorUseOfPlot: savePlotDetails.majorUseOfPlot || "",
-            plotSubUse: savePlotDetails.plotSubUse || "",
-            plotNo: savePlotDetails.plotNo || "",
-            isInternalRoadPresent: savePlotDetails.isInternalRoadPresent || "",
-            plotType: savePlotDetails.plotType || "",
-            plotEntries: Array.isArray(savePlotDetails.plotEntries) && savePlotDetails.plotEntries.length > 0
-              ? savePlotDetails.plotEntries
+          villageName: String(savePlotDetails.villageName || ""),
+          plotBelongsTo: normalizePlotBelongsForRegion(
+            region,
+            String(savePlotDetails.ward || "") || undefined,
+            String(savePlotDetails.plotBelongsTo || "")
+          ),
+          grossPlotArea: String(savePlotDetails.grossPlotArea || ""),
+          sacNo: Array.isArray(savePlotDetails.sacNo)
+            ? savePlotDetails.sacNo.map(String)
+            : typeof savePlotDetails.sacNo === "string" && savePlotDetails.sacNo
+              ? [savePlotDetails.sacNo]
+              : [],
+          roadName: String(savePlotDetails.roadName || ""),
+          dpZone: String(savePlotDetails.dpZone || ""),
+          majorUseOfPlot: String(savePlotDetails.majorUseOfPlot || ""),
+          plotSubUse: String(savePlotDetails.plotSubUse || ""),
+          plotNo: String(savePlotDetails.plotNo || ""),
+          isInternalRoadPresent: (savePlotDetails.isInternalRoadPresent === "Yes" || savePlotDetails.isInternalRoadPresent === "No") ? savePlotDetails.isInternalRoadPresent : "",
+          plotType: String(savePlotDetails.plotType || ""),
+          plotEntries:
+            Array.isArray(savePlotDetails.plotEntries) && savePlotDetails.plotEntries.length > 0
+              ? (savePlotDetails.plotEntries as SavePlotFormData["plotEntries"])
               : [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
-          };
+        };
 
-          // Debug: Log the form data we're about to set
-          console.log("[Edit Mode] Setting form data:", {
-            zone: savePlotFormData.zone,
-            ward: savePlotFormData.ward,
-            villageName: savePlotFormData.villageName,
-            proposedCtsNumber: savePlotFormData.proposedCtsNumber,
-            plotBelongsTo: savePlotFormData.plotBelongsTo,
-          });
-          
-          // Set flag to prevent clearing effects during initial load - MUST be set before reset
-          setIsInitialLoad(true);
-          
-          // Populate forms with fetched data using reset
-          resetProject(projectFormData);
-          resetSavePlot(savePlotFormData);
-          
-          // Save to localStorage drafts for consistency
-          saveDraft("draft-project-details-project", projectFormData);
-          saveDraft("draft-project-details-save-plot", savePlotFormData);
+        setIsInitialLoad(true);
+        resetProject(projectFormData);
+        resetSavePlot(savePlotFormData);
+        saveDraft("draft-project-details-project", projectFormData);
+        saveDraft("draft-project-details-save-plot", savePlotFormData);
+        saveDraft("saved-project-info-snapshot", projectFormData);
+        saveDraft("saved-save-plot-details-snapshot", savePlotFormData);
 
-          // Mark tabs as saved if they have meaningful data from Supabase
-          const hasMeaningful = (val: any): boolean => {
-            if (val === null || val === undefined) return false;
-            if (typeof val === "string") return val.trim().length > 0;
-            if (typeof val === "number") return true;
-            if (typeof val === "boolean") return val;
-            if (Array.isArray(val)) return val.length > 0 && val.some(hasMeaningful);
-            if (typeof val === "object") return Object.values(val).some(hasMeaningful);
-            return false;
-          };
-          if (hasMeaningful(data.project_info)) {
-            markPageSaved("saved-project-info");
-            setIsProjectInfoSaved(true);
-          }
-          if (hasMeaningful(data.save_plot_details)) {
-            markPageSaved("saved-save-plot-details");
-            setIsSavePlotSaved(true);
-          }
-          
-          // Use requestAnimationFrame and setTimeout to ensure reset has completed
-          // Then set values explicitly to ensure watched values update and dropdowns show correct selections
-          requestAnimationFrame(() => {
+        const hasMeaningful = (val: unknown): boolean => {
+          if (val === null || val === undefined) return false;
+          if (typeof val === "string") return val.trim().length > 0;
+          if (typeof val === "number") return true;
+          if (typeof val === "boolean") return val;
+          if (Array.isArray(val)) return val.length > 0 && val.some(hasMeaningful);
+          if (typeof val === "object") return Object.values(val).some(hasMeaningful);
+          return false;
+        };
+        if (hasMeaningful(data.project_info)) {
+          markPageSaved("saved-project-info");
+          setIsProjectInfoSaved(true);
+        }
+        if (hasMeaningful(data.save_plot_details)) {
+          markPageSaved("saved-save-plot-details");
+          setIsSavePlotSaved(true);
+        }
+
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (savePlotFormData.zone) {
+              setSavePlotValue("zone", savePlotFormData.zone, {
+                shouldValidate: false,
+                shouldDirty: false,
+                shouldTouch: false,
+              });
+            }
             setTimeout(() => {
-              // Verify reset worked, then set values explicitly
-              const currentValues = getSavePlotValues();
-              console.log("[Edit Mode] Current form values after reset:", currentValues);
-              
-              // Set values explicitly to ensure watched values update
-              // This is critical for dropdowns to show the selected values
-              console.log("[Edit Mode] Setting zone:", savePlotFormData.zone);
-              if (savePlotFormData.zone) {
-                setSavePlotValue("zone", savePlotFormData.zone, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+              if (savePlotFormData.ward) {
+                setSavePlotValue("ward", savePlotFormData.ward, {
+                  shouldValidate: false,
+                  shouldDirty: false,
+                  shouldTouch: false,
+                });
               }
-              
-              // Set ward after a small delay to ensure zone is set first
               setTimeout(() => {
-                console.log("[Edit Mode] Setting ward:", savePlotFormData.ward);
-                if (savePlotFormData.ward) {
-                  setSavePlotValue("ward", savePlotFormData.ward, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
+                if (savePlotFormData.villageName) {
+                  setSavePlotValue("villageName", savePlotFormData.villageName, {
+                    shouldValidate: false,
+                    shouldDirty: false,
+                    shouldTouch: false,
+                  });
                 }
-                
-                // Set village after ward is set
-                setTimeout(() => {
-                  console.log("[Edit Mode] Setting village:", savePlotFormData.villageName);
-                  if (savePlotFormData.villageName) {
-                    setSavePlotValue("villageName", savePlotFormData.villageName, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
-                  }
-                  if (savePlotFormData.proposedCtsNumber && savePlotFormData.proposedCtsNumber.length > 0) {
-                    console.log("[Edit Mode] Setting CTS numbers:", savePlotFormData.proposedCtsNumber);
-                    setSavePlotValue("proposedCtsNumber", savePlotFormData.proposedCtsNumber, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
-                  }
-                  if (savePlotFormData.plotBelongsTo) {
-                    setSavePlotValue("plotBelongsTo", savePlotFormData.plotBelongsTo, { shouldValidate: false, shouldDirty: false, shouldTouch: false });
-                  }
-                  
-                  // Verify values are set
-                  setTimeout(() => {
-                    const finalValues = getSavePlotValues();
-                    console.log("[Edit Mode] Final form values:", {
-                      zone: finalValues.zone,
-                      ward: finalValues.ward,
-                      villageName: finalValues.villageName,
-                      proposedCtsNumber: finalValues.proposedCtsNumber,
-                    });
-                  }, 100);
-                  
-                  if (savePlotFormData.villageName && savePlotFormData.ward) {
-                    console.log("[Edit Mode] Getting survey numbers for:", savePlotFormData.villageName, savePlotFormData.ward);
-                    const loadNumbers = async () => {
-                      if (savePlotFormData.plotBelongsTo === "F.P.No") {
-                        try {
-                          const qs = new URLSearchParams({
-                            type: "fp",
-                            ward: savePlotFormData.ward,
-                            tps: savePlotFormData.villageName,
-                          });
-                          const r = await fetch(`/api/dp2034/map-query?${qs}`);
-                          const data = await r.json();
-                          if (Array.isArray(data.values) && data.values.length > 0) {
-                            setCtsNumbers(data.values);
-                            return;
-                          }
-                        } catch {
-                          /* fall through */
+                if (savePlotFormData.proposedCtsNumber?.length > 0) {
+                  setSavePlotValue("proposedCtsNumber", savePlotFormData.proposedCtsNumber, {
+                    shouldValidate: false,
+                    shouldDirty: false,
+                    shouldTouch: false,
+                  });
+                }
+                if (savePlotFormData.plotBelongsTo) {
+                  setSavePlotValue("plotBelongsTo", savePlotFormData.plotBelongsTo, {
+                    shouldValidate: false,
+                    shouldDirty: false,
+                    shouldTouch: false,
+                  });
+                }
+                if (savePlotFormData.villageName && savePlotFormData.ward) {
+                  const loadNumbers = async () => {
+                    if (savePlotFormData.plotBelongsTo === "F.P.No") {
+                      try {
+                        const qs = new URLSearchParams({
+                          type: "fp",
+                          ward: savePlotFormData.ward,
+                          tps: savePlotFormData.villageName,
+                        });
+                        const r = await fetch(`/api/dp2034/map-query?${qs}`);
+                        const mapData = await r.json();
+                        if (Array.isArray(mapData.values) && mapData.values.length > 0) {
+                          setCtsNumbers(mapData.values);
+                          return;
                         }
+                      } catch {
+                        /* fall through */
                       }
-                      const numbers = getSurveyNumbersForPlotFlowSync(
+                    }
+                    setCtsNumbers(
+                      getSurveyNumbersForPlotFlowSync(
                         savePlotFormData.ward,
                         savePlotFormData.villageName,
                         savePlotFormData.plotBelongsTo || ""
-                      );
-                      setCtsNumbers(numbers);
-                    };
-                    void loadNumbers();
-                  }
-                  
-                  // Reset flag after all values are set
-                  setTimeout(() => {
-                    console.log("[Edit Mode] Clearing isInitialLoad flag");
-                    setIsInitialLoad(false);
-                  }, 300);
-                }, 100);
+                      )
+                    );
+                  };
+                  void loadNumbers();
+                }
+                setTimeout(() => setIsInitialLoad(false), 300);
               }, 100);
             }, 100);
-          });
-        }
+          }, 100);
+        });
       } catch (err) {
         console.error("Error fetching project:", err);
         alert("Failed to load project data. Please try again.");
@@ -611,16 +579,12 @@ export default function ProjectDetailsClient() {
     fetchProject();
   }, [projectId, isEditMode, resetProject, resetSavePlot]);
 
-  // Set isInitialLoad to false after component mounts and form is ready
-  // This allows initial values to display, but enables clearing when user changes fields
+  // New projects only — edit mode clears isInitialLoad after DB data is applied
   useEffect(() => {
-    // Give form time to initialize with default values or draft data
-    const timer = setTimeout(() => {
-      setIsInitialLoad(false);
-    }, 500); // Small delay to ensure form values are set
-    
+    if (isEditMode) return;
+    const timer = setTimeout(() => setIsInitialLoad(false), 500);
     return () => clearTimeout(timer);
-  }, []); // Only run once on mount
+  }, [isEditMode]);
 
   // Persist drafts whenever forms change
   useEffect(() => {

@@ -166,7 +166,7 @@ export default function AreaDetailsPage() {
   useEffect(() => {
     if (isEditMode && projectData && !isLoading) {
       const areaDetails = projectData.area_details || {};
-      const plotsData = areaDetails.plots || [];
+      const plotsData = (areaDetails.plots || []) as PlotRow[];
       
       if (plotsData.length > 0) {
         setPlots(plotsData);

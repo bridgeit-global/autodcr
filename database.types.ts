@@ -325,6 +325,130 @@ export type Database = {
           save_plot_details: Json
         }[]
       }
+      sync_applicants_for_project: {
+        Args: { p_project_id: string }
+        Returns: undefined
+      }
+      get_projects_for_owner: {
+        Args: { p_owner_id: string }
+        Returns: {
+          id: string
+          title: string
+          status: string
+          project_info: Json
+          save_plot_details: Json
+        }[]
+      }
+      get_applications_for_owner: {
+        Args: {
+          p_owner_id: string
+          p_department: string
+          p_project_ids?: string[]
+        }
+        Returns: {
+          id: string
+          project_id: string
+          project_title: string
+          permission_type: string
+          created_at: string
+          workflow_stage: string
+          owner_signed_at: string | null
+          architect_signed_at: string | null
+        }[]
+      }
+      get_application_for_owner: {
+        Args: { p_application_id: string; p_owner_id: string }
+        Returns: {
+          id: string
+          project_id: string
+          permission_type: string
+          department: string
+          created_at: string
+          workflow_stage: string
+          owner_signed_at: string | null
+          architect_signed_at: string | null
+        }[]
+      }
+      get_application_for_signing: {
+        Args: { p_application_id: string }
+        Returns: {
+          id: string
+          project_id: string
+          permission_type: string
+          department: string
+          created_at: string
+          workflow_stage: string
+          owner_signed_at: string | null
+          architect_signed_at: string | null
+        }[]
+      }
+      update_application_for_signing: {
+        Args: {
+          p_application_id: string
+          p_signer_id: string
+          p_workflow_stage?: string
+          p_owner_signed_at?: string
+          p_owner_signed_by?: string
+          p_architect_signed_at?: string
+          p_architect_signed_by?: string
+        }
+        Returns: boolean
+      }
+      delete_application_for_owner: {
+        Args: { p_application_id: string; p_owner_id: string }
+        Returns: {
+          project_id: string
+          permission_type: string
+        }[]
+      }
+      update_application_for_owner: {
+        Args: {
+          p_application_id: string
+          p_owner_id: string
+          p_workflow_stage?: string
+          p_owner_signed_at?: string
+          p_owner_signed_by?: string
+          p_architect_signed_at?: string
+          p_architect_signed_by?: string
+        }
+        Returns: boolean
+      }
+      create_application_for_owner: {
+        Args: {
+          p_owner_id: string
+          p_project_id: string
+          p_project_title: string
+          p_department: string
+          p_permission_type: string
+          p_workflow_stage?: string
+        }
+        Returns: string
+      }
+      get_project_for_preview: {
+        Args: { p_project_id: string }
+        Returns: Json
+      }
+      get_project_by_id_for_owner: {
+        Args: { p_project_id: string }
+        Returns: Json
+      }
+      get_applications_for_consultant: {
+        Args: {
+          p_consultant_id: string
+          p_department: string
+          p_project_ids?: string[]
+        }
+        Returns: {
+          id: string
+          project_id: string
+          project_title: string
+          permission_type: string
+          created_at: string
+          workflow_stage: string
+          owner_signed_at: string | null
+          architect_signed_at: string | null
+        }[]
+      }
       update_auth_user_role: {
         Args: { new_role: string; user_uuid: string }
         Returns: undefined

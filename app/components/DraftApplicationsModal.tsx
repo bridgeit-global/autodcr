@@ -13,6 +13,7 @@ export function normalizeApplicationWorkflowStage(value: unknown): ApplicationWo
 
 export type DraftApplication = {
   applicationId?: string;
+  projectId?: string;
   applicationNo: string;
   ward: string;
   applicationType: string;
@@ -32,6 +33,7 @@ interface DraftApplicationsModalProps {
   onDeleteApplication?: (applicationId: string) => Promise<void>;
   onOpenApplicationDetails?: (payload: {
     applicationId: string;
+    projectId?: string;
     applicationNo: string;
     appType: string;
   }) => void;
@@ -80,7 +82,7 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg shadow-2xl w-[950px] max-h-[85vh] overflow-hidden">
+      <div className="relative bg-white rounded-lg shadow-2xl w-[950px] max-h-[85vh] overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
           <div>
@@ -157,6 +159,7 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                         onClick={() =>
                           onOpenApplicationDetails({
                             applicationId: app.applicationId as string,
+                            projectId: app.projectId,
                             applicationNo: app.applicationNo,
                             appType: app.applicationType || appType,
                           })

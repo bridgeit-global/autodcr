@@ -12,6 +12,8 @@ import { isPageSaved, loadDraft, clearProjectDrafts, markPageSaved } from "../ut
 import { supabase } from "../utils/supabase";
 import { clearAllProjectLibraryFiles, getProjectLibraryFile } from "../utils/projectLibraryFiles";
 import { useProjectData } from "../hooks/useProjectData";
+import { fetchProjectForEdit } from "../utils/fetchProjectForEdit";
+import { buildProjectUpdatePayload, countPayloadSections } from "../utils/projectUpdatePayload";
 
 type RequiredPage = {
   key: string;
@@ -74,7 +76,8 @@ function DashboardLayoutContent({
   const isEditMode = !!projectId;
   
   // Use useProjectData hook to verify project actually exists
-  const { projectData: verifiedProjectData } = useProjectData();
+  const { projectData: verifiedProjectData, isLoading: isProjectDataLoading, error: projectDataError } =
+    useProjectData();
   
   const isDraftProject = !!(verifiedProjectData && verifiedProjectData.status === "draft");
 
@@ -124,7 +127,7 @@ function DashboardLayoutContent({
     verifiedProjectData.status === "draft" &&
     preMarkedProjectRef.current !== verifiedProjectData.id
   ) {
-    preMarkedProjectRef.current = verifiedProjectData.id;
+    preMarkedProjectRef.current = verifiedProjectData.id ?? null;
 
     const hasMeaningful = (val: any): boolean => {
       if (val === null || val === undefined) return false;
@@ -497,8 +500,6 @@ function DashboardLayoutContent({
     setSubmitError(null);
     setSubmitSuccessMessage(null);
 
-    // For submitted projects in edit mode, skip the "all pages saved" check (allow partial updates).
-    // For create mode and draft projects, require all pages to be saved before submission.
     const isSubmittedProject = isEditMode && !isDraftProject;
     if (!isSubmittedProject) {
       const missing = REQUIRED_PAGES.filter((page) => {
@@ -514,10 +515,16 @@ function DashboardLayoutContent({
       }
     }
 
+    if (isEditMode && isProjectDataLoading) {
+      const message = "Project is still loading. Please wait a moment and try again.";
+      setSubmitError(message);
+      alert(message);
+      return;
+    }
+
     try {
       setIsSubmittingProject(true);
 
-      // Get current user id from localStorage (set on login)
       const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
       if (!userId) {
         const message = "User not found in local session. Please log in again.";
@@ -526,15 +533,27 @@ function DashboardLayoutContent({
         return;
       }
 
-      // Get projectId from URL if not available from searchParams (fallback)
-      const currentProjectId = projectId || (typeof window !== "undefined" 
-        ? new URLSearchParams(window.location.search).get("projectId")
-        : null);
-      
-      // Only treat as edit mode if projectId exists AND project data was successfully loaded
-      const isActuallyEditMode = !!currentProjectId && !!verifiedProjectData;
+      const currentProjectId =
+        projectId ||
+        (typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("projectId")
+          : null);
 
-      // Collect drafts from localStorage
+      const isActuallyEditMode = !!currentProjectId;
+
+      let existingData = verifiedProjectData;
+      if (isActuallyEditMode && currentProjectId && !existingData) {
+        const { project, error: loadError } = await fetchProjectForEdit(currentProjectId);
+        if (loadError || !project) {
+          const message =
+            loadError || projectDataError || "Could not load project for update. Please refresh and try again.";
+          setSubmitError(message);
+          alert(message);
+          return;
+        }
+        existingData = project;
+      }
+
       const projectInfo = loadDraft("draft-project-details-project", {
         proposalAsPer: "",
         title: "",
@@ -548,10 +567,9 @@ function DashboardLayoutContent({
         hasPaidLatestPropertyTax: "",
       });
 
-      // In edit mode, get title from existing project data if not in draft
-      let projectTitle = projectInfo?.title;
-      if (isActuallyEditMode && verifiedProjectData && (!projectTitle || projectTitle.trim() === "")) {
-        projectTitle = verifiedProjectData.title || "";
+      let projectTitle = (projectInfo as { title?: string })?.title;
+      if (isActuallyEditMode && existingData && (!projectTitle || projectTitle.trim() === "")) {
+        projectTitle = (existingData.title as string) || "";
       }
 
       if (!projectTitle || typeof projectTitle !== "string" || projectTitle.trim() === "") {
@@ -585,7 +603,7 @@ function DashboardLayoutContent({
       const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
       const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
-      const proposalNo = (projectInfo as any)?.proposalNo?.trim() || "";
+      const proposalNo = (projectInfo as { proposalNo?: string })?.proposalNo?.trim() || "";
 
       let baseTitle = projectTitle as string;
       if (isActuallyEditMode && proposalNo) {
@@ -596,145 +614,57 @@ function DashboardLayoutContent({
 
       const finalProjectTitle = proposalNo ? `${baseTitle} ${proposalNo}`.trim() : baseTitle;
 
-      // Helper function to deep compare two values
-      const deepEqual = (a: any, b: any): boolean => {
-        if (a === b) return true;
-        if (a == null || b == null) return a === b;
-        if (typeof a !== typeof b) return false;
-        if (typeof a !== "object") return a === b;
-        if (Array.isArray(a) !== Array.isArray(b)) return false;
-        
-        if (Array.isArray(a)) {
-          if (a.length !== b.length) return false;
-          return a.every((val, idx) => deepEqual(val, b[idx]));
-        }
-        
-        const keysA = Object.keys(a);
-        const keysB = Object.keys(b);
-        if (keysA.length !== keysB.length) return false;
-        return keysA.every(key => deepEqual(a[key], b[key]));
-      };
+      const payload = buildProjectUpdatePayload({
+        userId,
+        finalProjectTitle,
+        existingData: isActuallyEditMode ? existingData : null,
+        partialUpdate: isSubmittedProject,
+        projectInfo: projectInfo as Record<string, unknown>,
+        savePlotDetails: savePlotDetails as Record<string, unknown>,
+        applicantsList,
+        buildingDetails: buildingDetails as Record<string, unknown>,
+        areaPlots,
+        areaTotals,
+        projectLibraryUploads,
+        bgEntries,
+      });
 
-      // Build payload - only include sections that have been modified
-      // Always include user_id, title, and status (required fields)
-      const payload: any = {
-        user_id: userId,
-        title: finalProjectTitle,
-        status: "submitted",
-      };
-
-      // Ensure user_id is always present
       if (!payload.user_id) {
-        console.error("ERROR: user_id is missing from payload!");
         const message = "User ID is missing. Please log in again.";
         setSubmitError(message);
         alert(message);
         return;
       }
 
-      // Get existing project data for comparison (only in edit mode)
-      const existingData = isActuallyEditMode && verifiedProjectData ? verifiedProjectData : null;
-
-      // Compare and include project_info only if modified
-      if (projectInfo && Object.keys(projectInfo).length > 0) {
-        const existingProjectInfo = existingData?.project_info || {};
-        if (!deepEqual(projectInfo, existingProjectInfo)) {
-          payload.project_info = projectInfo;
-        }
-      }
-
-      // Compare and include save_plot_details only if modified
-      if (savePlotDetails && Object.keys(savePlotDetails).length > 0) {
-        const existingSavePlot = existingData?.save_plot_details || {};
-        if (!deepEqual(savePlotDetails, existingSavePlot)) {
-          payload.save_plot_details = savePlotDetails;
-        }
-      }
-
-      // Compare and include applicant_details only if modified
-      if (applicantsList && applicantsList.length > 0) {
-        const existingApplicants = existingData?.applicant_details?.applicants || [];
-        if (!deepEqual(applicantsList, existingApplicants)) {
-          payload.applicant_details = {
-            applicants: applicantsList,
-          };
-        }
-      }
-
-      // Compare and include building_details only if modified
-      if (buildingDetails && Object.keys(buildingDetails).length > 0) {
-        const existingBuilding = existingData?.building_details || {};
-        if (!deepEqual(buildingDetails, existingBuilding)) {
-          payload.building_details = buildingDetails;
-        }
-      }
-
-      // Compare and include area_details only if modified
-      if (areaPlots && Array.isArray(areaPlots) && areaPlots.length > 0) {
-        const existingArea = existingData?.area_details || {};
-        const existingPlots = existingArea.plots || [];
-        if (!deepEqual(areaPlots, existingPlots)) {
-          payload.area_details = {
-            plots: areaPlots,
-            totals: areaTotals,
-          };
-        }
-      }
-
-      // Compare and include project_library only if modified
-      if (projectLibraryUploads && Array.isArray(projectLibraryUploads)) {
-        const filteredUploads = projectLibraryUploads.filter((u: any) => u !== null && u !== undefined && u !== "") as ProjectLibraryUpload[];
-        if (filteredUploads.length > 0) {
-          const existingLibrary = existingData?.project_library || {};
-          const existingUploads = existingLibrary.uploads || [];
-          // Compare uploads by their essential properties (name, path, url)
-          const normalizedNew = filteredUploads.map((u) => ({
-            name: u?.name,
-            path: u?.path,
-            url: u?.url,
-          }));
-          const normalizedExisting = existingUploads.map((u: any) => ({
-            name: u?.name,
-            path: u?.path,
-            url: u?.url,
-          }));
-          if (!deepEqual(normalizedNew, normalizedExisting)) {
-            payload.project_library = {
-              uploads: filteredUploads,
-            };
-          }
-        }
-      }
-
-      // Compare and include bg_details only if modified
-      if (bgEntries && Array.isArray(bgEntries) && bgEntries.length > 0) {
-        const existingBg = existingData?.bg_details || {};
-        const existingBgEntries = existingBg.entries || [];
-        if (!deepEqual(bgEntries, existingBgEntries)) {
-          payload.bg_details = {
-            entries: bgEntries,
-          };
-        }
-      }
-
       let finalProjectId: string | null = null;
 
-      if (isActuallyEditMode && currentProjectId && verifiedProjectData) {
-        // Update existing project
-        console.log("Updating project with ID:", currentProjectId);
-        console.log("Payload being sent:", JSON.stringify(payload, null, 2));
-        console.log("Payload keys:", Object.keys(payload));
-        console.log("User ID in payload:", payload.user_id);
-        
-        // Get auth token for authenticated request
+      if (isActuallyEditMode && currentProjectId) {
+        const sectionCount = countPayloadSections(payload);
+        const titleChanged =
+          !!existingData &&
+          finalProjectTitle.trim() !== String(existingData.title ?? "").trim();
+        if (isSubmittedProject && sectionCount === 0 && !titleChanged) {
+          const message =
+            "No changes to save. Edit a section, use Save on that page, then click Update Project again.";
+          setSubmitError(message);
+          alert(message);
+          return;
+        }
+
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
-        
-        const headers: HeadersInit = { "Content-Type": "application/json" };
-        if (authToken) {
-          headers["Authorization"] = `Bearer ${authToken}`;
+        if (!authToken) {
+          const message = "Your session expired. Please log in again.";
+          setSubmitError(message);
+          alert(message);
+          return;
         }
-        
+
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        };
+
         const response = await fetch(`/api/projects/${currentProjectId}`, {
           method: "PUT",
           headers,
@@ -742,7 +672,7 @@ function DashboardLayoutContent({
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
+          const errorData = await response.json().catch(() => ({}));
           const message = errorData.error || "Failed to update project.";
           setSubmitError(message);
           alert(`Project update failed: ${message}`);
@@ -750,8 +680,8 @@ function DashboardLayoutContent({
         }
 
         const result = await response.json();
-        console.log("Updated project:", result);
         finalProjectId = result.project?.id || currentProjectId;
+        setSubmitSuccessMessage("Project updated successfully.");
       } else {
         // Create new project - Call Supabase RPC directly from the client so auth.uid() matches the logged-in user
         const { data, error } = await supabase.rpc("create_project", {
@@ -877,6 +807,8 @@ function DashboardLayoutContent({
                       onSaveDraftClick={handleSaveDraftClick}
                       allPagesSaved={allPagesSaved}
                       isDraftProject={isDraftProject}
+                      isProjectDataLoading={isProjectDataLoading}
+                      isSubmittingProject={isSubmittingProject}
                     />
                   </Suspense>
                 </div>

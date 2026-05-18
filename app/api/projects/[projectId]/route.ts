@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
 
 const pickText = (...values: Array<unknown>): string | undefined => {
   for (const value of values) {
@@ -67,30 +68,46 @@ export async function PUT(
       );
     }
 
-    // Get auth token from Authorization header
     const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.replace("Bearer ", "");
+    const token = authHeader?.replace("Bearer ", "").trim();
 
-    // Create Supabase client with auth token if available (needed for RLS)
-    const supabaseOptions: any = {};
-    if (token) {
-      supabaseOptions.global = {
-        headers: { Authorization: `Bearer ${token}` },
-      };
+    if (!token) {
+      return NextResponse.json({ error: "Authorization required." }, { status: 401 });
     }
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, supabaseOptions);
 
-    // First, check if project exists (without user_id filter to see if it exists at all)
-    console.log("Checking project:", { projectId, userId, projectIdType: typeof projectId, userIdType: typeof userId, hasToken: !!token });
-    
-    // Try to fetch project by ID only first
-    const { data: projectCheck, error: checkError } = await supabase
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const {
+      data: { user },
+      error: authErr,
+    } = await userClient.auth.getUser();
+
+    if (authErr || !user?.id) {
+      return NextResponse.json({ error: "Invalid or expired session." }, { status: 401 });
+    }
+
+    const requestUserId = String(userId || "");
+    if (requestUserId !== String(user.id)) {
+      return NextResponse.json(
+        { error: "Unauthorized - User ID does not match session." },
+        { status: 403 }
+      );
+    }
+
+    const readClient =
+      serviceRoleKey.length > 0
+        ? createClient(supabaseUrl, serviceRoleKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          })
+        : userClient;
+
+    const { data: projectCheck, error: checkError } = await readClient
       .from("projects")
       .select("id, user_id")
       .eq("id", projectId)
-      .maybeSingle(); // Use maybeSingle instead of single to avoid error if not found
-    
-    console.log("Project check result:", { projectCheck, checkError });
+      .maybeSingle();
 
     if (checkError && checkError.code !== "PGRST116") {
       console.error("Error checking project:", checkError);
@@ -101,28 +118,21 @@ export async function PUT(
     }
 
     if (!projectCheck) {
-      console.log("Project not found by ID:", projectId);
       return NextResponse.json(
         { error: "Project not found", details: `No project found with ID: ${projectId}` },
         { status: 404 }
       );
     }
 
-    const existingProject = projectCheck;
-    console.log("Project found:", { id: existingProject.id, userId: existingProject.user_id, requestUserId: userId });
-
-    // Compare user_id as strings to handle UUID type differences
-    const projectUserId = String(existingProject.user_id || "");
-    const requestUserId = String(userId || "");
-    
-    console.log("User ID comparison:", { projectUserId, requestUserId, match: projectUserId === requestUserId });
-    
+    const projectUserId = String(projectCheck.user_id || "");
     if (projectUserId !== requestUserId) {
       return NextResponse.json(
-        { error: "Unauthorized - You can only update your own projects", details: `Project belongs to ${projectUserId}, but request is from ${requestUserId}` },
+        { error: "Unauthorized - You can only update your own projects" },
         { status: 403 }
       );
     }
+
+    const supabase = readClient;
 
     // Build update object - only include fields that are provided
     // For form submissions, we replace the entire section (not merge) since forms send complete data
@@ -223,6 +233,22 @@ export async function PUT(
       );
     }
 
+    if (body.applicant_details !== undefined) {
+      const { error: syncError } = await supabase.rpc("sync_applicants_for_project", {
+        p_project_id: projectId,
+      });
+      if (syncError) {
+        console.error("sync_applicants_for_project failed:", syncError);
+        return NextResponse.json(
+          {
+            error: "Project saved but applicant roster sync failed",
+            details: syncError.message,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
     return NextResponse.json(
       {
         success: true,
@@ -261,45 +287,48 @@ export async function GET(
       );
     }
 
-    // Get auth token from Authorization header
     const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.replace("Bearer ", "");
+    const token = authHeader?.replace("Bearer ", "").trim();
 
-    // Get user_id from query parameter or from auth token
     const url = new URL(request.url);
     let userId = url.searchParams.get("user_id");
 
-    // If user_id not in query, try to get from auth token
     if (!userId && token) {
       const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-        global: {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        global: { headers: { Authorization: `Bearer ${token}` } },
       });
       const { data: { user } } = await supabaseAuth.auth.getUser();
       userId = user?.id || null;
     }
-    
+
     if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized - User ID is required" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized - User ID is required" }, { status: 401 });
     }
 
-    // Create Supabase client with auth token if available
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      },
-    });
+    if (token) {
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data: { user }, error: authErr } = await supabaseAuth.auth.getUser();
+      if (authErr || !user?.id || String(user.id) !== String(userId)) {
+        return NextResponse.json({ error: "Invalid or expired session." }, { status: 401 });
+      }
+    }
 
-    // Fetch the project
+    const supabase =
+      serviceRoleKey.length > 0
+        ? createClient(supabaseUrl, serviceRoleKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          })
+        : createClient(supabaseUrl, supabaseAnonKey, {
+            global: { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+          });
+
     const { data, error } = await supabase
       .from("projects")
       .select("*")
       .eq("id", projectId)
-      .eq("user_id", userId) // Ensure user can only access their own projects
+      .eq("user_id", userId)
       .single();
 
     if (error) {

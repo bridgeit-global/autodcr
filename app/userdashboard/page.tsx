@@ -9,6 +9,12 @@ import DraftApplicationsModal, { DraftApplication } from "../components/DraftApp
 import CustomSelect from "@/app/components/CustomSelect";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import { supabase } from "@/app/utils/supabase";
+import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import {
+  applicantTypeToPermissionTitle,
+  normalizeProjectId,
+  permissionTypeMatchesTitle,
+} from "@/app/utils/applicantAppointmentPermissions";
 import {
   normalizeApplicationWorkflowStage,
   type ApplicationWorkflowStage,
@@ -596,21 +602,15 @@ const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
 function UserDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const {
+    projects,
+    loading: projectsLoading,
+    isConsultant,
+    consultantType,
+    permissionTitlesByProject,
+  } = useDashboardProjects();
   // Project filter: "ALL" means don't filter
   const [selectedProject, setSelectedProject] = useState("ALL");
-  const [projects, setProjects] = useState<
-    {
-      id: string;
-      title: string;
-      status?: string;
-      project_info?: { proposalNo?: string } | null;
-      save_plot_details?: {
-        selectedSurveyNos?: string[];
-        plotEntries?: Array<{ ctsNumber?: string }>;
-      } | null;
-    }[]
-  >([]);
-  const [projectsLoading, setProjectsLoading] = useState(false);
   const [selectedApplicationType, setSelectedApplicationType] = useState("General");
   const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
   const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
@@ -651,52 +651,6 @@ function UserDashboardContent() {
     }
   }, [searchParams]);
 
-  // Load projects for logged-in user (populate "Select Project" dropdown)
-  useEffect(() => {
-    const loadProjects = async () => {
-      setProjectsLoading(true);
-      try {
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError) {
-          console.error("Error fetching auth user:", authError);
-          setProjects([]);
-          return;
-        }
-        const userId = authData.user?.id;
-        if (!userId) {
-          setProjects([]);
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from("projects")
-          .select("id,title,status,project_info,save_plot_details")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          console.error("Error loading projects:", error);
-          setProjects([]);
-          return;
-        }
-
-        setProjects(
-          (data ?? []).map((row: any) => ({
-            id: row.id,
-            title: row.title,
-            status: row.status,
-            project_info: row.project_info,
-            save_plot_details: row.save_plot_details,
-          }))
-        );
-      } finally {
-        setProjectsLoading(false);
-      }
-    };
-
-    loadProjects();
-  }, []);
-
   const handleCellClick = (appType: string, count: number | string, status: string) => {
     if (count && count !== "-" && Number(count) > 0) {
       setSelectedDraftApp({ appType, status });
@@ -730,22 +684,10 @@ function UserDashboardContent() {
       return;
     }
 
-    let query = supabase
-      .from("applications")
-      .select(
-        "id,project_id,project_title,permission_type,created_at,workflow_stage,owner_signed_at,architect_signed_at"
-      )
-      .eq("department", selectedApplicationType);
-
-    if (selectedProject === "ALL") {
-      query = query.in("project_id", projects.map((project) => project.id));
-    } else {
-      query = query.eq("project_id", selectedProject);
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error("Error loading application draft counts:", error);
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+    if (authError || !userId) {
+      console.error("Error loading applications: not authenticated", authError);
       setDraftCounts({});
       setInProcessCounts({});
       setApprovedCounts({});
@@ -753,12 +695,87 @@ function UserDashboardContent() {
       return;
     }
 
+    const projectIds =
+      selectedProject === "ALL"
+        ? projects.map((p) => String(p.id))
+        : [String(selectedProject)];
+
+    type ApplicationRow = {
+      id?: string;
+      project_id: string;
+      permission_type: string;
+      project_title?: string;
+      created_at?: string;
+      workflow_stage?: string | null;
+      owner_signed_at?: string | null;
+      architect_signed_at?: string | null;
+    };
+
+    let applicationRows: ApplicationRow[] = [];
+
+    const rpcName = isConsultant
+      ? "get_applications_for_consultant"
+      : "get_applications_for_owner";
+    const rpcArgs = isConsultant
+      ? {
+          p_consultant_id: userId,
+          p_department: selectedApplicationType,
+          p_project_ids: projectIds,
+        }
+      : {
+          p_owner_id: userId,
+          p_department: selectedApplicationType,
+          p_project_ids: projectIds,
+        };
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc(rpcName, rpcArgs);
+
+    if (!rpcError) {
+      applicationRows = (rpcData ?? []) as ApplicationRow[];
+    } else {
+      console.warn(`${rpcName} failed, falling back to direct query:`, rpcError.message);
+      let query = supabase
+        .from("applications")
+        .select(
+          "id,project_id,project_title,permission_type,created_at,workflow_stage,owner_signed_at,architect_signed_at"
+        )
+        .eq("department", selectedApplicationType);
+
+      if (selectedProject === "ALL") {
+        query = query.in("project_id", projectIds);
+      } else {
+        query = query.eq("project_id", String(selectedProject));
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.error("Error loading application draft counts:", error);
+        setDraftCounts({});
+        setInProcessCounts({});
+        setApprovedCounts({});
+        setDraftApplicationsByType({});
+        return;
+      }
+      applicationRows = (data ?? []) as ApplicationRow[];
+    }
+    if (isConsultant && selectedApplicationType === "General") {
+      const consultantDefaultTitle = consultantType
+        ? applicantTypeToPermissionTitle(consultantType)
+        : null;
+      applicationRows = applicationRows.filter((row) => {
+        const projectKey = normalizeProjectId(row.project_id);
+        const allowedTitle =
+          permissionTitlesByProject[projectKey] ?? consultantDefaultTitle;
+        return permissionTypeMatchesTitle(row.permission_type, allowedTitle);
+      });
+    }
+
     const draftMap: Record<string, number> = {};
     const inProcessMap: Record<string, number> = {};
     const approvedMap: Record<string, number> = {};
     const groupedApplications: Record<string, DraftApplication[]> = {};
 
-    (data ?? []).forEach(
+    applicationRows.forEach(
       (row: {
         id?: string;
         project_id: string;
@@ -800,6 +817,7 @@ function UserDashboardContent() {
 
         const entry: DraftApplication = {
           applicationId: row.id,
+          projectId: String(row.project_id),
           applicationNo,
           ward: "-",
           applicationType: row.permission_type,
@@ -820,95 +838,81 @@ function UserDashboardContent() {
     setInProcessCounts(inProcessMap);
     setApprovedCounts(approvedMap);
     setDraftApplicationsByType(groupedApplications);
-  }, [projects, selectedApplicationType, selectedProject]);
+  }, [
+    projects,
+    selectedApplicationType,
+    selectedProject,
+    isConsultant,
+    consultantType,
+    permissionTitlesByProject,
+  ]);
 
   useEffect(() => {
     loadDraftCounts();
   }, [loadDraftCounts]);
 
   const handleDeleteApplication = async (applicationId: string) => {
-    const { data: appRow, error: fetchErr } = await supabase
-      .from("applications")
-      .select("project_id, permission_type")
-      .eq("id", applicationId)
-      .single();
+    if (isConsultant) return;
 
-    if (fetchErr || !appRow?.project_id) {
-      alert("Could not load application to delete.");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const authToken = sessionData.session?.access_token;
+    if (!authToken) {
+      alert("You must be signed in to delete an application.");
       return;
     }
 
-    const { error } = await supabase.from("applications").delete().eq("id", applicationId);
-    if (error) {
-      alert("Failed to delete application. Please try again.");
+    const response = await fetch(
+      `/api/applications/${encodeURIComponent(applicationId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => null)) as {
+        error?: string;
+        details?: string;
+      } | null;
+      const msg =
+        typeof errBody?.error === "string"
+          ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+          : "Failed to delete application. Please try again.";
+      alert(msg);
       return;
-    }
-
-    const projectId = String(appRow.project_id);
-    const permissionType = typeof appRow.permission_type === "string" ? appRow.permission_type.trim() : "";
-
-    if (!permissionType) {
-      await loadDraftCounts();
-      return;
-    }
-
-    const { data: siblings } = await supabase
-      .from("applications")
-      .select("id")
-      .eq("project_id", projectId)
-      .eq("permission_type", permissionType);
-
-    if ((siblings?.length ?? 0) > 0) {
-      await loadDraftCounts();
-      return;
-    }
-
-    const templateKey = mapSelectedApplicationToTemplate(permissionType);
-
-    const { data: proj, error: projErr } = await supabase
-      .from("projects")
-      .select("application_urls")
-      .eq("id", projectId)
-      .maybeSingle();
-
-    if (projErr || !proj?.application_urls || typeof proj.application_urls !== "object" || Array.isArray(proj.application_urls)) {
-      await loadDraftCounts();
-      return;
-    }
-
-    const urls = { ...(proj.application_urls as Record<string, unknown>) };
-    delete urls[templateKey];
-    if (templateKey === "Architect") {
-      delete urls["Architect_acceptance"];
-    }
-
-    const { error: updErr } = await supabase.from("projects").update({ application_urls: urls }).eq("id", projectId);
-
-    if (updErr) {
-      console.error("Failed to update application_urls after application delete:", updErr);
     }
 
     await loadDraftCounts();
+    setIsDraftModalOpen(false);
+    setSelectedDraftApp(null);
   };
 
   const handleOpenApplicationDetails = async (payload: {
     applicationId: string;
+    projectId?: string;
     applicationNo: string;
     appType: string;
   }) => {
-    const { data, error } = await supabase
-      .from("applications")
-      .select("project_id")
-      .eq("id", payload.applicationId)
-      .single();
+    let projectId = payload.projectId?.trim() || "";
 
-    if (error || !data?.project_id) {
-      alert("Unable to open application details. Linked project not found.");
-      return;
+    if (!projectId) {
+      const { data, error } = await supabase
+        .from("applications")
+        .select("project_id")
+        .eq("id", payload.applicationId)
+        .single();
+
+      if (error || !data?.project_id) {
+        alert("Unable to open application details. Linked project not found.");
+        return;
+      }
+      projectId = String(data.project_id);
     }
 
     const query = new URLSearchParams({
-      projectId: String(data.project_id),
+      projectId,
       applicationId: payload.applicationId,
       applicationNo: payload.applicationNo,
       selectedApplication: payload.appType,
@@ -1076,7 +1080,8 @@ function UserDashboardContent() {
 
           {/* Right Sidebar - Announcements */}
           <div className="w-80 space-y-4">
-            <div className="flex items-center gap-2 w-full">
+            {!isConsultant && (
+            <motion.div className="flex items-center gap-2 w-full">
               <button
                 onClick={() => setIsProjectModalOpen(true)}
                 className="h-9 flex-1 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
@@ -1089,7 +1094,8 @@ function UserDashboardContent() {
               >
                 + Applications
               </button>
-            </div>
+            </motion.div>
+            )}
             <div className="bg-white rounded-lg border border-gray-300 p-4">
               <h3 className="text-lg font-semibold text-black mb-4">Announcements</h3>
               <div className="space-y-4">
@@ -1143,7 +1149,7 @@ function UserDashboardContent() {
               return a.workflowStage === want;
             }
           )}
-          onDeleteApplication={handleDeleteApplication}
+          onDeleteApplication={isConsultant ? undefined : handleDeleteApplication}
           onOpenApplicationDetails={handleOpenApplicationDetails}
         />
       )}
