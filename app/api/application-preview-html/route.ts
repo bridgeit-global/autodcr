@@ -237,6 +237,45 @@ function insertSavedPdfQrBesideClientBlock(html: string, qrRightColumn: string):
   return null;
 }
 
+function readApplicationUrlFromUrlsJson(
+  raw: unknown,
+  urlsKey: string
+): string | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const v = (raw as Record<string, unknown>)[urlsKey];
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+async function loadSavedPdfUrlForQr(
+  supabase: SupabaseClient,
+  projectId: string,
+  urlsKey: string
+): Promise<string | undefined> {
+  const { data, error } = await supabase
+    .from("projects")
+    .select("application_urls")
+    .eq("id", projectId)
+    .maybeSingle();
+
+  if (!error && data) {
+    const fromRow = readApplicationUrlFromUrlsJson(data.application_urls, urlsKey);
+    if (fromRow) return fromRow;
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc("get_project_for_preview", {
+    p_project_id: projectId,
+  });
+
+  if (!rpcError && rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+    return readApplicationUrlFromUrlsJson(
+      (rpcData as { application_urls?: unknown }).application_urls,
+      urlsKey
+    );
+  }
+
+  return undefined;
+}
+
 async function injectSavedPdfQrHtml(
   html: string,
   opts: {
@@ -260,19 +299,7 @@ async function injectSavedPdfQrHtml(
       },
     });
 
-    const { data, error } = await supabase
-      .from("projects")
-      .select("application_urls")
-      .eq("id", opts.projectId.trim())
-      .maybeSingle();
-
-    if (!error && data) {
-      const raw = data.application_urls;
-      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-        const v = (raw as Record<string, unknown>)[urlsKey];
-        if (typeof v === "string" && v.trim()) pdfUrl = v.trim();
-      }
-    }
+    pdfUrl = await loadSavedPdfUrlForQr(supabase, opts.projectId.trim(), urlsKey);
   }
 
   const stripSentinel = (s: string) => s.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("");

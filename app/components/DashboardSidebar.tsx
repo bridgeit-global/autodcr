@@ -14,9 +14,20 @@ type DashboardSidebarProps = {
   onSaveDraftClick: () => void;
   allPagesSaved: boolean;
   isDraftProject: boolean;
+  isProjectDataLoading?: boolean;
+  isSubmittingProject?: boolean;
 };
 
-const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, onSaveDraftClick, allPagesSaved, isDraftProject }: DashboardSidebarProps) => {
+const DashboardSidebar = ({
+  collapsed,
+  onToggleSidebar,
+  onSubmitProjectClick,
+  onSaveDraftClick,
+  allPagesSaved,
+  isDraftProject,
+  isProjectDataLoading = false,
+  isSubmittingProject = false,
+}: DashboardSidebarProps) => {
   const { slot: applicationPdfSaveSlot } = useApplicationPdfSaveSlot();
   const { slot: applicationSignSlot } = useApplicationSignSlot();
   const pathname = usePathname();
@@ -687,7 +698,7 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
                     className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
                     aria-hidden
                   />
-                  {!collapsed && <span>Opening…</span>}
+                  {!collapsed && <span>Signing…</span>}
                 </span>
               ) : collapsed ? (
                 signAllowed ? "Sign" : "—"
@@ -702,14 +713,24 @@ const DashboardSidebar = ({ collapsed, onToggleSidebar, onSubmitProjectClick, on
         {/* Action Button (hidden when sidebar is collapsed or on small screens) */}
         {!collapsed && !isReadOnlyMode && (() => {
           const isSubmittedProject = isEditMode && !isDraftProject;
+          const updateDisabled = isProjectDataLoading || isSubmittingProject;
           if (isSubmittedProject) {
             return (
               <button
                 type="button"
                 onClick={onSubmitProjectClick}
-                className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
+                disabled={updateDisabled}
+                className={`hidden md:block w-full font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0 ${
+                  updateDisabled
+                    ? "bg-emerald-400 text-white cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                }`}
               >
-                Update Project
+                {isProjectDataLoading
+                  ? "Loading…"
+                  : isSubmittingProject
+                    ? "Updating…"
+                    : "Update Project"}
               </button>
             );
           }

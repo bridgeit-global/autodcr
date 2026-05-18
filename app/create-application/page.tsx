@@ -8,6 +8,16 @@ import CustomSelect from "@/app/components/CustomSelect";
 import SiteFooter from "../components/SiteFooter";
 import { supabase } from "@/app/utils/supabase";
 import { getAppointmentPermissionIdsFromApplicantDetails } from "@/app/utils/applicantAppointmentPermissions";
+import {
+  createApplicationForOwner,
+  fetchExistingPermissionTypesForProject,
+  getAuthUserId,
+} from "@/app/utils/ownerApplicationRpc";
+import {
+  fetchOwnerProjectsForSelect,
+  getProjectPlanningAuthority,
+  type OwnerProjectSelectRow,
+} from "@/app/utils/ownerProjects";
 
 type PlanningAuthority = {
   id: string;
@@ -597,15 +607,8 @@ export default function CreateApplicationPage() {
   const [sessionTime, setSessionTime] = useState(3600);
   const [selectedAuthority, setSelectedAuthority] = useState("bmc");
   const [selectedProject, setSelectedProject] = useState("");
-  const [projects, setProjects] = useState<
-    {
-      id: string;
-      title: string;
-      project_info?: { proposalNo?: string } | null;
-      save_plot_details?: { planningAuthority?: string } | null;
-      applicant_details?: unknown;
-    }[]
-  >([]);
+  const [projects, setProjects] = useState<OwnerProjectSelectRow[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
@@ -623,23 +626,18 @@ export default function CreateApplicationPage() {
   const [redirectOnModalOk, setRedirectOnModalOk] = useState(false);
 
   useEffect(() => {
-    const loadProjects = async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id;
-      if (!userId) return;
-
-      const { data, error } = await supabase
-        .from("projects")
-        .select("id,title,project_info,save_plot_details,applicant_details")
-        .eq("user_id", userId)
-        .eq("status", "submitted")
-        .order("created_at", { ascending: false });
-
-      if (!error && data) {
-        setProjects(data);
+    let cancelled = false;
+    (async () => {
+      setProjectsLoading(true);
+      const rows = await fetchOwnerProjectsForSelect();
+      if (!cancelled) {
+        setProjects(rows);
+        setProjectsLoading(false);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    loadProjects();
   }, []);
 
   useEffect(() => {
@@ -647,17 +645,28 @@ export default function CreateApplicationPage() {
 
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("projects")
-        .select("applicant_details")
-        .eq("id", selectedProject)
-        .single();
+      const { data: rpcData, error: rpcError } = await supabase.rpc("get_project_for_preview", {
+        p_project_id: selectedProject,
+      });
 
-      if (cancelled || error) return;
+      if (cancelled) return;
+
+      let applicantDetails: unknown;
+      if (!rpcError && rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+        applicantDetails = (rpcData as { applicant_details?: unknown }).applicant_details;
+      } else {
+        const { data, error } = await supabase
+          .from("projects")
+          .select("applicant_details")
+          .eq("id", selectedProject)
+          .single();
+        if (cancelled || error) return;
+        applicantDetails = data?.applicant_details;
+      }
 
       setProjects((prev) =>
         prev.map((p) =>
-          p.id === selectedProject ? { ...p, applicant_details: data?.applicant_details } : p
+          p.id === selectedProject ? { ...p, applicant_details: applicantDetails } : p
         )
       );
     })();
@@ -702,8 +711,7 @@ export default function CreateApplicationPage() {
     };
   };
   const filteredProjects = projects.filter(
-    (project) =>
-      project.save_plot_details?.planningAuthority?.toUpperCase() === selectedAuthorityLabel
+    (project) => getProjectPlanningAuthority(project) === selectedAuthorityLabel
   );
   const selectedProjectTitle =
     getProjectDisplayData(
@@ -754,30 +762,48 @@ export default function CreateApplicationPage() {
     }
 
     setIsSubmitting(true);
-    const { error } = await supabase.from("applications").insert({
-      project_id: selectedProjectRecord.id,
-      project_title: selectedProjectRecord.title,
-      department: selectedDepartment,
-      permission_type: selectedPermissionRecord.title,
-      workflow_stage: "draft",
-    });
-    setIsSubmitting(false);
-
-    if (error) {
-      // Postgres unique violation code: duplicate permission type for same project.
-      if (error.code === "23505") {
-        setModalMessage(
-          "This permission type is already added for the selected project. Please choose a different permission type."
-        );
-        setRedirectOnModalOk(false);
-        setShowInfoModal(true);
-        return;
-      }
-
-      alert("Failed to create application. Please try again.");
+    const ownerId = await getAuthUserId();
+    if (!ownerId) {
+      setIsSubmitting(false);
+      alert("You must be signed in to create an application.");
       return;
     }
 
+    const result = await createApplicationForOwner(ownerId, {
+      projectId: selectedProjectRecord.id,
+      projectTitle: selectedProjectRecord.title,
+      department: selectedDepartment,
+      permissionType: selectedPermissionRecord.title,
+      workflowStage: "draft",
+    });
+    setIsSubmitting(false);
+
+    if ("error" in result) {
+      if (result.code === "23505") {
+        setModalMessage(
+          result.error ||
+            "This permission type is already added for the selected project. Please choose a different permission type."
+        );
+        setRedirectOnModalOk(false);
+        setShowInfoModal(true);
+        setExistingPermissionTypes((prev) =>
+          prev.includes(selectedPermissionRecord.title)
+            ? prev
+            : [...prev, selectedPermissionRecord.title]
+        );
+        return;
+      }
+
+      alert(result.error || "Failed to create application. Please try again.");
+      return;
+    }
+
+    setExistingPermissionTypes((prev) =>
+      prev.includes(selectedPermissionRecord.title)
+        ? prev
+        : [...prev, selectedPermissionRecord.title]
+    );
+    setSelectedPermission(null);
     setModalMessage("Application created successfully.");
     setRedirectOnModalOk(true);
     setShowInfoModal(true);
@@ -823,30 +849,32 @@ export default function CreateApplicationPage() {
   }, [selectedProject]);
 
   useEffect(() => {
-    const loadExistingPermissions = async () => {
+    let cancelled = false;
+    (async () => {
       if (!selectedProject) {
         setExistingPermissionTypes([]);
         return;
       }
 
-      const { data, error } = await supabase
-        .from("applications")
-        .select("permission_type")
-        .eq("project_id", selectedProject)
-        .eq("department", selectedDepartment);
-
-      if (error) {
-        console.error("Error loading existing permissions:", error);
+      const ownerId = await getAuthUserId();
+      if (!ownerId) {
         setExistingPermissionTypes([]);
         return;
       }
 
-      setExistingPermissionTypes(
-        (data ?? []).map((row: { permission_type: string }) => row.permission_type)
+      const titles = await fetchExistingPermissionTypesForProject(
+        selectedProject,
+        selectedDepartment,
+        ownerId
       );
-    };
+      if (!cancelled) {
+        setExistingPermissionTypes(titles);
+      }
+    })();
 
-    loadExistingPermissions();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedProject, selectedDepartment]);
 
   const formatTime = (seconds: number) => {
@@ -1017,7 +1045,11 @@ export default function CreateApplicationPage() {
                               ))}
                               {filteredProjects.length === 0 && (
                                 <div className="px-3 py-2 text-sm text-gray-500">
-                                  No submitted projects for selected authority
+                                  {projectsLoading
+                                    ? "Loading projects…"
+                                    : projects.length === 0
+                                      ? "No submitted projects yet. Complete and submit a project from the dashboard first."
+                                      : `No projects for ${selectedAuthorityLabel}. Try another planning authority or update the project in project details.`}
                                 </div>
                               )}
                               {filteredProjects.length > 0 && filteredProjectOptions.length === 0 && (
@@ -1078,6 +1110,8 @@ export default function CreateApplicationPage() {
                                 <button
                                   key={type.id}
                                   type="button"
+                                  disabled={Boolean(isAlreadyCreated)}
+                                  aria-disabled={Boolean(isAlreadyCreated)}
                                   onClick={() => {
                                     if (isAlreadyCreated) {
                                       setModalMessage(
@@ -1206,6 +1240,10 @@ export default function CreateApplicationPage() {
                         isSubmitting ||
                         !selectedProject ||
                         !selectedPermission ||
+                        (selectedPermission &&
+                          existingPermissionTypes.includes(
+                            visiblePermissionTypes.find((p) => p.id === selectedPermission)?.title ?? ""
+                          )) ||
                         (showBuildingPermissionFields &&
                           (!typeOfNotice || !proposedApplication || !majorUse || !applicationType))
                       }

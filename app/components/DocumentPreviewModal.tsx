@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 
-const PlainPDFViewer = dynamic(() => import("./PlainPDFViewer"), {
+const ApplicationStoredPdfViewer = dynamic(() => import("./ApplicationStoredPdfViewer"), {
   ssr: false,
 }) as React.ComponentType<{ fileUrl: string }>;
 
@@ -16,7 +16,7 @@ const BridgeSignModal = dynamic(() => import("./BridgeSignModal"), {
 type DocumentPreviewModalProps = {
   open: boolean;
   onClose: () => void;
-  /** When provided, renders a PDF preview via PlainPDFViewer. */
+  /** When provided, renders a PDF preview via ApplicationStoredPdfViewer. */
   fileUrl?: string | null;
   /**
    * When provided (and `fileUrl` is not), renders the HTML directly in an
@@ -42,8 +42,10 @@ type DocumentPreviewModalProps = {
   signingFileName?: string;
   /** Hide the Save / Saved toolbar control (e.g. preview-only flows). */
   hideSaveButton?: boolean;
-  /** When true with `showMockSignButton`, iframe loads then mock owner sign + `onMockSignComplete` run once (sidebar “Sign application”). */
+  /** When true with `showMockSignButton`, iframe loads then mock sign + `onMockSignComplete` run once (sidebar “Sign application”). */
   autoMockSignAfterOpen?: boolean;
+  /** `owner_only` = left column; `owner_and_architect` = both columns (architect co-sign step). */
+  mockSignMode?: "owner_only" | "owner_and_architect";
   /** Show a mock “Sign” control that injects “Owner” + a dummy signature into the HTML iframe (first client signature column). */
   showMockSignButton?: boolean;
   /** After mock sign is injected (and fonts settle), parent can persist PDF / update workflow. */
@@ -69,6 +71,7 @@ export default function DocumentPreviewModal({
   signingFileName,
   hideSaveButton = false,
   autoMockSignAfterOpen = false,
+  mockSignMode = "owner_only",
   showMockSignButton = false,
   onMockSignComplete,
   mockSignBusy = false,
@@ -146,12 +149,6 @@ export default function DocumentPreviewModal({
       const tryInject = (): boolean | "already" => {
         const doc = iframeRef.current?.contentDocument;
         if (!doc) return false;
-        const firstCell = doc.querySelector(".signature-table tr td");
-        if (!firstCell) return false;
-        if (firstCell.querySelector("#preview-dummy-owner-sign")) return "already";
-        const signatureLine = firstCell.querySelector(".signature-line");
-        if (!signatureLine) return false;
-
         const fontLinkId = "preview-owner-signature-font-link";
         if (!doc.getElementById(fontLinkId)) {
           const link = doc.createElement("link");
@@ -162,13 +159,22 @@ export default function DocumentPreviewModal({
           doc.head.appendChild(link);
         }
 
-        const wrap = doc.createElement("div");
-        wrap.id = "preview-dummy-owner-sign";
-        wrap.setAttribute(
-          "style",
-          "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
-        );
-        wrap.innerHTML = `
+        const injectColumn = (
+          cell: Element,
+          wrapId: string,
+          label: string,
+          rotateDeg: string
+        ): boolean | "already" => {
+          if (cell.querySelector(`#${wrapId}`)) return "already";
+          const signatureLine = cell.querySelector(".signature-line");
+          if (!signatureLine) return false;
+          const wrap = doc.createElement("div");
+          wrap.id = wrapId;
+          wrap.setAttribute(
+            "style",
+            "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
+          );
+          wrap.innerHTML = `
         <span style="
           font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
           font-size:clamp(28px,4.2vw,36px);
@@ -177,15 +183,51 @@ export default function DocumentPreviewModal({
           color:#0f172a;
           letter-spacing:0.02em;
           display:inline-block;
-          transform:rotate(-2deg);
+          transform:rotate(${rotateDeg});
           text-shadow:0 1px 0 rgba(255,255,255,0.6);
-        ">Owner</span>
+        ">${label}</span>
       `;
-        firstCell.insertBefore(wrap, signatureLine);
-        // Template `.signature-line` uses a large margin-top for blank signing space; once
-        // “Owner” is injected above it, that margin reads as an awkward gap before designation.
-        (signatureLine as HTMLElement).style.marginTop = "4px";
-        return true;
+          cell.insertBefore(wrap, signatureLine);
+          (signatureLine as HTMLElement).style.marginTop = "4px";
+          return true;
+        };
+
+        const cells = doc.querySelectorAll(".signature-table tr td");
+        const firstCell = cells[0];
+        if (!firstCell) return false;
+
+        const needOwner =
+          mockSignMode === "owner_only" || mockSignMode === "owner_and_architect";
+        const needArchitect = mockSignMode === "owner_and_architect";
+
+        let ownerResult: boolean | "already" = "already";
+        if (needOwner) {
+          ownerResult = injectColumn(firstCell, "preview-dummy-owner-sign", "Owner", "-2deg");
+          if (ownerResult === false) return false;
+        }
+
+        if (needArchitect) {
+          const architectCell = cells[1];
+          if (!architectCell) return false;
+          const archResult = injectColumn(
+            architectCell,
+            "preview-dummy-architect-sign",
+            "Architect",
+            "1.5deg"
+          );
+          if (archResult === false) return false;
+          if (archResult === true) return true;
+        }
+
+        if (ownerResult === true) return true;
+        if (
+          needArchitect &&
+          cells[1]?.querySelector("#preview-dummy-architect-sign") &&
+          (ownerResult === "already" || !needOwner)
+        ) {
+          return "already";
+        }
+        return ownerResult === "already" ? "already" : false;
       };
 
       const afterInject = async () => {
@@ -291,9 +333,11 @@ export default function DocumentPreviewModal({
   if (typeof window === "undefined") return null;
 
   const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
+  const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
+  const useCompactPreviewLayout = isHtmlPreview || isStoredPdfPreview;
   const canSign = Boolean(getPdfBlob);
 
-  const saveUiBusy = Boolean(isSaving) || signPipelineBusy;
+  const saveUiBusy = Boolean(isSaving);
 
   const handleCloseAll = () => {
     if (saveUiBusy) return;
@@ -320,6 +364,36 @@ export default function DocumentPreviewModal({
     }
   };
 
+  const handlePrintStoredPdf = async () => {
+    if (!fileUrl) return;
+    try {
+      const res = await fetch(fileUrl);
+      if (!res.ok) throw new Error("Could not load the saved PDF.");
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = blobUrl;
+      document.body.appendChild(iframe);
+      iframe.onload = () => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } finally {
+          window.setTimeout(() => {
+            URL.revokeObjectURL(blobUrl);
+            iframe.remove();
+          }, 1500);
+        }
+      };
+    } catch {
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+
   const modalContent = (
     <AnimatePresence>
       {open && (
@@ -332,7 +406,7 @@ export default function DocumentPreviewModal({
         >
           <motion.div
             className={
-              isHtmlPreview
+              useCompactPreviewLayout
                 ? "bg-white w-fit max-w-[calc(100vw-2rem)] rounded-2xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
                 : "bg-white w-full max-w-5xl rounded-2xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
             }
@@ -374,9 +448,12 @@ export default function DocumentPreviewModal({
                     Sign with DSC
                   </button>
                 )}
-                {htmlContent && !fileUrl && (
+                {((htmlContent && !fileUrl) || isStoredPdfPreview) && (
                   <button
-                    onClick={handlePrint}
+                    onClick={() => {
+                      if (isStoredPdfPreview) void handlePrintStoredPdf();
+                      else handlePrint();
+                    }}
                     disabled={saveUiBusy}
                     className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                     aria-label="Print or save as PDF"
@@ -498,11 +575,13 @@ export default function DocumentPreviewModal({
                   </div>
                 </div>
               ) : fileUrl ? (
-                <div
-                  className="rounded-xl bg-white border border-gray-200 overflow-hidden"
-                  style={{ minHeight: "600px" }}
-                >
-                  <PlainPDFViewer fileUrl={fileUrl} />
+                <div className="flex justify-center">
+                  <div
+                    className="rounded-xl bg-white border border-gray-200 overflow-hidden"
+                    style={{ width: "min(800px, calc(100vw - 2rem))", minHeight: "600px" }}
+                  >
+                    <ApplicationStoredPdfViewer fileUrl={fileUrl} />
+                  </div>
                 </div>
               ) : null}
             </div>

@@ -57,11 +57,13 @@ export default function BuildingDetailsPage() {
   useEffect(() => {
     if (isEditMode && projectData && !isLoading) {
       const buildingDetails = projectData.building_details || {};
+      const bd = buildingDetails as Record<string, unknown>;
+      const s = (v: unknown): string => (typeof v === "string" ? v : "");
       const formData: BuildingFormData = {
-        buildingType: buildingDetails.buildingType || "",
-        height: buildingDetails.height || "",
-        fsiBuiltUpArea: buildingDetails.fsiBuiltUpArea || "",
-        grossConstructionArea: buildingDetails.grossConstructionArea || "",
+        buildingType: s(bd.buildingType),
+        height: s(bd.height),
+        fsiBuiltUpArea: s(bd.fsiBuiltUpArea),
+        grossConstructionArea: s(bd.grossConstructionArea),
       };
       reset(formData);
       saveDraft("draft-building-details-form", formData);

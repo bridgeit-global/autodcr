@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { TEMPLATE_CONFIG } from "@/app/templates/templateGenerators";
+import {
+  canUserSaveApplicationPdf,
+  type SigningProjectContext,
+} from "@/app/utils/applicationSigning";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
@@ -13,7 +17,8 @@ export const dynamic = "force-dynamic";
  * Uploads the saved appointment PDF to Storage and merges
  * `application_urls` on `projects`.
  * Uses the service role for Storage/DB so client Storage RLS cannot block saves.
- * Caller must present a valid Bearer token; JWT subject must own the project.
+ * Caller must present a valid Bearer token; authorized: project owner, appointed
+ * architect, or consultant on the applicants roster.
  */
 export async function POST(
   request: NextRequest,
@@ -104,7 +109,7 @@ export async function POST(
 
     const { data: projectRow, error: projErr } = await admin
       .from("projects")
-      .select("id, user_id, application_urls")
+      .select("id, user_id, application_urls, architect_user_id, applicant_details")
       .eq("id", projectId.trim())
       .maybeSingle();
 
@@ -115,7 +120,23 @@ export async function POST(
       );
     }
 
-    if (!projectRow || String(projectRow.user_id) !== user.id) {
+    if (!projectRow) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
+    const projectContext: SigningProjectContext = {
+      user_id: projectRow.user_id,
+      architect_user_id: projectRow.architect_user_id,
+      applicant_details: projectRow.applicant_details as unknown as NonNullable<SigningProjectContext>["applicant_details"],
+    };
+
+    if (
+      !canUserSaveApplicationPdf(
+        user.id,
+        projectContext,
+        typeof projectRow.user_id === "string" ? projectRow.user_id : null
+      )
+    ) {
       return NextResponse.json({ error: "Project not found or access denied." }, { status: 403 });
     }
 
@@ -157,8 +178,7 @@ export async function POST(
     const { error: updErr } = await admin
       .from("projects")
       .update({ application_urls: nextUrls })
-      .eq("id", projectId.trim())
-      .eq("user_id", user.id);
+      .eq("id", projectId.trim());
 
     if (updErr) {
       return NextResponse.json(

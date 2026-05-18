@@ -11,6 +11,17 @@ import {
 } from "@/app/components/DraftApplicationsModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
+import {
+  collectOwnerSignerUserIds,
+  isAnySameUserId,
+  resolveAppointedArchitectUserId,
+  sameUserId,
+} from "@/app/utils/applicationSigning";
+import {
+  fetchApplicationForSigning,
+  getAuthUserId,
+  updateApplicationForSigning,
+} from "@/app/utils/ownerApplicationRpc";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
@@ -32,6 +43,7 @@ type PreviewProjectData = {
   title?: string;
   user_id?: string | null;
   architect_user_id?: string | null;
+  application_urls?: Record<string, unknown> | null;
   project_info?: {
     proposalNo?: string;
     fullNameOfApplicant?: string;
@@ -73,52 +85,6 @@ type PreviewProjectData = {
   } | null;
 };
 
-/** Who may act as “owner” for signing: project row + Owner applicants (auth id may match applicant, not `projects.user_id`). */
-function collectOwnerSignerUserIds(
-  proj: PreviewProjectData | null,
-  projectRowUserId: string | null | undefined
-): string[] {
-  const raw: string[] = [];
-  if (typeof projectRowUserId === "string" && projectRowUserId.trim()) {
-    raw.push(projectRowUserId.trim());
-  }
-  if (typeof proj?.user_id === "string" && proj.user_id.trim()) {
-    raw.push(proj.user_id.trim());
-  }
-  const applicants = proj?.applicant_details?.applicants ?? [];
-  for (const a of applicants) {
-    const type = (a.applicantType || a.applicant_type || "").toLowerCase();
-    if (!type.includes("owner")) continue;
-    for (const v of [a.user_id, a.userId, a.id, a.owner_id]) {
-      if (typeof v === "string" && v.trim()) raw.push(v.trim());
-    }
-  }
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const r of raw) {
-    const k = r.trim().toLowerCase();
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    out.push(r.trim());
-  }
-  return out;
-}
-
-function isAnySameUserId(uid: string, candidates: string[]): boolean {
-  const u = uid.trim().toLowerCase();
-  if (!u) return false;
-  return candidates.some((c) => c.trim().toLowerCase() === u);
-}
-
-function sameUserIdStr(
-  a: string | null | undefined,
-  b: string | null | undefined
-): boolean {
-  const x = typeof a === "string" ? a.trim().toLowerCase() : "";
-  const y = typeof b === "string" ? b.trim().toLowerCase() : "";
-  return x.length > 0 && y.length > 0 && x === y;
-}
-
 type MockSignAvailability = {
   actionAvailable: boolean;
   idleReason?: string;
@@ -132,7 +98,6 @@ function computeMockSignAvailability(args: {
   architectSignedAt: string | null;
   projectData: PreviewProjectData | null;
   projectRowUserId: string | null | undefined;
-  architectUserId: string | null | undefined;
 }): MockSignAvailability {
   const {
     templateType,
@@ -141,7 +106,6 @@ function computeMockSignAvailability(args: {
     architectSignedAt,
     projectData,
     projectRowUserId,
-    architectUserId,
   } = args;
   const uid = typeof authUserId === "string" ? authUserId.trim() : "";
   if (!uid) {
@@ -156,7 +120,8 @@ function computeMockSignAvailability(args: {
   const architectSigned = Boolean(architectSignedAt?.trim());
   const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
   const isOwner = isAnySameUserId(uid, ownerSignerIds);
-  const isArchitect = sameUserIdStr(uid, architectUserId);
+  const appointedArchitectId = resolveAppointedArchitectUserId(projectData);
+  const isArchitect = sameUserId(uid, appointedArchitectId);
 
   if (templateType === "Architect") {
     if (ownerSigned && architectSigned) {
@@ -182,7 +147,8 @@ function computeMockSignAvailability(args: {
     if (isArchitect) {
       return {
         actionAvailable: true,
-        subtitle: "Opens preview, applies mock architect signature, then saves.",
+        subtitle:
+          "Adds your signature beside the owner on appointment and acceptance PDFs.",
       };
     }
     return {
@@ -547,10 +513,20 @@ async function buildApplicationPreviewContext(
     if ((prefer || !consultantEmail) && nextConsultantEmail) consultantEmail = nextConsultantEmail;
   };
 
-  const consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
+  let consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
     templateType,
     projectData
   );
+  if (consultantLookupUserIds.length === 0) {
+    const { data: authRow } = await supabase.auth.getUser();
+    const role =
+      typeof authRow.user?.user_metadata?.role === "string"
+        ? authRow.user.user_metadata.role
+        : "";
+    if (role === "Consultant" && authRow.user?.id) {
+      consultantLookupUserIds = [authRow.user.id];
+    }
+  }
 
   try {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -766,6 +742,84 @@ function hasApplicationUrlKey(raw: unknown, key: string): boolean {
   return typeof v === "string" && v.trim().length > 0;
 }
 
+/** Stored PDF URL for preview (Architect: appointment vs acceptance letter). */
+function getStoredApplicationPdfUrl(
+  raw: unknown,
+  templateType: TemplateType,
+  architectVariant: "appointment" | "acceptance" = "appointment"
+): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const key =
+    templateType === "Architect"
+      ? architectVariant === "acceptance"
+        ? ARCHITECT_ACCEPTANCE_URL_KEY
+        : "Architect"
+      : templateType;
+  const v = o[key];
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+/** Build signed Architect PDF for one letter variant (appointment or acceptance). */
+async function buildArchitectSignedPdfBlob(
+  previewBase: BuildApplicationPreviewContextInput,
+  variant: "appointment" | "acceptance",
+  signatures: { owner: boolean; architect: boolean }
+): Promise<Blob> {
+  const built = await buildApplicationPreviewContext({
+    ...previewBase,
+    architectHtmlVariant: variant,
+  });
+  let html = await generateApplicationPreviewHtml(
+    built.fields,
+    built.templateType,
+    built.previewSource
+  );
+  if (signatures.owner) {
+    html = injectMockOwnerSignatureIntoPreviewHtml(html, built.templateType);
+  }
+  if (signatures.architect) {
+    html = injectMockArchitectSignatureIntoPreviewHtml(html, built.templateType);
+  }
+  return generateApplicationPreviewPdfFromHtml(html, built.templateType);
+}
+
+/** Persist appointment + acceptance PDFs under `Architect` and `Architect_acceptance`. */
+async function persistArchitectSignedLetterPdfs(
+  previewBase: BuildApplicationPreviewContextInput,
+  signatures: { owner: boolean; architect: boolean },
+  upload: (pdfBlob: Blob, applicationUrlsKey: string) => Promise<{ publicUrl?: string }>
+): Promise<{ appointmentUrl: string | null; acceptanceUrl: string | null }> {
+  const variants: Array<{
+    variant: "appointment" | "acceptance";
+    urlsKey: string;
+  }> = [
+    { variant: "appointment", urlsKey: "Architect" },
+    { variant: "acceptance", urlsKey: ARCHITECT_ACCEPTANCE_URL_KEY },
+  ];
+
+  const results = await Promise.all(
+    variants.map(async ({ variant, urlsKey }) => {
+      const blobInitial = await buildArchitectSignedPdfBlob(previewBase, variant, signatures);
+      await upload(blobInitial, urlsKey);
+      // Second pass: storage URL exists — preview HTML API can inject QR, then overwrite PDF.
+      const blobWithQr = await buildArchitectSignedPdfBlob(previewBase, variant, signatures);
+      const { publicUrl } = await upload(blobWithQr, urlsKey);
+      const trimmed = typeof publicUrl === "string" && publicUrl.trim() ? publicUrl.trim() : null;
+      return { variant, url: trimmed };
+    })
+  );
+
+  let appointmentUrl: string | null = null;
+  let acceptanceUrl: string | null = null;
+  for (const { variant, url } of results) {
+    if (variant === "appointment") appointmentUrl = url;
+    else acceptanceUrl = url;
+  }
+
+  return { appointmentUrl, acceptanceUrl };
+}
+
 export default function ApplicationDetailsPage() {
   const { userMetadata } = useUserMetadata();
   const router = useRouter();
@@ -790,6 +844,7 @@ export default function ApplicationDetailsPage() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isSavingPdf, setIsSavingPdf] = useState(false);
+  const [isSigningPdf, setIsSigningPdf] = useState(false);
   const [savePdfMessage, setSavePdfMessage] = useState<string | null>(null);
   const [savePdfError, setSavePdfError] = useState<string | null>(null);
   const [previewReadyForSave, setPreviewReadyForSave] = useState(false);
@@ -816,6 +871,7 @@ export default function ApplicationDetailsPage() {
   } | null>(null);
   const saveApplicationPdfRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
+  const signDirectlyRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const buildApplicationPreviewPdfBlob = async (): Promise<Blob> => {
     const ctx = previewPdfContextRef.current;
     if (!ctx) {
@@ -831,16 +887,37 @@ export default function ApplicationDetailsPage() {
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
     const loadProject = async () => {
-      const { data, error } = await supabase
+      const coreSelect =
+        "title,project_info,save_plot_details,applicant_details,user_id,application_urls";
+
+      const { data: directData, error: directError } = await supabase
         .from("projects")
-        .select("title,project_info,save_plot_details,applicant_details,user_id,architect_user_id")
+        .select(coreSelect)
         .eq("id", projectId)
         .single();
-      if (error) {
-        console.error("Failed to load project for preview mapping:", error);
+
+      if (!directError && directData) {
+        setProjectData(directData as PreviewProjectData);
         return;
       }
-      setProjectData(data);
+
+      if (directError) {
+        console.warn("Direct project select failed, trying get_project_for_preview:", directError.message);
+      }
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc("get_project_for_preview", {
+        p_project_id: projectId,
+      });
+
+      if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+        setProjectData(rpcData as PreviewProjectData);
+        return;
+      }
+
+      if (rpcError) {
+        console.error("Failed to load project for preview mapping:", rpcError);
+      }
+      setProjectData(null);
     };
     void loadProject();
   }, [isReadOnlyMode, projectId]);
@@ -848,24 +925,26 @@ export default function ApplicationDetailsPage() {
   useEffect(() => {
     if (!isReadOnlyMode || !applicationId) return;
     const loadApplication = async () => {
-      const { data, error } = await supabase
-        .from("applications")
-        .select("created_at, workflow_stage, owner_signed_at, architect_signed_at")
-        .eq("id", applicationId)
-        .single();
-      if (error) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) {
+        console.error("Failed to load application: not authenticated");
+        return;
+      }
+
+      const { data, error } = await fetchApplicationForSigning(applicationId);
+      if (error || !data) {
         console.error("Failed to load application for preview mapping:", error);
         return;
       }
-      setApplicationCreatedAt(data?.created_at ?? null);
-      setApplicationWorkflowStage(normalizeApplicationWorkflowStage(data?.workflow_stage));
+      setApplicationCreatedAt(data.created_at ?? null);
+      setApplicationWorkflowStage(normalizeApplicationWorkflowStage(data.workflow_stage));
       setOwnerSignedAt(
-        typeof data?.owner_signed_at === "string" && data.owner_signed_at.trim()
+        typeof data.owner_signed_at === "string" && data.owner_signed_at.trim()
           ? data.owner_signed_at.trim()
           : null
       );
       setArchitectSignedAt(
-        typeof data?.architect_signed_at === "string" && data.architect_signed_at.trim()
+        typeof data.architect_signed_at === "string" && data.architect_signed_at.trim()
           ? data.architect_signed_at.trim()
           : null
       );
@@ -901,7 +980,6 @@ export default function ApplicationDetailsPage() {
         architectSignedAt,
         projectData,
         projectRowUserId: projectData?.user_id,
-        architectUserId: projectData?.architect_user_id,
       }),
     [
       previewTemplateType,
@@ -911,6 +989,66 @@ export default function ApplicationDetailsPage() {
       projectData,
     ]
   );
+
+  const mockSignMode = useMemo((): "owner_only" | "owner_and_architect" => {
+    if (previewTemplateType !== "Architect") return "owner_only";
+    const ownerSigned = Boolean(ownerSignedAt?.trim());
+    const architectSigned = Boolean(architectSignedAt?.trim());
+    const appointedId = resolveAppointedArchitectUserId(projectData);
+    if (ownerSigned && !architectSigned && authUserId && sameUserId(authUserId, appointedId)) {
+      return "owner_and_architect";
+    }
+    return "owner_only";
+  }, [
+    previewTemplateType,
+    ownerSignedAt,
+    architectSignedAt,
+    projectData,
+    authUserId,
+  ]);
+
+  /** Approved/Verified: switching Architect letter shows the matching stored PDF. */
+  useEffect(() => {
+    if (
+      !previewOpen ||
+      applicationWorkflowStage !== "approved_verified" ||
+      previewTemplateType !== "Architect" ||
+      !projectId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      let raw = projectData?.application_urls;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+          p_project_id: projectId,
+        });
+        if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+          raw = (rpcData as PreviewProjectData).application_urls;
+        }
+      }
+      if (cancelled) return;
+      const url = getStoredApplicationPdfUrl(raw, "Architect", architectPreviewVariant);
+      if (url) {
+        setPreviewHtml(null);
+        setPreviewUrl(url);
+        setStoredSigningPdfUrl(url);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    previewOpen,
+    applicationWorkflowStage,
+    previewTemplateType,
+    architectPreviewVariant,
+    projectId,
+    projectData?.application_urls,
+  ]);
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -997,6 +1135,36 @@ export default function ApplicationDetailsPage() {
       previewPdfContextRef.current = null;
       setIsPreviewLoading(true);
 
+      let projectForPreview = projectData;
+      if (!projectForPreview && projectId) {
+        const coreSelect =
+          "title,project_info,save_plot_details,applicant_details,user_id,application_urls";
+        const { data: directData } = await supabase
+          .from("projects")
+          .select(coreSelect)
+          .eq("id", projectId)
+          .single();
+        if (directData) {
+          projectForPreview = directData as PreviewProjectData;
+          setProjectData(projectForPreview);
+        } else {
+          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+            p_project_id: projectId,
+          });
+          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+            projectForPreview = rpcData as PreviewProjectData;
+            setProjectData(projectForPreview);
+          }
+        }
+      }
+
+      if (!projectForPreview) {
+        setPreviewError(
+          "Project data could not be loaded. Confirm you have access to this project and try again."
+        );
+        return;
+      }
+
       let workflowStageForPreview = applicationWorkflowStage;
       if (applicationId) {
         const { data: appRow } = await supabase
@@ -1015,7 +1183,7 @@ export default function ApplicationDetailsPage() {
       const { fields, previewSource, templateType, fieldMapping } =
         await buildApplicationPreviewContext({
           userMetadata,
-          projectData,
+          projectData: projectForPreview,
           selectedApplication,
           applicationNo,
           applicationCreatedAt,
@@ -1032,62 +1200,69 @@ export default function ApplicationDetailsPage() {
       }
 
       if (workflowStageForPreview === "approved_verified" && projectId) {
-        const { data: urlsRow } = await supabase
-          .from("projects")
-          .select("application_urls")
-          .eq("id", projectId)
-          .maybeSingle();
-        const raw = urlsRow?.application_urls;
-        const entry =
-          raw && typeof raw === "object" && !Array.isArray(raw)
-            ? (raw as Record<string, unknown>)[templateType]
-            : undefined;
-        const savedPdfUrl =
-          typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
+        let raw = projectForPreview.application_urls;
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          const { data: urlsRow } = await supabase
+            .from("projects")
+            .select("application_urls")
+            .eq("id", projectId)
+            .maybeSingle();
+          raw = urlsRow?.application_urls;
+        }
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+            p_project_id: projectId,
+          });
+          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+            raw = (rpcData as PreviewProjectData).application_urls;
+          }
+        }
+        const architectVariant =
+          templateType === "Architect" ? architectPreviewVariant : "appointment";
+        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, architectVariant);
 
         if (savedPdfUrl) {
-          // Same HTML path as In process so letterhead (CSS/Paged.js) renders in the iframe.
-          // Stored PDF alone often lacks painted backgrounds; signing still uses `storedSigningPdfUrl`.
-          const rawHtml = await generateApplicationPreviewHtml(
-            fields,
-            templateType,
-            previewSource
-          );
-          // Match the mock-sign save pipeline so the owner script signature appears (fresh HTML omits it).
-          const html = injectMockOwnerSignatureIntoPreviewHtml(rawHtml, templateType);
           previewPdfContextRef.current = { fields, templateType, previewSource };
           setPdfSavedForCurrentPreview(true);
           setPreviewReadyForSave(true);
           setStoredSigningPdfUrl(savedPdfUrl);
-          setPreviewUrl(null);
-          setPreviewHtml(html);
+          setPreviewHtml(null);
+          setPreviewUrl(savedPdfUrl);
           setPreviewFieldMapping(fieldMapping);
           setPreviewOpen(true);
           return;
         }
+
+        setPreviewError(
+          templateType === "Architect"
+            ? `No signed PDF on file for the ${architectVariant} letter.`
+            : "No signed PDF on file for this application."
+        );
+        return;
       }
 
-      const html = await generateApplicationPreviewHtml(
+      let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
         previewSource
       );
 
-      let alreadySavedForTemplate = false;
-      if (projectId) {
-        const { data: urlsRow } = await supabase
-          .from("projects")
-          .select("application_urls")
-          .eq("id", projectId)
-          .maybeSingle();
-        alreadySavedForTemplate = applicationTemplateSavedInUrls(
-          urlsRow?.application_urls,
-          templateType
-        );
+      if (!html || !html.trim()) {
+        setPreviewError("Preview HTML was empty. Check that the template file exists under html/.");
+        return;
+      }
+
+      if (
+        templateType === "Architect" &&
+        workflowStageForPreview === "in_process" &&
+        ownerSignedAt?.trim() &&
+        !architectSignedAt?.trim()
+      ) {
+        html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
       }
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
-      setPdfSavedForCurrentPreview(alreadySavedForTemplate);
+      setPdfSavedForCurrentPreview(false);
       setPreviewReadyForSave(true);
       setPreviewUrl(null);
       setPreviewHtml(html);
@@ -1136,19 +1311,11 @@ export default function ApplicationDetailsPage() {
       return;
     }
 
-    setIsSavingPdf(true);
+    setIsSigningPdf(true);
     setSavePdfMessage(null);
     setSavePdfError(null);
 
-    const sameUserId = (a: string | null | undefined, b: string | null | undefined) => {
-      const x = typeof a === "string" ? a.trim().toLowerCase() : "";
-      const y = typeof b === "string" ? b.trim().toLowerCase() : "";
-      return x.length > 0 && y.length > 0 && x === y;
-    };
-
     try {
-      const slug = ctx.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-
       const {
         data: { user: authUser },
         error: authUserErr,
@@ -1163,21 +1330,46 @@ export default function ApplicationDetailsPage() {
         throw new Error("Missing session token. Please log in again.");
       }
 
-      const [{ data: appSignRow, error: appSignErr }, { data: projSignRow, error: projSignErr }] =
-        await Promise.all([
-          supabase
-            .from("applications")
-            .select("owner_signed_at, architect_signed_at, workflow_stage")
-            .eq("id", resolvedApplicationId)
-            .single(),
-          supabase.from("projects").select("user_id, architect_user_id").eq("id", projectId).single(),
-        ]);
-
+      const { data: appSignRow, error: appSignErr } = await fetchApplicationForSigning(
+        resolvedApplicationId
+      );
       if (appSignErr || !appSignRow) {
         throw new Error("Could not load application signing state.");
       }
-      if (projSignErr || !projSignRow) {
-        throw new Error("Could not load project for signing permissions.");
+
+      let projectRowUserId: string | null =
+        typeof projectData?.user_id === "string" ? projectData.user_id : null;
+      let appointedArchitectId = resolveAppointedArchitectUserId(projectData);
+
+      if (!projectRowUserId || (ctx.templateType === "Architect" && !appointedArchitectId)) {
+        const { data: rpcProj } = await supabase.rpc("get_project_for_preview", {
+          p_project_id: projectId,
+        });
+        if (rpcProj && typeof rpcProj === "object" && !Array.isArray(rpcProj)) {
+          const rp = rpcProj as PreviewProjectData;
+          if (!projectRowUserId && typeof rp.user_id === "string") projectRowUserId = rp.user_id;
+          if (!projectData) setProjectData(rp);
+          appointedArchitectId = resolveAppointedArchitectUserId(rp) ?? appointedArchitectId;
+        } else {
+          const { data: projSignRow, error: projSignErr } = await supabase
+            .from("projects")
+            .select("user_id, architect_user_id")
+            .eq("id", projectId)
+            .single();
+          if (projSignErr || !projSignRow) {
+            throw new Error("Could not load project for signing permissions.");
+          }
+          projectRowUserId =
+            typeof projSignRow.user_id === "string" ? projSignRow.user_id : projectRowUserId;
+          if (!projectData) {
+            setProjectData({
+              user_id: projSignRow.user_id,
+              architect_user_id: projSignRow.architect_user_id,
+            } as PreviewProjectData);
+          }
+          appointedArchitectId =
+            resolveAppointedArchitectUserId(projectData) ?? appointedArchitectId;
+        }
       }
 
       const ownerSignedAt =
@@ -1191,9 +1383,7 @@ export default function ApplicationDetailsPage() {
           : null;
       const ownerSigned = Boolean(ownerSignedAt);
       const architectSigned = Boolean(architectSignedAt);
-      const appointedArchitectId =
-        typeof projSignRow.architect_user_id === "string" ? projSignRow.architect_user_id : null;
-      const ownerSignerIds = collectOwnerSignerUserIds(projectData, projSignRow.user_id);
+      const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
 
       const isArchitectLetter = ctx.templateType === "Architect";
       const uid = authUser.id;
@@ -1226,75 +1416,126 @@ export default function ApplicationDetailsPage() {
         }
       }
 
-      const baseHtml = await generateApplicationPreviewHtml(
-        ctx.fields,
-        ctx.templateType,
-        ctx.previewSource
-      );
+      const uploadSignedPdf = async (pdfBlob: Blob, applicationUrlsKey: string) => {
+        const keySlug = applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+        const formData = new FormData();
+        formData.append("pdf", pdfBlob, `${keySlug}.pdf`);
+        formData.append("templateType", ctx.templateType);
+        formData.append("applicationUrlsKey", applicationUrlsKey);
+        formData.append("user_id", authUser.id);
 
-      let htmlWithSign: string;
-      if (isArchitectLetter && ownerSigned && !architectSigned) {
-        const withOwner = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
-        htmlWithSign = injectMockArchitectSignatureIntoPreviewHtml(withOwner, ctx.templateType);
-      } else {
-        htmlWithSign = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
-      }
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/save-application-pdf`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: formData,
+          }
+        );
 
-      const pdfBlob = await generateApplicationPreviewPdfFromHtml(htmlWithSign, ctx.templateType);
-
-      const formData = new FormData();
-      formData.append("pdf", pdfBlob, `${slug}.pdf`);
-      formData.append("templateType", ctx.templateType);
-      formData.append("user_id", authUser.id);
-
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/save-application-pdf`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: formData,
+        if (!response.ok) {
+          const errBody = (await response.json().catch(() => null)) as {
+            error?: string;
+            details?: string;
+          } | null;
+          const msg =
+            typeof errBody?.error === "string"
+              ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+              : `Save failed (${response.status}).`;
+          throw new Error(msg);
         }
-      );
 
-      if (!response.ok) {
-        const errBody = (await response.json().catch(() => null)) as {
-          error?: string;
-          details?: string;
+        const jsonBody = (await response.json().catch(() => null)) as {
+          publicUrl?: string;
         } | null;
-        const msg =
-          typeof errBody?.error === "string"
-            ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
-            : `Save failed (${response.status}).`;
-        throw new Error(msg);
-      }
+        return {
+          publicUrl:
+            typeof jsonBody?.publicUrl === "string" && jsonBody.publicUrl.trim()
+              ? jsonBody.publicUrl.trim()
+              : undefined,
+        };
+      };
 
-      const jsonBody = (await response.json().catch(() => null)) as {
-        publicUrl?: string;
-      } | null;
-      const publicUrl =
-        typeof jsonBody?.publicUrl === "string" && jsonBody.publicUrl.trim()
-          ? jsonBody.publicUrl.trim()
-          : null;
+      let publicUrl: string | null = null;
+
+      // When the same person is both project owner and the appointed architect,
+      // sign both steps in one pass to save time.
+      const canSignBoth =
+        isArchitectLetter &&
+        !ownerSigned &&
+        Boolean(appointedArchitectId) &&
+        sameUserId(uid, appointedArchitectId) &&
+        isAnySameUserId(uid, ownerSignerIds);
+
+      if (isArchitectLetter) {
+        const { appointmentUrl } = await persistArchitectSignedLetterPdfs(
+          {
+            userMetadata,
+            projectData,
+            selectedApplication,
+            applicationNo,
+            applicationCreatedAt,
+            projectId,
+          },
+          {
+            owner: true,
+            architect: (ownerSigned && !architectSigned) || canSignBoth,
+          },
+          uploadSignedPdf
+        );
+        publicUrl = appointmentUrl;
+      } else {
+        const buildSignedBlob = async () => {
+          const baseHtml = await generateApplicationPreviewHtml(
+            ctx.fields,
+            ctx.templateType,
+            ctx.previewSource
+          );
+          const htmlWithSign = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
+          return generateApplicationPreviewPdfFromHtml(htmlWithSign, ctx.templateType);
+        };
+        await uploadSignedPdf(await buildSignedBlob(), ctx.templateType);
+        const uploaded = await uploadSignedPdf(await buildSignedBlob(), ctx.templateType);
+        publicUrl = uploaded.publicUrl ?? null;
+      }
 
       const nowIso = new Date().toISOString();
 
       if (isArchitectLetter && !ownerSigned) {
-        const { error: updErr } = await supabase
-          .from("applications")
-          .update({
-            owner_signed_at: nowIso,
-            owner_signed_by: uid,
-            workflow_stage: "in_process",
-          })
-          .eq("id", resolvedApplicationId);
-        if (updErr) {
-          console.error("Failed to record owner signature:", updErr);
-          throw new Error("PDF saved but owner signature could not be recorded (check permissions).");
+        const signingPatch = canSignBoth
+          ? {
+              owner_signed_at: nowIso,
+              owner_signed_by: uid,
+              architect_signed_at: nowIso,
+              architect_signed_by: uid,
+              workflow_stage: "approved_verified",
+            }
+          : {
+              owner_signed_at: nowIso,
+              owner_signed_by: uid,
+              workflow_stage: "in_process",
+            };
+
+        const { ok, error: updErr } = await updateApplicationForSigning(
+          resolvedApplicationId,
+          uid,
+          signingPatch
+        );
+        if (updErr || !ok) {
+          console.error("Failed to record signature:", updErr);
+          throw new Error("PDF saved but signature could not be recorded (check permissions).");
         }
-        setApplicationWorkflowStage("in_process");
-        setOwnerSignedAt(nowIso);
+
+        if (canSignBoth) {
+          setApplicationWorkflowStage("approved_verified");
+          setOwnerSignedAt(nowIso);
+          setArchitectSignedAt(nowIso);
+        } else {
+          setApplicationWorkflowStage("in_process");
+          setOwnerSignedAt(nowIso);
+        }
         setPdfSavedForCurrentPreview(true);
         setSavePdfMessage(null);
         if (previewUrl?.startsWith("blob:")) {
@@ -1305,31 +1546,28 @@ export default function ApplicationDetailsPage() {
           setPreviewHtml(null);
         }
         setPreviewOpen(false);
-        const { data: deptRowOwner } = await supabase
-          .from("applications")
-          .select("department")
-          .eq("id", resolvedApplicationId)
-          .maybeSingle();
         const deptOwner =
-          typeof deptRowOwner?.department === "string" ? deptRowOwner.department.trim() : "";
+          typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
         const dashboardUrlOwner =
           deptOwner.length > 0
             ? `/userdashboard?department=${encodeURIComponent(deptOwner)}`
             : "/userdashboard";
-        router.push(dashboardUrlOwner);
+        setPendingDashboardUrl(dashboardUrlOwner);
+        if (canSignBoth) {
+          setSignedDocSuccessDialogOpen(true);
+        } else {
+          setSaveSuccessDialogOpen(true);
+        }
         return;
       }
 
       if (isArchitectLetter && ownerSigned && !architectSigned) {
-        const { error: updErr } = await supabase
-          .from("applications")
-          .update({
-            architect_signed_at: nowIso,
-            architect_signed_by: uid,
-            workflow_stage: "approved_verified",
-          })
-          .eq("id", resolvedApplicationId);
-        if (updErr) {
+        const { ok, error: updErr } = await updateApplicationForSigning(resolvedApplicationId, uid, {
+          architect_signed_at: nowIso,
+          architect_signed_by: uid,
+          workflow_stage: "approved_verified",
+        });
+        if (updErr || !ok) {
           console.error("Failed to record architect signature / stage:", updErr);
           throw new Error(
             "Signed PDF was saved, but the application could not be moved to Approved or Verified (check permissions)."
@@ -1346,12 +1584,8 @@ export default function ApplicationDetailsPage() {
           setPreviewUrl(publicUrl);
           setPreviewHtml(null);
         }
-        const { data: deptRow } = await supabase
-          .from("applications")
-          .select("department")
-          .eq("id", resolvedApplicationId)
-          .maybeSingle();
-        const dept = typeof deptRow?.department === "string" ? deptRow.department.trim() : "";
+        const dept =
+          typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
         const dashboardUrl =
           dept.length > 0
             ? `/userdashboard?department=${encodeURIComponent(dept)}`
@@ -1380,16 +1614,17 @@ export default function ApplicationDetailsPage() {
         return;
       }
 
-      const { error: stageErr } = await supabase
-        .from("applications")
-        .update({
+      const { ok: signedOk, error: stageErr } = await updateApplicationForSigning(
+        resolvedApplicationId,
+        uid,
+        {
           owner_signed_at: nowIso,
           owner_signed_by: uid,
           workflow_stage: "approved_verified",
-        })
-        .eq("id", resolvedApplicationId);
+        }
+      );
 
-      if (stageErr) {
+      if (stageErr || !signedOk) {
         console.error("Failed to update application workflow_stage:", stageErr);
         setSavePdfError(
           "Signed PDF was saved, but the application could not be moved to Approved or Verified (check permissions)."
@@ -1410,12 +1645,8 @@ export default function ApplicationDetailsPage() {
         setPreviewHtml(null);
       }
 
-      const { data: deptRow } = await supabase
-        .from("applications")
-        .select("department")
-        .eq("id", resolvedApplicationId)
-        .maybeSingle();
-      const dept = typeof deptRow?.department === "string" ? deptRow.department.trim() : "";
+      const dept =
+        typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
       const dashboardUrl =
         dept.length > 0
           ? `/userdashboard?department=${encodeURIComponent(dept)}`
@@ -1446,9 +1677,74 @@ export default function ApplicationDetailsPage() {
       const message = err instanceof Error ? err.message : "Failed to save signed PDF.";
       setSavePdfError(message);
     } finally {
-      setIsSavingPdf(false);
+      setIsSigningPdf(false);
     }
   };
+
+  /** Sign silently (no preview modal): build context then run the signing pipeline. */
+  const handleSignDirectly = async () => {
+    if (!projectId) {
+      setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
+      return;
+    }
+    try {
+      setSavePdfError(null);
+      setSavePdfMessage(null);
+      setIsSigningPdf(true);
+
+      let projectForSign = projectData;
+      if (!projectForSign) {
+        const coreSelect =
+          "title,project_info,save_plot_details,applicant_details,user_id,application_urls";
+        const { data: directData } = await supabase
+          .from("projects")
+          .select(coreSelect)
+          .eq("id", projectId)
+          .single();
+        if (directData) {
+          projectForSign = directData as PreviewProjectData;
+          setProjectData(projectForSign);
+        } else {
+          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+            p_project_id: projectId,
+          });
+          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+            projectForSign = rpcData as PreviewProjectData;
+            setProjectData(projectForSign);
+          }
+        }
+      }
+      if (!projectForSign) {
+        throw new Error("Project data could not be loaded.");
+      }
+
+      const { fields, previewSource, templateType } = await buildApplicationPreviewContext({
+        userMetadata,
+        projectData: projectForSign,
+        selectedApplication,
+        applicationNo,
+        applicationCreatedAt,
+        projectId,
+        architectHtmlVariant:
+          mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
+            ? architectPreviewVariant
+            : undefined,
+      });
+
+      previewPdfContextRef.current = { fields, templateType, previewSource };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to prepare signing context.";
+      setSavePdfError(message);
+      setIsSigningPdf(false);
+      return;
+    }
+
+    // isSigningPdf is still true; handleMockSignComplete will set it false in its own finally.
+    setIsSigningPdf(false);
+    await handleMockSignComplete();
+  };
+
+  signDirectlyRef.current = handleSignDirectly;
 
   const handleSaveApplicationPdf = async () => {
     if (!projectId) {
@@ -1546,10 +1842,10 @@ export default function ApplicationDetailsPage() {
       if (stageBeforeSave === "draft" && ctx.templateType === "Architect") {
         const saveArchitectVariant = async (
           variant: "appointment" | "acceptance",
-          applicationUrlsKey: string
+          applicationUrlsKey: string,
+          urlsRawInitial: unknown
         ) => {
-          let urlsRaw = await fetchApplicationUrls();
-          const hadKey = hasApplicationUrlKey(urlsRaw, applicationUrlsKey);
+          const hadKey = hasApplicationUrlKey(urlsRawInitial, applicationUrlsKey);
           const built = await buildApplicationPreviewContext({
             userMetadata,
             projectData,
@@ -1577,10 +1873,12 @@ export default function ApplicationDetailsPage() {
           }
         };
 
-        setSidebarPdfStatus("Saving appointment…");
-        await saveArchitectVariant("appointment", "Architect");
-        setSidebarPdfStatus("Saving acceptance…");
-        await saveArchitectVariant("acceptance", ARCHITECT_ACCEPTANCE_URL_KEY);
+        setSidebarPdfStatus("Saving appointment & acceptance…");
+        const urlsBeforeSave = await fetchApplicationUrls();
+        await Promise.all([
+          saveArchitectVariant("appointment", "Architect", urlsBeforeSave),
+          saveArchitectVariant("acceptance", ARCHITECT_ACCEPTANCE_URL_KEY, urlsBeforeSave),
+        ]);
 
         const refreshed = await buildApplicationPreviewContext({
           userMetadata,
@@ -1636,11 +1934,13 @@ export default function ApplicationDetailsPage() {
       }
 
       if (applicationId) {
-        const { error: stageErr } = await supabase
-          .from("applications")
-          .update({ workflow_stage: "in_process" })
-          .eq("id", applicationId);
-        if (stageErr) {
+        const ownerIdForStage = await getAuthUserId();
+        const { ok: stageOk, error: stageErr } = ownerIdForStage
+          ? await updateApplicationForSigning(applicationId, ownerIdForStage, {
+              workflow_stage: "in_process",
+            })
+          : { ok: false, error: new Error("Not signed in") };
+        if (stageErr || !stageOk) {
           console.error("Failed to update application workflow_stage:", stageErr);
           setSavePdfMessage(
             "Application PDF saved. Could not move application to In Process (check DB migration / permissions)."
@@ -1650,13 +1950,13 @@ export default function ApplicationDetailsPage() {
           if (stageBeforeSave === "draft") {
             setPreviewOpen(false);
             setSavePdfMessage(null);
-            const { data: deptRow } = await supabase
-              .from("applications")
-              .select("department")
-              .eq("id", applicationId)
-              .maybeSingle();
+            let deptApp: { department?: string } | null = null;
+            if (ownerIdForStage) {
+              const deptFetch = await fetchApplicationForSigning(applicationId);
+              deptApp = deptFetch.data;
+            }
             const dept =
-              typeof deptRow?.department === "string" ? deptRow.department.trim() : "";
+              typeof deptApp?.department === "string" ? deptApp.department.trim() : "";
             const dashboardUrl =
               dept.length > 0
                 ? `/userdashboard?department=${encodeURIComponent(dept)}`
@@ -1734,11 +2034,10 @@ export default function ApplicationDetailsPage() {
     setSignApplicationSlot({
       onSign: async () => {
         if (!avail.actionAvailable) return;
-        setAutoMockSignAfterPreviewOpen(true);
-        await openPreviewForSignRef.current();
+        await signDirectlyRef.current();
       },
-      disabled: isSavingPdf,
-      busy: isPreviewLoading,
+      disabled: isSavingPdf || isSigningPdf,
+      busy: isSigningPdf,
       subtitle: avail.subtitle,
       actionAvailable: avail.actionAvailable,
       unavailableHint: avail.idleReason,
@@ -1750,8 +2049,8 @@ export default function ApplicationDetailsPage() {
     isReadOnlyMode,
     projectId,
     applicationWorkflowStage,
-    isPreviewLoading,
     isSavingPdf,
+    isSigningPdf,
     setSignApplicationSlot,
     mockSignAvailability,
   ]);
@@ -1801,38 +2100,6 @@ export default function ApplicationDetailsPage() {
             >
               {isPreviewLoading ? "Generating..." : "Preview"}
             </button>
-            {projectId &&
-              previewReadyForSave &&
-              applicationWorkflowStage !== "draft" && (
-              <button
-                type="button"
-                onClick={() => void handleSaveApplicationPdf()}
-                disabled={
-                  isSavingPdf ||
-                  pdfSavedForCurrentPreview ||
-                  applicationWorkflowStage === "approved_verified"
-                }
-                className={
-                  pdfSavedForCurrentPreview && !isSavingPdf
-                    ? "px-4 py-2 rounded-lg border border-emerald-500 bg-emerald-50 text-emerald-800 text-sm font-semibold cursor-default"
-                    : "px-4 py-2 rounded-lg border border-blue-600 bg-white text-blue-700 text-sm font-semibold hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                }
-              >
-                {isSavingPdf ? (
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-blue-600 border-t-transparent animate-spin"
-                      aria-hidden
-                    />
-                    Saving PDF…
-                  </span>
-                ) : applicationWorkflowStage === "approved_verified"
-                    ? "Signed PDF on file"
-                    : pdfSavedForCurrentPreview
-                      ? "Saved"
-                      : "Save PDF to project"}
-              </button>
-            )}
           </div>
         </div>
         <p className="text-sm text-gray-600 mt-1">
@@ -1885,6 +2152,7 @@ export default function ApplicationDetailsPage() {
         fieldMapping={previewFieldMapping}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
         autoMockSignAfterOpen={autoMockSignAfterPreviewOpen}
+        mockSignMode={mockSignMode}
         onSave={projectId ? handleSaveApplicationPdf : undefined}
         isSaving={isSavingPdf}
         saveDisabled={!projectId || !previewReadyForSave}
@@ -1892,39 +2160,41 @@ export default function ApplicationDetailsPage() {
         saveFeedbackError={savePdfError}
         saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
         getPdfBlob={
-          storedSigningPdfUrl &&
-          (storedSigningPdfUrl.startsWith("https://") ||
-            storedSigningPdfUrl.startsWith("http://") ||
-            storedSigningPdfUrl.startsWith("/"))
-            ? async () => {
-                const res = await fetch(storedSigningPdfUrl);
-                if (!res.ok) throw new Error("Could not load the saved PDF.");
-                return res.blob();
-              }
-            : previewUrl &&
-                (previewUrl.startsWith("https://") ||
-                  previewUrl.startsWith("http://") ||
-                  previewUrl.startsWith("/"))
+          applicationWorkflowStage === "approved_verified"
+            ? undefined
+            : storedSigningPdfUrl &&
+                (storedSigningPdfUrl.startsWith("https://") ||
+                  storedSigningPdfUrl.startsWith("http://") ||
+                  storedSigningPdfUrl.startsWith("/"))
               ? async () => {
-                  const res = await fetch(previewUrl);
+                  const res = await fetch(storedSigningPdfUrl);
                   if (!res.ok) throw new Error("Could not load the saved PDF.");
                   return res.blob();
                 }
-              : previewHtml && applicationWorkflowStage !== "draft"
-                ? () => buildApplicationPreviewPdfBlob()
-                : undefined
+              : previewUrl &&
+                  (previewUrl.startsWith("https://") ||
+                    previewUrl.startsWith("http://") ||
+                    previewUrl.startsWith("/"))
+                ? async () => {
+                    const res = await fetch(previewUrl);
+                    if (!res.ok) throw new Error("Could not load the saved PDF.");
+                    return res.blob();
+                  }
+                : previewHtml && applicationWorkflowStage !== "draft"
+                  ? () => buildApplicationPreviewPdfBlob()
+                  : undefined
         }
         signingFileName={
           previewPdfContextRef.current
             ? `${previewPdfContextRef.current.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_")}-application.pdf`
             : undefined
         }
-        hideSaveButton={applicationWorkflowStage === "draft"}
+        hideSaveButton={true}
         showMockSignButton={
           applicationWorkflowStage === "in_process" && mockSignAvailability.actionAvailable
         }
         onMockSignComplete={handleMockSignComplete}
-        mockSignBusy={isSavingPdf}
+        mockSignBusy={isSigningPdf}
       />
 
       {saveSuccessDialogOpen && (
@@ -1936,10 +2206,10 @@ export default function ApplicationDetailsPage() {
         >
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
             <h2 id="save-success-title" className="text-lg font-semibold text-gray-900">
-              Saved successfully
+              Application signed
             </h2>
             <p className="text-sm text-gray-600 mt-3">
-              Your application PDF has been saved. The application is now in{" "}
+              Your application has been signed and saved. The application is now in{" "}
               <span className="font-medium text-gray-800">In Process</span>.
             </p>
             <div className="mt-6 flex justify-end">

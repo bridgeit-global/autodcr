@@ -138,7 +138,7 @@ export default function ProjectLibraryPage() {
   useEffect(() => {
     if (isEditMode && projectData && !isLoading) {
       const projectLibrary = projectData.project_library || {};
-      const uploadsData = projectLibrary.uploads || [];
+      const uploadsData = (projectLibrary.uploads || []) as (UploadRecord | undefined)[];
       
       if (uploadsData.length > 0) {
         const paddedUploads = [...uploadsData];

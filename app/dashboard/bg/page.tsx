@@ -201,24 +201,27 @@ export default function BGDetailsPage() {
   useEffect(() => {
     if (isEditMode && projectData && !isLoading) {
       const bgDetails = projectData.bg_details || {};
-      const entries = bgDetails.entries || [];
+      const entries = (bgDetails.entries || []) as BGEntry[];
       const projectInfo = projectData.project_info || {};
       const proposalNoFromProject = projectInfo.proposalNo || projectInfo.proposal_no || "";
 
       if (entries.length > 0) {
-        const firstEntry = entries[0];
+        const firstEntry = entries[0] as Record<string, unknown>;
+        const str = (v: unknown): string => (typeof v === "string" ? v : "");
+        const pick = (...vals: unknown[]): string =>
+          vals.reduce<string>((acc, v) => acc || (typeof v === "string" ? v : ""), "");
         const bgEntry: BGEntry = {
-          id: firstEntry.id || createId(),
-          zone: firstEntry.zone || "",
-          proposalNo: proposalNoFromProject || firstEntry.proposalNo || firstEntry.proposal_no || firstEntry.fileNo || firstEntry.file_no || "",
-          bgNumber: firstEntry.bgNumber || firstEntry.bg_number || "",
-          bgDate: firstEntry.bgDate || firstEntry.bg_date || "",
-          bankName: firstEntry.bankName || firstEntry.bank_name || "",
-          branchName: firstEntry.branchName || firstEntry.branch_name || "",
-          amount: firstEntry.amount || "",
-          bgValidDate: firstEntry.bgValidDate || firstEntry.bg_valid_date || "",
-          bgBankEmail: firstEntry.bgBankEmail || firstEntry.bg_bank_email || "",
-          scanCopyName: firstEntry.scanCopyName || firstEntry.scan_copy_name || "",
+          id: pick(firstEntry.id) || createId(),
+          zone: pick(firstEntry.zone),
+          proposalNo: pick(proposalNoFromProject, firstEntry.proposalNo, firstEntry.proposal_no, firstEntry.fileNo, firstEntry.file_no),
+          bgNumber: pick(firstEntry.bgNumber, firstEntry.bg_number),
+          bgDate: pick(firstEntry.bgDate, firstEntry.bg_date),
+          bankName: pick(firstEntry.bankName, firstEntry.bank_name),
+          branchName: pick(firstEntry.branchName, firstEntry.branch_name),
+          amount: pick(firstEntry.amount),
+          bgValidDate: pick(firstEntry.bgValidDate, firstEntry.bg_valid_date),
+          bgBankEmail: pick(firstEntry.bgBankEmail, firstEntry.bg_bank_email),
+          scanCopyName: pick(firstEntry.scanCopyName, firstEntry.scan_copy_name),
         };
         
         setEntry(bgEntry);
@@ -228,7 +231,7 @@ export default function BGDetailsPage() {
         markPageSaved("saved-bg-details");
         setIsSaved(true);
       } else if (proposalNoFromProject) {
-        setValue("proposalNo", proposalNoFromProject);
+        setValue("proposalNo", String(proposalNoFromProject));
       }
     }
   }, [isEditMode, projectData, isLoading, reset, setValue]);
