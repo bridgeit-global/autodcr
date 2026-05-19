@@ -42,6 +42,10 @@ type DocumentPreviewModalProps = {
   signingFileName?: string;
   /** Hide the Save / Saved toolbar control (e.g. preview-only flows). */
   hideSaveButton?: boolean;
+  /** Show a loading state in the preview body while HTML/PDF is being prepared. */
+  isLoading?: boolean;
+  /** Error to show inside the modal when preview content could not be loaded. */
+  loadError?: string | null;
   /** When true with `showMockSignButton`, iframe loads then mock sign + `onMockSignComplete` run once (sidebar “Sign application”). */
   autoMockSignAfterOpen?: boolean;
   /** `owner_only` = left column; `owner_and_architect` = both columns (architect co-sign step). */
@@ -70,6 +74,8 @@ export default function DocumentPreviewModal({
   getPdfBlob,
   signingFileName,
   hideSaveButton = false,
+  isLoading = false,
+  loadError = null,
   autoMockSignAfterOpen = false,
   mockSignMode = "owner_only",
   showMockSignButton = false,
@@ -559,7 +565,15 @@ export default function DocumentPreviewModal({
             )}
 
             <div className="flex-1 overflow-auto p-3 bg-gray-50">
-              {htmlContent && !fileUrl ? (
+              {isLoading ? (
+                <div className="flex min-h-[600px] items-center justify-center text-sm text-gray-500">
+                  Generating preview…
+                </div>
+              ) : loadError ? (
+                <div className="flex min-h-[600px] items-center justify-center px-6 text-center text-sm text-red-600">
+                  {loadError}
+                </div>
+              ) : htmlContent && !fileUrl ? (
                 <div className="flex justify-center">
                   <div
                     className="rounded-xl bg-white border border-gray-200 overflow-hidden"

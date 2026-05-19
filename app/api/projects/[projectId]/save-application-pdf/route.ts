@@ -85,16 +85,26 @@ export async function POST(
       return NextResponse.json({ error: "Invalid templateType." }, { status: 400 });
     }
 
-    if (templateType === "Architect") {
-      if (applicationUrlsKey !== "Architect" && applicationUrlsKey !== "Architect_acceptance") {
-        return NextResponse.json(
-          { error: "For Architect, applicationUrlsKey must be Architect or Architect_acceptance." },
-          { status: 400 }
-        );
-      }
-    } else if (applicationUrlsKey !== templateType) {
+    const VALID_ACCEPTANCE_URL_KEYS = new Set([
+      "Architect_acceptance",
+      "Licensed_Surveyor_acceptance",
+      "Fire_Safety_acceptance",
+      "Landscape_Consultant_acceptance",
+      "Geotechnical_Consultant_acceptance",
+      "ME_Consultant_acceptance",
+      "Plumber_acceptance",
+      "Town_Planner_acceptance",
+      "Structural_Engineer_acceptance",
+      "Environmental_Consultant_acceptance",
+      "PMC_Project_Manager_acceptance",
+    ]);
+
+    const keyIsValid =
+      applicationUrlsKey === templateType || VALID_ACCEPTANCE_URL_KEYS.has(applicationUrlsKey);
+
+    if (!keyIsValid) {
       return NextResponse.json(
-        { error: "applicationUrlsKey must match templateType for this consultant type." },
+        { error: "applicationUrlsKey must match templateType or be a valid acceptance key." },
         { status: 400 }
       );
     }
