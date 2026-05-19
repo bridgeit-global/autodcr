@@ -279,6 +279,19 @@ p.closing-line {
 .cc-content p {
   margin: 0;
   line-height: 1.2;
+  font-weight: bold;
+}
+
+/* “To,” address block — full address bold (matches CC / authority letter style). */
+.to-content p {
+  margin: 0;
+  line-height: 1.2;
+  font-weight: bold;
+}
+
+.to-content p .value-bold {
+  display: inline;
+  font-weight: bold;
 }
 
 .cc-note {
@@ -286,6 +299,147 @@ p.closing-line {
   text-indent: 0.5in;
   font-style: italic;
   line-height: 1.2;
+}
+
+/* Demo-style label : value rows (appointment letters to authority). */
+.label-value-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 8px 0;
+}
+
+.label-value-table td {
+  vertical-align: top;
+  padding: 2px 0;
+}
+
+.field-label {
+  width: 90px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.field-colon {
+  width: 10px;
+  font-weight: normal;
+}
+
+.field-value {
+  font-weight: normal;
+  text-align: justify;
+  overflow-wrap: break-word;
+}
+
+/* Subject / Project / Ref. — two columns; only .value-bold tokens are bold. */
+.subject-reference-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 8px 0 10px;
+}
+
+.subject-reference-table td {
+  vertical-align: top;
+  padding: 2px 0;
+}
+
+.subject-reference-table .sr-label {
+  width: 72px;
+  padding-right: 6px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.subject-reference-table .sr-value {
+  font-weight: normal;
+  text-align: left;
+  overflow-wrap: break-word;
+}
+
+.subject-reference-table .sr-value .value-bold {
+  font-weight: bold;
+}
+
+.project-details {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 10px 0 12px;
+}
+
+.project-details td {
+  vertical-align: top;
+  padding: 2px 0;
+}
+
+.section-label {
+  width: 250px;
+  font-weight: bold;
+  padding-right: 8px;
+}
+
+.section-value {
+  text-align: justify;
+  overflow-wrap: break-word;
+}
+
+.consultant-details {
+  margin: 8px 0 12px;
+}
+
+.consultant-details .field-value p {
+  margin: 0;
+}
+
+/* Consultant details: static labels normal; only .value-bold tokens bold. */
+.consultant-details .field-value p.bold {
+  font-weight: normal;
+}
+
+.consultant-details .field-value p.bold .value-bold {
+  font-weight: bold;
+}
+
+.owner-signature {
+  margin-top: 12px;
+  margin-left: auto;
+  margin-right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  line-height: 1.35;
+  width: auto;
+  max-width: 100%;
+}
+
+.owner-signature #preview-dummy-owner-sign {
+  display: block;
+  margin: 0 0 6px;
+  text-align: right;
+  align-self: flex-end;
+}
+
+.owner-signature .owner-signature-details.signature-line {
+  margin-top: 0;
+  margin-left: 0;
+  width: auto !important;
+  max-width: 100%;
+  padding-top: 0;
+  font-weight: bold;
+  line-height: 1.25;
+  text-align: right;
+  align-self: flex-end;
+}
+
+.cc-box.cc-architect {
+  page-break-before: auto;
+}
+
+p + .project-details,
+p + .label-value-table {
+  margin-top: 8px;
 }
 
 p,

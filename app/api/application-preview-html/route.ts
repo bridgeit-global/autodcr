@@ -6,6 +6,11 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
+import {
+  CLEAN_APPOINTMENT_HTML_TYPES,
+  isLegacySubAppointmentHtml,
+  mergeBuildingProposalOfficerZoneParagraphs,
+} from "@/app/utils/cleanAppointmentLetterTypes";
 import { enrichConsultantAppointmentFields } from "@/app/utils/enrichConsultantAppointmentFields";
 
 export const runtime = "nodejs";
@@ -80,13 +85,23 @@ function describeStorageTemplateDownloadError(
   return `Could not download "${objectPath}" from bucket "${bucket}". Check Storage policies and that the file exists.`;
 }
 
+const SHARED_CSS_STORAGE_PATH = "_shared/application-templates.css";
+
 /**
- * When true, HTML is loaded from Supabase Storage instead of the repo `html/` folder.
- * Default: repo (`html/`) first; Storage only if the file is missing locally.
+ * When true, HTML/CSS is read from the repo `html/` folder before Storage.
+ * Default: Supabase Storage bucket `Application_Templates` first; repo is fallback only.
  */
-function preferSupabaseApplicationTemplates(): boolean {
-  const v = process.env.USE_SUPABASE_APPLICATION_TEMPLATES?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
+function preferLocalApplicationTemplates(): boolean {
+  const local = process.env.USE_LOCAL_APPLICATION_TEMPLATES?.trim().toLowerCase();
+  if (local === "1" || local === "true" || local === "yes" || local === "on") {
+    return true;
+  }
+  // Legacy opt-out of Storage-first (local first when explicitly disabled).
+  const legacy = process.env.USE_SUPABASE_APPLICATION_TEMPLATES?.trim().toLowerCase();
+  if (legacy === "0" || legacy === "false" || legacy === "off") {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -151,8 +166,47 @@ async function readBundledSharedApplicationCss(): Promise<string> {
   }
 }
 
-/** Shared letter chrome for Architect templates — always from repo (`html/_shared/`). */
-async function loadSharedArchitectApplicationCss(): Promise<string> {
+/** Shared letter chrome — Storage `_shared/application-templates.css`, then repo fallback. */
+async function loadSharedArchitectApplicationCss(
+  supabase?: SupabaseClient,
+  opts?: { preferBundledCss?: boolean }
+): Promise<string> {
+  if (opts?.preferBundledCss) {
+    const bundled = await readBundledSharedApplicationCss();
+    if (bundled.trim()) {
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[application-preview-html] using bundled shared CSS (clean appointment)"
+        );
+      }
+      return bundled;
+    }
+  }
+
+  if (supabase && !preferLocalApplicationTemplates()) {
+    try {
+      const fromStorage = await downloadStorageTemplateText(
+        supabase,
+        SHARED_CSS_STORAGE_PATH
+      );
+      if (fromStorage?.trim()) {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[application-preview-html] using Storage shared CSS:",
+            SHARED_CSS_STORAGE_PATH
+          );
+        }
+        return fromStorage;
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn(
+          "[application-preview-html] Storage shared CSS failed; using repo fallback.",
+          error
+        );
+      }
+    }
+  }
   return readBundledSharedApplicationCss();
 }
 
@@ -390,20 +444,81 @@ const ACCEPTANCE_APPLICATION_URL_KEY_MAP: Partial<Record<TemplateType, string>> 
   "PMC / Project Manager": "PMC_Project_Manager_acceptance",
 };
 
-async function downloadGlobalTemplateHtml(opts: {
-  templateType: TemplateType;
-  authorizationToken?: string | null;
-  /** When `acceptance`, loads the type-specific `*_acceptance.html` template. */
-  letterVariant?: "appointment" | "acceptance";
-}): Promise<string | null> {
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+async function loadApplicationTemplateHtml(
+  supabase: SupabaseClient,
+  objectPath: string,
+  opts?: { templateType?: TemplateType; letterVariant?: "appointment" | "acceptance" }
+): Promise<string | null> {
+  const loadFromRepo = async (): Promise<string | null> =>
+    readRepoApplicationTemplateHtml(objectPath);
+
+  const loadFromStorage = async (): Promise<string | null> => {
+    const text = await downloadStorageTemplateText(supabase, objectPath);
+    if (text !== null && process.env.NODE_ENV === "development") {
+      console.log(
+        `[application-preview-html] using Storage template: ${TEMPLATE_BUCKET}/${objectPath}`
+      );
+    }
+    return text;
+  };
+
+  const preferRepoFirst =
+    preferLocalApplicationTemplates() ||
+    (opts?.letterVariant !== "acceptance" &&
+      opts?.templateType != null &&
+      CLEAN_APPOINTMENT_HTML_TYPES.has(opts.templateType));
+
+  if (preferRepoFirst) {
+    const repoHtml = await loadFromRepo();
+    if (repoHtml !== null) return repoHtml;
+    return loadFromStorage();
+  }
+
+  try {
+    const fromStorage = await loadFromStorage();
+    if (fromStorage !== null) return fromStorage;
+  } catch (error) {
+    const repoHtml = await loadFromRepo();
+    if (repoHtml !== null) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn(
+          `[application-preview-html] Storage failed for "${objectPath}"; using repo fallback.`
+        );
+      }
+      return repoHtml;
+    }
+    throw error;
+  }
+
+  const repoHtml = await loadFromRepo();
+  if (repoHtml !== null) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        `[application-preview-html] Storage object missing for "${objectPath}"; using repo fallback.`
+      );
+    }
+    return repoHtml;
+  }
+
+  return loadFromStorage();
+}
+
+function createTemplateSupabaseClient(authorizationToken?: string | null): SupabaseClient {
+  return createClient(supabaseUrl, supabaseAnonKey, {
     global: {
-      headers: opts.authorizationToken
-        ? { Authorization: `Bearer ${opts.authorizationToken}` }
+      headers: authorizationToken
+        ? { Authorization: `Bearer ${authorizationToken}` }
         : {},
     },
   });
+}
 
+async function downloadGlobalTemplateHtml(opts: {
+  supabase: SupabaseClient;
+  templateType: TemplateType;
+  /** When `acceptance`, loads the type-specific `*_acceptance.html` template. */
+  letterVariant?: "appointment" | "acceptance";
+}): Promise<string | null> {
   let objectPath = TEMPLATE_PATH_MAP[opts.templateType]?.trim() || "";
   if (opts.letterVariant === "acceptance") {
     const acceptancePath = ACCEPTANCE_TEMPLATE_PATH_MAP[opts.templateType];
@@ -411,30 +526,10 @@ async function downloadGlobalTemplateHtml(opts: {
   }
   if (!objectPath) return null;
 
-  if (preferSupabaseApplicationTemplates()) {
-    try {
-      const fromStorage = await downloadStorageTemplateText(supabase, objectPath);
-      if (fromStorage !== null) return fromStorage;
-    } catch (error) {
-      const repoHtml = await readRepoApplicationTemplateHtml(objectPath);
-      if (repoHtml !== null) return repoHtml;
-      throw error;
-    }
-  }
-
-  const repoHtml = await readRepoApplicationTemplateHtml(objectPath);
-  if (repoHtml !== null) return repoHtml;
-
-  try {
-    return await downloadStorageTemplateText(supabase, objectPath);
-  } catch (error) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn(
-        `[application-preview-html] Repo template missing for "${objectPath}"; Storage also failed.`
-      );
-    }
-    throw error;
-  }
+  return loadApplicationTemplateHtml(opts.supabase, objectPath, {
+    templateType: opts.templateType,
+    letterVariant: opts.letterVariant,
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -473,9 +568,11 @@ export async function POST(request: NextRequest) {
         ? "acceptance"
         : undefined;
 
-    const htmlTemplate = await downloadGlobalTemplateHtml({
+    const supabase = createTemplateSupabaseClient(token);
+
+    let htmlTemplate = await downloadGlobalTemplateHtml({
+      supabase,
       templateType: body.templateType,
-      authorizationToken: token,
       letterVariant,
     });
 
@@ -487,23 +584,46 @@ export async function POST(request: NextRequest) {
     if (!htmlTemplate) {
       return NextResponse.json(
         {
-          error: `No HTML template found for "${body.templateType}". Expected repo file html/${expectedPath ?? "(unknown)"} or Storage object in bucket "${TEMPLATE_BUCKET}".`,
+          error: `No HTML template found for "${body.templateType}". Upload "${expectedPath ?? "(unknown)"}" to Storage bucket "${TEMPLATE_BUCKET}" (or add html/${expectedPath} locally for fallback).`,
         },
         { status: 400 }
       );
     }
 
+    const isCleanAppointmentLetter =
+      letterVariant !== "acceptance" &&
+      CLEAN_APPOINTMENT_HTML_TYPES.has(body.templateType);
+
+    if (
+      isCleanAppointmentLetter &&
+      isLegacySubAppointmentHtml(htmlTemplate) &&
+      expectedPath
+    ) {
+      const repoHtml = await readRepoApplicationTemplateHtml(expectedPath);
+      if (repoHtml?.includes("subject-reference-table")) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn(
+            `[application-preview-html] Replaced legacy Storage "${expectedPath}" with repo template.`
+          );
+        }
+        htmlTemplate = repoHtml;
+      }
+    }
+
     // Inject shared CSS for all templates that use the clean acceptance HTML format.
     const needsSharedCss =
       body.templateType === "Architect" ||
+      isCleanAppointmentLetter ||
       (letterVariant === "acceptance" && body.templateType in ACCEPTANCE_TEMPLATE_PATH_MAP);
     let mergedHtml = htmlTemplate;
     if (needsSharedCss) {
-      const sharedCss = await loadSharedArchitectApplicationCss();
+      const sharedCss = await loadSharedArchitectApplicationCss(supabase, {
+        preferBundledCss: isCleanAppointmentLetter,
+      });
       mergedHtml = injectSharedApplicationTemplateStyle(htmlTemplate, sharedCss);
       if (!sharedCss.trim()) {
         console.error(
-          "[application-preview-html] Missing html/_shared/application-templates.css in repo — acceptance letters will render unstyled."
+          `[application-preview-html] Missing shared CSS in Storage (${SHARED_CSS_STORAGE_PATH}) and repo html/_shared/ — letters will render unstyled.`
         );
       }
     }
@@ -517,7 +637,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    let finalHtml = replaceTemplateTokens(mergedHtml, fieldsForTemplate);
+    let finalHtml = mergeBuildingProposalOfficerZoneParagraphs(
+      replaceTemplateTokens(mergedHtml, fieldsForTemplate)
+    );
 
     const acceptanceUrlsKey =
       letterVariant === "acceptance"

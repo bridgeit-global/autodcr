@@ -48,8 +48,10 @@ type DocumentPreviewModalProps = {
   loadError?: string | null;
   /** When true with `showMockSignButton`, iframe loads then mock sign + `onMockSignComplete` run once (sidebar “Sign application”). */
   autoMockSignAfterOpen?: boolean;
-  /** `owner_only` = left column; `owner_and_architect` = both columns (architect co-sign step). */
+  /** `owner_only` = owner signature only; `owner_and_architect` = owner + second signer columns. */
   mockSignMode?: "owner_only" | "owner_and_architect";
+  /** Cursive label for the second signature column (e.g. Plumber, Architect). */
+  mockSecondSignLabel?: string;
   /** Show a mock “Sign” control that injects “Owner” + a dummy signature into the HTML iframe (first client signature column). */
   showMockSignButton?: boolean;
   /** After mock sign is injected (and fonts settle), parent can persist PDF / update workflow. */
@@ -78,6 +80,7 @@ export default function DocumentPreviewModal({
   loadError = null,
   autoMockSignAfterOpen = false,
   mockSignMode = "owner_only",
+  mockSecondSignLabel = "Architect",
   showMockSignButton = false,
   onMockSignComplete,
   mockSignBusy = false,
@@ -198,37 +201,80 @@ export default function DocumentPreviewModal({
           return true;
         };
 
-        const cells = doc.querySelectorAll(".signature-table tr td");
-        const firstCell = cells[0];
-        if (!firstCell) return false;
-
         const needOwner =
           mockSignMode === "owner_only" || mockSignMode === "owner_and_architect";
-        const needArchitect = mockSignMode === "owner_and_architect";
+        const needSecondSigner = mockSignMode === "owner_and_architect";
+
+        const ownerSignatureBlock = doc.querySelector(".owner-signature");
+        if (ownerSignatureBlock && needOwner) {
+          if (ownerSignatureBlock.querySelector("#preview-dummy-owner-sign")) {
+            if (!needSecondSigner) return "already";
+          } else {
+            const details = ownerSignatureBlock.querySelector(
+              ".owner-signature-details"
+            ) as HTMLElement | null;
+            if (details) {
+              details.style.width = "auto";
+              details.style.textAlign = "right";
+            }
+            (ownerSignatureBlock as HTMLElement).style.marginLeft = "auto";
+            (ownerSignatureBlock as HTMLElement).style.display = "flex";
+            (ownerSignatureBlock as HTMLElement).style.flexDirection = "column";
+            (ownerSignatureBlock as HTMLElement).style.alignItems = "flex-end";
+            const wrap = doc.createElement("div");
+            wrap.id = "preview-dummy-owner-sign";
+            wrap.setAttribute(
+              "style",
+              "display:block;text-align:right;align-self:flex-end;margin:0 0 6px;padding-bottom:2px;"
+            );
+            wrap.innerHTML = `
+        <span style="
+          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
+          font-size:clamp(28px,4.2vw,36px);
+          font-weight:400;
+          line-height:1.15;
+          color:#0f172a;
+          letter-spacing:0.02em;
+          display:inline-block;
+          transform:rotate(-2deg);
+          text-shadow:0 1px 0 rgba(255,255,255,0.6);
+        ">Owner</span>`;
+            if (details) {
+              ownerSignatureBlock.insertBefore(wrap, details);
+            } else {
+              ownerSignatureBlock.insertBefore(wrap, ownerSignatureBlock.firstChild);
+            }
+          }
+          if (!needSecondSigner) return true;
+        }
+
+        const cells = doc.querySelectorAll(".signature-table tr td");
+        const firstCell = cells[0];
+        if (!firstCell && !ownerSignatureBlock) return false;
 
         let ownerResult: boolean | "already" = "already";
-        if (needOwner) {
+        if (needOwner && firstCell) {
           ownerResult = injectColumn(firstCell, "preview-dummy-owner-sign", "Owner", "-2deg");
           if (ownerResult === false) return false;
         }
 
-        if (needArchitect) {
-          const architectCell = cells[1];
-          if (!architectCell) return false;
-          const archResult = injectColumn(
-            architectCell,
-            "preview-dummy-architect-sign",
-            "Architect",
+        if (needSecondSigner) {
+          const secondCell = cells[1];
+          if (!secondCell) return false;
+          const secondResult = injectColumn(
+            secondCell,
+            "preview-dummy-consultant-sign",
+            mockSecondSignLabel,
             "1.5deg"
           );
-          if (archResult === false) return false;
-          if (archResult === true) return true;
+          if (secondResult === false) return false;
+          if (secondResult === true) return true;
         }
 
         if (ownerResult === true) return true;
         if (
-          needArchitect &&
-          cells[1]?.querySelector("#preview-dummy-architect-sign") &&
+          needSecondSigner &&
+          cells[1]?.querySelector("#preview-dummy-consultant-sign") &&
           (ownerResult === "already" || !needOwner)
         ) {
           return "already";

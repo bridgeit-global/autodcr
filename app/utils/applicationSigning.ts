@@ -1,3 +1,6 @@
+import type { TemplateType } from "@/app/templates/templateGenerators";
+import { findConsultantApplicantInList } from "@/app/utils/consultantTemplateTokens";
+
 /** Project/applicant shape used for signing permission checks. */
 export type SigningProjectContext = {
   user_id?: string | null;
@@ -50,6 +53,31 @@ export function resolveAppointedArchitectUserId(
   return null;
 }
 
+/** Appointed consultant for a dual-letter application (Plumber, Town Planner, etc.). */
+export function resolveAppointedConsultantUserId(
+  project: SigningProjectContext,
+  templateType: TemplateType
+): string | null {
+  if (!project || templateType === "Architect") return null;
+  const applicants = project.applicant_details?.applicants ?? [];
+  const match = findConsultantApplicantInList(applicants, templateType);
+  if (!match) return null;
+  const uid = match.user_id ?? match.userId;
+  if (typeof uid === "string" && uid.trim()) return uid.trim();
+  return null;
+}
+
+/** Second signer on dual-letter flows: architect for Architect, else appointed consultant. */
+export function resolveAppointedSecondSignerUserId(
+  project: SigningProjectContext,
+  templateType: TemplateType
+): string | null {
+  if (templateType === "Architect") {
+    return resolveAppointedArchitectUserId(project);
+  }
+  return resolveAppointedConsultantUserId(project, templateType);
+}
+
 export function collectOwnerSignerUserIds(
   project: SigningProjectContext,
   projectRowUserId?: string | null
@@ -84,16 +112,27 @@ export function isAnySameUserId(uid: string, candidates: string[]): boolean {
   return candidates.some((c) => normalizeId(c) === u);
 }
 
-export type ArchitectSignStep = "owner" | "architect" | "complete" | "none";
+export type DualLetterSignStep = "owner" | "consultant" | "complete" | "none";
 
+/** @deprecated Use {@link getDualLetterSignStep} */
+export type ArchitectSignStep = DualLetterSignStep | "architect";
+
+export function getDualLetterSignStep(
+  application: SigningApplicationRow | null | undefined
+): DualLetterSignStep {
+  const ownerSigned = Boolean(application?.owner_signed_at?.trim());
+  const secondSigned = Boolean(application?.architect_signed_at?.trim());
+  if (ownerSigned && secondSigned) return "complete";
+  if (!ownerSigned) return "owner";
+  return "consultant";
+}
+
+/** @deprecated Use {@link getDualLetterSignStep} */
 export function getArchitectSignStep(
   application: SigningApplicationRow | null | undefined
 ): ArchitectSignStep {
-  const ownerSigned = Boolean(application?.owner_signed_at?.trim());
-  const architectSigned = Boolean(application?.architect_signed_at?.trim());
-  if (ownerSigned && architectSigned) return "complete";
-  if (!ownerSigned) return "owner";
-  return "architect";
+  const step = getDualLetterSignStep(application);
+  return step === "consultant" ? "architect" : step;
 }
 
 /** Whether user may save PDFs / update application_urls for this project. */
