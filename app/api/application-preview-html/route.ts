@@ -6,6 +6,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
+import { enrichConsultantAppointmentFields } from "@/app/utils/enrichConsultantAppointmentFields";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -359,11 +360,41 @@ async function injectSavedPdfQrHtml(
   return out;
 }
 
+/** Maps each template type to its acceptance HTML file name. */
+const ACCEPTANCE_TEMPLATE_PATH_MAP: Partial<Record<TemplateType, string>> = {
+  Architect: "architect_acceptance.html",
+  "Licensed Surveyor": "licensed-surveyor_acceptance.html",
+  "Fire Safety Consultant": "fire-safety-consultant_acceptance.html",
+  "Landscape Consultant": "landscape-consultant_acceptance.html",
+  "Geotechnical Consultant": "geotechnical-consultant_acceptance.html",
+  "M&E Consultant": "me-consultant_acceptance.html",
+  Plumber: "plumber_acceptance.html",
+  "Town Planner": "town-planner_acceptance.html",
+  "Structural Engineer": "structural-engineer_acceptance.html",
+  "Environmental Consultant": "environmental-consultant_acceptance.html",
+  "PMC / Project Manager": "pmc-project-manager_acceptance.html",
+};
+
+/** Maps template type to its `application_urls` acceptance key for QR injection. */
+const ACCEPTANCE_APPLICATION_URL_KEY_MAP: Partial<Record<TemplateType, string>> = {
+  Architect: "Architect_acceptance",
+  "Licensed Surveyor": "Licensed_Surveyor_acceptance",
+  "Fire Safety Consultant": "Fire_Safety_acceptance",
+  "Landscape Consultant": "Landscape_Consultant_acceptance",
+  "Geotechnical Consultant": "Geotechnical_Consultant_acceptance",
+  "M&E Consultant": "ME_Consultant_acceptance",
+  Plumber: "Plumber_acceptance",
+  "Town Planner": "Town_Planner_acceptance",
+  "Structural Engineer": "Structural_Engineer_acceptance",
+  "Environmental Consultant": "Environmental_Consultant_acceptance",
+  "PMC / Project Manager": "PMC_Project_Manager_acceptance",
+};
+
 async function downloadGlobalTemplateHtml(opts: {
   templateType: TemplateType;
   authorizationToken?: string | null;
-  /** Architect: load `architect_acceptance.html` instead of `architect.html`. */
-  architectHtmlVariant?: "appointment" | "acceptance";
+  /** When `acceptance`, loads the type-specific `*_acceptance.html` template. */
+  letterVariant?: "appointment" | "acceptance";
 }): Promise<string | null> {
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     global: {
@@ -374,11 +405,9 @@ async function downloadGlobalTemplateHtml(opts: {
   });
 
   let objectPath = TEMPLATE_PATH_MAP[opts.templateType]?.trim() || "";
-  if (
-    opts.templateType === "Architect" &&
-    opts.architectHtmlVariant === "acceptance"
-  ) {
-    objectPath = "architect_acceptance.html";
+  if (opts.letterVariant === "acceptance") {
+    const acceptancePath = ACCEPTANCE_TEMPLATE_PATH_MAP[opts.templateType];
+    if (acceptancePath) objectPath = acceptancePath;
   }
   if (!objectPath) return null;
 
@@ -422,6 +451,9 @@ export async function POST(request: NextRequest) {
       fields?: Record<string, string | undefined>;
       owner_debug?: unknown;
       projectId?: string;
+      /** Preferred variant field — works for all types with acceptance letters. */
+      letterVariant?: "appointment" | "acceptance";
+      /** @deprecated Back-compat alias for `letterVariant`. */
       architectHtmlVariant?: "appointment" | "acceptance";
     };
 
@@ -435,21 +467,21 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "").trim() || null;
 
-    const architectVariant =
-      body.templateType === "Architect" &&
-      body.architectHtmlVariant === "acceptance"
+    // Accept both `letterVariant` and the legacy `architectHtmlVariant`.
+    const letterVariant: "appointment" | "acceptance" | undefined =
+      body.letterVariant === "acceptance" || body.architectHtmlVariant === "acceptance"
         ? "acceptance"
         : undefined;
 
     const htmlTemplate = await downloadGlobalTemplateHtml({
       templateType: body.templateType,
       authorizationToken: token,
-      architectHtmlVariant: architectVariant,
+      letterVariant,
     });
 
     const expectedPath =
-      body.templateType === "Architect" && architectVariant === "acceptance"
-        ? "architect_acceptance.html"
+      letterVariant === "acceptance"
+        ? (ACCEPTANCE_TEMPLATE_PATH_MAP[body.templateType] ?? TEMPLATE_PATH_MAP[body.templateType])
         : TEMPLATE_PATH_MAP[body.templateType];
 
     if (!htmlTemplate) {
@@ -461,27 +493,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Inject shared CSS for all templates that use the clean acceptance HTML format.
+    const needsSharedCss =
+      body.templateType === "Architect" ||
+      (letterVariant === "acceptance" && body.templateType in ACCEPTANCE_TEMPLATE_PATH_MAP);
     let mergedHtml = htmlTemplate;
-    if (body.templateType === "Architect") {
+    if (needsSharedCss) {
       const sharedCss = await loadSharedArchitectApplicationCss();
       mergedHtml = injectSharedApplicationTemplateStyle(htmlTemplate, sharedCss);
       if (!sharedCss.trim()) {
         console.error(
-          "[application-preview-html] Missing html/_shared/application-templates.css in repo — Architect letters will render unstyled."
+          "[application-preview-html] Missing html/_shared/application-templates.css in repo — acceptance letters will render unstyled."
         );
       }
     }
 
-    let finalHtml = replaceTemplateTokens(mergedHtml, body.fields);
+    let fieldsForTemplate = body.fields;
+    if (letterVariant !== "acceptance" && body.projectId?.trim() && token) {
+      fieldsForTemplate = await enrichConsultantAppointmentFields(body.fields, {
+        projectId: body.projectId.trim(),
+        token,
+        templateType: body.templateType,
+      });
+    }
+
+    let finalHtml = replaceTemplateTokens(mergedHtml, fieldsForTemplate);
+
+    const acceptanceUrlsKey =
+      letterVariant === "acceptance"
+        ? ACCEPTANCE_APPLICATION_URL_KEY_MAP[body.templateType]
+        : undefined;
 
     finalHtml = await injectSavedPdfQrHtml(finalHtml, {
       projectId: body.projectId,
       templateType: body.templateType,
       authorizationToken: token,
-      applicationUrlsKey:
-        body.templateType === "Architect" && architectVariant === "acceptance"
-          ? "Architect_acceptance"
-          : undefined,
+      applicationUrlsKey: acceptanceUrlsKey,
     });
 
     if (process.env.NODE_ENV === "development") {

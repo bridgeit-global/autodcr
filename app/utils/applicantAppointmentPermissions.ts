@@ -77,6 +77,27 @@ export function permissionTitleToApplicantType(permissionType: string): string |
 
 export const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
 
+/**
+ * Maps applicant types to their `application_urls` acceptance key.
+ * All types that have an acceptance letter template are listed here.
+ */
+export const ACCEPTANCE_URL_KEY_MAP: Partial<Record<string, string>> = {
+  Architect: "Architect_acceptance",
+  "Licensed Surveyor": "Licensed_Surveyor_acceptance",
+  "Fire Consultant": "Fire_Safety_acceptance",
+  "Landscape Consultant": "Landscape_Consultant_acceptance",
+  "Geotechnical Consultant": "Geotechnical_Consultant_acceptance",
+  "M&E Consultant": "ME_Consultant_acceptance",
+  Plumber: "Plumber_acceptance",
+  "Town Planner": "Town_Planner_acceptance",
+  "Structural Engineer": "Structural_Engineer_acceptance",
+  "Environmental Consultant": "Environmental_Consultant_acceptance",
+  "PMC / Project Manager": "PMC_Project_Manager_acceptance",
+};
+
+/** All valid acceptance URL keys (for server-side validation). */
+export const VALID_ACCEPTANCE_URL_KEYS = new Set(Object.values(ACCEPTANCE_URL_KEY_MAP) as string[]);
+
 /** Keys in `projects.application_urls` cleared when an application is fully removed. */
 export function applicationUrlKeysForPermissionType(permissionType: string): string[] {
   const title = permissionType.trim();
@@ -85,7 +106,8 @@ export function applicationUrlKeysForPermissionType(permissionType: string): str
   for (const [type, permId] of Object.entries(APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID)) {
     const permTitle = APPOINTMENT_PERMISSION_ID_TO_TITLE[permId];
     if (permTitle && permissionTypeMatchesTitle(title, permTitle)) {
-      if (type === "Architect") return ["Architect", ARCHITECT_ACCEPTANCE_URL_KEY];
+      const acceptanceKey = ACCEPTANCE_URL_KEY_MAP[type];
+      if (acceptanceKey) return [type, acceptanceKey];
       return [type];
     }
   }

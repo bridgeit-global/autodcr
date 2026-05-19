@@ -151,9 +151,11 @@ export async function resolveConsultantMetadata(
   ];
 
   /**
-   * Directory often stores `auth.users.id` (UUID). RPC may return an incomplete row; Admin API returns full `user_metadata` (COA keys).
+   * Directory often stores `auth.users.id` (UUID). RPC may return an incomplete row; Admin API returns full `user_metadata` (COA keys, address, company name).
+   * Always fetch preferred lookup IDs when provided — not just when COA is missing —
+   * so address/company fields are populated even when the logged-in user is the owner (not the consultant).
    */
-  if (adminClient && mergeNeedsCoa()) {
+  if (adminClient && preferredLookupIds.length > 0) {
     for (const lookupId of preferredLookupIds) {
       if (!isAuthUserUuid(lookupId)) continue;
       const { data: consultantAdmin, error: consultantErr } =
@@ -178,7 +180,6 @@ export async function resolveConsultantMetadata(
           ...(consultantAdmin.user.user_metadata as Record<string, unknown>),
         };
       }
-      if (!mergeNeedsCoa()) break;
     }
   }
 

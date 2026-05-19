@@ -18,6 +18,10 @@ import {
   sameUserId,
 } from "@/app/utils/applicationSigning";
 import {
+  fetchApplicantDetailsFromTable,
+  mergeApplicantDetailsPreferTable,
+} from "@/app/utils/resolveApplicantDetailsForProject";
+import {
   fetchApplicationForSigning,
   getAuthUserId,
   updateApplicationForSigning,
@@ -399,7 +403,9 @@ type BuildApplicationPreviewContextInput = {
   applicationNo: string | null;
   applicationCreatedAt: string | null;
   projectId: string | null;
-  /** Architect: `architect.html` vs `architect_acceptance.html` from Application_Templates. */
+  /** For all dual-letter types: `appointment` → default template, `acceptance` → acceptance template. */
+  letterVariant?: "appointment" | "acceptance";
+  /** @deprecated Use `letterVariant`. */
   architectHtmlVariant?: "appointment" | "acceptance";
 };
 
@@ -418,11 +424,18 @@ async function buildApplicationPreviewContext(
     applicationNo,
     applicationCreatedAt,
     projectId,
+    letterVariant: inputLetterVariant,
     architectHtmlVariant,
   } = input;
 
   const localMeta = readLocalStoredUserMetadata();
   const templateType = mapSelectedApplicationToTemplate(selectedApplication);
+
+  const applicantDetailsFromTable = projectId
+    ? await fetchApplicantDetailsFromTable(supabase, projectId)
+    : null;
+  const effectiveProjectData =
+    mergeApplicantDetailsPreferTable(projectData, applicantDetailsFromTable) ?? projectData;
 
   let coaRegNo =
     pickCoaRegNoFromMeta(userMetadata) ||
@@ -459,10 +472,8 @@ async function buildApplicationPreviewContext(
     (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
   );
   const ownerApplicant = ownerApplicants[0];
-  let clientCompanyName =
-    ownerApplicant?.entity_name?.trim() ||
-    ownerApplicant?.entityName?.trim() ||
-    pickEntityNameFromMeta(ownerApplicant);
+  // Owner company: auth.users raw_user_meta_data.entity_name (loaded below), not applicants.entity_name.
+  let clientCompanyName = "";
   let clientName =
     (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
     pickPersonFullNameFromMeta(ownerApplicant);
@@ -515,7 +526,7 @@ async function buildApplicationPreviewContext(
 
   let consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
     templateType,
-    projectData
+    effectiveProjectData
   );
   if (consultantLookupUserIds.length === 0) {
     const { data: authRow } = await supabase.auth.getUser();
@@ -569,7 +580,19 @@ async function buildApplicationPreviewContext(
     mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
   }
 
-  if (
+  // Always load the appointed consultant profile from server when we know their user id.
+  // JWT may have COA/reg only while address/company live in admin user_metadata.
+  const consultantProfileLookupIds =
+    consultantLookupUserIds.length > 0
+      ? consultantLookupUserIds
+      : pickConsultantLookupUserIdsFromProject(templateType, effectiveProjectData);
+  if (consultantProfileLookupIds.length > 0) {
+    const serverMeta = await fetchRawUserMetadataFromApi(
+      userMetadata,
+      consultantProfileLookupIds
+    );
+    if (serverMeta) mergeConsultantMeta(serverMeta, true);
+  } else if (
     templateType === "Licensed Surveyor"
       ? !lbsLicenseNo || !lbsExpiryDate
       : !coaRegNo || !coaExpiryDate
@@ -580,15 +603,16 @@ async function buildApplicationPreviewContext(
 
   const ownerLookupUserIds = [
     ...new Set(
-      ownerApplicants
-        .flatMap((owner) => [
+      [
+        normalizeLookupId(effectiveProjectData?.user_id),
+        ...ownerApplicants.flatMap((owner) => [
           normalizeLookupId(owner.user_id),
           normalizeLookupId(owner.userId),
           normalizeLookupId(owner.id),
           normalizeLookupId((owner as { owner_id?: unknown }).owner_id),
           normalizeLookupId((owner as { ownerId?: unknown }).ownerId),
-        ])
-        .filter(Boolean)
+        ]),
+      ].filter(Boolean)
     ),
   ];
   let ownerMetaSnapshot: unknown = null;
@@ -624,11 +648,11 @@ async function buildApplicationPreviewContext(
       const resolved = pickAddressLineFromMeta(ownerMeta, 3);
       if (resolved) clientAddressLine3 = resolved;
     }
-    const resolved = pickEntityNameFromMeta(ownerMeta);
-    if (resolved) {
-      clientCompanyName = resolved;
-      if (clientCompanyDesignation && clientName) break;
+    const resolvedCompany = pickEntityNameFromMeta(ownerMeta);
+    if (resolvedCompany) {
+      clientCompanyName = resolvedCompany;
     }
+    if (clientCompanyDesignation && clientName && clientCompanyName) break;
   }
 
   if (process.env.NODE_ENV === "development") {
@@ -702,10 +726,11 @@ async function buildApplicationPreviewContext(
       resolvedOwnerLetterheadUrl: ownerLetterheadUrl,
     },
     consultantLookupUserIds,
-    projectData,
-    ...(templateType === "Architect"
+    projectData: effectiveProjectData,
+    // Pass letterVariant for all types that have an acceptance template.
+    ...(TYPES_WITH_ACCEPTANCE.has(templateType)
       ? {
-          architectHtmlVariant: architectHtmlVariant ?? "appointment",
+          letterVariant: (inputLetterVariant ?? architectHtmlVariant) ?? "appointment",
         }
       : {}),
   };
@@ -714,7 +739,40 @@ async function buildApplicationPreviewContext(
   return { fields, previewSource, templateType, fieldMapping };
 }
 
+/** All consultant types that have both appointment and acceptance letter templates. */
+const TYPES_WITH_ACCEPTANCE = new Set<TemplateType>([
+  "Architect",
+  "Licensed Surveyor",
+  "Fire Safety Consultant",
+  "Landscape Consultant",
+  "Geotechnical Consultant",
+  "M&E Consultant",
+  "Plumber",
+  "Town Planner",
+  "Structural Engineer",
+  "Environmental Consultant",
+  "PMC / Project Manager",
+]);
+
+/** `application_urls` key for each type's acceptance PDF. */
+const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>> = {
+  Architect: "Architect_acceptance",
+  "Licensed Surveyor": "Licensed_Surveyor_acceptance",
+  "Fire Safety Consultant": "Fire_Safety_acceptance",
+  "Landscape Consultant": "Landscape_Consultant_acceptance",
+  "Geotechnical Consultant": "Geotechnical_Consultant_acceptance",
+  "M&E Consultant": "ME_Consultant_acceptance",
+  Plumber: "Plumber_acceptance",
+  "Town Planner": "Town_Planner_acceptance",
+  "Structural Engineer": "Structural_Engineer_acceptance",
+  "Environmental Consultant": "Environmental_Consultant_acceptance",
+  "PMC / Project Manager": "PMC_Project_Manager_acceptance",
+};
+
 const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
+
+/** Whether this type uses dual letters (appointment + acceptance). */
+const isDualLetterType = (t: TemplateType) => TYPES_WITH_ACCEPTANCE.has(t);
 
 function applicationTemplateSavedInUrls(
   raw: unknown,
@@ -722,9 +780,10 @@ function applicationTemplateSavedInUrls(
 ): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const o = raw as Record<string, unknown>;
-  if (templateType === "Architect") {
-    const a = o["Architect"];
-    const b = o[ARCHITECT_ACCEPTANCE_URL_KEY];
+  const acceptanceKey = ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType];
+  if (acceptanceKey) {
+    const a = o[templateType];
+    const b = o[acceptanceKey];
     return (
       typeof a === "string" &&
       a.trim().length > 0 &&
@@ -742,33 +801,42 @@ function hasApplicationUrlKey(raw: unknown, key: string): boolean {
   return typeof v === "string" && v.trim().length > 0;
 }
 
-/** Stored PDF URL for preview (Architect: appointment vs acceptance letter). */
+/** Stored PDF URL for preview (dual-letter types: appointment vs acceptance). */
 function getStoredApplicationPdfUrl(
   raw: unknown,
   templateType: TemplateType,
-  architectVariant: "appointment" | "acceptance" = "appointment"
+  letterVariant: "appointment" | "acceptance" = "appointment"
 ): string | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   const key =
-    templateType === "Architect"
-      ? architectVariant === "acceptance"
-        ? ARCHITECT_ACCEPTANCE_URL_KEY
-        : "Architect"
+    letterVariant === "acceptance"
+      ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? templateType)
       : templateType;
   const v = o[key];
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 }
 
-/** Build signed Architect PDF for one letter variant (appointment or acceptance). */
-async function buildArchitectSignedPdfBlob(
+/** Avoid browser showing a cached PDF after owner/architect re-sign overwrites storage. */
+function storedPdfUrlWithCacheBuster(
+  url: string,
+  opts?: { ownerSignedAt?: string | null; architectSignedAt?: string | null }
+): string {
+  const version = opts?.architectSignedAt?.trim() || opts?.ownerSignedAt?.trim();
+  if (!version) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}v=${encodeURIComponent(version)}`;
+}
+
+/** Build a signed PDF blob for one letter variant (appointment or acceptance). */
+async function buildConsultantSignedPdfBlob(
   previewBase: BuildApplicationPreviewContextInput,
   variant: "appointment" | "acceptance",
   signatures: { owner: boolean; architect: boolean }
 ): Promise<Blob> {
   const built = await buildApplicationPreviewContext({
     ...previewBase,
-    architectHtmlVariant: variant,
+    letterVariant: variant,
   });
   let html = await generateApplicationPreviewHtml(
     built.fields,
@@ -784,37 +852,34 @@ async function buildArchitectSignedPdfBlob(
   return generateApplicationPreviewPdfFromHtml(html, built.templateType);
 }
 
-/** Persist appointment + acceptance PDFs under `Architect` and `Architect_acceptance`. */
-async function persistArchitectSignedLetterPdfs(
+/** Persist appointment + acceptance PDFs for any dual-letter consultant type. */
+async function persistDualLetterPdfs(
   previewBase: BuildApplicationPreviewContextInput,
+  templateType: TemplateType,
   signatures: { owner: boolean; architect: boolean },
   upload: (pdfBlob: Blob, applicationUrlsKey: string) => Promise<{ publicUrl?: string }>
 ): Promise<{ appointmentUrl: string | null; acceptanceUrl: string | null }> {
+  const acceptanceKey = ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`;
   const variants: Array<{
     variant: "appointment" | "acceptance";
     urlsKey: string;
   }> = [
-    { variant: "appointment", urlsKey: "Architect" },
-    { variant: "acceptance", urlsKey: ARCHITECT_ACCEPTANCE_URL_KEY },
+    { variant: "appointment", urlsKey: templateType },
+    { variant: "acceptance", urlsKey: acceptanceKey },
   ];
 
-  const results = await Promise.all(
-    variants.map(async ({ variant, urlsKey }) => {
-      const blobInitial = await buildArchitectSignedPdfBlob(previewBase, variant, signatures);
-      await upload(blobInitial, urlsKey);
-      // Second pass: storage URL exists — preview HTML API can inject QR, then overwrite PDF.
-      const blobWithQr = await buildArchitectSignedPdfBlob(previewBase, variant, signatures);
-      const { publicUrl } = await upload(blobWithQr, urlsKey);
-      const trimmed = typeof publicUrl === "string" && publicUrl.trim() ? publicUrl.trim() : null;
-      return { variant, url: trimmed };
-    })
-  );
-
+  // Upload sequentially so each save-application-pdf merge to application_urls
+  // sees the previous keys (parallel uploads were dropping e.g. "Architect").
   let appointmentUrl: string | null = null;
   let acceptanceUrl: string | null = null;
-  for (const { variant, url } of results) {
-    if (variant === "appointment") appointmentUrl = url;
-    else acceptanceUrl = url;
+  for (const { variant, urlsKey } of variants) {
+    const blobInitial = await buildConsultantSignedPdfBlob(previewBase, variant, signatures);
+    await upload(blobInitial, urlsKey);
+    const blobWithQr = await buildConsultantSignedPdfBlob(previewBase, variant, signatures);
+    const { publicUrl } = await upload(blobWithQr, urlsKey);
+    const trimmed = typeof publicUrl === "string" && publicUrl.trim() ? publicUrl.trim() : null;
+    if (variant === "appointment") appointmentUrl = trimmed;
+    else acceptanceUrl = trimmed;
   }
 
   return { appointmentUrl, acceptanceUrl };
@@ -836,7 +901,7 @@ export default function ApplicationDetailsPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   /** When Approved preview uses HTML iframe (letterhead), DSC/sign still loads bytes from this Storage URL. */
   const [storedSigningPdfUrl, setStoredSigningPdfUrl] = useState<string | null>(null);
-  const [architectPreviewVariant, setArchitectPreviewVariant] = useState<
+  const [letterVariant, setLetterVariant] = useState<
     "appointment" | "acceptance"
   >("appointment");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -888,7 +953,7 @@ export default function ApplicationDetailsPage() {
     if (!isReadOnlyMode || !projectId) return;
     const loadProject = async () => {
       const coreSelect =
-        "title,project_info,save_plot_details,applicant_details,user_id,application_urls";
+        "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
 
       const { data: directData, error: directError } = await supabase
         .from("projects")
@@ -1007,12 +1072,13 @@ export default function ApplicationDetailsPage() {
     authUserId,
   ]);
 
-  /** Approved/Verified: switching Architect letter shows the matching stored PDF. */
+  /** In process / Approved: switching letter variant shows the matching stored PDF. */
   useEffect(() => {
     if (
       !previewOpen ||
-      applicationWorkflowStage !== "approved_verified" ||
-      previewTemplateType !== "Architect" ||
+      (applicationWorkflowStage !== "approved_verified" &&
+        applicationWorkflowStage !== "in_process") ||
+      !isDualLetterType(previewTemplateType) ||
       !projectId
     ) {
       return;
@@ -1030,11 +1096,15 @@ export default function ApplicationDetailsPage() {
         }
       }
       if (cancelled) return;
-      const url = getStoredApplicationPdfUrl(raw, "Architect", architectPreviewVariant);
+      const url = getStoredApplicationPdfUrl(raw, previewTemplateType, letterVariant);
       if (url) {
+        const pdfUrl = storedPdfUrlWithCacheBuster(url, {
+          ownerSignedAt,
+          architectSignedAt,
+        });
         setPreviewHtml(null);
-        setPreviewUrl(url);
-        setStoredSigningPdfUrl(url);
+        setPreviewUrl(pdfUrl);
+        setStoredSigningPdfUrl(pdfUrl);
       }
     })();
 
@@ -1045,9 +1115,11 @@ export default function ApplicationDetailsPage() {
     previewOpen,
     applicationWorkflowStage,
     previewTemplateType,
-    architectPreviewVariant,
+    letterVariant,
     projectId,
     projectData?.application_urls,
+    ownerSignedAt,
+    architectSignedAt,
   ]);
 
   useEffect(() => {
@@ -1064,10 +1136,7 @@ export default function ApplicationDetailsPage() {
           applicationNo,
           applicationCreatedAt,
           projectId,
-          architectHtmlVariant:
-            mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
-              ? architectPreviewVariant
-              : undefined,
+          letterVariant,
         });
         if (cancelled) return;
         setDetailsFieldRows(buildDetailsFieldRowsForUi(ctx.fieldMapping, ctx.templateType));
@@ -1093,7 +1162,7 @@ export default function ApplicationDetailsPage() {
     selectedApplication,
     applicationNo,
     userMetadata,
-    architectPreviewVariant,
+    letterVariant,
   ]);
 
   useEffect(() => {
@@ -1133,12 +1202,16 @@ export default function ApplicationDetailsPage() {
       setPdfSavedForCurrentPreview(false);
       setStoredSigningPdfUrl(null);
       previewPdfContextRef.current = null;
+      setPreviewOpen(false);
+      setPreviewHtml(null);
+      setPreviewUrl(null);
       setIsPreviewLoading(true);
+      setPreviewOpen(true);
 
       let projectForPreview = projectData;
       if (!projectForPreview && projectId) {
         const coreSelect =
-          "title,project_info,save_plot_details,applicant_details,user_id,application_urls";
+          "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
         const { data: directData } = await supabase
           .from("projects")
           .select(coreSelect)
@@ -1162,6 +1235,7 @@ export default function ApplicationDetailsPage() {
         setPreviewError(
           "Project data could not be loaded. Confirm you have access to this project and try again."
         );
+        setPreviewOpen(true);
         return;
       }
 
@@ -1188,10 +1262,7 @@ export default function ApplicationDetailsPage() {
           applicationNo,
           applicationCreatedAt,
           projectId,
-          architectHtmlVariant:
-            mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
-              ? architectPreviewVariant
-              : undefined,
+          letterVariant,
         });
 
       // Always release the previous blob URL before opening a new preview.
@@ -1199,7 +1270,16 @@ export default function ApplicationDetailsPage() {
         URL.revokeObjectURL(previewUrl);
       }
 
-      if (workflowStageForPreview === "approved_verified" && projectId) {
+      // In process + approved: load the PDF from Supabase (projects.application_urls).
+      // Same URL is overwritten on each save/sign:
+      //   1) Draft save → in_process: PDF without owner sign
+      //   2) Owner signs: PDF with owner sign (still in_process)
+      //   3) Architect signs → approved: PDF with both signatures
+      if (
+        (workflowStageForPreview === "in_process" ||
+          workflowStageForPreview === "approved_verified") &&
+        projectId
+      ) {
         let raw = projectForPreview.application_urls;
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
           const { data: urlsRow } = await supabase
@@ -1217,30 +1297,36 @@ export default function ApplicationDetailsPage() {
             raw = (rpcData as PreviewProjectData).application_urls;
           }
         }
-        const architectVariant =
-          templateType === "Architect" ? architectPreviewVariant : "appointment";
-        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, architectVariant);
+        const resolvedVariant = isDualLetterType(templateType) ? letterVariant : "appointment";
+        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
 
         if (savedPdfUrl) {
+          const pdfUrl = storedPdfUrlWithCacheBuster(savedPdfUrl, {
+            ownerSignedAt,
+            architectSignedAt,
+          });
           previewPdfContextRef.current = { fields, templateType, previewSource };
           setPdfSavedForCurrentPreview(true);
           setPreviewReadyForSave(true);
-          setStoredSigningPdfUrl(savedPdfUrl);
+          setStoredSigningPdfUrl(pdfUrl);
           setPreviewHtml(null);
-          setPreviewUrl(savedPdfUrl);
+          setPreviewUrl(pdfUrl);
           setPreviewFieldMapping(fieldMapping);
           setPreviewOpen(true);
           return;
         }
 
-        setPreviewError(
-          templateType === "Architect"
-            ? `No signed PDF on file for the ${architectVariant} letter.`
-            : "No signed PDF on file for this application."
-        );
-        return;
+        if (workflowStageForPreview === "approved_verified") {
+          setPreviewError(
+            isDualLetterType(templateType)
+              ? `No signed PDF on file for the ${resolvedVariant} letter.`
+              : "No signed PDF on file for this application."
+          );
+          return;
+        }
       }
 
+      // Draft, or in_process before any PDF was saved: unsigned HTML preview.
       let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
@@ -1249,16 +1335,8 @@ export default function ApplicationDetailsPage() {
 
       if (!html || !html.trim()) {
         setPreviewError("Preview HTML was empty. Check that the template file exists under html/.");
+        setPreviewOpen(true);
         return;
-      }
-
-      if (
-        templateType === "Architect" &&
-        workflowStageForPreview === "in_process" &&
-        ownerSignedAt?.trim() &&
-        !architectSignedAt?.trim()
-      ) {
-        html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
       }
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
@@ -1272,6 +1350,7 @@ export default function ApplicationDetailsPage() {
       console.error("Preview generation failed:", error);
       const message = error instanceof Error ? error.message : "Failed to generate preview.";
       setPreviewError(message);
+      setPreviewOpen(true);
     } finally {
       setIsPreviewLoading(false);
     }
@@ -1386,6 +1465,7 @@ export default function ApplicationDetailsPage() {
       const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
 
       const isArchitectLetter = ctx.templateType === "Architect";
+      const hasDualLetters = isDualLetterType(ctx.templateType);
       const uid = authUser.id;
 
       if (isArchitectLetter && architectSigned) {
@@ -1469,16 +1549,42 @@ export default function ApplicationDetailsPage() {
         sameUserId(uid, appointedArchitectId) &&
         isAnySameUserId(uid, ownerSignerIds);
 
-      if (isArchitectLetter) {
-        const { appointmentUrl } = await persistArchitectSignedLetterPdfs(
-          {
-            userMetadata,
-            projectData,
-            selectedApplication,
-            applicationNo,
-            applicationCreatedAt,
-            projectId,
-          },
+      let projectForPdf = projectData;
+      if (!projectForPdf?.applicant_details || (isArchitectLetter && !projectForPdf?.architect_user_id)) {
+        const coreSelect =
+          "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
+        const { data: directData } = await supabase
+          .from("projects")
+          .select(coreSelect)
+          .eq("id", projectId)
+          .single();
+        if (directData) {
+          projectForPdf = directData as PreviewProjectData;
+          setProjectData(projectForPdf);
+        } else {
+          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+            p_project_id: projectId,
+          });
+          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+            projectForPdf = rpcData as PreviewProjectData;
+            setProjectData(projectForPdf);
+          }
+        }
+      }
+
+      const previewBase: BuildApplicationPreviewContextInput = {
+        userMetadata,
+        projectData: projectForPdf,
+        selectedApplication,
+        applicationNo,
+        applicationCreatedAt,
+        projectId,
+      };
+
+      if (hasDualLetters) {
+        const { appointmentUrl } = await persistDualLetterPdfs(
+          previewBase,
+          ctx.templateType,
           {
             owner: true,
             architect: (ownerSigned && !architectSigned) || canSignBoth,
@@ -1695,7 +1801,7 @@ export default function ApplicationDetailsPage() {
       let projectForSign = projectData;
       if (!projectForSign) {
         const coreSelect =
-          "title,project_info,save_plot_details,applicant_details,user_id,application_urls";
+          "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
         const { data: directData } = await supabase
           .from("projects")
           .select(coreSelect)
@@ -1725,10 +1831,7 @@ export default function ApplicationDetailsPage() {
         applicationNo,
         applicationCreatedAt,
         projectId,
-        architectHtmlVariant:
-          mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
-            ? architectPreviewVariant
-            : undefined,
+        letterVariant,
       });
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
@@ -1766,10 +1869,7 @@ export default function ApplicationDetailsPage() {
           applicationNo,
           applicationCreatedAt,
           projectId,
-          architectHtmlVariant:
-            mapSelectedApplicationToTemplate(selectedApplication) === "Architect"
-              ? architectPreviewVariant
-              : undefined,
+          letterVariant,
         });
         previewPdfContextRef.current = {
           fields: built.fields,
@@ -1839,8 +1939,9 @@ export default function ApplicationDetailsPage() {
         return urlsRow?.application_urls;
       };
 
-      if (stageBeforeSave === "draft" && ctx.templateType === "Architect") {
-        const saveArchitectVariant = async (
+      if (stageBeforeSave === "draft" && isDualLetterType(ctx.templateType)) {
+        const acceptanceKey = ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
+        const saveDualVariant = async (
           variant: "appointment" | "acceptance",
           applicationUrlsKey: string,
           urlsRawInitial: unknown
@@ -1853,7 +1954,7 @@ export default function ApplicationDetailsPage() {
             applicationNo,
             applicationCreatedAt,
             projectId,
-            architectHtmlVariant: variant,
+            letterVariant: variant,
           });
           const blob1 = await generateApplicationPreviewPdf(
             built.fields,
@@ -1876,8 +1977,8 @@ export default function ApplicationDetailsPage() {
         setSidebarPdfStatus("Saving appointment & acceptance…");
         const urlsBeforeSave = await fetchApplicationUrls();
         await Promise.all([
-          saveArchitectVariant("appointment", "Architect", urlsBeforeSave),
-          saveArchitectVariant("acceptance", ARCHITECT_ACCEPTANCE_URL_KEY, urlsBeforeSave),
+          saveDualVariant("appointment", ctx.templateType, urlsBeforeSave),
+          saveDualVariant("acceptance", acceptanceKey, urlsBeforeSave),
         ]);
 
         const refreshed = await buildApplicationPreviewContext({
@@ -1887,7 +1988,7 @@ export default function ApplicationDetailsPage() {
           applicationNo,
           applicationCreatedAt,
           projectId,
-          architectHtmlVariant: architectPreviewVariant,
+          letterVariant,
         });
         previewPdfContextRef.current = {
           fields: refreshed.fields,
@@ -1902,7 +2003,7 @@ export default function ApplicationDetailsPage() {
         setPreviewHtml(htmlWithQr);
         const urlsAfterSave = await fetchApplicationUrls();
         setPdfSavedForCurrentPreview(
-          applicationTemplateSavedInUrls(urlsAfterSave, "Architect")
+          applicationTemplateSavedInUrls(urlsAfterSave, ctx.templateType)
         );
         setSidebarPdfStatus(null);
       } else {
@@ -1996,7 +2097,7 @@ export default function ApplicationDetailsPage() {
       busy: isSavingPdf,
       done: pdfSavedForCurrentPreview,
       subtitle:
-        previewTemplateType === "Architect"
+        isDualLetterType(previewTemplateType)
           ? "Saves appointment and acceptance PDFs to the project."
           : undefined,
       statusText: sidebarPdfStatus ?? undefined,
@@ -2074,18 +2175,18 @@ export default function ApplicationDetailsPage() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-xl font-bold text-gray-900">Application Details</h2>
           <div className="flex items-center gap-2 flex-wrap">
-            {previewTemplateType === "Architect" && (
+            {isDualLetterType(previewTemplateType) && (
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <span className="whitespace-nowrap">Letter</span>
                 <select
-                  value={architectPreviewVariant}
+                  value={letterVariant}
                   onChange={(e) =>
-                    setArchitectPreviewVariant(
+                    setLetterVariant(
                       e.target.value === "acceptance" ? "acceptance" : "appointment"
                     )
                   }
                   className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 min-w-[11rem]"
-                  aria-label="Architect letter type"
+                  aria-label="Letter type"
                 >
                   <option value="appointment">Appointment</option>
                   <option value="acceptance">Acceptance</option>
@@ -2150,6 +2251,8 @@ export default function ApplicationDetailsPage() {
         fileUrl={previewUrl}
         htmlContent={previewHtml}
         fieldMapping={previewFieldMapping}
+        isLoading={isPreviewLoading}
+        loadError={previewError}
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
         autoMockSignAfterOpen={autoMockSignAfterPreviewOpen}
         mockSignMode={mockSignMode}

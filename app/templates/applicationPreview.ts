@@ -1,8 +1,18 @@
 "use client";
 
 import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
+import {
+  addressLinesFromApplicantRecord,
+  ensureTrailingPeriodOnAddressLine3,
+} from "@/app/utils/applicantRecordFields";
+import {
+  templateConsultantApplicantKeywords,
+  templateTypeToPdfTokenSuffix,
+} from "@/app/utils/consultantTemplateTokens";
 import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
+
+export { templateConsultantApplicantKeywords, templateTypeToPdfTokenSuffix } from "@/app/utils/consultantTemplateTokens";
 
 export type ApplicationPreviewSource = {
   projectId?: string | null;
@@ -34,10 +44,18 @@ export type ApplicationPreviewSource = {
   consultantEmail?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
   consultantLookupUserIds?: string[];
-  /** Architect only: `appointment` → `architect.html`, `acceptance` → `architect_acceptance.html` in Application_Templates. */
+  /**
+   * For all types that have an acceptance letter: `appointment` → default template,
+   * `acceptance` → `{type}_acceptance.html` in Application_Templates.
+   * Replaces the old `architectHtmlVariant` (kept for backward compatibility).
+   */
+  letterVariant?: "appointment" | "acceptance";
+  /** @deprecated Use `letterVariant` instead. Kept for backward compatibility. */
   architectHtmlVariant?: "appointment" | "acceptance";
   projectData?: {
     title?: string;
+    /** The architect's Supabase auth UUID stored at the project level (projects.architect_user_id). Used as a fallback to fetch architect metadata when the applicant row lacks a user_id. */
+    architect_user_id?: string | null;
     project_info?: {
       proposalNo?: string;
       fullNameOfApplicant?: string;
@@ -175,79 +193,6 @@ export function mapSelectedApplicationToTemplate(
   return "Architect";
 }
 
-/** Token suffix segment used in `project_*_${suffix}` placeholders (matches HTML templates). */
-export function templateTypeToPdfTokenSuffix(type?: TemplateType): string {
-  switch (type) {
-    case "Architect":
-      return "Architect";
-    case "Licensed Surveyor":
-      return "LS";
-    case "Structural Engineer":
-      return "Structural_Engineer";
-    case "Fire Safety Consultant":
-      return "Fire_Safety";
-    case "M&E Consultant":
-      return "ME_Consultant";
-    case "Plumber":
-      return "Plumber";
-    case "Parking Consultant":
-      return "Parking_Consultant";
-    case "Landscape Consultant":
-      return "Landscape_Consultant";
-    case "Geotechnical Consultant":
-      return "Geotechnical_Consultant";
-    case "Environmental Consultant":
-      return "Environmental_Consultant";
-    case "Town Planner":
-      return "Town_Planner";
-    case "PMC / Project Manager":
-      return "PMC_Project_Manager";
-    case "Rainwater Consultant":
-      return "Rainwater_Consultant";
-    case "Site Supervisor":
-      return "Site_Supervisor";
-    case "Horticulturist":
-      return "Horticulturist";
-    default:
-      return "Architect";
-  }
-}
-
-function templateConsultantApplicantKeywords(templateType: TemplateType): string[] {
-  switch (templateType) {
-    case "Licensed Surveyor":
-      return ["licensed surveyor"];
-    case "Structural Engineer":
-      return ["structural"];
-    case "Fire Safety Consultant":
-      return ["fire"];
-    case "M&E Consultant":
-      return ["mep"];
-    case "Plumber":
-      return ["plumb"];
-    case "Parking Consultant":
-      return ["parking"];
-    case "Landscape Consultant":
-      return ["landscape"];
-    case "Geotechnical Consultant":
-      return ["geotechnical"];
-    case "Environmental Consultant":
-      return ["environment"];
-    case "Town Planner":
-      return ["town planner", "townplanner"];
-    case "PMC / Project Manager":
-      return ["pmc", "project manager"];
-    case "Rainwater Consultant":
-      return ["rain", "rainwater"];
-    case "Site Supervisor":
-      return ["site supervisor"];
-    case "Horticulturist":
-      return ["horticultur"];
-    default:
-      return ["architect", "licensed surveyor"];
-  }
-}
-
 export function pickConsultantLookupUserIdsFromProject(
   templateType: TemplateType,
   projectData: ApplicationPreviewSource["projectData"]
@@ -260,7 +205,26 @@ export function pickConsultantLookupUserIdsFromProject(
   });
   const uid =
     row && typeof row.user_id === "string" ? row.user_id.trim() : "";
-  return uid ? [uid] : [];
+  if (uid) return [uid];
+
+  // Architect appointment: always resolve the appointed architect's auth id.
+  if (templateType === "Architect") {
+    const architectProjectUid =
+      typeof projectData?.architect_user_id === "string"
+        ? projectData.architect_user_id.trim()
+        : "";
+    if (architectProjectUid) return [architectProjectUid];
+    const architectRow = applicants.find((a) =>
+      (a.applicantType || a.applicant_type || "").toLowerCase().includes("architect")
+    );
+    const architectRowUid =
+      architectRow && typeof architectRow.user_id === "string"
+        ? architectRow.user_id.trim()
+        : "";
+    if (architectRowUid) return [architectRowUid];
+  }
+
+  return [];
 }
 
 function getCurrentDate(): string {
@@ -408,12 +372,7 @@ export function mapToPdfFieldValues(
     value.replace(/[,\s]+$/g, "").trim();
 
   /** Ends architect address line 3 with a period when DB omits it. */
-  const ensureTrailingPeriodOnFinalAddressLine = (value: string): string => {
-    const s = value.trim();
-    if (!s) return "";
-    if (/[.!?…]\s*$/.test(s)) return s;
-    return `${s}.`;
-  };
+  const ensureTrailingPeriodOnFinalAddressLine = ensureTrailingPeriodOnAddressLine3;
 
   const applicants = source?.projectData?.applicant_details?.applicants || [];
   const ownerApplicant = applicants.find(
@@ -436,32 +395,34 @@ export function mapToPdfFieldValues(
       : templateType || "Architect";
   const consultantName =
     primaryConsultantApplicant?.name?.trim() || source?.consultantName?.trim() || "";
+  const consultantFromApplicant = addressLinesFromApplicantRecord(
+    primaryConsultantApplicant as Record<string, unknown> | undefined
+  );
   // Address resolution priority (per consultant):
-  //   1. The applicant row in projects.applicant_details (per-project source of truth).
-  //   2. source.consultantAddressLine* (the consultant's auth.users.user_metadata).
-  //   3. "" (empty) — we never split combined `address` / `residentialAddress` strings.
-  // This lets the project owner override a consultant's address per-project
-  // by editing the applicant row, while still falling back to the consultant's
-  // own profile when no override is present.
+  //   1. The applicant row in applicant_details (address_line1/2/3 or residentialAddress).
+  //   2. source.consultantAddressLine* (auth.users user_metadata).
   const consultantAddressLine1 = sanitizeAddressLine(
     pickText(
-    primaryConsultantApplicant?.address_line1,
-    (primaryConsultantApplicant as any)?.addressLine1,
-    source?.consultantAddressLine1
+      primaryConsultantApplicant?.address_line1,
+      (primaryConsultantApplicant as { addressLine1?: string })?.addressLine1,
+      consultantFromApplicant.line1,
+      source?.consultantAddressLine1
     )
   );
   const consultantAddressLine2 = sanitizeAddressLine(
     pickText(
-    primaryConsultantApplicant?.address_line2,
-    (primaryConsultantApplicant as any)?.addressLine2,
-    source?.consultantAddressLine2
+      primaryConsultantApplicant?.address_line2,
+      (primaryConsultantApplicant as { addressLine2?: string })?.addressLine2,
+      consultantFromApplicant.line2,
+      source?.consultantAddressLine2
     )
   );
   const consultantAddressLine3 = sanitizeAddressLine(
     pickText(
-    primaryConsultantApplicant?.address_line3,
-    (primaryConsultantApplicant as any)?.addressLine3,
-    source?.consultantAddressLine3
+      primaryConsultantApplicant?.address_line3,
+      (primaryConsultantApplicant as { addressLine3?: string })?.addressLine3,
+      consultantFromApplicant.line3,
+      source?.consultantAddressLine3
     )
   );
   const architectName =
@@ -484,25 +445,7 @@ export function mapToPdfFieldValues(
   const architectFallbackLine3 = isArchitectAlsoLoggedInConsultant
     ? consultantAddressLine3
     : "";
-  const architectAddressLine1 = pickText(
-    architectApplicant?.address_line1,
-    (architectApplicant as any)?.addressLine1,
-    architectFallbackLine1
-  );
-  const architectAddressLine2 = pickText(
-    architectApplicant?.address_line2,
-    (architectApplicant as any)?.addressLine2,
-    architectFallbackLine2
-  );
-  const architectAddressLine3 = pickText(
-    architectApplicant?.address_line3,
-    (architectApplicant as any)?.addressLine3,
-    architectFallbackLine3
-  );
-  const architectAddressLine3ForLetter =
-    architectAddressLine3.trim().length > 0
-      ? ensureTrailingPeriodOnFinalAddressLine(architectAddressLine3)
-      : "";
+  const isArchitectAppointmentLetter = templateType === "Architect";
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
   const planningAuthority =
     source?.projectData?.save_plot_details?.planningAuthority?.trim() || "BMC";
@@ -543,6 +486,7 @@ export function mapToPdfFieldValues(
   const consultantCompanyName = pickText(
     primaryConsultantApplicant?.entity_name,
     primaryConsultantApplicant?.entityName,
+    consultantFromApplicant.company,
     source?.consultantCompanyName
   );
   const consultantRegNo = isLicensedSurveyorLetter
@@ -577,11 +521,50 @@ export function mapToPdfFieldValues(
       source?.clientAddressLine3
     )
   );
-  const clientCompanyName =
-    ownerApplicant?.entity_name?.trim() ||
-    ownerApplicant?.entityName?.trim() ||
-    source?.clientCompanyName?.trim() ||
-    "";
+  // Owner LLP / company name: auth.users raw_user_meta_data.entity_name (via previewSource), not applicants.
+  const clientCompanyName = source?.clientCompanyName?.trim() || "";
+
+  const architectFromApplicant = addressLinesFromApplicantRecord(
+    architectApplicant as Record<string, unknown> | undefined
+  );
+  let architectAddressLine1 = pickText(
+    architectApplicant?.address_line1,
+    (architectApplicant as any)?.addressLine1,
+    architectFromApplicant.line1,
+    architectFallbackLine1,
+    isArchitectAppointmentLetter ? consultantAddressLine1 : "",
+    isArchitectAppointmentLetter ? source?.consultantAddressLine1 : ""
+  );
+  let architectAddressLine2 = pickText(
+    architectApplicant?.address_line2,
+    (architectApplicant as any)?.addressLine2,
+    architectFromApplicant.line2,
+    architectFallbackLine2,
+    isArchitectAppointmentLetter ? consultantAddressLine2 : "",
+    isArchitectAppointmentLetter ? source?.consultantAddressLine2 : ""
+  );
+  let architectAddressLine3 = pickText(
+    architectApplicant?.address_line3,
+    (architectApplicant as any)?.addressLine3,
+    architectFromApplicant.line3,
+    architectFallbackLine3,
+    isArchitectAppointmentLetter ? consultantAddressLine3 : "",
+    isArchitectAppointmentLetter ? source?.consultantAddressLine3 : ""
+  );
+  // Architect appointment "To," company = owner's entity_name from auth metadata (same as client company).
+  let architectCompanyForLetter = isArchitectAppointmentLetter
+    ? pickText(source?.clientCompanyName)
+    : pickText(
+        architectApplicant?.entity_name,
+        architectApplicant?.entityName,
+        architectFromApplicant.company
+      );
+
+  const architectAddressLine3ForLetter =
+    architectAddressLine3.trim().length > 0
+      ? ensureTrailingPeriodOnFinalAddressLine(architectAddressLine3)
+      : "";
+
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
   const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
   const normalizedClientEntityType = clientCompanyDesignation.toLowerCase();
@@ -693,14 +676,9 @@ export function mapToPdfFieldValues(
       ? `${architectName.trim()},`
       : undefined,
     "project_Name_Architect.": architectName || undefined,
-    project_Company_Name_Architect: (() => {
-      const company =
-        architectApplicant?.entity_name?.trim() ||
-        architectApplicant?.entityName?.trim() ||
-        consultantCompanyName?.trim() ||
-        "";
-      return company ? `${company},` : undefined;
-    })(),
+    project_Company_Name_Architect: architectCompanyForLetter
+      ? `${architectCompanyForLetter},`
+      : undefined,
     project_RegNo_Architect: consultantRegNo,
     /** Label for value from `coa_reg_no` (Council of Architecture registration). */
     project_Architect_COA_Reg_No_Label: "COA Reg. No.:",
@@ -1482,15 +1460,20 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     cssBackgroundShorthandMatch?.[2] ||
     "";
   const isArchitectTemplate = templateType === "Architect";
-  const pageMarginTop = isArchitectTemplate ? "72pt" : "95pt";
-  const pageMarginBottom = isArchitectTemplate ? "72pt" : "135pt";
-  const contentPaddingTop = isArchitectTemplate ? "22pt" : "40pt";
+  // Acceptance letters use the same clean HTML format as the Architect template,
+  // so apply the same compact page margins regardless of consultant type.
+  const isAcceptanceLetter =
+    metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body");
+  const useArchitectLayout = isArchitectTemplate || isAcceptanceLetter;
+  const pageMarginTop = useArchitectLayout ? "72pt" : "95pt";
+  const pageMarginBottom = useArchitectLayout ? "72pt" : "135pt";
+  const contentPaddingTop = useArchitectLayout ? "22pt" : "40pt";
   /* No extra inner gap under body copy; @page margin-bottom still clears letterhead/footer. */
   const contentPaddingBottom = "0";
-  const pageMarginLeft = isArchitectTemplate ? "36pt" : "56pt";
-  const pageMarginRight = isArchitectTemplate ? "30pt" : "42pt";
-  const contentPaddingLeft = isArchitectTemplate ? "36pt" : "56pt";
-  const contentPaddingRight = isArchitectTemplate ? "30pt" : "42pt";
+  const pageMarginLeft = useArchitectLayout ? "36pt" : "56pt";
+  const pageMarginRight = useArchitectLayout ? "30pt" : "42pt";
+  const contentPaddingLeft = useArchitectLayout ? "36pt" : "56pt";
+  const contentPaddingRight = useArchitectLayout ? "30pt" : "42pt";
 
   const acceptanceLetterBodyPagedCss =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body")
@@ -1854,7 +1837,9 @@ export async function generateApplicationPreviewHtml(
   source?: ApplicationPreviewSource
 ): Promise<string> {
   const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source);
-  if (templateType === "Plumber") {
+  // Plumber acceptance letters use the shared clean HTML format (eeb-tab-line marker),
+  // not the Word-exported two-page appointment layout — route via injectPaginatedStyles.
+  if (templateType === "Plumber" && !rawHtml.includes("eeb-tab-line")) {
     return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
   }
   return injectPaginatedStyles(rawHtml, templateType);
@@ -1882,9 +1867,8 @@ export async function fetchApplicationPreviewHtmlRaw(
       fields: formValues,
       ...(source?.projectId ? { projectId: source.projectId } : {}),
       ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
-      ...(templateType === "Architect" &&
-      source?.architectHtmlVariant === "acceptance"
-        ? { architectHtmlVariant: "acceptance" as const }
+      ...((source?.letterVariant === "acceptance" || source?.architectHtmlVariant === "acceptance")
+        ? { letterVariant: "acceptance" as const }
         : {}),
     }),
   });
