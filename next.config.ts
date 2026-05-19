@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
 	// Note: moved from experimental.outputFileTracingIncludes (Next.js 15) to top-level (Next.js 16).
 	outputFileTracingIncludes: {
 		"/api/application-preview-pdf": ["./node_modules/@sparticuz/chromium/**"],
+		"/api/application-preview-html": ["./html/**"],
 	},
 	images: {
 		remotePatterns: [

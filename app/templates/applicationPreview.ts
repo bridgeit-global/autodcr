@@ -74,6 +74,7 @@ export type ApplicationPreviewSource = {
       proposedCtsNumber?: string[] | string;
       villageName?: string;
       roadName?: string;
+      majorUseOfPlot?: string;
     } | null;
     applicant_details?: {
       applicants?: Array<{
@@ -145,6 +146,18 @@ function normalizeWardPrefix(ward?: string): string {
   const s = (ward || "").trim().toUpperCase();
   if (!s) return "";
   return s.charAt(0);
+}
+
+/** Pincode for EEBP acceptance “Mumbai - …” line (project info or BP address line 3). */
+function resolveAcceptanceEebpPincode(
+  projectPincode?: string,
+  buildingProposalLine3?: string
+): string {
+  const fromProject = (projectPincode || "").trim();
+  if (fromProject) return fromProject;
+  const line3 = (buildingProposalLine3 || "").trim();
+  const match = line3.match(/Mumbai\s*-\s*([\d][\d\s]{4,})/i);
+  return match ? match[1].replace(/\s+/g, " ").trim() : "";
 }
 
 function resolveBuildingProposalAddress(
@@ -643,6 +656,12 @@ export function mapToPdfFieldValues(
     "project_Ward.": wardForProjectToken || undefined,
     project_Planning_Authority: planningAuthority,
     project_Proposal_Number: proposalNumber || undefined,
+    project_Project_Title:
+      source?.projectData?.title?.trim() ||
+      fields.FirmName?.trim() ||
+      undefined,
+    project_Type_of_Development:
+      source?.projectData?.save_plot_details?.majorUseOfPlot?.trim() || undefined,
 
     // Client signature block (common)
     project_Client_Company_Name: clientCompanyName,
@@ -657,12 +676,20 @@ export function mapToPdfFieldValues(
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
     project_BuildingProposal_OfficerDesignation: officerDesignationDisplay,
     project_BuildingProposal_ZoneSuffix: officerZoneSuffix,
+    project_BuildingProposal_OfficerLine: [officerDesignationDisplay, officerZoneSuffix]
+      .filter((part) => part.trim().length > 0)
+      .join(" "),
     project_addressline1_BuildingProposal: buildingProposalAddress?.line1 || "",
     project_addressline2_BuildingProposal: buildingProposalAddress?.line2 || "",
     project_addressline3_BuildingProposal: buildingProposalAddress?.line3 || "",
     "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
     "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
     "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
+    project_Acceptance_EEBP_Pincode:
+      resolveAcceptanceEebpPincode(
+        source?.projectData?.project_info?.pincode,
+        buildingProposalAddress?.line3
+      ) || undefined,
 
     // Generic consultant tokens for all application types.
     // Keep this before template-specific blocks so specific mappings can override.
@@ -732,6 +759,7 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_BuildingProposal_BaseDesignation: "Building proposal — base designation",
   project_BuildingProposal_OfficerDesignation: "Building proposal — officer designation",
   project_BuildingProposal_ZoneSuffix: "Building proposal — zone suffix",
+  project_BuildingProposal_OfficerLine: "Building proposal — officer line",
   project_addressline1_BuildingProposal: "Building proposal — address line 1",
   project_addressline2_BuildingProposal: "Building proposal — address line 2",
   project_addressline3_BuildingProposal: "Building proposal — address line 3",
@@ -1052,7 +1080,6 @@ type RasterPdfMetrics = {
   jpegQuality: number;
   imageCompression: "MEDIUM" | "FAST";
   windowWidthPx: number;
-  plumberCcBreakPx: number | null;
 };
 
 function computeRasterPdfMetrics(
@@ -1072,17 +1099,7 @@ function computeRasterPdfMetrics(
     1,
     Math.ceil(Math.max(captureRoot.scrollWidth, captureRoot.getBoundingClientRect().width))
   );
-  let plumberCcBreakPx: number | null = null;
-  if (templateType === "Plumber") {
-    const ccAnchor = captureRoot.querySelector(".cc-start") as HTMLElement | null;
-    if (ccAnchor) {
-      const hostRect = captureRoot.getBoundingClientRect();
-      const anchorRect = ccAnchor.getBoundingClientRect();
-      const offset = anchorRect.top - hostRect.top;
-      plumberCcBreakPx = offset > 0 ? offset : null;
-    }
-  }
-  return { captureScale, jpegQuality, imageCompression, windowWidthPx, plumberCcBreakPx };
+  return { captureScale, jpegQuality, imageCompression, windowWidthPx };
 }
 
 async function composePdfFromRasterCanvas(
@@ -1094,11 +1111,9 @@ async function composePdfFromRasterCanvas(
   const captureScale = metrics.captureScale;
   const jpegQuality = metrics.jpegQuality;
   const imageCompression = metrics.imageCompression;
-  const plumberCcBreakPx = metrics.plumberCcBreakPx;
-
   const pdf = new JsPdfCtor({ unit: "pt", format: "a4", orientation: "portrait" });
-  const marginTopPt = templateType === "Plumber" ? 60 : PDF_MARGIN_TOP_PT;
-  const marginBottomPt = templateType === "Plumber" ? 90 : PDF_MARGIN_BOTTOM_PT;
+  const marginTopPt = PDF_MARGIN_TOP_PT;
+  const marginBottomPt = PDF_MARGIN_BOTTOM_PT;
   const contentWidthPt = PDF_CONTENT_WIDTH_PT;
   const contentHeightPt = A4_PAGE_HEIGHT_PT - marginTopPt - marginBottomPt;
 
@@ -1116,24 +1131,8 @@ async function composePdfFromRasterCanvas(
 
   let consumed = 0;
   let pageIndex = 0;
-  const forcedBreakCanvasPx =
-    plumberCcBreakPx != null ? Math.floor(plumberCcBreakPx * captureScale) : null;
-  let plumberForcedBreakApplied = false;
   while (consumed < canvas.height) {
-    let sliceHeightPx = Math.min(pageContentCanvasHeightPx, canvas.height - consumed);
-    if (
-      templateType === "Plumber" &&
-      !plumberForcedBreakApplied &&
-      forcedBreakCanvasPx != null &&
-      forcedBreakCanvasPx > consumed &&
-      forcedBreakCanvasPx < canvas.height
-    ) {
-      const untilForcedBreak = forcedBreakCanvasPx - consumed;
-      if (untilForcedBreak > 0) {
-        sliceHeightPx = Math.min(sliceHeightPx, untilForcedBreak);
-        plumberForcedBreakApplied = true;
-      }
-    }
+    const sliceHeightPx = Math.min(pageContentCanvasHeightPx, canvas.height - consumed);
     const sliceCanvas = document.createElement("canvas");
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = sliceHeightPx;
@@ -1464,7 +1463,12 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
   // so apply the same compact page margins regardless of consultant type.
   const isAcceptanceLetter =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body");
-  const useArchitectLayout = isArchitectTemplate || isAcceptanceLetter;
+  const isAuthorityAppointmentLetter =
+    metaHtml.includes("letter-header") &&
+    metaHtml.includes("subject-reference-table") &&
+    !isAcceptanceLetter;
+  const useArchitectLayout =
+    isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
   const pageMarginTop = useArchitectLayout ? "72pt" : "95pt";
   const pageMarginBottom = useArchitectLayout ? "72pt" : "135pt";
   const contentPaddingTop = useArchitectLayout ? "22pt" : "40pt";
@@ -1497,6 +1501,33 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     box-sizing: border-box !important;
   }`
       : "";
+
+  const authorityAppointmentPagedCss = isAuthorityAppointmentLetter
+    ? `
+  .pagedjs_page_content .subject-reference-table .sr-value {
+    font-weight: 400 !important;
+    text-align: left !important;
+    text-indent: 0 !important;
+    padding-left: 0 !important;
+  }
+  .pagedjs_page_content .subject-reference-table .sr-value .value-bold {
+    font-weight: 700 !important;
+  }
+  .pagedjs_page_content .subject-reference-table .sr-label {
+    font-weight: 400 !important;
+  }
+  .pagedjs_page_content .label-value-table .field-label,
+  .pagedjs_page_content .label-value-table .field-colon {
+    font-weight: 400 !important;
+  }
+  .pagedjs_page_content .label-value-table .field-value .value-bold {
+    font-weight: 700 !important;
+  }
+  .pagedjs_page_content .to-content p,
+  .pagedjs_page_content .cc-content p {
+    font-weight: 700 !important;
+  }`
+    : "";
 
   const head = `
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1667,6 +1698,7 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     .pagedjs_page { box-shadow: none; margin: 0; }
   }
   ${acceptanceLetterBodyPagedCss}
+  ${authorityAppointmentPagedCss}
 </style>
 ${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
 <script src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></script>`;
@@ -1837,9 +1869,12 @@ export async function generateApplicationPreviewHtml(
   source?: ApplicationPreviewSource
 ): Promise<string> {
   const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source);
-  // Plumber acceptance letters use the shared clean HTML format (eeb-tab-line marker),
-  // not the Word-exported two-page appointment layout — route via injectPaginatedStyles.
-  if (templateType === "Plumber" && !rawHtml.includes("eeb-tab-line")) {
+  // Legacy Word-export plumber layout (cc-start); clean templates use letter-header + injectPaginatedStyles.
+  if (
+    templateType === "Plumber" &&
+    !rawHtml.includes("eeb-tab-line") &&
+    !rawHtml.includes("letter-header")
+  ) {
     return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
   }
   return injectPaginatedStyles(rawHtml, templateType);
@@ -1929,6 +1964,45 @@ export async function generateApplicationPreviewPdf(
  * a live iframe’s `documentElement.outerHTML` after Paged.js has run: the DOM then contains
  * both the pre-layout source and `.pagedjs_pages`, and Chromium prints overlapping duplicate text.
  */
+function ensurePreviewSignatureFont(parsed: Document): void {
+  const fontLinkId = "preview-owner-signature-font-link";
+  if (parsed.getElementById(fontLinkId)) return;
+  const link = parsed.createElement("link");
+  link.id = fontLinkId;
+  link.rel = "stylesheet";
+  link.href = "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
+  parsed.head.appendChild(link);
+}
+
+function buildMockSignatureWrap(
+  parsed: Document,
+  wrapId: string,
+  label: string,
+  rotateDeg: string
+): HTMLDivElement {
+  const wrap = parsed.createElement("div");
+  wrap.id = wrapId;
+  wrap.setAttribute("style", "margin-bottom:10px;padding-bottom:2px;display:inline-block;");
+  wrap.innerHTML = `<span style="
+          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
+          font-size:clamp(28px,4.2vw,36px);
+          font-weight:400;
+          line-height:1.15;
+          color:#0f172a;
+          letter-spacing:0.02em;
+          display:inline-block;
+          transform:rotate(${rotateDeg});
+          text-shadow:0 1px 0 rgba(255,255,255,0.6);
+        ">${label}</span>`;
+  return wrap;
+}
+
+/** Label shown in mock consultant/architect signature on acceptance letters. */
+export function mockSecondSignerLabel(templateType?: TemplateType): string {
+  if (!templateType || templateType === "Architect") return "Architect";
+  return templateType;
+}
+
 export function injectMockOwnerSignatureIntoPreviewHtml(
   html: string,
   _templateType?: TemplateType
@@ -1937,39 +2011,33 @@ export function injectMockOwnerSignatureIntoPreviewHtml(
     return html;
   }
   const parsed = new DOMParser().parseFromString(html, "text/html");
+  ensurePreviewSignatureFont(parsed);
+
+  const ownerSignatureBlock = parsed.querySelector(".owner-signature");
+  if (ownerSignatureBlock && !ownerSignatureBlock.querySelector("#preview-dummy-owner-sign")) {
+    const wrap = buildMockSignatureWrap(parsed, "preview-dummy-owner-sign", "Owner", "-2deg");
+    wrap.style.display = "block";
+    wrap.style.textAlign = "right";
+    wrap.style.alignSelf = "flex-end";
+    const details = ownerSignatureBlock.querySelector(".owner-signature-details");
+    if (details instanceof HTMLElement) {
+      details.style.width = "auto";
+      details.style.textAlign = "right";
+    }
+    if (details) {
+      ownerSignatureBlock.insertBefore(wrap, details);
+    } else {
+      ownerSignatureBlock.insertBefore(wrap, ownerSignatureBlock.firstChild);
+    }
+    return parsed.documentElement.outerHTML;
+  }
+
   const firstCell = parsed.querySelector(".signature-table tr td");
   const signatureLine = firstCell?.querySelector(".signature-line");
   if (!firstCell || !signatureLine) return html;
   if (firstCell.querySelector("#preview-dummy-owner-sign")) return html;
 
-  const fontLinkId = "preview-owner-signature-font-link";
-  if (!parsed.getElementById(fontLinkId)) {
-    const link = parsed.createElement("link");
-    link.id = fontLinkId;
-    link.rel = "stylesheet";
-    link.href = "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
-    parsed.head.appendChild(link);
-  }
-
-  const wrap = parsed.createElement("div");
-  wrap.id = "preview-dummy-owner-sign";
-  wrap.setAttribute(
-    "style",
-    "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
-  );
-  wrap.innerHTML = `
-        <span style="
-          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
-          font-size:clamp(28px,4.2vw,36px);
-          font-weight:400;
-          line-height:1.15;
-          color:#0f172a;
-          letter-spacing:0.02em;
-          display:inline-block;
-          transform:rotate(-2deg);
-          text-shadow:0 1px 0 rgba(255,255,255,0.6);
-        ">Owner</span>
-      `;
+  const wrap = buildMockSignatureWrap(parsed, "preview-dummy-owner-sign", "Owner", "-2deg");
   firstCell.insertBefore(wrap, signatureLine);
   (signatureLine as HTMLElement).style.marginTop = "4px";
   return parsed.documentElement.outerHTML;
@@ -1979,53 +2047,45 @@ export function injectMockOwnerSignatureIntoPreviewHtml(
  * Mock “Architect” signature in the **second** column of `.signature-table` (Architect appointment HTML).
  * Call after {@link injectMockOwnerSignatureIntoPreviewHtml} when persisting the architect signing step.
  */
-export function injectMockArchitectSignatureIntoPreviewHtml(
+export function injectMockConsultantSignatureIntoPreviewHtml(
   html: string,
   templateType?: TemplateType
 ): string {
-  if (templateType && templateType !== "Architect") return html;
   if (typeof window === "undefined" || typeof DOMParser === "undefined") {
     return html;
   }
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const cells = parsed.querySelectorAll(".signature-table tr td");
   if (cells.length < 2) return html;
-  const architectCell = cells[1];
-  const signatureLine = architectCell?.querySelector(".signature-line");
-  if (!architectCell || !signatureLine) return html;
-  if (architectCell.querySelector("#preview-dummy-architect-sign")) return html;
-
-  const fontLinkId = "preview-owner-signature-font-link";
-  if (!parsed.getElementById(fontLinkId)) {
-    const link = parsed.createElement("link");
-    link.id = fontLinkId;
-    link.rel = "stylesheet";
-    link.href = "https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap";
-    parsed.head.appendChild(link);
+  const consultantCell = cells[1];
+  const signatureLine = consultantCell?.querySelector(".signature-line");
+  if (!consultantCell || !signatureLine) return html;
+  if (
+    consultantCell.querySelector("#preview-dummy-consultant-sign") ||
+    consultantCell.querySelector("#preview-dummy-architect-sign")
+  ) {
+    return html;
   }
 
-  const wrap = parsed.createElement("div");
-  wrap.id = "preview-dummy-architect-sign";
-  wrap.setAttribute(
-    "style",
-    "margin-bottom:10px;padding-bottom:2px;display:inline-block;"
+  ensurePreviewSignatureFont(parsed);
+  const label = mockSecondSignerLabel(templateType);
+  const wrap = buildMockSignatureWrap(
+    parsed,
+    "preview-dummy-consultant-sign",
+    label,
+    "1.5deg"
   );
-  wrap.innerHTML = `
-        <span style="
-          font-family:'Great Vibes','Segoe Script','Brush Script MT',cursive;
-          font-size:clamp(28px,4.2vw,36px);
-          font-weight:400;
-          line-height:1.15;
-          color:#0f172a;
-          letter-spacing:0.02em;
-          display:inline-block;
-          transform:rotate(1.5deg);
-          text-shadow:0 1px 0 rgba(255,255,255,0.6);
-        ">Architect</span>
-      `;
-  architectCell.insertBefore(wrap, signatureLine);
+  consultantCell.insertBefore(wrap, signatureLine);
   (signatureLine as HTMLElement).style.marginTop = "4px";
   return parsed.documentElement.outerHTML;
+}
+
+/** @deprecated Use {@link injectMockConsultantSignatureIntoPreviewHtml} */
+export function injectMockArchitectSignatureIntoPreviewHtml(
+  html: string,
+  templateType?: TemplateType
+): string {
+  return injectMockConsultantSignatureIntoPreviewHtml(html, templateType);
 }
 
 /**

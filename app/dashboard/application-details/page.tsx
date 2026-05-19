@@ -15,8 +15,10 @@ import {
   collectOwnerSignerUserIds,
   isAnySameUserId,
   resolveAppointedArchitectUserId,
+  resolveAppointedSecondSignerUserId,
   sameUserId,
 } from "@/app/utils/applicationSigning";
+import { isCleanAppointmentLetterType } from "@/app/utils/cleanAppointmentLetterTypes";
 import {
   fetchApplicantDetailsFromTable,
   mergeApplicantDetailsPreferTable,
@@ -33,8 +35,9 @@ import {
   generateApplicationPreviewHtml,
   generateApplicationPreviewPdf,
   generateApplicationPreviewPdfFromHtml,
-  injectMockArchitectSignatureIntoPreviewHtml,
+  injectMockConsultantSignatureIntoPreviewHtml,
   injectMockOwnerSignatureIntoPreviewHtml,
+  mockSecondSignerLabel,
   mapApplicationPreviewFields,
   mapToPdfFieldValues,
   mapSelectedApplicationToTemplate,
@@ -121,14 +124,16 @@ function computeMockSignAvailability(args: {
   }
 
   const ownerSigned = Boolean(ownerSignedAt?.trim());
-  const architectSigned = Boolean(architectSignedAt?.trim());
+  const secondSigned = Boolean(architectSignedAt?.trim());
   const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
   const isOwner = isAnySameUserId(uid, ownerSignerIds);
-  const appointedArchitectId = resolveAppointedArchitectUserId(projectData);
-  const isArchitect = sameUserId(uid, appointedArchitectId);
+  const appointedSecondId = resolveAppointedSecondSignerUserId(projectData, templateType);
+  const isSecondSigner = sameUserId(uid, appointedSecondId);
+  const secondRoleLabel =
+    templateType === "Architect" ? "architect" : mockSecondSignerLabel(templateType).toLowerCase();
 
-  if (templateType === "Architect") {
-    if (ownerSigned && architectSigned) {
+  if (isDualLetterType(templateType)) {
+    if (ownerSigned && secondSigned) {
       return {
         actionAvailable: false,
         idleReason: "Signing is already complete.",
@@ -145,20 +150,19 @@ function computeMockSignAvailability(args: {
       return {
         actionAvailable: false,
         idleReason: "Waiting for the project owner to sign first.",
-        subtitle: "Only the owner signs first on the Architect appointment.",
+        subtitle: `Only the owner signs first on the ${templateType} appointment.`,
       };
     }
-    if (isArchitect) {
+    if (isSecondSigner) {
       return {
         actionAvailable: true,
-        subtitle:
-          "Adds your signature beside the owner on appointment and acceptance PDFs.",
+        subtitle: `Adds your signature on the acceptance letter (appointment is owner-signed only).`,
       };
     }
     return {
       actionAvailable: false,
-      idleReason: "Waiting for the appointed architect to sign.",
-      subtitle: "Your owner signature is saved. The architect completes the next step.",
+      idleReason: `Waiting for the appointed ${secondRoleLabel} to sign.`,
+      subtitle: `Your owner signature is saved. The ${secondRoleLabel} completes the acceptance letter.`,
     };
   }
 
@@ -832,7 +836,7 @@ function storedPdfUrlWithCacheBuster(
 async function buildConsultantSignedPdfBlob(
   previewBase: BuildApplicationPreviewContextInput,
   variant: "appointment" | "acceptance",
-  signatures: { owner: boolean; architect: boolean }
+  signatures: { owner: boolean; consultant: boolean }
 ): Promise<Blob> {
   const built = await buildApplicationPreviewContext({
     ...previewBase,
@@ -846,8 +850,12 @@ async function buildConsultantSignedPdfBlob(
   if (signatures.owner) {
     html = injectMockOwnerSignatureIntoPreviewHtml(html, built.templateType);
   }
-  if (signatures.architect) {
-    html = injectMockArchitectSignatureIntoPreviewHtml(html, built.templateType);
+  if (signatures.consultant) {
+    const injectSecondColumn =
+      variant === "acceptance" || built.templateType === "Architect";
+    if (injectSecondColumn) {
+      html = injectMockConsultantSignatureIntoPreviewHtml(html, built.templateType);
+    }
   }
   return generateApplicationPreviewPdfFromHtml(html, built.templateType);
 }
@@ -856,7 +864,7 @@ async function buildConsultantSignedPdfBlob(
 async function persistDualLetterPdfs(
   previewBase: BuildApplicationPreviewContextInput,
   templateType: TemplateType,
-  signatures: { owner: boolean; architect: boolean },
+  signatures: { owner: boolean; consultant: boolean },
   upload: (pdfBlob: Blob, applicationUrlsKey: string) => Promise<{ publicUrl?: string }>
 ): Promise<{ appointmentUrl: string | null; acceptanceUrl: string | null }> {
   const acceptanceKey = ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`;
@@ -1056,11 +1064,11 @@ export default function ApplicationDetailsPage() {
   );
 
   const mockSignMode = useMemo((): "owner_only" | "owner_and_architect" => {
-    if (previewTemplateType !== "Architect") return "owner_only";
+    if (!isDualLetterType(previewTemplateType)) return "owner_only";
     const ownerSigned = Boolean(ownerSignedAt?.trim());
-    const architectSigned = Boolean(architectSignedAt?.trim());
-    const appointedId = resolveAppointedArchitectUserId(projectData);
-    if (ownerSigned && !architectSigned && authUserId && sameUserId(authUserId, appointedId)) {
+    const secondSigned = Boolean(architectSignedAt?.trim());
+    const appointedId = resolveAppointedSecondSignerUserId(projectData, previewTemplateType);
+    if (ownerSigned && !secondSigned && authUserId && sameUserId(authUserId, appointedId)) {
       return "owner_and_architect";
     }
     return "owner_only";
@@ -1071,6 +1079,11 @@ export default function ApplicationDetailsPage() {
     projectData,
     authUserId,
   ]);
+
+  const mockSecondSignLabel = useMemo(
+    () => mockSecondSignerLabel(previewTemplateType),
+    [previewTemplateType]
+  );
 
   /** In process / Approved: switching letter variant shows the matching stored PDF. */
   useEffect(() => {
@@ -1271,11 +1284,12 @@ export default function ApplicationDetailsPage() {
       }
 
       // In process + approved: load the PDF from Supabase (projects.application_urls).
-      // Same URL is overwritten on each save/sign:
-      //   1) Draft save → in_process: PDF without owner sign
-      //   2) Owner signs: PDF with owner sign (still in_process)
-      //   3) Architect signs → approved: PDF with both signatures
+      // Clean appointment letters always use live HTML so layout matches repo templates
+      // (stored PDFs may still be the old "Sub:" Word export).
+      const preferLiveHtmlPreview = isCleanAppointmentLetterType(templateType);
+
       if (
+        !preferLiveHtmlPreview &&
         (workflowStageForPreview === "in_process" ||
           workflowStageForPreview === "approved_verified") &&
         projectId
@@ -1326,12 +1340,25 @@ export default function ApplicationDetailsPage() {
         }
       }
 
-      // Draft, or in_process before any PDF was saved: unsigned HTML preview.
+      // Draft, in_process (no stored PDF / clean templates), or approved with live HTML.
       let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
         previewSource
       );
+
+      const resolvedPreviewVariant = isDualLetterType(templateType)
+        ? letterVariant
+        : "appointment";
+      if (ownerSignedAt?.trim()) {
+        html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
+      }
+      if (
+        architectSignedAt?.trim() &&
+        (resolvedPreviewVariant === "acceptance" || templateType === "Architect")
+      ) {
+        html = injectMockConsultantSignatureIntoPreviewHtml(html, templateType);
+      }
 
       if (!html || !html.trim()) {
         setPreviewError("Preview HTML was empty. Check that the template file exists under html/.");
@@ -1418,9 +1445,10 @@ export default function ApplicationDetailsPage() {
 
       let projectRowUserId: string | null =
         typeof projectData?.user_id === "string" ? projectData.user_id : null;
-      let appointedArchitectId = resolveAppointedArchitectUserId(projectData);
+      const hasDualLetters = isDualLetterType(ctx.templateType);
+      let appointedSecondId = resolveAppointedSecondSignerUserId(projectData, ctx.templateType);
 
-      if (!projectRowUserId || (ctx.templateType === "Architect" && !appointedArchitectId)) {
+      if (!projectRowUserId || (hasDualLetters && !appointedSecondId)) {
         const { data: rpcProj } = await supabase.rpc("get_project_for_preview", {
           p_project_id: projectId,
         });
@@ -1428,7 +1456,7 @@ export default function ApplicationDetailsPage() {
           const rp = rpcProj as PreviewProjectData;
           if (!projectRowUserId && typeof rp.user_id === "string") projectRowUserId = rp.user_id;
           if (!projectData) setProjectData(rp);
-          appointedArchitectId = resolveAppointedArchitectUserId(rp) ?? appointedArchitectId;
+          appointedSecondId = resolveAppointedSecondSignerUserId(rp, ctx.templateType) ?? appointedSecondId;
         } else {
           const { data: projSignRow, error: projSignErr } = await supabase
             .from("projects")
@@ -1446,8 +1474,8 @@ export default function ApplicationDetailsPage() {
               architect_user_id: projSignRow.architect_user_id,
             } as PreviewProjectData);
           }
-          appointedArchitectId =
-            resolveAppointedArchitectUserId(projectData) ?? appointedArchitectId;
+          appointedSecondId =
+            resolveAppointedSecondSignerUserId(projectData, ctx.templateType) ?? appointedSecondId;
         }
       }
 
@@ -1464,33 +1492,41 @@ export default function ApplicationDetailsPage() {
       const architectSigned = Boolean(architectSignedAt);
       const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
 
-      const isArchitectLetter = ctx.templateType === "Architect";
-      const hasDualLetters = isDualLetterType(ctx.templateType);
       const uid = authUser.id;
+      const secondRoleLabel =
+        ctx.templateType === "Architect"
+          ? "architect"
+          : mockSecondSignerLabel(ctx.templateType).toLowerCase();
 
-      if (isArchitectLetter && architectSigned) {
+      if (hasDualLetters && architectSigned) {
         throw new Error("This application is already fully signed.");
       }
 
-      if (isArchitectLetter && !ownerSigned) {
-        if (sameUserId(uid, appointedArchitectId) && !isAnySameUserId(uid, ownerSignerIds)) {
+      if (hasDualLetters && !ownerSigned) {
+        if (sameUserId(uid, appointedSecondId) && !isAnySameUserId(uid, ownerSignerIds)) {
           throw new Error("The owner has not signed yet.");
         }
         if (!isAnySameUserId(uid, ownerSignerIds)) {
           throw new Error("Only the project owner can sign at this step.");
         }
-      } else if (isArchitectLetter && ownerSigned && !architectSigned) {
-        if (isAnySameUserId(uid, ownerSignerIds) && !sameUserId(uid, appointedArchitectId)) {
-          setSavePdfMessage("Your signature is already saved. The architect will complete the next step.");
+      } else if (hasDualLetters && ownerSigned && !architectSigned) {
+        if (isAnySameUserId(uid, ownerSignerIds) && !sameUserId(uid, appointedSecondId)) {
+          setSavePdfMessage(
+            `Your signature is already saved. The ${secondRoleLabel} will complete the acceptance letter.`
+          );
           return;
         }
-        if (!sameUserId(uid, appointedArchitectId)) {
-          throw new Error("Only the appointed architect can complete this signature step.");
+        if (!sameUserId(uid, appointedSecondId)) {
+          throw new Error(
+            `Only the appointed ${secondRoleLabel} can complete this signature step.`
+          );
         }
-        if (!appointedArchitectId?.trim()) {
-          throw new Error("This project has no appointed architect. Assign one before architect signing.");
+        if (!appointedSecondId?.trim()) {
+          throw new Error(
+            `This project has no appointed ${secondRoleLabel}. Add them on Applicant Details before signing.`
+          );
         }
-      } else if (!isArchitectLetter) {
+      } else if (!hasDualLetters) {
         if (!isAnySameUserId(uid, ownerSignerIds)) {
           throw new Error("Only the project owner can sign this application.");
         }
@@ -1543,14 +1579,17 @@ export default function ApplicationDetailsPage() {
       // When the same person is both project owner and the appointed architect,
       // sign both steps in one pass to save time.
       const canSignBoth =
-        isArchitectLetter &&
+        hasDualLetters &&
         !ownerSigned &&
-        Boolean(appointedArchitectId) &&
-        sameUserId(uid, appointedArchitectId) &&
+        Boolean(appointedSecondId) &&
+        sameUserId(uid, appointedSecondId) &&
         isAnySameUserId(uid, ownerSignerIds);
 
       let projectForPdf = projectData;
-      if (!projectForPdf?.applicant_details || (isArchitectLetter && !projectForPdf?.architect_user_id)) {
+      if (
+        !projectForPdf?.applicant_details ||
+        (hasDualLetters && ctx.templateType === "Architect" && !projectForPdf?.architect_user_id)
+      ) {
         const coreSelect =
           "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
         const { data: directData } = await supabase
@@ -1587,11 +1626,124 @@ export default function ApplicationDetailsPage() {
           ctx.templateType,
           {
             owner: true,
-            architect: (ownerSigned && !architectSigned) || canSignBoth,
+            consultant: (ownerSigned && !architectSigned) || canSignBoth,
           },
           uploadSignedPdf
         );
         publicUrl = appointmentUrl;
+
+        const nowIso = new Date().toISOString();
+
+        if (!ownerSigned) {
+          const signingPatch = canSignBoth
+            ? {
+                owner_signed_at: nowIso,
+                owner_signed_by: uid,
+                architect_signed_at: nowIso,
+                architect_signed_by: uid,
+                workflow_stage: "approved_verified",
+              }
+            : {
+                owner_signed_at: nowIso,
+                owner_signed_by: uid,
+                workflow_stage: "in_process",
+              };
+
+          const { ok, error: updErr } = await updateApplicationForSigning(
+            resolvedApplicationId,
+            uid,
+            signingPatch
+          );
+          if (updErr || !ok) {
+            console.error("Failed to record signature:", updErr);
+            throw new Error("PDF saved but signature could not be recorded (check permissions).");
+          }
+
+          if (canSignBoth) {
+            setApplicationWorkflowStage("approved_verified");
+            setOwnerSignedAt(nowIso);
+            setArchitectSignedAt(nowIso);
+          } else {
+            setApplicationWorkflowStage("in_process");
+            setOwnerSignedAt(nowIso);
+          }
+          setPdfSavedForCurrentPreview(true);
+          setSavePdfMessage(null);
+          if (previewUrl?.startsWith("blob:")) {
+            URL.revokeObjectURL(previewUrl);
+          }
+          if (publicUrl) {
+            setPreviewUrl(publicUrl);
+            setPreviewHtml(null);
+          }
+          setPreviewOpen(false);
+          const deptOwner =
+            typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
+          const dashboardUrlOwner =
+            deptOwner.length > 0
+              ? `/userdashboard?department=${encodeURIComponent(deptOwner)}`
+              : "/userdashboard";
+          setPendingDashboardUrl(dashboardUrlOwner);
+          if (canSignBoth) {
+            setSignedDocSuccessDialogOpen(true);
+          } else {
+            setSaveSuccessDialogOpen(true);
+          }
+          return;
+        }
+
+        if (ownerSigned && !architectSigned) {
+          const { ok, error: updErr } = await updateApplicationForSigning(resolvedApplicationId, uid, {
+            architect_signed_at: nowIso,
+            architect_signed_by: uid,
+            workflow_stage: "approved_verified",
+          });
+          if (updErr || !ok) {
+            console.error("Failed to record consultant signature / stage:", updErr);
+            throw new Error(
+              "Signed PDF was saved, but the application could not be moved to Approved or Verified (check permissions)."
+            );
+          }
+          setApplicationWorkflowStage("approved_verified");
+          setArchitectSignedAt(nowIso);
+          setPdfSavedForCurrentPreview(true);
+          setSavePdfMessage(null);
+          if (previewUrl?.startsWith("blob:")) {
+            URL.revokeObjectURL(previewUrl);
+          }
+          if (publicUrl) {
+            setPreviewUrl(publicUrl);
+            setPreviewHtml(null);
+          }
+          const dept =
+            typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
+          const dashboardUrl =
+            dept.length > 0
+              ? `/userdashboard?department=${encodeURIComponent(dept)}`
+              : "/userdashboard";
+          setPendingDashboardUrl(dashboardUrl);
+          setPreviewOpen(false);
+          setSignedDocSuccessDialogOpen(true);
+          if (!publicUrl && projectId) {
+            const { data: urlsRow } = await supabase
+              .from("projects")
+              .select("application_urls")
+              .eq("id", projectId)
+              .maybeSingle();
+            const raw = urlsRow?.application_urls;
+            const entry =
+              raw && typeof raw === "object" && !Array.isArray(raw)
+                ? (raw as Record<string, unknown>)[ctx.templateType]
+                : undefined;
+            const fallback =
+              typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
+            if (fallback) {
+              setPreviewUrl(fallback);
+              setPreviewHtml(null);
+            }
+          }
+          return;
+        }
       } else {
         const buildSignedBlob = async () => {
           const baseHtml = await generateApplicationPreviewHtml(
@@ -1607,119 +1759,11 @@ export default function ApplicationDetailsPage() {
         publicUrl = uploaded.publicUrl ?? null;
       }
 
+      if (hasDualLetters) {
+        return;
+      }
+
       const nowIso = new Date().toISOString();
-
-      if (isArchitectLetter && !ownerSigned) {
-        const signingPatch = canSignBoth
-          ? {
-              owner_signed_at: nowIso,
-              owner_signed_by: uid,
-              architect_signed_at: nowIso,
-              architect_signed_by: uid,
-              workflow_stage: "approved_verified",
-            }
-          : {
-              owner_signed_at: nowIso,
-              owner_signed_by: uid,
-              workflow_stage: "in_process",
-            };
-
-        const { ok, error: updErr } = await updateApplicationForSigning(
-          resolvedApplicationId,
-          uid,
-          signingPatch
-        );
-        if (updErr || !ok) {
-          console.error("Failed to record signature:", updErr);
-          throw new Error("PDF saved but signature could not be recorded (check permissions).");
-        }
-
-        if (canSignBoth) {
-          setApplicationWorkflowStage("approved_verified");
-          setOwnerSignedAt(nowIso);
-          setArchitectSignedAt(nowIso);
-        } else {
-          setApplicationWorkflowStage("in_process");
-          setOwnerSignedAt(nowIso);
-        }
-        setPdfSavedForCurrentPreview(true);
-        setSavePdfMessage(null);
-        if (previewUrl?.startsWith("blob:")) {
-          URL.revokeObjectURL(previewUrl);
-        }
-        if (publicUrl) {
-          setPreviewUrl(publicUrl);
-          setPreviewHtml(null);
-        }
-        setPreviewOpen(false);
-        const deptOwner =
-          typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
-        const dashboardUrlOwner =
-          deptOwner.length > 0
-            ? `/userdashboard?department=${encodeURIComponent(deptOwner)}`
-            : "/userdashboard";
-        setPendingDashboardUrl(dashboardUrlOwner);
-        if (canSignBoth) {
-          setSignedDocSuccessDialogOpen(true);
-        } else {
-          setSaveSuccessDialogOpen(true);
-        }
-        return;
-      }
-
-      if (isArchitectLetter && ownerSigned && !architectSigned) {
-        const { ok, error: updErr } = await updateApplicationForSigning(resolvedApplicationId, uid, {
-          architect_signed_at: nowIso,
-          architect_signed_by: uid,
-          workflow_stage: "approved_verified",
-        });
-        if (updErr || !ok) {
-          console.error("Failed to record architect signature / stage:", updErr);
-          throw new Error(
-            "Signed PDF was saved, but the application could not be moved to Approved or Verified (check permissions)."
-          );
-        }
-        setApplicationWorkflowStage("approved_verified");
-        setArchitectSignedAt(nowIso);
-        setPdfSavedForCurrentPreview(true);
-        setSavePdfMessage(null);
-        if (previewUrl?.startsWith("blob:")) {
-          URL.revokeObjectURL(previewUrl);
-        }
-        if (publicUrl) {
-          setPreviewUrl(publicUrl);
-          setPreviewHtml(null);
-        }
-        const dept =
-          typeof appSignRow.department === "string" ? appSignRow.department.trim() : "";
-        const dashboardUrl =
-          dept.length > 0
-            ? `/userdashboard?department=${encodeURIComponent(dept)}`
-            : "/userdashboard";
-        setPendingDashboardUrl(dashboardUrl);
-        setPreviewOpen(false);
-        setSignedDocSuccessDialogOpen(true);
-        if (!publicUrl && projectId) {
-          const { data: urlsRow } = await supabase
-            .from("projects")
-            .select("application_urls")
-            .eq("id", projectId)
-            .maybeSingle();
-          const raw = urlsRow?.application_urls;
-          const entry =
-            raw && typeof raw === "object" && !Array.isArray(raw)
-              ? (raw as Record<string, unknown>)[ctx.templateType]
-              : undefined;
-          const fallback =
-            typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
-          if (fallback) {
-            setPreviewUrl(fallback);
-            setPreviewHtml(null);
-          }
-        }
-        return;
-      }
-
       const { ok: signedOk, error: stageErr } = await updateApplicationForSigning(
         resolvedApplicationId,
         uid,
@@ -2256,6 +2300,7 @@ export default function ApplicationDetailsPage() {
         title={selectedApplication ? `${selectedApplication} Preview` : "Application Preview"}
         autoMockSignAfterOpen={autoMockSignAfterPreviewOpen}
         mockSignMode={mockSignMode}
+        mockSecondSignLabel={mockSecondSignLabel}
         onSave={projectId ? handleSaveApplicationPdf : undefined}
         isSaving={isSavingPdf}
         saveDisabled={!projectId || !previewReadyForSave}
