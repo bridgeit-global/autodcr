@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
+import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
+import path from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** PDF + Paged.js can exceed the default 10s on Vercel Hobby; Pro allows up to 300. */
+export const maxDuration = 60;
 
 type RequestBody = {
   html?: string;
@@ -19,9 +23,37 @@ const LOCAL_CHROME_PATHS = [
 
 const isLambdaLikeRuntime = Boolean(process.env.VERCEL || process.env.AWS_REGION);
 
+/** Where @sparticuz/chromium keeps chromium.br (must ship with the serverless bundle). */
+function resolveChromiumBinDir(): string {
+  const candidates = [
+    path.join(process.cwd(), "node_modules/@sparticuz/chromium/bin"),
+    path.join(process.cwd(), ".next/server/node_modules/@sparticuz/chromium/bin"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(path.join(dir, "chromium.br"))) return dir;
+  }
+  throw new Error(
+    `Chromium binaries not found (checked: ${candidates.join(", ")}). ` +
+      "Ensure next.config outputFileTracingIncludes bundles @sparticuz/chromium and redeploy."
+  );
+}
+
+/** One decompression at a time — parallel calls on a warm instance can cause spawn ETXTBSY. */
+let serverChromiumPathPromise: Promise<string> | null = null;
+
+async function resolveServerChromiumPath(): Promise<string> {
+  if (!serverChromiumPathPromise) {
+    serverChromiumPathPromise = (async () => {
+      chromium.setGraphicsMode = false;
+      return chromium.executablePath(resolveChromiumBinDir());
+    })();
+  }
+  return serverChromiumPathPromise;
+}
+
 async function pickExecutablePath(): Promise<string> {
   if (isLambdaLikeRuntime) {
-    return chromium.executablePath();
+    return resolveServerChromiumPath();
   }
 
   for (const candidate of LOCAL_CHROME_PATHS) {
@@ -33,7 +65,8 @@ async function pickExecutablePath(): Promise<string> {
     }
   }
 
-  return chromium.executablePath();
+  chromium.setGraphicsMode = false;
+  return chromium.executablePath(resolveChromiumBinDir());
 }
 
 function pickLaunchArgs(): string[] {
@@ -134,7 +167,16 @@ export async function POST(request: NextRequest) {
     browser = await puppeteer.launch({
       args: pickLaunchArgs(),
       executablePath,
-      headless: true,
+      headless: isLambdaLikeRuntime ? ("shell" as const) : true,
+      ...(isLambdaLikeRuntime
+        ? {
+            defaultViewport: {
+              width: 1240,
+              height: 1754,
+              deviceScaleFactor: 1,
+            },
+          }
+        : {}),
     });
     const page = await browser.newPage();
     await page.setDefaultNavigationTimeout(120_000);
