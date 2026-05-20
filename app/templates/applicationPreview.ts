@@ -3,7 +3,8 @@
 import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
 import {
   addressLinesFromApplicantRecord,
-  ensureTrailingPeriodOnAddressLine3,
+  formatAddressLinesForLetterDisplay,
+  stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
 import {
   templateConsultantApplicantKeywords,
@@ -381,11 +382,7 @@ export function mapToPdfFieldValues(
     }
     return "";
   };
-  const sanitizeAddressLine = (value: string): string =>
-    value.replace(/[,\s]+$/g, "").trim();
-
-  /** Ends architect address line 3 with a period when DB omits it. */
-  const ensureTrailingPeriodOnFinalAddressLine = ensureTrailingPeriodOnAddressLine3;
+  const sanitizeAddressLine = stripTrailingAddressPunctuation;
 
   const applicants = source?.projectData?.applicant_details?.applicants || [];
   const ownerApplicant = applicants.find(
@@ -414,7 +411,7 @@ export function mapToPdfFieldValues(
   // Address resolution priority (per consultant):
   //   1. The applicant row in applicant_details (address_line1/2/3 or residentialAddress).
   //   2. source.consultantAddressLine* (auth.users user_metadata).
-  const consultantAddressLine1 = sanitizeAddressLine(
+  const consultantRawAddressLine1 = sanitizeAddressLine(
     pickText(
       primaryConsultantApplicant?.address_line1,
       (primaryConsultantApplicant as { addressLine1?: string })?.addressLine1,
@@ -422,7 +419,7 @@ export function mapToPdfFieldValues(
       source?.consultantAddressLine1
     )
   );
-  const consultantAddressLine2 = sanitizeAddressLine(
+  const consultantRawAddressLine2 = sanitizeAddressLine(
     pickText(
       primaryConsultantApplicant?.address_line2,
       (primaryConsultantApplicant as { addressLine2?: string })?.addressLine2,
@@ -430,7 +427,7 @@ export function mapToPdfFieldValues(
       source?.consultantAddressLine2
     )
   );
-  const consultantAddressLine3 = sanitizeAddressLine(
+  const consultantRawAddressLine3 = sanitizeAddressLine(
     pickText(
       primaryConsultantApplicant?.address_line3,
       (primaryConsultantApplicant as { addressLine3?: string })?.addressLine3,
@@ -438,6 +435,14 @@ export function mapToPdfFieldValues(
       source?.consultantAddressLine3
     )
   );
+  const consultantAddressFormatted = formatAddressLinesForLetterDisplay(
+    consultantRawAddressLine1,
+    consultantRawAddressLine2,
+    consultantRawAddressLine3
+  );
+  const consultantAddressLine1 = consultantAddressFormatted.line1;
+  const consultantAddressLine2 = consultantAddressFormatted.line2;
+  const consultantAddressLine3 = consultantAddressFormatted.line3;
   const architectName =
     architectApplicant?.name?.trim() || (templateType === "Architect" ? consultantName : "");
   // For the architect block (used by every template either as primary or CC),
@@ -450,13 +455,13 @@ export function mapToPdfFieldValues(
     Boolean(architectApplicant) &&
     architectApplicant === primaryConsultantApplicant;
   const architectFallbackLine1 = isArchitectAlsoLoggedInConsultant
-    ? consultantAddressLine1
+    ? consultantRawAddressLine1
     : "";
   const architectFallbackLine2 = isArchitectAlsoLoggedInConsultant
-    ? consultantAddressLine2
+    ? consultantRawAddressLine2
     : "";
   const architectFallbackLine3 = isArchitectAlsoLoggedInConsultant
-    ? consultantAddressLine3
+    ? consultantRawAddressLine3
     : "";
   const isArchitectAppointmentLetter = templateType === "Architect";
   const proposalNumber = source?.projectData?.project_info?.proposalNo?.trim();
@@ -513,57 +518,73 @@ export function mapToPdfFieldValues(
     fields.ApplicantName?.trim() ||
     source?.projectData?.title?.trim() ||
     "-";
-  const clientAddressLine1 = sanitizeAddressLine(
-    pickText(
-      ownerApplicant?.address_line1,
-      ownerApplicant?.addressLine1,
-      source?.clientAddressLine1
+  const clientAddressFormatted = formatAddressLinesForLetterDisplay(
+    sanitizeAddressLine(
+      pickText(
+        ownerApplicant?.address_line1,
+        ownerApplicant?.addressLine1,
+        source?.clientAddressLine1
+      )
+    ),
+    sanitizeAddressLine(
+      pickText(
+        ownerApplicant?.address_line2,
+        ownerApplicant?.addressLine2,
+        source?.clientAddressLine2
+      )
+    ),
+    sanitizeAddressLine(
+      pickText(
+        ownerApplicant?.address_line3,
+        ownerApplicant?.addressLine3,
+        source?.clientAddressLine3
+      )
     )
   );
-  const clientAddressLine2 = sanitizeAddressLine(
-    pickText(
-      ownerApplicant?.address_line2,
-      ownerApplicant?.addressLine2,
-      source?.clientAddressLine2
-    )
-  );
-  const clientAddressLine3 = sanitizeAddressLine(
-    pickText(
-      ownerApplicant?.address_line3,
-      ownerApplicant?.addressLine3,
-      source?.clientAddressLine3
-    )
-  );
+  const clientAddressLine1 = clientAddressFormatted.line1;
+  const clientAddressLine2 = clientAddressFormatted.line2;
+  const clientAddressLine3 = clientAddressFormatted.line3;
   // Owner LLP / company name: auth.users raw_user_meta_data.entity_name (via previewSource), not applicants.
   const clientCompanyName = source?.clientCompanyName?.trim() || "";
 
   const architectFromApplicant = addressLinesFromApplicantRecord(
     architectApplicant as Record<string, unknown> | undefined
   );
-  let architectAddressLine1 = pickText(
-    architectApplicant?.address_line1,
-    (architectApplicant as any)?.addressLine1,
-    architectFromApplicant.line1,
-    architectFallbackLine1,
-    isArchitectAppointmentLetter ? consultantAddressLine1 : "",
-    isArchitectAppointmentLetter ? source?.consultantAddressLine1 : ""
+  const architectAddressFormatted = formatAddressLinesForLetterDisplay(
+    sanitizeAddressLine(
+      pickText(
+        architectApplicant?.address_line1,
+        (architectApplicant as { addressLine1?: string })?.addressLine1,
+        architectFromApplicant.line1,
+        architectFallbackLine1,
+        isArchitectAppointmentLetter ? consultantRawAddressLine1 : "",
+        isArchitectAppointmentLetter ? source?.consultantAddressLine1 : ""
+      )
+    ),
+    sanitizeAddressLine(
+      pickText(
+        architectApplicant?.address_line2,
+        (architectApplicant as { addressLine2?: string })?.addressLine2,
+        architectFromApplicant.line2,
+        architectFallbackLine2,
+        isArchitectAppointmentLetter ? consultantRawAddressLine2 : "",
+        isArchitectAppointmentLetter ? source?.consultantAddressLine2 : ""
+      )
+    ),
+    sanitizeAddressLine(
+      pickText(
+        architectApplicant?.address_line3,
+        (architectApplicant as { addressLine3?: string })?.addressLine3,
+        architectFromApplicant.line3,
+        architectFallbackLine3,
+        isArchitectAppointmentLetter ? consultantRawAddressLine3 : "",
+        isArchitectAppointmentLetter ? source?.consultantAddressLine3 : ""
+      )
+    )
   );
-  let architectAddressLine2 = pickText(
-    architectApplicant?.address_line2,
-    (architectApplicant as any)?.addressLine2,
-    architectFromApplicant.line2,
-    architectFallbackLine2,
-    isArchitectAppointmentLetter ? consultantAddressLine2 : "",
-    isArchitectAppointmentLetter ? source?.consultantAddressLine2 : ""
-  );
-  let architectAddressLine3 = pickText(
-    architectApplicant?.address_line3,
-    (architectApplicant as any)?.addressLine3,
-    architectFromApplicant.line3,
-    architectFallbackLine3,
-    isArchitectAppointmentLetter ? consultantAddressLine3 : "",
-    isArchitectAppointmentLetter ? source?.consultantAddressLine3 : ""
-  );
+  const architectAddressLine1 = architectAddressFormatted.line1;
+  const architectAddressLine2 = architectAddressFormatted.line2;
+  const architectAddressLine3 = architectAddressFormatted.line3;
   // Architect appointment "To," company = owner's entity_name from auth metadata (same as client company).
   let architectCompanyForLetter = isArchitectAppointmentLetter
     ? pickText(source?.clientCompanyName)
@@ -572,11 +593,6 @@ export function mapToPdfFieldValues(
         architectApplicant?.entityName,
         architectFromApplicant.company
       );
-
-  const architectAddressLine3ForLetter =
-    architectAddressLine3.trim().length > 0
-      ? ensureTrailingPeriodOnFinalAddressLine(architectAddressLine3)
-      : "";
 
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
   const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
@@ -591,10 +607,25 @@ export function mapToPdfFieldValues(
           : normalizedClientEntityType === "partnership firm"
             ? "Partner"
             : clientCompanyDesignation;
-  const buildingProposalAddress = resolveBuildingProposalAddress(
+  const buildingProposalAddressRaw = resolveBuildingProposalAddress(
     regionForProjectToken,
     wardForProjectToken
   );
+  const buildingProposalAddressFormatted = buildingProposalAddressRaw
+    ? formatAddressLinesForLetterDisplay(
+        buildingProposalAddressRaw.line1,
+        buildingProposalAddressRaw.line2,
+        buildingProposalAddressRaw.line3
+      )
+    : null;
+  const buildingProposalAddress = buildingProposalAddressFormatted
+    ? {
+        officerName: buildingProposalAddressRaw!.officerName,
+        line1: buildingProposalAddressFormatted.line1,
+        line2: buildingProposalAddressFormatted.line2,
+        line3: buildingProposalAddressFormatted.line3,
+      }
+    : undefined;
   const officerDesignationDisplay =
     "O/o The Dy. Ch. Eng. (B.P.)";
   const officerZoneSuffix =
@@ -711,8 +742,7 @@ export function mapToPdfFieldValues(
     project_Architect_COA_Reg_No_Label: "COA Reg. No.:",
     "project_Address_line1_Architect": architectAddressLine1 || undefined,
     "project_Address_line2_Architect": architectAddressLine2 || undefined,
-    "project_Address_line3Architect":
-      architectAddressLine3ForLetter || undefined,
+    "project_Address_line3Architect": architectAddressLine3 || undefined,
     project_Validity_Architect: consultantValidityDisplay,
     "project_RegNo_Architect.": consultantRegNo,
     "project_Validity_Architect.": consultantValidityDisplay,

@@ -262,6 +262,28 @@ function replaceTemplateTokens(
   return out;
 }
 
+function paragraphVisibleText(innerHtml: string): string {
+  return innerHtml
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Removes empty address-line paragraphs after token substitution (e.g. unused line 3). */
+function removeEmptyAddressParagraphs(html: string): string {
+  return html.replace(/<p(\s[^>]*)?>([\s\S]*?)<\/p>/gi, (full, attrs, inner) => {
+    if (paragraphVisibleText(inner)) return full;
+    const attrStr = attrs ?? "";
+    const isAddressLike =
+      /\bbold\b|MsoNormal|value-bold|to-content/i.test(attrStr) ||
+      /value-bold|class=['"]?bold/i.test(inner);
+    return isAddressLike ? "" : full;
+  });
+}
+
 /**
  * Places the saved-PDF QR beside the client/owner address on page 1.
  * Word letters usually look like: `<p>To,</p>` … address lines … `<p><b>Sub :</b>…`.
@@ -637,8 +659,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    let finalHtml = mergeBuildingProposalOfficerZoneParagraphs(
-      replaceTemplateTokens(mergedHtml, fieldsForTemplate)
+    let finalHtml = removeEmptyAddressParagraphs(
+      mergeBuildingProposalOfficerZoneParagraphs(
+        replaceTemplateTokens(mergedHtml, fieldsForTemplate)
+      )
     );
 
     const acceptanceUrlsKey =

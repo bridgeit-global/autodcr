@@ -1,8 +1,9 @@
 import type { TemplateType } from "@/app/templates/templateGenerators";
 import {
   addressLinesFromApplicantRecord,
-  ensureTrailingPeriodOnAddressLine3,
+  formatAddressLinesForLetterDisplay,
   pickEntityNameFromUserMeta,
+  stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
 import {
   findArchitectApplicantInList,
@@ -32,15 +33,16 @@ function applyAddressFields(
   rec: Record<string, unknown>
 ) {
   const parsed = addressLinesFromApplicantRecord(rec);
-  if (!out[keys.addr1]?.trim() && parsed.line1) {
-    out[keys.addr1] = parsed.line1;
-  }
-  if (!out[keys.addr2]?.trim() && parsed.line2) {
-    out[keys.addr2] = parsed.line2;
-  }
-  if (!out[keys.addr3]?.trim() && parsed.line3) {
-    out[keys.addr3] = ensureTrailingPeriodOnAddressLine3(parsed.line3);
-  }
+  const raw1 =
+    stripTrailingAddressPunctuation(out[keys.addr1] ?? "") || parsed.line1;
+  const raw2 =
+    stripTrailingAddressPunctuation(out[keys.addr2] ?? "") || parsed.line2;
+  const raw3 =
+    stripTrailingAddressPunctuation(out[keys.addr3] ?? "") || parsed.line3;
+  const formatted = formatAddressLinesForLetterDisplay(raw1, raw2, raw3);
+  if (formatted.line1) out[keys.addr1] = formatted.line1;
+  if (formatted.line2) out[keys.addr2] = formatted.line2;
+  if (formatted.line3) out[keys.addr3] = formatted.line3;
 }
 
 function applyCompanyField(

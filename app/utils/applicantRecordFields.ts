@@ -70,3 +70,41 @@ export function ensureTrailingPeriodOnAddressLine3(value: string): string {
   if (/[.!?…]\s*$/.test(s)) return s;
   return `${s}.`;
 }
+
+/** Strip trailing commas, periods, and whitespace before letter formatting. */
+export function stripTrailingAddressPunctuation(value: string): string {
+  return value.replace(/[,.!?…\s]+$/g, "").trim();
+}
+
+export function formatAddressLineWithComma(value: string): string {
+  const s = stripTrailingAddressPunctuation(value);
+  if (!s) return "";
+  return `${s},`;
+}
+
+/**
+ * Formats up to three address lines for appointment/acceptance HTML letters:
+ * non-final non-empty lines end with ",", the last non-empty line ends with ".".
+ */
+export function formatAddressLinesForLetterDisplay(
+  line1: string,
+  line2: string,
+  line3: string
+): { line1: string; line2: string; line3: string } {
+  const sanitized = [
+    stripTrailingAddressPunctuation(line1),
+    stripTrailingAddressPunctuation(line2),
+    stripTrailingAddressPunctuation(line3),
+  ];
+  const nonEmpty = sanitized
+    .map((line, index) => ({ line, index }))
+    .filter((entry) => entry.line.length > 0);
+  const result: [string, string, string] = ["", "", ""];
+  nonEmpty.forEach((entry, idx) => {
+    const isLast = idx === nonEmpty.length - 1;
+    result[entry.index] = isLast
+      ? ensureTrailingPeriodOnAddressLine3(entry.line)
+      : formatAddressLineWithComma(entry.line);
+  });
+  return { line1: result[0], line2: result[1], line3: result[2] };
+}
