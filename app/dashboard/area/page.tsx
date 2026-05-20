@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 
 type ExtractRow = {
   id: string;
@@ -142,6 +143,7 @@ export default function AreaDetailsPage() {
   const searchParams = useSearchParams();
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
+  const { showAlert } = useDashboardAlertModal();
   // Start with Plot No. 1 by default
   const [plots, setPlots] = useState<PlotRow[]>([createPlot(1)]);
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-area-details"));
@@ -274,7 +276,11 @@ const removePlot = (plotId: string) => {
     );
 
     if (invalidPlots.length > 0) {
-      alert("Please fill Plot Name, Owner Name, and select Type (7/12 or PRC) for all plots before saving.");
+      showAlert({
+        title: "Incomplete plots",
+        message:
+          "Please fill Plot Name, Owner Name, and select Type (7/12 or PRC) for all plots before saving.",
+      });
       return;
     }
 
@@ -283,7 +289,10 @@ const removePlot = (plotId: string) => {
       if (isEditMode && projectData?.id && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
-          alert("User not found in session. Please log in again.");
+          showAlert({
+            title: "Session required",
+            message: "User not found in session. Please log in again.",
+          });
           return;
         }
 
@@ -313,14 +322,23 @@ const removePlot = (plotId: string) => {
           throw new Error(error.error || "Failed to update project");
         }
 
-        alert("Area details updated successfully!");
+        showAlert({
+          title: "Area details",
+          message: "Area details updated successfully!",
+        });
       } else {
         console.log("Area Details:", plots);
-        alert("Area details saved successfully!");
+        showAlert({
+          title: "Area details",
+          message: "Area details saved successfully!",
+        });
       }
     } catch (error: any) {
       console.error("Error saving area details:", error);
-      alert(error.message || "Failed to save area details. Please try again.");
+      showAlert({
+        title: "Could not save",
+        message: error.message || "Failed to save area details. Please try again.",
+      });
       return;
     }
 

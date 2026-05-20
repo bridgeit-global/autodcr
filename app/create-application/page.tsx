@@ -19,6 +19,8 @@ import {
   type OwnerProjectSelectRow,
 } from "@/app/utils/ownerProjects";
 
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+
 type PlanningAuthority = {
   id: string;
   label: string;
@@ -604,6 +606,7 @@ const authorityPermissions: Record<string, PermissionType[]> = {
 
 export default function CreateApplicationPage() {
   const router = useRouter();
+  const { showAlert } = useDashboardAlertModal();
   const [sessionTime, setSessionTime] = useState(3600);
   const [selectedAuthority, setSelectedAuthority] = useState("bmc");
   const [selectedProject, setSelectedProject] = useState("");
@@ -757,7 +760,10 @@ export default function CreateApplicationPage() {
     );
 
     if (!selectedProjectRecord || !selectedPermissionRecord) {
-      alert("Please select a valid project and permission type.");
+      showAlert({
+        title: "Selection required",
+        message: "Please select a valid project and permission type.",
+      });
       return;
     }
 
@@ -765,7 +771,10 @@ export default function CreateApplicationPage() {
     const ownerId = await getAuthUserId();
     if (!ownerId) {
       setIsSubmitting(false);
-      alert("You must be signed in to create an application.");
+      showAlert({
+        title: "Sign in required",
+        message: "You must be signed in to create an application.",
+      });
       return;
     }
 
@@ -794,7 +803,10 @@ export default function CreateApplicationPage() {
         return;
       }
 
-      alert(result.error || "Failed to create application. Please try again.");
+      showAlert({
+        title: "Could not create application",
+        message: result.error || "Failed to create application. Please try again.",
+      });
       return;
     }
 

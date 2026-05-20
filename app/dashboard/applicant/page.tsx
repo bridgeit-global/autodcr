@@ -8,6 +8,7 @@ import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/dr
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { useProjectData } from "@/app/hooks/useProjectData";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 
 type ApplicantFormData = {
@@ -240,6 +241,7 @@ const APPLICANT_FORM_DEFAULTS: ApplicantFormData = {
 
 export default function ApplicantDetailsPage() {
   const { userMetadata } = useUserMetadata();
+  const { showAlert } = useDashboardAlertModal();
   const { isEditMode, isLoading, projectData } = useProjectData();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
@@ -710,6 +712,10 @@ export default function ApplicantDetailsPage() {
       },
     });
     setIsSaved(true);
+    showAlert({
+      title: "Applicant details",
+      message: "Applicant details saved successfully!",
+    });
   };
 
   // Persist draft as user types
@@ -820,7 +826,10 @@ export default function ApplicantDetailsPage() {
         if (!response.ok) {
           const error = await response.json();
           console.error("Error updating applicants after deletion:", error);
-          alert(`Failed to delete applicant: ${error.error || "Unknown error"}`);
+          showAlert({
+            title: "Could not delete applicant",
+            message: `Failed to delete applicant: ${error.error || "Unknown error"}`,
+          });
           setApplicants(applicants);
           saveDraft("draft-applicant-details-applicants", applicants);
           return;
@@ -829,7 +838,10 @@ export default function ApplicantDetailsPage() {
         console.log("Applicant deleted successfully from Supabase");
       } catch (error: any) {
         console.error("Error deleting applicant:", error);
-        alert(`Failed to delete applicant: ${error.message || "Unknown error"}`);
+        showAlert({
+          title: "Could not delete applicant",
+          message: `Failed to delete applicant: ${error.message || "Unknown error"}`,
+        });
         setApplicants(applicants);
         saveDraft("draft-applicant-details-applicants", applicants);
       }

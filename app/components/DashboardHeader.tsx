@@ -145,22 +145,36 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
     };
   }, [userMenuOpen]);
 
+  const handleLogoClick = () => {
+    if (pathname === "/userdashboard") return;
+    if (isDashboardPage) {
+      setShowBackWarning(true);
+      return;
+    }
+    router.push("/userdashboard");
+  };
+
   return (
     <header className="w-full text-gray-900">
       {/* Rounded navbar container (matches dashboard styling) */}
       <div className="w-full">
         <div className="bg-white border border-gray-200 rounded-3xl shadow-sm">
           <div className="flex max-w-full items-center justify-between gap-4 px-6 py-4">
-        {/* Left: Branding */}
-        <div className="flex items-center gap-3 min-w-[180px]">
-          <div className="h-9 w-9 rounded-xl bg-emerald-600 flex items-center justify-center shadow-sm">
+        {/* Left: Branding — click to go to dashboard */}
+        <button
+          type="button"
+          onClick={handleLogoClick}
+          className="flex items-center gap-3 min-w-[180px] rounded-xl hover:bg-gray-50 transition-colors cursor-pointer text-left"
+          aria-label="Go to dashboard"
+        >
+          <div className="h-9 w-9 rounded-xl bg-emerald-600 flex items-center justify-center shadow-sm shrink-0">
             <span className="text-sm text-white font-bold">DD</span>
-        </div>
+          </div>
           <div className="leading-tight">
             <div className="text-base font-semibold">Draft Desk</div>
             <div className="text-xs text-gray-500">Create Project Dashboard</div>
           </div>
-        </div>
+        </button>
 
         {/* Center: (Search removed as requested) */}
         <div className="hidden md:flex flex-1 justify-center" />

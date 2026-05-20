@@ -58,6 +58,11 @@ type DocumentPreviewModalProps = {
   onMockSignComplete?: () => void | Promise<void>;
   /** While parent is saving after mock sign (e.g. generating/uploading PDF). */
   mockSignBusy?: boolean;
+  /** Dual-letter applications: show Appointment / Acceptance selector in the toolbar. */
+  showLetterVariantSelector?: boolean;
+  letterVariant?: "appointment" | "acceptance";
+  onLetterVariantChange?: (variant: "appointment" | "acceptance") => void;
+  letterVariantDisabled?: boolean;
 };
 
 export default function DocumentPreviewModal({
@@ -84,6 +89,10 @@ export default function DocumentPreviewModal({
   showMockSignButton = false,
   onMockSignComplete,
   mockSignBusy = false,
+  showLetterVariantSelector = false,
+  letterVariant = "appointment",
+  onLetterVariantChange,
+  letterVariantDisabled = false,
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const injectMockOwnerSignatureRef = useRef<() => Promise<void>>(async () => Promise.resolve());
@@ -381,15 +390,17 @@ export default function DocumentPreviewModal({
   }, [open, htmlContent, fileUrl, showMockSignButton, autoMockSignAfterOpen, mockSignApplied]);
 
   const hasContent = Boolean(fileUrl) || Boolean(htmlContent);
-  if (!open || !hasContent) return null;
+  if (!open || (!hasContent && !isLoading && !loadError)) return null;
   if (typeof window === "undefined") return null;
 
   const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
   const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
-  const useCompactPreviewLayout = isHtmlPreview || isStoredPdfPreview;
+  const useCompactPreviewLayout =
+    isHtmlPreview || isStoredPdfPreview || (!hasContent && (isLoading || Boolean(loadError)));
   const canSign = Boolean(getPdfBlob);
 
   const saveUiBusy = Boolean(isSaving);
+  const previewReloadBusy = Boolean(isLoading && hasContent);
 
   const handleCloseAll = () => {
     if (saveUiBusy) return;
@@ -473,6 +484,25 @@ export default function DocumentPreviewModal({
                 {title || "Document Preview"}
               </div>
               <div className="flex items-center gap-2">
+                {showLetterVariantSelector && onLetterVariantChange && (
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <span className="whitespace-nowrap">Letter</span>
+                    <select
+                      value={letterVariant}
+                      onChange={(e) =>
+                        onLetterVariantChange(
+                          e.target.value === "acceptance" ? "acceptance" : "appointment"
+                        )
+                      }
+                      disabled={letterVariantDisabled || saveUiBusy}
+                      className="h-9 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 min-w-[11rem] disabled:opacity-50"
+                      aria-label="Letter type"
+                    >
+                      <option value="appointment">Appointment</option>
+                      <option value="acceptance">Acceptance</option>
+                    </select>
+                  </label>
+                )}
                 {canSign && (
                   <button
                     onClick={() => setSignModalOpen(true)}
@@ -611,7 +641,7 @@ export default function DocumentPreviewModal({
             )}
 
             <div className="flex-1 overflow-auto p-3 bg-gray-50">
-              {isLoading ? (
+              {isLoading && !hasContent ? (
                 <div className="flex min-h-[600px] items-center justify-center text-sm text-gray-500">
                   Generating preview…
                 </div>
@@ -646,7 +676,7 @@ export default function DocumentPreviewModal({
               ) : null}
             </div>
 
-            {saveUiBusy && (
+            {(saveUiBusy || previewReloadBusy) && (
               <div
                 className="absolute inset-0 z-[70] flex flex-col items-center justify-center rounded-2xl bg-white/90 backdrop-blur-[3px]"
                 role="status"
@@ -658,10 +688,16 @@ export default function DocumentPreviewModal({
                   aria-hidden
                 />
                 <p className="mt-4 text-sm font-semibold text-gray-900">
-                  {isSaving ? "Saving PDF…" : "Preparing signature…"}
+                  {saveUiBusy
+                    ? isSaving
+                      ? "Saving PDF…"
+                      : "Preparing signature…"
+                    : "Loading preview…"}
                 </p>
                 <p className="mt-1 max-w-[240px] text-center text-xs text-gray-500">
-                  Generating and uploading — this can take a moment
+                  {saveUiBusy
+                    ? "Generating and uploading — this can take a moment"
+                    : "Switching letter type"}
                 </p>
               </div>
             )}

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 
 type BuildingFormData = {
@@ -34,6 +35,7 @@ export default function BuildingDetailsPage() {
   const searchParams = useSearchParams();
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
+  const { showAlert } = useDashboardAlertModal();
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-building-details"));
 
   const {
@@ -95,7 +97,10 @@ export default function BuildingDetailsPage() {
       if (isEditMode && projectData?.id && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
-          alert("User not found in session. Please log in again.");
+          showAlert({
+            title: "Session required",
+            message: "User not found in session. Please log in again.",
+          });
           return;
         }
 
@@ -121,10 +126,16 @@ export default function BuildingDetailsPage() {
           throw new Error(error.error || "Failed to update project");
         }
 
-        alert("Building details updated successfully!");
+        showAlert({
+          title: "Building details",
+          message: "Building details updated successfully!",
+        });
       } else {
         console.log("Building Details:", data);
-        alert("Building details saved successfully!");
+        showAlert({
+          title: "Building details",
+          message: "Building details saved successfully!",
+        });
       }
       saveDraft("draft-building-details-form", data);
       markPageSaved("saved-building-details");
@@ -135,7 +146,10 @@ export default function BuildingDetailsPage() {
       setIsSaved(true);
     } catch (error: any) {
       console.error("Error saving building details:", error);
-      alert(error.message || "Failed to save building details. Please try again.");
+      showAlert({
+        title: "Could not save",
+        message: error.message || "Failed to save building details. Please try again.",
+      });
     }
   };
 

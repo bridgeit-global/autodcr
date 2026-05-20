@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 
 type BGFormData = {
@@ -52,6 +53,7 @@ export default function BGDetailsPage() {
   const searchParams = useSearchParams();
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
+  const { showAlert } = useDashboardAlertModal();
   const [entry, setEntry] = useState<BGEntry | null>(() => {
     const savedEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
     return savedEntries.length > 0 ? savedEntries[0] : null;
@@ -120,7 +122,10 @@ export default function BGDetailsPage() {
       if (isEditMode && projectData?.id && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
-          alert("User not found in session. Please log in again.");
+          showAlert({
+            title: "Session required",
+            message: "User not found in session. Please log in again.",
+          });
           return;
         }
 
@@ -148,9 +153,15 @@ export default function BGDetailsPage() {
           throw new Error(error.error || "Failed to update project");
         }
 
-        alert("BG details updated successfully!");
+        showAlert({
+          title: "BG details",
+          message: "BG details updated successfully!",
+        });
       } else {
-        alert("BG details saved successfully!");
+        showAlert({
+          title: "BG details",
+          message: "BG details saved successfully!",
+        });
       }
 
       markPageSaved("saved-bg-details");
@@ -163,7 +174,10 @@ export default function BGDetailsPage() {
       setIsSaved(true);
     } catch (error: any) {
       console.error("Error saving BG details:", error);
-      alert(error.message || "Failed to save BG details. Please try again.");
+      showAlert({
+        title: "Could not save",
+        message: error.message || "Failed to save BG details. Please try again.",
+      });
     }
   };
 
@@ -273,7 +287,10 @@ export default function BGDetailsPage() {
     }
 
     handleSubmit(onSubmit)();
-    alert("BG details submitted successfully!");
+    showAlert({
+      title: "BG details",
+      message: "BG details submitted successfully!",
+    });
   };
 
   return (

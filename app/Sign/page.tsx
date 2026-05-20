@@ -7,6 +7,8 @@ import { PDFDocument } from "pdf-lib";
 import "@react-pdf-viewer/core/lib/styles/index.css";
 import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+
 interface SignaturePosition {
   x: number;
   y: number;
@@ -27,6 +29,7 @@ interface Signature {
 }
 
 const DigitalSignaturePage: React.FC = () => {
+  const { showAlert } = useDashboardAlertModal();
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isSignatureMode, setIsSignatureMode] = useState(false);
@@ -132,7 +135,11 @@ const DigitalSignaturePage: React.FC = () => {
             }, 300);
           } else {
             // No area selected yet - prompt user to select area first
-            alert("Please select an area on the PDF first!\n\nClick 'Add Signature' button, then drag on the PDF to select where you want to place the signature.");
+            showAlert({
+              title: "Select signature area",
+              message:
+                "Please select an area on the PDF first!\n\nClick 'Add Signature' button, then drag on the PDF to select where you want to place the signature.",
+            });
             // Store the image temporarily so they can use it after selecting area
             setSignatureImage(imageDataUrl);
             // Enable area selection mode
@@ -148,11 +155,17 @@ const DigitalSignaturePage: React.FC = () => {
         };
         reader.onerror = (error) => {
           console.error("Error reading signature file:", error);
-          alert("Error reading signature file. Please try again.");
+          showAlert({
+            title: "Could not read file",
+            message: "Error reading signature file. Please try again.",
+          });
         };
         reader.readAsDataURL(file);
       } else {
-        alert("Please select an image file (PNG, JPG, SVG, etc.)");
+        showAlert({
+          title: "Invalid file type",
+          message: "Please select an image file (PNG, JPG, SVG, etc.)",
+        });
       }
     }
   };
@@ -179,7 +192,11 @@ const DigitalSignaturePage: React.FC = () => {
             }, 200);
           } else {
             // No area selected - prompt user
-            alert("Please select an area on the PDF first!\n\nClick 'Add Signature' button, then drag on the PDF to select where you want to place the signature.");
+            showAlert({
+              title: "Select signature area",
+              message:
+                "Please select an area on the PDF first!\n\nClick 'Add Signature' button, then drag on the PDF to select where you want to place the signature.",
+            });
             setSignatureImage(imageDataUrl);
             if (!currentMode) {
               setIsSignatureMode(true);
@@ -189,7 +206,10 @@ const DigitalSignaturePage: React.FC = () => {
         };
         reader.onerror = (error) => {
           console.error("Error reading dropped signature file:", error);
-          alert("Error reading signature file. Please try again.");
+          showAlert({
+            title: "Could not read file",
+            message: "Error reading signature file. Please try again.",
+          });
         };
         reader.readAsDataURL(file);
       } else if (file.type === "application/pdf") {
@@ -207,7 +227,10 @@ const DigitalSignaturePage: React.FC = () => {
   // Start signature placement mode - just enable area selection
   const handleAddSignature = () => {
     if (!pdfUrl) {
-      alert("Please upload a PDF first");
+      showAlert({
+        title: "PDF required",
+        message: "Please upload a PDF first",
+      });
       return;
     }
     // Clear any previous signature image and area
@@ -475,7 +498,10 @@ const DigitalSignaturePage: React.FC = () => {
   // Apply signature to PDF
   const applySignatureToPdf = async (): Promise<Blob | null> => {
     if (!pdfFile || signatures.length === 0) {
-      alert("Please upload a PDF and add at least one signature");
+      showAlert({
+        title: "Signatures required",
+        message: "Please upload a PDF and add at least one signature",
+      });
       return null;
     }
 
@@ -653,7 +679,10 @@ const DigitalSignaturePage: React.FC = () => {
         const errorDetails = errorMessages.length > 0 
           ? `\n\nError details:\n${errorMessages.join('\n')}`
           : '';
-        alert(`Failed to apply any signatures. Errors: ${errorCount}${errorDetails}\n\nPlease check the browser console (F12) for more details.`);
+        showAlert({
+          title: "Signatures failed",
+          message: `Failed to apply any signatures. Errors: ${errorCount}${errorDetails}\n\nPlease check the browser console (F12) for more details.`,
+        });
         console.error("All signatures failed. Errors:", errorMessages);
         return null;
       }
@@ -687,13 +716,19 @@ const DigitalSignaturePage: React.FC = () => {
         errorCount
       });
       
-      alert(`Signatures applied successfully! ${successCount} signature(s) embedded. ${errorCount > 0 ? `(${errorCount} error(s))` : ''} You can now download the signed PDF.`);
+      showAlert({
+        title: "Signatures applied",
+        message: `Signatures applied successfully! ${successCount} signature(s) embedded. ${errorCount > 0 ? `(${errorCount} error(s))` : ''} You can now download the signed PDF.`,
+      });
       
       // Return the blob so it can be used immediately for download
       return blob;
     } catch (error) {
       console.error("Error applying signature:", error);
-      alert(`Error applying signature: ${error instanceof Error ? error.message : 'Unknown error'}. Please check the console for details.`);
+      showAlert({
+        title: "Could not apply signatures",
+        message: `Error applying signature: ${error instanceof Error ? error.message : 'Unknown error'}. Please check the console for details.`,
+      });
       return null;
     } finally {
       setIsProcessing(false);
@@ -713,7 +748,10 @@ const DigitalSignaturePage: React.FC = () => {
         blobToDownload = await applySignatureToPdf();
         
         if (!blobToDownload) {
-          alert("Failed to apply signatures. Please try again.");
+          showAlert({
+            title: "Could not apply signatures",
+            message: "Failed to apply signatures. Please try again.",
+          });
           return;
         }
         
@@ -737,16 +775,25 @@ const DigitalSignaturePage: React.FC = () => {
         }
       } catch (error) {
         console.error("Error downloading PDF:", error);
-        alert("Error downloading PDF. Please try again.");
+        showAlert({
+          title: "Download failed",
+          message: "Error downloading PDF. Please try again.",
+        });
         return;
       }
     } else {
-      alert("No PDF available to download.");
+      showAlert({
+        title: "No PDF",
+        message: "No PDF available to download.",
+      });
       return;
     }
     
     if (!blobToDownload) {
-      alert("No PDF available to download.");
+      showAlert({
+        title: "No PDF",
+        message: "No PDF available to download.",
+      });
       return;
     }
     
