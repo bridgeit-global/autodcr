@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import ForgotPasswordModal from "./ForgotPasswordModal";
@@ -18,15 +18,78 @@ type LoginForm = {
   captcha: string;
 };
 
-// Generate random captcha code
-const generateCaptcha = () => {
-  const num1 = Math.floor(Math.random() * 90 + 10); // 2-digit number
-  const num2 = Math.floor(Math.random() * 90 + 10); // 2-digit number
-  return {
-    display: `${num1}•${num2}`,
-    value: `${num1}${num2}`
-  };
+type CaptchaState = { num1: number; num2: number; value: string };
+
+// Two 2-digit numbers concatenated; image and input are the same 4 digits.
+const generateCaptcha = (): CaptchaState => {
+  const num1 = Math.floor(Math.random() * 90 + 10);
+  const num2 = Math.floor(Math.random() * 90 + 10);
+  return { num1, num2, value: `${num1}${num2}` };
 };
+
+const CAPTCHA_CSS_W = 160;
+const CAPTCHA_CSS_H = 48;
+
+/** Renders captcha as a bitmap (noise + distorted glyphs) — not plain DOM text. */
+function drawCaptchaOnCanvas(canvas: HTMLCanvasElement, num1: number, num2: number) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  // Cap DPR so high-density screens don’t allocate huge backing stores for a tiny widget.
+  const rawDpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const dpr = Math.min(2, rawDpr);
+  canvas.width = Math.floor(CAPTCHA_CSS_W * dpr);
+  canvas.height = Math.floor(CAPTCHA_CSS_H * dpr);
+  canvas.style.width = `${CAPTCHA_CSS_W}px`;
+  canvas.style.height = `${CAPTCHA_CSS_H}px`;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = "#fafafa";
+  ctx.fillRect(0, 0, CAPTCHA_CSS_W, CAPTCHA_CSS_H);
+
+  // Speckle noise (kept light for fast redraws)
+  for (let i = 0; i < 42; i++) {
+    ctx.fillStyle = `rgba(${80 + Math.random() * 120},${80 + Math.random() * 120},${100 + Math.random() * 100},${0.15 + Math.random() * 0.35})`;
+    ctx.fillRect(Math.random() * CAPTCHA_CSS_W, Math.random() * CAPTCHA_CSS_H, 1.2, 1.2);
+  }
+
+  // Curved distraction lines
+  for (let i = 0; i < 2; i++) {
+    ctx.strokeStyle = `rgba(${60 + Math.random() * 100},${60 + Math.random() * 100},${80 + Math.random() * 100},0.35)`;
+    ctx.lineWidth = 0.8 + Math.random();
+    ctx.beginPath();
+    const y0 = Math.random() * CAPTCHA_CSS_H;
+    ctx.moveTo(0, y0);
+    ctx.bezierCurveTo(
+      CAPTCHA_CSS_W * 0.35,
+      y0 + (Math.random() - 0.5) * 30,
+      CAPTCHA_CSS_W * 0.65,
+      y0 + (Math.random() - 0.5) * 30,
+      CAPTCHA_CSS_W,
+      Math.random() * CAPTCHA_CSS_H
+    );
+    ctx.stroke();
+  }
+
+  const chars = `${num1}${num2}`.split("");
+  ctx.textBaseline = "middle";
+  ctx.font = "600 21px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  let x = 18;
+  const midY = CAPTCHA_CSS_H / 2;
+
+  for (const ch of chars) {
+    const wch = ctx.measureText(ch).width;
+    ctx.save();
+    ctx.translate(x + wch / 2, midY);
+    ctx.rotate((Math.random() - 0.5) * 0.45);
+    ctx.fillStyle = `rgb(${25 + Math.random() * 60},${25 + Math.random() * 60},${35 + Math.random() * 50})`;
+    ctx.fillText(ch, -wch / 2, 0);
+    ctx.restore();
+    x += wch + 3;
+  }
+}
 
 const HeroSection = ({ slides }: HeroSectionProps) => {
   const router = useRouter();
@@ -35,7 +98,9 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [userforgotOpen, setUserForgotOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [captcha, setCaptcha] = useState({ display: "98•22", value: "9822" });
+  /** null until first client layout pass — avoids double-generate + double-draw on mount. */
+  const [captcha, setCaptcha] = useState<CaptchaState | null>(null);
+  const captchaCanvasRef = useRef<HTMLCanvasElement>(null);
   const [showPassword, setShowPassword] = useState(false);
 
   // ⭐ React Hook Form
@@ -48,11 +113,19 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
   const [loginError, setLoginError] = useState<string>("");
 
-  // Generate captcha on mount; prefetch dashboard so navigation after login feels instant
   useEffect(() => {
-    setCaptcha(generateCaptcha());
     router.prefetch("/userdashboard");
   }, [router]);
+
+  useLayoutEffect(() => {
+    if (captcha === null) {
+      setCaptcha(generateCaptcha());
+      return;
+    }
+    const el = captchaCanvasRef.current;
+    if (!el) return;
+    drawCaptchaOnCanvas(el, captcha.num1, captcha.num2);
+  }, [captcha]);
 
   const regenerateCaptcha = () => {
     setCaptcha(generateCaptcha());
@@ -63,7 +136,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
     setIsLoading(true);
 
     // Validate captcha first
-    if (data.captcha !== captcha.value) {
+    if (!captcha || data.captcha.trim() !== captcha.value) {
       setLoginError("Invalid captcha. Please try again.");
       regenerateCaptcha();
       setIsLoading(false);
@@ -301,13 +374,17 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
                 {/* Captcha */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="h-12 w-40 select-none rounded border border-zinc-300 bg-zinc-50 p-2 text-center font-mono text-lg tracking-widest text-zinc-700">
-                      {captcha.display}
-                    </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <canvas
+                      ref={captchaCanvasRef}
+                      className="select-none rounded border border-zinc-300 bg-zinc-50"
+                      width={CAPTCHA_CSS_W}
+                      height={CAPTCHA_CSS_H}
+                      aria-label="Captcha: type the four digits shown"
+                    />
                     <button 
                       type="button" 
-                      className="text-sm text-sky-700 underline"
+                      className="shrink-0 text-sm text-sky-700 underline"
                       onClick={regenerateCaptcha}
                     >
                       Generate New Image
@@ -320,7 +397,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                     })}
                     type="text"
                     className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
-                    placeholder="Type the code from the image"
+                    placeholder="Enter the 4-digit code from the image"
                   />
                 </div>
                 {errors.captcha && (

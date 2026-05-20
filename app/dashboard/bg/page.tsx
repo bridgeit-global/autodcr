@@ -399,26 +399,11 @@ export default function BGDetailsPage() {
               <label className="block font-medium text-black mb-1">
                 BG Date <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  {...register("bgDate", { required: "BG date is required" })}
-                  className={`${inputClasses} pr-10`}
-                />
-                <svg
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-              </div>
+              <input
+                type="date"
+                {...register("bgDate", { required: "BG date is required" })}
+                className={inputClasses}
+              />
               {errors.bgDate && <p className="text-sm text-red-600 mt-1">{errors.bgDate.message}</p>}
             </div>
           </div>
@@ -466,26 +451,11 @@ export default function BGDetailsPage() {
               <label className="block font-medium text-black mb-1">
                 BG Valid Date <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  {...register("bgValidDate", { required: "BG valid date is required" })}
-                  className={`${inputClasses} pr-10`}
-                />
-                <svg
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-              </div>
+              <input
+                type="date"
+                {...register("bgValidDate", { required: "BG valid date is required" })}
+                className={inputClasses}
+              />
               {errors.bgValidDate && <p className="text-sm text-red-600 mt-1">{errors.bgValidDate.message}</p>}
             </div>
           </div>
