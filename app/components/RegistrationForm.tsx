@@ -3002,8 +3002,23 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       type={showConfirmPassword ? "text" : "password"}
                       value={formData.confirmPassword}
                       onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                      onCopy={(e) => e.preventDefault()}
+                      onPaste={(e) => e.preventDefault()}
+                      onCut={(e) => e.preventDefault()}
+                      onPasteCapture={(e) => e.preventDefault()}
+                      onDrop={(e) => e.preventDefault()}
+                      onBeforeInput={(e) => {
+                        const n = e.nativeEvent;
+                        if ("inputType" in n) {
+                          const inputType = (n as InputEvent).inputType;
+                          if (inputType === "insertFromPaste" || inputType === "insertFromDrop") {
+                            e.preventDefault();
+                          }
+                        }
+                      }}
                       className="border rounded-lg px-3 py-2 h-10 w-full pr-10 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Re-enter password"
+                      autoComplete="new-password"
                     />
                     <button
                       type="button"

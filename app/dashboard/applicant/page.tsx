@@ -197,6 +197,21 @@ const pickText = (...values: Array<unknown>): string => {
   return "";
 };
 
+/** Collapse newlines into one comma-separated line (avoids multi-line textarea scroll). */
+const normalizeAddressSingleLine = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed
+    .split(/\n+/)
+    .flatMap((line) =>
+      line
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean)
+    )
+    .join(", ");
+};
+
 const composeAddress = (
   line1?: string,
   line2?: string,
@@ -207,7 +222,20 @@ const composeAddress = (
     .map((v) => (typeof v === "string" ? v.trim() : ""))
     .filter(Boolean)
     .join(", ");
-  return joined || (fallback?.trim() || "");
+  const raw = joined || (typeof fallback === "string" ? fallback.trim() : "");
+  return normalizeAddressSingleLine(raw);
+};
+
+const APPLICANT_FORM_DEFAULTS: ApplicantFormData = {
+  applicantType: "",
+  plumbingConsultant: "",
+  name: "",
+  residentialAddress: "",
+  contactNumber: "",
+  emailAddress: "",
+  registrationNumber: "",
+  panNo: "",
+  licenseIssueDate: "",
 };
 
 export default function ApplicantDetailsPage() {
@@ -239,17 +267,13 @@ export default function ApplicantDetailsPage() {
     formState: { errors },
     reset,
   } = useForm<ApplicantFormData>({
-    defaultValues: loadDraft<ApplicantFormData>("draft-applicant-details-form", {
-      applicantType: "",
-      plumbingConsultant: "",
-      name: "",
-      residentialAddress: "",
-      contactNumber: "",
-      emailAddress: "",
-      registrationNumber: "",
-      panNo: "",
-      licenseIssueDate: "",
-    }),
+    defaultValues: (() => {
+      const loaded = loadDraft<ApplicantFormData>("draft-applicant-details-form", APPLICANT_FORM_DEFAULTS);
+      return {
+        ...loaded,
+        residentialAddress: normalizeAddressSingleLine(loaded.residentialAddress || ""),
+      };
+    })(),
   });
 
   const inputClasses =
@@ -299,7 +323,12 @@ export default function ApplicantDetailsPage() {
           registrationNo: app.registrationNumber || app.registration_number || app.registrationNo || "",
           panNo: app.panNo || app.pan_no || app.pan || "",
           licenseIssueDate: app.licenseIssueDate || app.license_issue_date || "",
-          residentialAddress: app.residentialAddress || app.residential_address || "",
+          residentialAddress: composeAddress(
+            pickText(app.address_line1, app.addressLine1),
+            pickText(app.address_line2, app.addressLine2),
+            pickText(app.address_line3, app.addressLine3),
+            pickText(app.residentialAddress, app.residential_address)
+          ),
           officeAddress: app.officeAddress || app.office_address || "",
           address_line1: pickText(app.address_line1, app.addressLine1),
           address_line2: pickText(app.address_line2, app.addressLine2),
@@ -1009,7 +1038,7 @@ export default function ApplicantDetailsPage() {
                 </label>
                 <textarea
                   {...register("residentialAddress", { required: "Residential address is required" })}
-                className={`${textareaClasses} h-10 ${disabledClasses}`}
+                className={`${textareaClasses} h-10 overflow-x-auto overflow-y-hidden whitespace-nowrap ${disabledClasses}`}
                 placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
                 readOnly={true}
                 />
