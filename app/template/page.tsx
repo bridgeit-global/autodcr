@@ -13,6 +13,7 @@ import {
 } from "../templates/templateGenerators";
 import { useSigningStore } from "@/app/lib/bridge/signingStore";
 import { base64ToBlob } from "@/app/lib/bridge/pdfChunker";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 
 const MAX_SIGN_PDF_BASE64_SIZE = 8 * 1024 * 1024;
 
@@ -238,6 +239,7 @@ const getCurrentDate = () => {
 };
 
 export default function TemplatePage() {
+  const { showAlert } = useDashboardAlertModal();
   const [sessionTime, setSessionTime] = useState(3600);
   const [selectedProject, setSelectedProject] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateType | "">("");
@@ -375,7 +377,10 @@ export default function TemplatePage() {
 
   const openDscModal = async () => {
     if (!generatedPdfUrl) {
-      alert("Please generate the PDF first.");
+      showAlert({
+        title: "PDF required",
+        message: "Please generate the PDF first.",
+      });
       return;
     }
     setIsDscModalOpen(true);
@@ -500,20 +505,31 @@ export default function TemplatePage() {
     try {
       if (!letterheadBytes) {
         setIsGenerating(false);
-        alert(letterheadError ?? "Letterhead template is still loading. Please try again in a moment.");
+        showAlert({
+          title: "Letterhead not ready",
+          message:
+            letterheadError ??
+            "Letterhead template is still loading. Please try again in a moment.",
+        });
         return;
       }
 
       if (!selectedTemplate) {
         setIsGenerating(false);
-        alert("Please select a template type first.");
+        showAlert({
+          title: "Template required",
+          message: "Please select a template type first.",
+        });
         return;
       }
 
       const templateConfig = TEMPLATE_CONFIG[selectedTemplate];
       if (!templateConfig) {
         setIsGenerating(false);
-        alert("Invalid template selected.");
+        showAlert({
+          title: "Invalid template",
+          message: "Invalid template selected.",
+        });
         return;
       }
 
@@ -540,7 +556,10 @@ export default function TemplatePage() {
       setGeneratedPdfUrl(url);
     } catch (error) {
       console.error("Error generating PDF:", error);
-      alert("Failed to generate PDF. Please try again.");
+      showAlert({
+        title: "PDF generation failed",
+        message: "Failed to generate PDF. Please try again.",
+      });
     } finally {
       setIsGenerating(false);
     }

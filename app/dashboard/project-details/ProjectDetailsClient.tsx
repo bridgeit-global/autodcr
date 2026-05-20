@@ -14,6 +14,7 @@ import {
 import { supabase } from "@/app/utils/supabase";
 import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
 import { useUserMetadata } from "@/app/contexts/UserContext";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 
 
@@ -213,7 +214,8 @@ export default function ProjectDetailsClient() {
   const mode = searchParams.get("mode");
   const isReadOnlyMode = mode === "readonly";
   const { userMetadata } = useUserMetadata();
-  
+  const { showAlert } = useDashboardAlertModal();
+
   // Only enable edit mode if we're on the project-details page and have a projectId
   const isProjectDetailsPage = pathname === "/dashboard/project-details";
   const isEditMode = isProjectDetailsPage && !!projectId;
@@ -403,7 +405,10 @@ export default function ProjectDetailsClient() {
 
         if (loadError || !data) {
           console.error("Error fetching project:", loadError);
-          alert("Failed to load project data. Please try again.");
+          showAlert({
+            title: "Could not load project",
+            message: "Failed to load project data. Please try again.",
+          });
           return;
         }
 
@@ -570,14 +575,17 @@ export default function ProjectDetailsClient() {
         });
       } catch (err) {
         console.error("Error fetching project:", err);
-        alert("Failed to load project data. Please try again.");
+        showAlert({
+          title: "Could not load project",
+          message: "Failed to load project data. Please try again.",
+        });
       } finally {
         setIsLoadingProject(false);
       }
     };
 
     fetchProject();
-  }, [projectId, isEditMode, resetProject, resetSavePlot]);
+  }, [projectId, isEditMode, resetProject, resetSavePlot, showAlert]);
 
   // New projects only — edit mode clears isInitialLoad after DB data is applied
   useEffect(() => {
@@ -902,7 +910,10 @@ export default function ProjectDetailsClient() {
       const isDraft = projectData?.status === "draft";
       if (isEditMode && projectId && !isDraft) {
         if (!userId) {
-          alert("User not found in session. Please log in again.");
+          showAlert({
+            title: "Session required",
+            message: "User not found in session. Please log in again.",
+          });
           return;
         }
 
@@ -929,10 +940,16 @@ export default function ProjectDetailsClient() {
           throw new Error(error.error || "Failed to update project");
         }
 
-        alert("Project details updated successfully!");
+        showAlert({
+          title: "Project details",
+          message: "Project details updated successfully!",
+        });
       } else {
         console.log("Project Data:", data);
-        alert("Project details saved successfully!");
+        showAlert({
+          title: "Project details",
+          message: "Project details saved successfully!",
+        });
       }
       markPageSaved("saved-project-info");
       saveDraft("dirty-project-details", false);
@@ -940,7 +957,10 @@ export default function ProjectDetailsClient() {
       setIsProjectInfoSaved(true);
     } catch (error: any) {
       console.error("Error saving project:", error);
-      alert(error.message || "Failed to save project details. Please try again.");
+      showAlert({
+        title: "Could not save",
+        message: error.message || "Failed to save project details. Please try again.",
+      });
     }
   };
 
@@ -951,7 +971,10 @@ export default function ProjectDetailsClient() {
       if (isEditMode && projectId && !isDraft) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
-          alert("User not found in session. Please log in again.");
+          showAlert({
+            title: "Session required",
+            message: "User not found in session. Please log in again.",
+          });
           return;
         }
 
@@ -977,10 +1000,16 @@ export default function ProjectDetailsClient() {
           throw new Error(error.error || "Failed to update project");
         }
 
-        alert("Save plot details updated successfully!");
+        showAlert({
+          title: "Save plot details",
+          message: "Save plot details updated successfully!",
+        });
       } else {
         console.log("Save Plot Data:", data);
-        alert("Save plot details saved successfully!");
+        showAlert({
+          title: "Save plot details",
+          message: "Save plot details saved successfully!",
+        });
       }
       markPageSaved("saved-save-plot-details");
       saveDraft("dirty-project-details", false);
@@ -988,7 +1017,10 @@ export default function ProjectDetailsClient() {
       setIsSavePlotSaved(true);
     } catch (error: any) {
       console.error("Error saving plot details:", error);
-      alert(error.message || "Failed to save plot details. Please try again.");
+      showAlert({
+        title: "Could not save",
+        message: error.message || "Failed to save plot details. Please try again.",
+      });
     }
   };
 

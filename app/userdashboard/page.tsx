@@ -9,6 +9,7 @@ import DraftApplicationsModal, { DraftApplication } from "../components/DraftApp
 import CustomSelect from "@/app/components/CustomSelect";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import { supabase } from "@/app/utils/supabase";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import {
   applicantTypeToPermissionTitle,
@@ -602,6 +603,7 @@ const DRAFT_APPLICATIONS: Record<string, DraftApplication[]> = {
 function UserDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { showAlert } = useDashboardAlertModal();
   const {
     projects,
     loading: projectsLoading,
@@ -857,7 +859,10 @@ function UserDashboardContent() {
     const { data: sessionData } = await supabase.auth.getSession();
     const authToken = sessionData.session?.access_token;
     if (!authToken) {
-      alert("You must be signed in to delete an application.");
+      showAlert({
+        title: "Sign in required",
+        message: "You must be signed in to delete an application.",
+      });
       return;
     }
 
@@ -880,7 +885,10 @@ function UserDashboardContent() {
         typeof errBody?.error === "string"
           ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
           : "Failed to delete application. Please try again.";
-      alert(msg);
+      showAlert({
+        title: "Could not delete application",
+        message: msg,
+      });
       return;
     }
 
@@ -905,7 +913,10 @@ function UserDashboardContent() {
         .single();
 
       if (error || !data?.project_id) {
-        alert("Unable to open application details. Linked project not found.");
+        showAlert({
+          title: "Application details",
+          message: "Unable to open application details. Linked project not found.",
+        });
         return;
       }
       projectId = String(data.project_id);

@@ -1085,55 +1085,213 @@ export default function ApplicationDetailsPage() {
     [previewTemplateType]
   );
 
-  /** In process / Approved: switching letter variant shows the matching stored PDF. */
-  useEffect(() => {
-    if (
-      !previewOpen ||
-      (applicationWorkflowStage !== "approved_verified" &&
-        applicationWorkflowStage !== "in_process") ||
-      !isDualLetterType(previewTemplateType) ||
-      !projectId
-    ) {
-      return;
-    }
+  const loadPreviewContent = async (
+    variant: "appointment" | "acceptance",
+    opts?: { keepModalOpen?: boolean; resetSaveState?: boolean }
+  ) => {
+    const keepModalOpen = opts?.keepModalOpen ?? false;
+    const resetSaveState = opts?.resetSaveState ?? !keepModalOpen;
 
-    let cancelled = false;
-    void (async () => {
-      let raw = projectData?.application_urls;
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
-          p_project_id: projectId,
+    try {
+      setPreviewError(null);
+      if (resetSaveState) {
+        setSavePdfMessage(null);
+        setSavePdfError(null);
+        setPreviewReadyForSave(false);
+        setPdfSavedForCurrentPreview(false);
+        setStoredSigningPdfUrl(null);
+        previewPdfContextRef.current = null;
+      }
+
+      if (!keepModalOpen) {
+        setPreviewOpen(false);
+        setPreviewHtml(null);
+        setPreviewUrl((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return null;
         });
-        if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-          raw = (rpcData as PreviewProjectData).application_urls;
+      }
+
+      setIsPreviewLoading(true);
+      if (!keepModalOpen) setPreviewOpen(true);
+
+      let projectForPreview = projectData;
+      if (!projectForPreview && projectId) {
+        const coreSelect =
+          "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
+        const { data: directData } = await supabase
+          .from("projects")
+          .select(coreSelect)
+          .eq("id", projectId)
+          .single();
+        if (directData) {
+          projectForPreview = directData as PreviewProjectData;
+          setProjectData(projectForPreview);
+        } else {
+          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+            p_project_id: projectId,
+          });
+          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+            projectForPreview = rpcData as PreviewProjectData;
+            setProjectData(projectForPreview);
+          }
         }
       }
-      if (cancelled) return;
-      const url = getStoredApplicationPdfUrl(raw, previewTemplateType, letterVariant);
-      if (url) {
-        const pdfUrl = storedPdfUrlWithCacheBuster(url, {
-          ownerSignedAt,
-          architectSignedAt,
-        });
-        setPreviewHtml(null);
-        setPreviewUrl(pdfUrl);
-        setStoredSigningPdfUrl(pdfUrl);
-      }
-    })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    previewOpen,
-    applicationWorkflowStage,
-    previewTemplateType,
-    letterVariant,
-    projectId,
-    projectData?.application_urls,
-    ownerSignedAt,
-    architectSignedAt,
-  ]);
+      if (!projectForPreview) {
+        setPreviewError(
+          "Project data could not be loaded. Confirm you have access to this project and try again."
+        );
+        setPreviewOpen(true);
+        return;
+      }
+
+      let workflowStageForPreview = applicationWorkflowStage;
+      if (applicationId) {
+        const { data: appRow } = await supabase
+          .from("applications")
+          .select("workflow_stage")
+          .eq("id", applicationId)
+          .maybeSingle();
+        if (appRow?.workflow_stage != null && appRow.workflow_stage !== "") {
+          workflowStageForPreview = normalizeApplicationWorkflowStage(
+            String(appRow.workflow_stage)
+          );
+          setApplicationWorkflowStage(workflowStageForPreview);
+        }
+      }
+
+      const { fields, previewSource, templateType, fieldMapping } =
+        await buildApplicationPreviewContext({
+          userMetadata,
+          projectData: projectForPreview,
+          selectedApplication,
+          applicationNo,
+          applicationCreatedAt,
+          projectId,
+          letterVariant: variant,
+        });
+
+      const preferLiveHtmlPreview = isCleanAppointmentLetterType(templateType);
+
+      if (
+        !preferLiveHtmlPreview &&
+        (workflowStageForPreview === "in_process" ||
+          workflowStageForPreview === "approved_verified") &&
+        projectId
+      ) {
+        let raw = projectForPreview.application_urls;
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          const { data: urlsRow } = await supabase
+            .from("projects")
+            .select("application_urls")
+            .eq("id", projectId)
+            .maybeSingle();
+          raw = urlsRow?.application_urls;
+        }
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+            p_project_id: projectId,
+          });
+          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+            raw = (rpcData as PreviewProjectData).application_urls;
+          }
+        }
+        const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
+        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
+
+        if (savedPdfUrl) {
+          const pdfUrl = storedPdfUrlWithCacheBuster(savedPdfUrl, {
+            ownerSignedAt,
+            architectSignedAt,
+          });
+          previewPdfContextRef.current = { fields, templateType, previewSource };
+          setPdfSavedForCurrentPreview(true);
+          setPreviewReadyForSave(true);
+          setStoredSigningPdfUrl(pdfUrl);
+          setPreviewHtml(null);
+          setPreviewUrl((prev) => {
+            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+            return pdfUrl;
+          });
+          setPreviewFieldMapping(fieldMapping);
+          setPreviewOpen(true);
+          return;
+        }
+
+        if (workflowStageForPreview === "approved_verified") {
+          setPreviewError(
+            isDualLetterType(templateType)
+              ? `No signed PDF on file for the ${resolvedVariant} letter.`
+              : "No signed PDF on file for this application."
+          );
+          return;
+        }
+      }
+
+      let html = await generateApplicationPreviewHtml(
+        fields,
+        templateType,
+        previewSource
+      );
+
+      const resolvedPreviewVariant = isDualLetterType(templateType)
+        ? variant
+        : "appointment";
+      if (ownerSignedAt?.trim()) {
+        html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
+      }
+      if (
+        architectSignedAt?.trim() &&
+        (resolvedPreviewVariant === "acceptance" || templateType === "Architect")
+      ) {
+        html = injectMockConsultantSignatureIntoPreviewHtml(html, templateType);
+      }
+
+      if (!html || !html.trim()) {
+        setPreviewError("Preview HTML was empty. Check that the template file exists under html/.");
+        setPreviewOpen(true);
+        return;
+      }
+
+      previewPdfContextRef.current = { fields, templateType, previewSource };
+      if (resetSaveState) {
+        setPdfSavedForCurrentPreview(false);
+      }
+      setPreviewReadyForSave(true);
+      setPreviewUrl((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setPreviewHtml(html);
+      setPreviewFieldMapping(fieldMapping);
+      setPreviewOpen(true);
+    } catch (error: unknown) {
+      console.error("Preview generation failed:", error);
+      const message = error instanceof Error ? error.message : "Failed to generate preview.";
+      setPreviewError(message);
+      setPreviewOpen(true);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    await loadPreviewContent(letterVariant, {
+      keepModalOpen: false,
+      resetSaveState: true,
+    });
+  };
+
+  const handleLetterVariantChange = (next: "appointment" | "acceptance") => {
+    if (next === letterVariant) return;
+    setLetterVariant(next);
+    if (previewOpen) {
+      void loadPreviewContent(next, { keepModalOpen: true, resetSaveState: false });
+    }
+  };
+
+  openPreviewForSignRef.current = handlePreview;
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -1205,185 +1363,6 @@ export default function ApplicationDetailsPage() {
       else window.clearTimeout(handle as unknown as number);
     };
   }, [isReadOnlyMode]);
-
-  const handlePreview = async () => {
-    try {
-      setPreviewError(null);
-      setSavePdfMessage(null);
-      setSavePdfError(null);
-      setPreviewReadyForSave(false);
-      setPdfSavedForCurrentPreview(false);
-      setStoredSigningPdfUrl(null);
-      previewPdfContextRef.current = null;
-      setPreviewOpen(false);
-      setPreviewHtml(null);
-      setPreviewUrl(null);
-      setIsPreviewLoading(true);
-      setPreviewOpen(true);
-
-      let projectForPreview = projectData;
-      if (!projectForPreview && projectId) {
-        const coreSelect =
-          "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
-        const { data: directData } = await supabase
-          .from("projects")
-          .select(coreSelect)
-          .eq("id", projectId)
-          .single();
-        if (directData) {
-          projectForPreview = directData as PreviewProjectData;
-          setProjectData(projectForPreview);
-        } else {
-          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
-            p_project_id: projectId,
-          });
-          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-            projectForPreview = rpcData as PreviewProjectData;
-            setProjectData(projectForPreview);
-          }
-        }
-      }
-
-      if (!projectForPreview) {
-        setPreviewError(
-          "Project data could not be loaded. Confirm you have access to this project and try again."
-        );
-        setPreviewOpen(true);
-        return;
-      }
-
-      let workflowStageForPreview = applicationWorkflowStage;
-      if (applicationId) {
-        const { data: appRow } = await supabase
-          .from("applications")
-          .select("workflow_stage")
-          .eq("id", applicationId)
-          .maybeSingle();
-        if (appRow?.workflow_stage != null && appRow.workflow_stage !== "") {
-          workflowStageForPreview = normalizeApplicationWorkflowStage(
-            String(appRow.workflow_stage)
-          );
-          setApplicationWorkflowStage(workflowStageForPreview);
-        }
-      }
-
-      const { fields, previewSource, templateType, fieldMapping } =
-        await buildApplicationPreviewContext({
-          userMetadata,
-          projectData: projectForPreview,
-          selectedApplication,
-          applicationNo,
-          applicationCreatedAt,
-          projectId,
-          letterVariant,
-        });
-
-      // Always release the previous blob URL before opening a new preview.
-      if (previewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(previewUrl);
-      }
-
-      // In process + approved: load the PDF from Supabase (projects.application_urls).
-      // Clean appointment letters always use live HTML so layout matches repo templates
-      // (stored PDFs may still be the old "Sub:" Word export).
-      const preferLiveHtmlPreview = isCleanAppointmentLetterType(templateType);
-
-      if (
-        !preferLiveHtmlPreview &&
-        (workflowStageForPreview === "in_process" ||
-          workflowStageForPreview === "approved_verified") &&
-        projectId
-      ) {
-        let raw = projectForPreview.application_urls;
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          const { data: urlsRow } = await supabase
-            .from("projects")
-            .select("application_urls")
-            .eq("id", projectId)
-            .maybeSingle();
-          raw = urlsRow?.application_urls;
-        }
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
-            p_project_id: projectId,
-          });
-          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-            raw = (rpcData as PreviewProjectData).application_urls;
-          }
-        }
-        const resolvedVariant = isDualLetterType(templateType) ? letterVariant : "appointment";
-        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
-
-        if (savedPdfUrl) {
-          const pdfUrl = storedPdfUrlWithCacheBuster(savedPdfUrl, {
-            ownerSignedAt,
-            architectSignedAt,
-          });
-          previewPdfContextRef.current = { fields, templateType, previewSource };
-          setPdfSavedForCurrentPreview(true);
-          setPreviewReadyForSave(true);
-          setStoredSigningPdfUrl(pdfUrl);
-          setPreviewHtml(null);
-          setPreviewUrl(pdfUrl);
-          setPreviewFieldMapping(fieldMapping);
-          setPreviewOpen(true);
-          return;
-        }
-
-        if (workflowStageForPreview === "approved_verified") {
-          setPreviewError(
-            isDualLetterType(templateType)
-              ? `No signed PDF on file for the ${resolvedVariant} letter.`
-              : "No signed PDF on file for this application."
-          );
-          return;
-        }
-      }
-
-      // Draft, in_process (no stored PDF / clean templates), or approved with live HTML.
-      let html = await generateApplicationPreviewHtml(
-        fields,
-        templateType,
-        previewSource
-      );
-
-      const resolvedPreviewVariant = isDualLetterType(templateType)
-        ? letterVariant
-        : "appointment";
-      if (ownerSignedAt?.trim()) {
-        html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
-      }
-      if (
-        architectSignedAt?.trim() &&
-        (resolvedPreviewVariant === "acceptance" || templateType === "Architect")
-      ) {
-        html = injectMockConsultantSignatureIntoPreviewHtml(html, templateType);
-      }
-
-      if (!html || !html.trim()) {
-        setPreviewError("Preview HTML was empty. Check that the template file exists under html/.");
-        setPreviewOpen(true);
-        return;
-      }
-
-      previewPdfContextRef.current = { fields, templateType, previewSource };
-      setPdfSavedForCurrentPreview(false);
-      setPreviewReadyForSave(true);
-      setPreviewUrl(null);
-      setPreviewHtml(html);
-      setPreviewFieldMapping(fieldMapping);
-      setPreviewOpen(true);
-    } catch (error: unknown) {
-      console.error("Preview generation failed:", error);
-      const message = error instanceof Error ? error.message : "Failed to generate preview.";
-      setPreviewError(message);
-      setPreviewOpen(true);
-    } finally {
-      setIsPreviewLoading(false);
-    }
-  };
-
-  openPreviewForSignRef.current = handlePreview;
 
   const handleMockSignComplete = async () => {
     if (!projectId) {
@@ -2225,7 +2204,7 @@ export default function ApplicationDetailsPage() {
                 <select
                   value={letterVariant}
                   onChange={(e) =>
-                    setLetterVariant(
+                    handleLetterVariantChange(
                       e.target.value === "acceptance" ? "acceptance" : "appointment"
                     )
                   }
@@ -2343,6 +2322,10 @@ export default function ApplicationDetailsPage() {
         }
         onMockSignComplete={handleMockSignComplete}
         mockSignBusy={isSigningPdf}
+        showLetterVariantSelector={isDualLetterType(previewTemplateType)}
+        letterVariant={letterVariant}
+        onLetterVariantChange={handleLetterVariantChange}
+        letterVariantDisabled={isPreviewLoading || isSavingPdf || isSigningPdf}
       />
 
       {saveSuccessDialogOpen && (

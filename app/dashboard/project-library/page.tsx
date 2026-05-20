@@ -11,6 +11,7 @@ import {
   hasAllProjectLibraryFiles,
   saveProjectLibraryFile,
 } from "@/app/utils/projectLibraryFiles";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 
 type UploadRecord = {
@@ -40,6 +41,7 @@ export default function ProjectLibraryPage() {
   const searchParams = useSearchParams();
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
+  const { showAlert } = useDashboardAlertModal();
   const [uploads, setUploads] = useState<(UploadRecord | undefined)[]>(() => {
     const saved = loadDraft<(UploadRecord | undefined)[]>(
       "draft-project-library-uploads",
@@ -72,7 +74,10 @@ export default function ProjectLibraryPage() {
     }
 
     if (!ACCEPTED_TYPES.some((type) => file.name.toLowerCase().endsWith(type))) {
-      alert("Only PDF files are supported.");
+      showAlert({
+        title: "Invalid file type",
+        message: "Only PDF files are supported.",
+      });
       event.target.value = "";
       return;
     }
@@ -91,7 +96,10 @@ export default function ProjectLibraryPage() {
         await saveProjectLibraryFile(index, file);
       } catch (e: any) {
         console.error("Error saving file locally:", e);
-        alert("Failed to save document locally. Please try again.");
+        showAlert({
+          title: "Could not save file",
+          message: "Failed to save document locally. Please try again.",
+        });
         event.target.value = "";
         return;
       }
@@ -163,12 +171,19 @@ export default function ProjectLibraryPage() {
     // Require all five documents to be selected (stored locally)
     const ok = await hasAllProjectLibraryFiles(MAX_FILES);
     if (!ok) {
-      alert("Please upload all five required documents before saving the Project Library.");
+      showAlert({
+        title: "Project library",
+        message:
+          "Please upload all five required documents before saving the Project Library.",
+      });
       return;
     }
 
     console.log("Project Library (local) uploads:", filteredUploads);
-    alert("Project library documents saved successfully!");
+    showAlert({
+      title: "Project library",
+      message: "Project library documents saved successfully!",
+    });
     markPageSaved("saved-project-library");
     saveDraft("dirty-project-library", false);
     saveDraft("saved-project-library-snapshot", uploads);

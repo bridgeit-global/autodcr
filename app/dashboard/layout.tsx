@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import SiteFooter from "../components/SiteFooter";
 import DashboardHeader from "../components/DashboardHeader";
@@ -8,6 +8,7 @@ import DashboardSidebar from "../components/DashboardSidebar";
 import { ApplicationPdfSaveSlotProvider } from "./context/ApplicationPdfSaveSlotContext";
 import { ApplicationSignSlotProvider } from "./context/ApplicationSignSlotContext";
 import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
+import { useDashboardAlertModal } from "./context/DashboardAlertModalContext";
 import { isPageSaved, loadDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
 import { supabase } from "../utils/supabase";
 import { clearAllProjectLibraryFiles, getProjectLibraryFile } from "../utils/projectLibraryFiles";
@@ -65,6 +66,42 @@ function extractProjectIdFromRpc(data: any): string | null {
   return null;
 }
 
+/** Sections not yet saved (local draft flags), with routes for direct navigation. */
+function getUnsavedRequiredPages(): RequiredPage[] {
+  const pages: RequiredPage[] = [];
+
+  if (!isPageSaved("saved-save-plot-details")) {
+    pages.push({
+      key: "saved-save-plot-details",
+      label: "Project Details (Save Plot Details)",
+      path: "/dashboard/project-details?tab=save-plot",
+    });
+  }
+  if (!isPageSaved("saved-project-info")) {
+    pages.push({
+      key: "saved-project-info",
+      label: "Project Details (Project Info)",
+      path: "/dashboard/project-details?tab=project-info",
+    });
+  }
+
+  const otherPages: RequiredPage[] = [
+    { key: "saved-applicant-details", label: "Applicant Details", path: "/dashboard/applicant" },
+    { key: "saved-building-details", label: "Building Details", path: "/dashboard/building" },
+    { key: "saved-area-details", label: "Area Details", path: "/dashboard/area" },
+    { key: "saved-project-library", label: "Project Library", path: "/dashboard/project-library" },
+    { key: "saved-bg-details", label: "BG Details", path: "/dashboard/bg" },
+  ];
+
+  for (const page of otherPages) {
+    if (!isPageSaved(page.key)) {
+      pages.push(page);
+    }
+  }
+
+  return pages;
+}
+
 function DashboardLayoutContent({
   children,
 }: {
@@ -72,6 +109,7 @@ function DashboardLayoutContent({
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { showAlert } = useDashboardAlertModal();
   const projectId = searchParams.get("projectId");
   const isEditMode = !!projectId;
   
@@ -306,8 +344,23 @@ function DashboardLayoutContent({
     return { payload, isActuallyEditMode, currentProjectId };
   };
 
+  const draftRemainingPages = useMemo(() => {
+    if (!showDraftConfirm) return [];
+    return getUnsavedRequiredPages();
+  }, [showDraftConfirm, allPagesSaved]);
+
   const handleSaveDraftClick = () => {
     setShowDraftConfirm(true);
+  };
+
+  const navigateToDraftPage = (path: string) => {
+    setShowDraftConfirm(false);
+    if (projectId) {
+      const separator = path.includes("?") ? "&" : "?";
+      router.push(`${path}${separator}projectId=${projectId}`);
+    } else {
+      router.push(path);
+    }
   };
 
   const handleDraftConfirmYes = async () => {
@@ -323,7 +376,7 @@ function DashboardLayoutContent({
       if (!payload.user_id) {
         const message = "User not found in local session. Please log in again.";
         setSubmitError(message);
-        alert(message);
+        showAlert({ title: "Session required", message });
         return;
       }
 
@@ -354,7 +407,7 @@ function DashboardLayoutContent({
       if (!payload.title || typeof payload.title !== "string" || payload.title.trim() === "") {
         const message = "Project title is missing. Please fill in the title under Project Details.";
         setSubmitError(message);
-        alert(message);
+        showAlert({ title: "Missing project title", message });
         return;
       }
 
@@ -378,7 +431,7 @@ function DashboardLayoutContent({
           const errorData = await response.json();
           const message = errorData.error || "Failed to save draft.";
           setSubmitError(message);
-          alert(`Draft save failed: ${message}`);
+          showAlert({ title: "Draft save failed", message });
           return;
         }
 
@@ -414,7 +467,7 @@ function DashboardLayoutContent({
             const errorData = await response.json();
             const message = errorData.error || "Failed to update existing draft.";
             setSubmitError(message);
-            alert(`Draft save failed: ${message}`);
+            showAlert({ title: "Draft save failed", message });
             return;
           }
 
@@ -437,7 +490,7 @@ function DashboardLayoutContent({
             console.error("Error saving draft via Supabase RPC:", error);
             const message = error.message || "Failed to save draft.";
             setSubmitError(message);
-            alert(`Draft save failed: ${message}`);
+            showAlert({ title: "Draft save failed", message });
             return;
           }
 
@@ -490,7 +543,7 @@ function DashboardLayoutContent({
       console.error("Error saving draft:", err);
       const message = err?.message || "Unexpected error while saving draft.";
       setSubmitError(message);
-      alert(message);
+      showAlert({ title: "Could not save draft", message });
     } finally {
       setIsSubmittingProject(false);
     }
@@ -518,7 +571,7 @@ function DashboardLayoutContent({
     if (isEditMode && isProjectDataLoading) {
       const message = "Project is still loading. Please wait a moment and try again.";
       setSubmitError(message);
-      alert(message);
+      showAlert({ title: "Please wait", message });
       return;
     }
 
@@ -529,7 +582,7 @@ function DashboardLayoutContent({
       if (!userId) {
         const message = "User not found in local session. Please log in again.";
         setSubmitError(message);
-        alert(message);
+        showAlert({ title: "Session required", message });
         return;
       }
 
@@ -548,7 +601,7 @@ function DashboardLayoutContent({
           const message =
             loadError || projectDataError || "Could not load project for update. Please refresh and try again.";
           setSubmitError(message);
-          alert(message);
+          showAlert({ title: "Could not load project", message });
           return;
         }
         existingData = project;
@@ -575,7 +628,7 @@ function DashboardLayoutContent({
       if (!projectTitle || typeof projectTitle !== "string" || projectTitle.trim() === "") {
         const message = "Project title is missing. Please fill Project Details and save again.";
         setSubmitError(message);
-        alert(message);
+        showAlert({ title: "Missing project title", message });
         return;
       }
 
@@ -632,7 +685,7 @@ function DashboardLayoutContent({
       if (!payload.user_id) {
         const message = "User ID is missing. Please log in again.";
         setSubmitError(message);
-        alert(message);
+        showAlert({ title: "Session required", message });
         return;
       }
 
@@ -647,7 +700,7 @@ function DashboardLayoutContent({
           const message =
             "No changes to save. Edit a section, use Save on that page, then click Update Project again.";
           setSubmitError(message);
-          alert(message);
+          showAlert({ title: "No changes to save", message });
           return;
         }
 
@@ -656,7 +709,7 @@ function DashboardLayoutContent({
         if (!authToken) {
           const message = "Your session expired. Please log in again.";
           setSubmitError(message);
-          alert(message);
+          showAlert({ title: "Session expired", message });
           return;
         }
 
@@ -675,7 +728,7 @@ function DashboardLayoutContent({
           const errorData = await response.json().catch(() => ({}));
           const message = errorData.error || "Failed to update project.";
           setSubmitError(message);
-          alert(`Project update failed: ${message}`);
+          showAlert({ title: "Project update failed", message });
           return;
         }
 
@@ -701,7 +754,7 @@ function DashboardLayoutContent({
           console.error("Error creating project via Supabase RPC:", error);
           const message = error.message || "Failed to create project.";
           setSubmitError(message);
-          alert(`Project submission failed: ${message}`);
+          showAlert({ title: "Project submission failed", message });
           return;
         }
 
@@ -767,7 +820,7 @@ function DashboardLayoutContent({
       console.error("Error submitting project:", err);
       const message = err?.message || "Unexpected error while submitting project.";
       setSubmitError(message);
-      alert(message);
+      showAlert({ title: "Something went wrong", message });
     } finally {
       setIsSubmittingProject(false);
     }
@@ -838,12 +891,40 @@ function DashboardLayoutContent({
 
       {showDraftConfirm && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4">
+          <div
+            className={`bg-white rounded-xl shadow-2xl p-6 w-full mx-4 ${
+              draftRemainingPages.length > 0 ? "max-w-md" : "max-w-sm"
+            }`}
+          >
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Save as Draft</h3>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="text-sm text-gray-600">
               Are you sure you want to save changes as draft?
             </p>
-            <div className="flex justify-end gap-3">
+            {draftRemainingPages.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-sm text-gray-600">
+                  The following sections are not saved yet. Open a section to complete and save
+                  it before saving the draft:
+                </p>
+                <ul className="space-y-2 max-h-48 overflow-y-auto">
+                  {draftRemainingPages.map((page) => (
+                    <li key={page.key}>
+                      <button
+                        type="button"
+                        onClick={() => navigateToDraftPage(page.path)}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
+                      >
+                        <span>{page.label}</span>
+                        <span className="text-xs text-emerald-700 font-medium shrink-0 ml-2">
+                          Go to section
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex justify-end gap-3 mt-6">
               <button
                 type="button"
                 onClick={() => setShowDraftConfirm(false)}
