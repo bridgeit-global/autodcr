@@ -324,20 +324,13 @@ export async function GET(
             global: { headers: token ? { Authorization: `Bearer ${token}` } : {} },
           });
 
-    const { data, error } = await supabase
+    const { data: project, error } = await supabase
       .from("projects")
       .select("*")
       .eq("id", projectId)
-      .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
-    if (error) {
-      if (error.code === "PGRST116") {
-        return NextResponse.json(
-          { error: "Project not found" },
-          { status: 404 }
-        );
-      }
+    if (error && error.code !== "PGRST116") {
       console.error("Error fetching project:", error);
       return NextResponse.json(
         { error: "Failed to fetch project", details: error.message },
@@ -345,10 +338,33 @@ export async function GET(
       );
     }
 
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const requestUserId = String(userId);
+    const isOwner = String(project.user_id || "") === requestUserId;
+    const isAppointedArchitect = String(project.architect_user_id || "") === requestUserId;
+
+    let isRosterConsultant = false;
+    if (!isOwner && !isAppointedArchitect) {
+      const { data: applicantRow } = await supabase
+        .from("applicants")
+        .select("user_id")
+        .eq("project_id", projectId)
+        .eq("user_id", requestUserId)
+        .maybeSingle();
+      isRosterConsultant = !!applicantRow;
+    }
+
+    if (!isOwner && !isAppointedArchitect && !isRosterConsultant) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
     return NextResponse.json(
       {
         success: true,
-        project: data,
+        project,
       },
       { status: 200 }
     );

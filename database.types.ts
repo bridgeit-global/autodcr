@@ -459,6 +459,10 @@ export type Database = {
         Args: { p_project_id: string }
         Returns: Json
       }
+      get_project_by_id_for_consultant: {
+        Args: { p_project_id: string }
+        Returns: Json
+      }
       get_applications_for_consultant: {
         Args: {
           p_consultant_id: string

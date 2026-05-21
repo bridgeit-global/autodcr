@@ -59,16 +59,40 @@ export async function fetchProjectForEdit(
     // fall through to RPC
   }
 
-  const { data: rpcData, error: rpcError } = await supabase.rpc("get_project_by_id_for_owner", {
-    p_project_id: projectId,
-  });
+  const { data: ownerRpcData, error: ownerRpcError } = await supabase.rpc(
+    "get_project_by_id_for_owner",
+    { p_project_id: projectId }
+  );
 
-  if (!rpcError && rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-    return { project: rpcData as ProjectRecord, error: null };
+  if (
+    !ownerRpcError &&
+    ownerRpcData &&
+    typeof ownerRpcData === "object" &&
+    !Array.isArray(ownerRpcData)
+  ) {
+    return { project: ownerRpcData as ProjectRecord, error: null };
+  }
+
+  const { data: consultantRpcData, error: consultantRpcError } = await supabase.rpc(
+    "get_project_by_id_for_consultant",
+    { p_project_id: projectId }
+  );
+
+  if (
+    !consultantRpcError &&
+    consultantRpcData &&
+    typeof consultantRpcData === "object" &&
+    !Array.isArray(consultantRpcData)
+  ) {
+    return { project: consultantRpcData as ProjectRecord, error: null };
   }
 
   return {
     project: null,
-    error: directError?.message || rpcError?.message || "Failed to load project",
+    error:
+      directError?.message ||
+      ownerRpcError?.message ||
+      consultantRpcError?.message ||
+      "Failed to load project",
   };
 }
