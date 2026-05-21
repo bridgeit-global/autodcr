@@ -1,4 +1,5 @@
 import { supabase } from "@/app/utils/supabase";
+import { enrichProjectRecordWithApplicants } from "@/app/utils/resolveApplicantDetailsForProject";
 
 export type ProjectRecord = Record<string, unknown> & {
   id?: string;
@@ -52,7 +53,8 @@ export async function fetchProjectForEdit(
     if (res.ok) {
       const json = (await res.json()) as { project?: ProjectRecord };
       if (json.project) {
-        return { project: json.project, error: null };
+        const project = await enrichProjectRecordWithApplicants(supabase, json.project);
+        return { project: (project ?? json.project) as ProjectRecord, error: null };
       }
     }
   } catch {
@@ -70,7 +72,11 @@ export async function fetchProjectForEdit(
     typeof ownerRpcData === "object" &&
     !Array.isArray(ownerRpcData)
   ) {
-    return { project: ownerRpcData as ProjectRecord, error: null };
+    const project = await enrichProjectRecordWithApplicants(
+      supabase,
+      ownerRpcData as ProjectRecord
+    );
+    return { project: (project ?? ownerRpcData) as ProjectRecord, error: null };
   }
 
   const { data: consultantRpcData, error: consultantRpcError } = await supabase.rpc(
@@ -84,7 +90,11 @@ export async function fetchProjectForEdit(
     typeof consultantRpcData === "object" &&
     !Array.isArray(consultantRpcData)
   ) {
-    return { project: consultantRpcData as ProjectRecord, error: null };
+    const project = await enrichProjectRecordWithApplicants(
+      supabase,
+      consultantRpcData as ProjectRecord
+    );
+    return { project: (project ?? consultantRpcData) as ProjectRecord, error: null };
   }
 
   return {

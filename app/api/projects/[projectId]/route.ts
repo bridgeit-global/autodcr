@@ -1,33 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { serializeApplicantRosterForStorage } from "@/app/utils/applicantRecordFields";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
 
-const pickText = (...values: Array<unknown>): string | undefined => {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim();
+const normalizeApplicantDetails = (raw: unknown) => {
+  if (!raw || typeof raw !== "object") {
+    return serializeApplicantRosterForStorage([]);
   }
-  return undefined;
-};
-
-const normalizeApplicantDetails = (raw: any) => {
-  if (!raw || typeof raw !== "object") return raw;
-  const applicants = Array.isArray(raw.applicants) ? raw.applicants : [];
-  const normalizedApplicants = applicants.map((applicant: any) => {
-    if (!applicant || typeof applicant !== "object") return applicant;
-    const address_line1 = pickText(applicant.address_line1, applicant.addressLine1);
-    const address_line2 = pickText(applicant.address_line2, applicant.addressLine2);
-    const address_line3 = pickText(applicant.address_line3, applicant.addressLine3);
-    return {
-      ...applicant,
-      ...(address_line1 ? { address_line1 } : {}),
-      ...(address_line2 ? { address_line2 } : {}),
-      ...(address_line3 ? { address_line3 } : {}),
-    };
-  });
-  return { ...raw, applicants: normalizedApplicants };
+  const applicants = Array.isArray((raw as { applicants?: unknown }).applicants)
+    ? (raw as { applicants: unknown[] }).applicants
+    : [];
+  return serializeApplicantRosterForStorage(applicants);
 };
 
 // Update a project by ID
@@ -146,9 +132,10 @@ export async function PUT(
       updateData.save_plot_details = body.save_plot_details;
     }
 
-    if (body.applicant_details !== undefined) {
-      updateData.applicant_details = normalizeApplicantDetails(body.applicant_details);
-    }
+    const applicantRoster =
+      body.applicant_details !== undefined
+        ? normalizeApplicantDetails(body.applicant_details)
+        : undefined;
 
     if (body.building_details !== undefined) {
       updateData.building_details = body.building_details;
@@ -216,36 +203,67 @@ export async function PUT(
       updateData.application_urls = merged;
     }
 
-    // Update the project
-    const { data, error } = await supabase
-      .from("projects")
-      .update(updateData)
-      .eq("id", projectId)
-      .eq("user_id", userId) // Extra security check
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error updating project:", error);
-      return NextResponse.json(
-        { error: "Failed to update project", details: error.message },
-        { status: 500 }
-      );
-    }
-
-    if (body.applicant_details !== undefined) {
-      const { error: syncError } = await supabase.rpc("sync_applicants_for_project", {
+    if (applicantRoster !== undefined) {
+      const { error: replaceError } = await userClient.rpc("replace_applicants_for_project", {
         p_project_id: projectId,
+        p_roster: applicantRoster,
       });
-      if (syncError) {
-        console.error("sync_applicants_for_project failed:", syncError);
+      if (replaceError) {
+        console.error("replace_applicants_for_project failed:", replaceError);
         return NextResponse.json(
           {
-            error: "Project saved but applicant roster sync failed",
-            details: syncError.message,
+            error: "Failed to save applicant roster",
+            details: replaceError.message,
           },
           { status: 500 }
         );
+      }
+    }
+
+    let data: Record<string, unknown> | null = null;
+
+    if (Object.keys(updateData).length > 0) {
+      const { data: updated, error } = await supabase
+        .from("projects")
+        .update(updateData)
+        .eq("id", projectId)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error updating project:", error);
+        return NextResponse.json(
+          { error: "Failed to update project", details: error.message },
+          { status: 500 }
+        );
+      }
+      data = updated as Record<string, unknown>;
+    } else {
+      const { data: existing, error: fetchError } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("id", projectId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (fetchError) {
+        console.error("Error loading project after applicant save:", fetchError);
+        return NextResponse.json(
+          { error: "Failed to load project", details: fetchError.message },
+          { status: 500 }
+        );
+      }
+      data = existing as Record<string, unknown> | null;
+    }
+
+    if (data) {
+      const { data: roster, error: rosterError } = await userClient.rpc(
+        "get_applicant_details_for_project",
+        { p_project_id: projectId }
+      );
+      if (!rosterError && roster != null) {
+        data.applicant_details = roster;
       }
     }
 
@@ -361,10 +379,26 @@ export async function GET(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
+    const rosterClient = token
+      ? createClient(supabaseUrl, supabaseAnonKey, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+        })
+      : supabase;
+
+    const { data: roster, error: rosterError } = await rosterClient.rpc(
+      "get_applicant_details_for_project",
+      { p_project_id: projectId }
+    );
+
+    const enrichedProject =
+      !rosterError && roster != null
+        ? { ...project, applicant_details: roster }
+        : project;
+
     return NextResponse.json(
       {
         success: true,
-        project,
+        project: enrichedProject,
       },
       { status: 200 }
     );

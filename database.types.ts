@@ -356,6 +356,10 @@ export type Database = {
         Args: { p_project_id: string }
         Returns: undefined
       }
+      replace_applicants_for_project: {
+        Args: { p_project_id: string; p_roster: Json }
+        Returns: undefined
+      }
       get_projects_for_owner: {
         Args: { p_owner_id: string }
         Returns: {

@@ -11,6 +11,10 @@ import { useProjectData } from "@/app/hooks/useProjectData";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
+import {
+  addressLinesFromResidential,
+  serializeApplicantRosterForStorage,
+} from "@/app/utils/applicantRecordFields";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -228,6 +232,24 @@ const composeAddress = (
   return normalizeAddressSingleLine(raw);
 };
 
+const isOwnerApplicantType = (type: string): boolean =>
+  type.trim().toLowerCase() === "owner";
+
+/** Owner row is always first; display ids are renumbered 1..n. */
+const sortApplicantsOwnerFirst = (rows: ApplicantRow[]): ApplicantRow[] => {
+  if (rows.length <= 1) return rows.map((row, index) => ({ ...row, id: index + 1 }));
+
+  const sorted = [...rows].sort((a, b) => {
+    const aOwner = isOwnerApplicantType(a.applicantType);
+    const bOwner = isOwnerApplicantType(b.applicantType);
+    if (aOwner && !bOwner) return -1;
+    if (!aOwner && bOwner) return 1;
+    return a.id - b.id;
+  });
+
+  return sorted.map((row, index) => ({ ...row, id: index + 1 }));
+};
+
 const APPLICANT_FORM_DEFAULTS: ApplicantFormData = {
   applicantType: "",
   plumbingConsultant: "",
@@ -250,7 +272,7 @@ export default function ApplicantDetailsPage() {
   const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   const [applicants, setApplicants] = useState<ApplicantRow[]>(() =>
-    loadDraft<ApplicantRow[]>("draft-applicant-details-applicants", [])
+    sortApplicantsOwnerFirst(loadDraft<ApplicantRow[]>("draft-applicant-details-applicants", []))
   );
   const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
@@ -338,9 +360,10 @@ export default function ApplicantDetailsPage() {
           address_line3: pickText(app.address_line3, app.addressLine3),
         }));
         
-        console.log("[Applicant Details] Mapped applicants:", mappedApplicants);
-        setApplicants(mappedApplicants);
-        saveDraft("draft-applicant-details-applicants", mappedApplicants);
+        const orderedApplicants = sortApplicantsOwnerFirst(mappedApplicants);
+        console.log("[Applicant Details] Mapped applicants:", orderedApplicants);
+        setApplicants(orderedApplicants);
+        saveDraft("draft-applicant-details-applicants", orderedApplicants);
         markPageSaved("saved-applicant-details");
         setIsSaved(true);
       } else {
@@ -546,9 +569,8 @@ export default function ApplicantDetailsPage() {
         address_line3: userAddressLine3 || undefined,
       };
 
-      // Shift existing IDs so logged-in user stays first with id 1
       const reindexed = prev.map((a, idx) => ({ ...a, id: idx + 2 }));
-      return [userRow, ...reindexed];
+      return sortApplicantsOwnerFirst([userRow, ...reindexed]);
     });
   }, [userMetadata, authUserId, isEditMode, projectData, applicants.length]);
 
@@ -662,18 +684,65 @@ export default function ApplicantDetailsPage() {
     availableApplicantTypes = ["Owner", ...availableApplicantTypes];
   }
 
-  const onSubmit = (data: ApplicantFormData) => {
+  const persistApplicantsToProject = async (roster: ApplicantRow[]): Promise<boolean> => {
+    if (!isEditMode || !projectId || projectData?.status === "draft") return true;
+
+    const userId =
+      typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
+    if (!userId) {
+      showAlert({
+        title: "Could not save applicants",
+        message: "User session not found. Please log in again.",
+      });
+      return false;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const authToken = session?.access_token;
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+    const response = await fetch(`/api/projects/${projectId}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        user_id: userId,
+        applicant_details: serializeApplicantRosterForStorage(roster),
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      showAlert({
+        title: "Could not save applicants",
+        message: (error as { error?: string }).error || "Failed to save applicant roster.",
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const onSubmit = async (data: ApplicantFormData) => {
     if (isReadOnlyMode) return;
     const nextId = applicants.length ? Math.max(...applicants.map((item) => item.id)) + 1 : 1;
     // All entries come from directory dropdown (consultants or owners), use their auth user id
-    const userId = (showDirectoryDropdown && selectedDirectoryId) ? selectedDirectoryId : undefined;
+    const userId = showDirectoryDropdown && selectedDirectoryId ? selectedDirectoryId : undefined;
 
-    const selectedDirectoryEntry = showDirectoryDropdown && selectedDirectoryId
-      ? directoryOptions.find((entry) => entry.id === selectedDirectoryId)
-      : undefined;
-    const addressLine1 = pickText(selectedDirectoryEntry?.address_line1);
-    const addressLine2 = pickText(selectedDirectoryEntry?.address_line2);
-    const addressLine3 = pickText(selectedDirectoryEntry?.address_line3);
+    const selectedDirectoryEntry =
+      showDirectoryDropdown && selectedDirectoryId
+        ? directoryOptions.find((entry) => entry.id === selectedDirectoryId)
+        : undefined;
+    let addressLine1 = pickText(selectedDirectoryEntry?.address_line1);
+    let addressLine2 = pickText(selectedDirectoryEntry?.address_line2);
+    let addressLine3 = pickText(selectedDirectoryEntry?.address_line3);
+    if (!addressLine1 && !addressLine2 && !addressLine3 && data.residentialAddress?.trim()) {
+      const split = addressLinesFromResidential(data.residentialAddress);
+      addressLine1 = split.line1;
+      addressLine2 = split.line2;
+      addressLine3 = split.line3;
+    }
     const newApplicant = {
       id: nextId,
       user_id: userId,
@@ -686,12 +755,17 @@ export default function ApplicantDetailsPage() {
       licenseIssueDate: data.licenseIssueDate || "-",
       residentialAddress:
         composeAddress(addressLine1, addressLine2, addressLine3, data.residentialAddress) || "-",
-      officeAddress: "-", // Not collected from form anymore
+      officeAddress: "-",
       address_line1: addressLine1 || undefined,
       address_line2: addressLine2 || undefined,
       address_line3: addressLine3 || undefined,
     };
-    const nextApplicants = [...applicants, newApplicant];
+    const nextApplicants = sortApplicantsOwnerFirst([...applicants, newApplicant]);
+
+    if (!(await persistApplicantsToProject(nextApplicants))) {
+      return;
+    }
+
     setApplicants(nextApplicants);
 
     reset();
@@ -794,7 +868,9 @@ export default function ApplicantDetailsPage() {
     }
 
     // Update local state
-    const updatedApplicants = applicants.filter((applicant) => applicant.id !== id);
+    const updatedApplicants = sortApplicantsOwnerFirst(
+      applicants.filter((applicant) => applicant.id !== id)
+    );
     setApplicants(updatedApplicants);
     saveDraft("draft-applicant-details-applicants", updatedApplicants);
 
@@ -820,7 +896,7 @@ export default function ApplicantDetailsPage() {
           headers,
           body: JSON.stringify({
             user_id: userId,
-            applicant_details: { applicants: updatedApplicants },
+            applicant_details: serializeApplicantRosterForStorage(updatedApplicants),
           }),
         });
 

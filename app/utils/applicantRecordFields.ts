@@ -39,6 +39,63 @@ export function pickEntityNameFromUserMeta(
   );
 }
 
+export type ApplicantRosterJson = { applicants: Record<string, unknown>[] };
+
+/** Canonical applicant row for public.applicants.applicant_details (includes address_line1–3). */
+export function serializeApplicantRowForStorage(
+  row: Record<string, unknown>
+): Record<string, unknown> {
+  const user_id = pickText(row.user_id, row.userId);
+  const applicantType = pickText(row.applicantType, row.applicant_type);
+  const name = pickText(row.name) || "-";
+  const residentialRaw = pickText(row.residentialAddress, row.residential_address, row.address);
+
+  let line1 = pickText(row.address_line1, row.addressLine1);
+  let line2 = pickText(row.address_line2, row.addressLine2);
+  let line3 = pickText(row.address_line3, row.addressLine3);
+  if (!line1 && !line2 && !line3 && residentialRaw) {
+    const split = addressLinesFromResidential(residentialRaw);
+    line1 = split.line1;
+    line2 = split.line2;
+    line3 = split.line3;
+  }
+
+  const residentialAddress =
+    residentialRaw || [line1, line2, line3].filter(Boolean).join(", ") || "-";
+
+  const out: Record<string, unknown> = {
+    applicantType,
+    name,
+    contactNumber: pickText(row.contactNumber, row.contact_number) || "-",
+    email: pickText(row.email, row.emailAddress, row.email_address) || "-",
+    registrationNumber:
+      pickText(row.registrationNumber, row.registrationNo, row.registration_number) || "-",
+    panNo: pickText(row.panNo, row.pan_no, row.pan) || "-",
+    licenseIssueDate: pickText(row.licenseIssueDate, row.license_issue_date) || "-",
+    residentialAddress,
+    officeAddress: pickText(row.officeAddress, row.office_address) || "-",
+  };
+
+  if (user_id) out.user_id = user_id;
+  if (line1) out.address_line1 = line1;
+  if (line2) out.address_line2 = line2;
+  if (line3) out.address_line3 = line3;
+
+  return out;
+}
+
+export function serializeApplicantRosterForStorage(applicants: unknown[]): ApplicantRosterJson {
+  const rows = (Array.isArray(applicants) ? applicants : [])
+    .filter(
+      (a): a is Record<string, unknown> =>
+        !!a && typeof a === "object" && !Array.isArray(a)
+    )
+    .map(serializeApplicantRowForStorage)
+    .filter((a) => typeof a.user_id === "string" && String(a.user_id).trim());
+
+  return { applicants: rows };
+}
+
 export function addressLinesFromApplicantRecord(
   rec: Record<string, unknown> | null | undefined
 ): { line1: string; line2: string; line3: string; company: string } {
