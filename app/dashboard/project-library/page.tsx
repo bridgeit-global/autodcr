@@ -13,6 +13,7 @@ import {
 } from "@/app/utils/projectLibraryFiles";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 type UploadRecord = {
   id: string;
@@ -238,10 +239,8 @@ export default function ProjectLibraryPage() {
               type="button"
               onClick={handleSave}
               disabled={isReadOnlyMode}
-              className={`px-6 py-2 rounded-lg font-semibold text-sm shadow transition-colors ${
-                isSaved
-                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+              className={`px-6 py-2 rounded-lg font-semibold text-sm ${
+                isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
               } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
             >
               {isSaved ? "Saved" : "Save"}

@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
 import { supabase } from "../utils/supabase";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
+import { TEXT_BODY, TEXT_LABEL, TEXT_MUTED, TEXT_TITLE_PANEL } from "@/app/utils/typography";
 
 type HeroSectionProps = {
   slides: string[];
@@ -237,16 +239,16 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
       />
 
       <section
-        className="relative w-full border-b border-zinc-200 bg-cover bg-center"
+        className="relative w-full border-b border-gray-200 bg-cover bg-center"
         style={{ backgroundImage: `url(${slides[currentSlide]})` }}
       >
-        <div className="absolute inset-0 bg-sky-900/40" />
+        <div className="absolute inset-0 bg-emerald-950/45" />
 
         {/* Arrows */}
         <button
           type="button"
           onClick={goToPrev}
-          className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/80 p-2 text-sky-700 shadow hover:bg-white"
+          className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/90 p-2 text-emerald-800 shadow hover:bg-white"
         >
           <span className="inline-block rotate-180 text-2xl leading-none">
             &rsaquo;
@@ -256,20 +258,20 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
         <button
           type="button"
           onClick={goToNext}
-          className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/80 p-2 text-sky-700 shadow hover:bg-white"
+          className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/90 p-2 text-emerald-800 shadow hover:bg-white"
         >
           <span className="inline-block text-2xl leading-none">&rsaquo;</span>
         </button>
 
         <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-start gap-8 px-4 py-8 text-white md:grid-cols-3 md:py-12">
           <div className="md:col-span-2">
-            <div className="mb-4 inline-block rounded bg-sky-900 px-4 py-2">
-              <h2 className="text-lg font-semibold tracking-wide">
+            <div className={`mb-4 inline-block rounded-lg px-4 py-2 ${BTN_PRIMARY}`}>
+              <h2 className={`${TEXT_TITLE_PANEL} tracking-wide`}>
                 REFORMS UNDERTAKEN
               </h2>
             </div>
 
-            <ul className="space-y-4 text-base leading-relaxed">
+            <ul className={`space-y-4 leading-relaxed ${TEXT_BODY}`}>
               {[
                 "Single Window Clearance System for all types of approval",
                 "Time bound approval system",
@@ -288,21 +290,21 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
           {/* Login Form With Validation */}
           <div className="md:col-span-1 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.6),0_15px_30px_-8px_rgba(0,0,0,0.5)]">
-            <div className="rounded-xl border border-sky-200 bg-white shadow-[0_25px_50px_-12px_rgba(0,0,0,0.6),0_15px_30px_-8px_rgba(0,0,0,0.5)]">
-              <div className="bg-sky-700 px-4 py-3 text-white rounded-xl">
-                <h3 className="text-base font-semibold">User Login</h3>
+            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg">
+              <div className={`px-4 py-3 ${BTN_PRIMARY} rounded-t-2xl`}>
+                <h3 className={TEXT_TITLE_PANEL}>User Login</h3>
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 p-4">
                 {/* User ID */}
-                <label className="block text-sm">
-                  <span className="mb-1 block text-zinc-700">User ID</span>
+                <label className="block">
+                  <span className={TEXT_LABEL}>User ID</span>
                   <input
                     {...register("username", {
                       required: "User ID is required"
                     })}
                     type="text"
-                    className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-emerald-500"
                     placeholder="Enter your User ID"
                   />
                 </label>
@@ -311,21 +313,21 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                 )}
 
                 {/* Password */}
-                <label className="block text-sm">
-                  <span className="mb-1 block text-zinc-700">Password</span>
+                <label className="block">
+                  <span className={TEXT_LABEL}>Password</span>
                   <div className="relative">
                     <input
                       {...register("password", {
                         required: "Password is required"
                       })}
                       type={showPassword ? "text" : "password"}
-                      className="w-full rounded border border-zinc-300 px-3 py-2 pr-10 text-sm outline-none focus:border-sky-500 text-black"
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 pr-10 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-emerald-500"
                       placeholder="Enter password"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-700 focus:outline-none"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
                       tabIndex={-1}
                     >
                       {showPassword ? (
@@ -377,14 +379,14 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                   <div className="flex items-center justify-between gap-2">
                     <canvas
                       ref={captchaCanvasRef}
-                      className="select-none rounded border border-zinc-300 bg-zinc-50"
+                      className="select-none rounded-xl border border-gray-200 bg-gray-50"
                       width={CAPTCHA_CSS_W}
                       height={CAPTCHA_CSS_H}
                       aria-label="Captcha: type the four digits shown"
                     />
                     <button 
                       type="button" 
-                      className="shrink-0 text-sm text-sky-700 underline"
+                      className="shrink-0 text-sm font-medium text-emerald-700 underline hover:text-emerald-800"
                       onClick={regenerateCaptcha}
                     >
                       Generate New Image
@@ -396,7 +398,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                       required: "Captcha is required"
                     })}
                     type="text"
-                    className="w-full rounded border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-sky-500 text-black"
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-emerald-500"
                     placeholder="Enter the 4-digit code from the image"
                   />
                 </div>
@@ -414,7 +416,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                   <button 
                     type="submit"
                     disabled={isLoading}
-                    className="w-full rounded bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:bg-sky-400 disabled:cursor-not-allowed sm:w-auto"
+                    className={`w-full rounded-lg px-4 py-2 text-sm font-semibold sm:w-auto ${BTN_PRIMARY} disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     {isLoading ? "Logging in..." : "Login"}
                   </button>
@@ -422,7 +424,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
                   <div className="flex flex-col gap-2 sm:flex-row sm:gap-0">
                     <button
                       type="button"
-                      className="w-full rounded bg-sky-700 px-3 py-2 text-xs sm:text-sm font-medium text-white hover:bg-sky-800 sm:mx-2 sm:w-auto"
+                      className={`w-full rounded-lg px-3 py-2 text-xs font-semibold sm:mx-2 sm:w-auto sm:text-sm ${BTN_SAVE_UNSAVED}`}
                       onClick={() => setForgotOpen(true)}
                     >
                       Forgot Password
@@ -430,7 +432,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
                     <button
                       type="button"
-                      className="w-full rounded bg-sky-700 px-3 py-2 text-xs sm:text-sm font-medium text-white hover:bg-sky-800 sm:w-auto"
+                      className={`w-full rounded-lg px-3 py-2 text-xs font-semibold sm:w-auto sm:text-sm ${BTN_SAVE_UNSAVED}`}
                       onClick={() => setUserForgotOpen(true)}
                     >
                       Forgot Username

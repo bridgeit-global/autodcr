@@ -537,7 +537,7 @@ export default function DocumentPreviewModal({
                       else handlePrint();
                     }}
                     disabled={saveUiBusy}
-                    className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
+                    className="h-9 px-3 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                     aria-label="Print or save as PDF"
                     type="button"
                   >

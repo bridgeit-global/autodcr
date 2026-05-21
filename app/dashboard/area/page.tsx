@@ -6,6 +6,7 @@ import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/dr
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 type ExtractRow = {
   id: string;
@@ -406,10 +407,8 @@ const removePlot = (plotId: string) => {
           <div className="w-full md:w-auto flex md:justify-end">
             <button
               onClick={handleSave}
-              className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                isSaved
-                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+              className={`px-6 py-2 rounded-lg font-semibold ${
+                isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
               }`}
             >
               {isSaved ? "Saved" : "Save"}

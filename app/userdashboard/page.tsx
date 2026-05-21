@@ -506,7 +506,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-white rounded-lg shadow-2xl w-[90%] max-w-md relative"
+            className="bg-white rounded-xl shadow-2xl w-[90%] max-w-md relative border border-gray-200"
             onClick={(e) => e.stopPropagation()}
             initial={{ y: -40, opacity: 0, scale: 0.95 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
@@ -526,7 +526,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
               <div className="space-y-0">
                 {items.map((item, index) => (
                   <div key={index}>
-                    {index > 0 && <div className="border-t border-gray-300 my-0"></div>}
+                    {index > 0 && <div className="border-t border-gray-200 my-0"></div>}
                     <div className="py-3">
                       {item.header && (
                         <div className="text-sm text-gray-500 mb-1">{item.header}</div>
@@ -557,7 +557,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
                       ) : (
                         <button
                           onClick={() => handleItemClick(item, index)}
-                          className="text-base font-bold text-black hover:text-blue-600 transition-colors w-full text-left"
+                          className="text-base font-bold text-gray-900 hover:text-emerald-600 transition-colors w-full text-left"
                         >
                           {item.action}
                         </button>
@@ -944,17 +944,25 @@ function UserDashboardContent() {
       : APPLICATION_DATA;
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-      <DashboardHeader sessionTime={formatTime(sessionTime)} />
-      
-      <div className="flex-1 overflow-y-auto bg-gray-100">
-        {/* Red Instruction Banner */}
-        <div className="w-full bg-red-600 text-white px-6 py-3 text-sm font-medium">
-          This is mandatory for all Architect/LS to fill up Building construction activity details twice a month (1st to 15th & 16th to 31st) and upload site photographs and site supervisor report
-        </div>
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-100">
+      <div className="p-4 md:p-6 shrink-0">
+        <DashboardHeader sessionTime={formatTime(sessionTime)} />
+      </div>
 
-        {/* Main Content */}
-        <div className="flex gap-4 p-6 min-h-full overflow-x-hidden">
+      <div className="px-4 md:px-6 pb-4 md:pb-6 flex-1 min-h-0 overflow-hidden">
+        <div className="h-full w-full rounded-3xl bg-white shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50 p-4 md:p-6">
+            {/* Mandatory notice */}
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md shadow-sm mb-4">
+              <p className="text-sm text-red-700">
+                <strong>Note:</strong> This is mandatory for all Architect/LS to fill up Building
+                construction activity details twice a month (1st to 15th & 16th to 31st) and upload
+                site photographs and site supervisor report
+              </p>
+            </div>
+
+            {/* Main Content */}
+            <div className="flex gap-4 min-h-full overflow-x-hidden">
           {/* Left Content Area */}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4">
             {/* Navigation and Filters */}
@@ -992,36 +1000,36 @@ function UserDashboardContent() {
             )}
 
             {/* Main Data Table */}
-            <div className="bg-white rounded-lg border border-gray-300 overflow-hidden flex-1 min-h-0">
+            <div className="rounded-2xl border border-gray-200 shadow-sm bg-white overflow-hidden flex-1 min-h-0">
               <div className="overflow-auto h-full min-h-[420px]">
                 <table className="w-full text-sm border-collapse">
                   <thead className="sticky top-0 z-10">
                     <tr>
-                      <th className="bg-green-100 border border-gray-300 px-4 py-3 text-left font-semibold text-black">
+                      <th className="bg-emerald-800 border-b border-emerald-700 px-4 py-3 text-left text-sm font-semibold text-white">
                         Application Type
                       </th>
-                      <th className="bg-blue-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
                         Draft
                       </th>
-                      <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
                         Due Payment
                       </th>
-                      <th className="bg-purple-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
                         In Process
                       </th>
-                      <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-400 border-b border-emerald-300 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
                         Need Clarification
                       </th>
-                      <th className="bg-amber-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-300 border-b border-emerald-200 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
                         Withdrawn
                       </th>
-                      <th className="bg-red-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-200 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-900">
                         Rejected or Cancelled
                       </th>
-                      <th className="bg-green-100 border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-100 border-b border-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
                         Approved or Verified
                       </th>
-                      <th className="bg-white border border-gray-300 px-4 py-3 text-center font-semibold text-black">
+                      <th className="bg-emerald-50 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
                         System Approved
                       </th>
                     </tr>
@@ -1033,52 +1041,52 @@ function UserDashboardContent() {
                       const approvedCount = approvedCounts[app.name] ?? 0;
                       return (
                       <tr key={index} className="hover:bg-gray-50">
-                        <td className="border border-gray-300 px-4 py-3 text-left font-medium text-black">
+                        <td className="border-b border-gray-200 px-4 py-3 text-left font-medium text-gray-900">
                           {app.name}
                         </td>
                         <td
-                          className={`border border-gray-300 px-4 py-3 text-center ${
+                          className={`border-b border-gray-200 px-4 py-3 text-center ${
                             draftCount > 0
-                              ? "text-blue-600 font-semibold underline cursor-pointer hover:bg-blue-50"
-                              : "text-black"
+                              ? "text-emerald-600 font-semibold underline cursor-pointer hover:bg-emerald-50"
+                              : "text-gray-900"
                           }`}
                           onClick={() => handleCellClick(app.name, draftCount, "Draft")}
                         >
                           {draftCount}
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Due Payment")}>
+                        <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "Due Payment")}>
                           0
                         </td>
                         <td
-                          className={`border border-gray-300 px-4 py-3 text-center ${
+                          className={`border-b border-gray-200 px-4 py-3 text-center ${
                             inProcessCount > 0
-                              ? "text-blue-600 font-semibold underline cursor-pointer hover:bg-blue-50"
-                              : "text-black"
+                              ? "text-emerald-600 font-semibold underline cursor-pointer hover:bg-emerald-50"
+                              : "text-gray-900"
                           }`}
                           onClick={() => handleCellClick(app.name, inProcessCount, "In Process")}
                         >
                           {inProcessCount}
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Need Clarification")}>
+                        <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "Need Clarification")}>
                           0
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Withdrawn")}>
+                        <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "Withdrawn")}>
                           0
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
+                        <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
                           0
                         </td>
                         <td
-                          className={`border border-gray-300 px-4 py-3 text-center ${
+                          className={`border-b border-gray-200 px-4 py-3 text-center ${
                             approvedCount > 0
-                              ? "text-blue-600 font-semibold underline cursor-pointer hover:bg-blue-50"
-                              : "text-black"
+                              ? "text-emerald-600 font-semibold underline cursor-pointer hover:bg-emerald-50"
+                              : "text-gray-900"
                           }`}
                           onClick={() => handleCellClick(app.name, approvedCount, "Approved or Verified")}
                         >
                           {approvedCount}
                         </td>
-                        <td className="border border-gray-300 px-4 py-3 text-center text-black" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
+                        <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
                           0
                         </td>
                       </tr>
@@ -1095,25 +1103,25 @@ function UserDashboardContent() {
             <motion.div className="flex items-center gap-2 w-full">
               <button
                 onClick={() => setIsProjectModalOpen(true)}
-                className="h-9 flex-1 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+                className="h-9 flex-1 px-4 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
               >
                 + Projects
               </button>
               <button
                 onClick={() => setIsApplicationModalOpen(true)}
-                className="h-9 flex-1 px-4 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+                className="h-9 flex-1 px-4 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
               >
                 + Applications
               </button>
             </motion.div>
             )}
-            <div className="bg-white rounded-lg border border-gray-300 p-4">
-              <h3 className="text-lg font-semibold text-black mb-4">Announcements</h3>
+            <div className="rounded-2xl border border-gray-200 shadow-sm bg-white p-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Announcements</h3>
               <div className="space-y-4">
                 {ANNOUNCEMENTS.map((announcement, index) => (
                   <div
                     key={index}
-                    className="bg-gray-100 border border-gray-300 rounded p-3 text-sm text-gray-700"
+                    className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700"
                   >
                     {announcement}
                   </div>
@@ -1121,10 +1129,14 @@ function UserDashboardContent() {
               </div>
             </div>
           </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <SiteFooter />
+      <div className="shrink-0">
+        <SiteFooter />
+      </div>
 
       {/* Application Modal */}
       <ApplicationModal
@@ -1171,9 +1183,9 @@ function UserDashboardContent() {
 export default function UserDashboardPage() {
   return (
     <Suspense fallback={
-      <div className="h-screen bg-gray-50 flex items-center justify-center">
+      <div className="h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading...</p>
         </div>
       </div>

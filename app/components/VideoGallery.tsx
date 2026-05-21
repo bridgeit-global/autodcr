@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
+import { TEXT_TITLE_SECTION } from "@/app/utils/typography";
 
 type VideoItem = {
 	title: string;
@@ -18,9 +20,9 @@ const VideoGallery = ({ videos }: VideoGalleryProps) => {
 
 	return (
 		<>
-			<section className="w-full bg-linear-to-b from-sky-200 via-sky-300 to-sky-400 py-12">
+			<section className="w-full bg-gradient-to-b from-emerald-100 via-emerald-200 to-emerald-400 py-12">
 				<div className="mx-auto max-w-7xl px-4">
-					<h2 className="mb-8 text-center text-2xl font-bold uppercase tracking-wide text-white">Video Gallery</h2>
+					<h2 className={`mb-8 text-center uppercase tracking-wide text-white ${TEXT_TITLE_SECTION}`}>Video Gallery</h2>
 					<div className="grid grid-cols-1 gap-6 md:grid-cols-3">
 						{videos.map((video) => (
 							<div
@@ -60,9 +62,9 @@ const VideoGallery = ({ videos }: VideoGalleryProps) => {
 												className="object-cover transition-transform duration-300 group-hover:scale-105"
 											/>
 										</span>
-										<span className="absolute inset-0 bg-sky-900/20 group-hover:bg-sky-900/30" />
+										<span className="absolute inset-0 bg-emerald-950/25 group-hover:bg-emerald-950/35" />
 										<span className="relative flex h-full flex-col items-center justify-center gap-4">
-											<span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-rose-500 text-white shadow-lg transition-transform duration-200 group-hover:scale-105">
+											<span className={`inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform duration-200 group-hover:scale-105 ${BTN_PRIMARY}`}>
 												▶
 											</span>
 											<span className="text-lg font-semibold uppercase tracking-wide text-white drop-shadow">{video.title}</span>

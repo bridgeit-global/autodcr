@@ -2140,7 +2140,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             type="button"
             onClick={handleSubmitForm}
             disabled={isSubmitting}
-            className="w-full mb-6 py-3 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full mb-6 py-3 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
               <>
@@ -3132,7 +3132,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               className={`px-10 py-2 rounded-lg font-medium shadow transition flex items-center gap-2
                 ${isSubmitting || submitSuccess 
                   ? 'bg-gray-400 cursor-not-allowed' 
-                  : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                  : 'bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all'}`}
             >
               {isSubmitting ? (
                 <>

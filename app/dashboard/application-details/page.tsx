@@ -2352,7 +2352,7 @@ export default function ApplicationDetailsPage() {
                   setPendingDashboardUrl(null);
                   router.push(url);
                 }}
-                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold"
+                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
               >
                 OK
               </button>
@@ -2385,7 +2385,7 @@ export default function ApplicationDetailsPage() {
                   setPendingDashboardUrl(null);
                   router.push(url);
                 }}
-                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold"
+                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
               >
                 OK
               </button>
