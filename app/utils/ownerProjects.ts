@@ -1,4 +1,5 @@
 import { supabase } from "@/app/utils/supabase";
+import { fetchApplicantDetailsMapForProjects } from "@/app/utils/resolveApplicantDetailsForProject";
 
 export type OwnerProjectSelectRow = {
   id: string;
@@ -58,14 +59,18 @@ export async function fetchOwnerProjectsForSelect(): Promise<OwnerProjectSelectR
     rows = (data ?? []) as ProjectRow[];
   }
 
-  return rows
-    .filter((row) => isProjectEligibleForNewApplication(row.status))
-    .map((row) => ({
-      id: row.id,
-      title: row.title,
-      status: row.status ?? undefined,
-      project_info: row.project_info as OwnerProjectSelectRow["project_info"],
-      save_plot_details: row.save_plot_details as OwnerProjectSelectRow["save_plot_details"],
-      applicant_details: row.applicant_details,
-    }));
+  const eligible = rows.filter((row) => isProjectEligibleForNewApplication(row.status));
+  const rosterByProject = await fetchApplicantDetailsMapForProjects(
+    supabase,
+    eligible.map((row) => row.id)
+  );
+
+  return eligible.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status ?? undefined,
+    project_info: row.project_info as OwnerProjectSelectRow["project_info"],
+    save_plot_details: row.save_plot_details as OwnerProjectSelectRow["save_plot_details"],
+    applicant_details: rosterByProject[row.id] ?? { applicants: [] },
+  }));
 }

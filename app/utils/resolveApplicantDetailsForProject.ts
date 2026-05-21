@@ -1,87 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { serializeApplicantRosterForStorage } from "@/app/utils/applicantRecordFields";
 
 export type ApplicantDetailsJson = {
   applicants?: unknown[];
 };
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+function normalizeApplicantDetailsPayload(data: unknown): ApplicantDetailsJson {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { applicants: [] };
+  }
+  const row = data as ApplicantDetailsJson;
+  return { applicants: Array.isArray(row.applicants) ? row.applicants : [] };
 }
 
-function applicantMatchKey(rec: Record<string, unknown>): string {
-  const userId = String(rec.user_id ?? rec.userId ?? "").trim().toLowerCase();
-  if (userId) return `uid:${userId}`;
-  const type = String(rec.applicantType ?? rec.applicant_type ?? "")
-    .trim()
-    .toLowerCase();
-  const name = String(rec.name ?? "").trim().toLowerCase();
-  const id = String(rec.id ?? "").trim();
-  if (id) return `id:${id}`;
-  return `type:${type}|name:${name}`;
-}
-
-function mergeApplicantRow(
-  base: Record<string, unknown> | undefined,
-  overlay: Record<string, unknown>
-): Record<string, unknown> {
-  if (!base) return { ...overlay };
-  const merged: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(overlay)) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    merged[key] = value;
-  }
-  return merged;
-}
-
-/** Overlay public.applicants rows onto projects.applicant_details (table wins on conflicts). */
-export function mergeApplicantDetailsWithTable(
-  projectApplicantDetails: ApplicantDetailsJson | null | undefined,
-  fromTable: ApplicantDetailsJson | null | undefined
-): ApplicantDetailsJson {
-  const jsonApplicants = Array.isArray(projectApplicantDetails?.applicants)
-    ? projectApplicantDetails.applicants
-    : [];
-  const tableApplicants = Array.isArray(fromTable?.applicants) ? fromTable.applicants : [];
-
-  if (tableApplicants.length === 0) {
-    return { applicants: jsonApplicants };
-  }
-
-  const jsonByKey = new Map<string, Record<string, unknown>>();
-  for (const row of jsonApplicants) {
-    const rec = asRecord(row);
-    if (!rec) continue;
-    jsonByKey.set(applicantMatchKey(rec), rec);
-  }
-
-  const merged: Record<string, unknown>[] = [];
-  const seen = new Set<string>();
-
-  for (const row of tableApplicants) {
-    const overlay = asRecord(row);
-    if (!overlay) continue;
-    const key = applicantMatchKey(overlay);
-    seen.add(key);
-    merged.push(mergeApplicantRow(jsonByKey.get(key), overlay));
-  }
-
-  for (const row of jsonApplicants) {
-    const rec = asRecord(row);
-    if (!rec) {
-      merged.push(row as Record<string, unknown>);
-      continue;
-    }
-    const key = applicantMatchKey(rec);
-    if (!seen.has(key)) merged.push(rec);
-  }
-
-  return { applicants: merged };
-}
-
-/** Load roster from public.applicants (source of truth during dual-write). */
+/** Load roster from public.applicants (source of truth). Null only when RPC fails. */
 export async function fetchApplicantDetailsFromTable(
   supabase: SupabaseClient,
   projectId: string | undefined | null
@@ -93,29 +25,120 @@ export async function fetchApplicantDetailsFromTable(
     const { data, error } = await supabase.rpc("get_applicant_details_for_project", {
       p_project_id: id,
     });
-    if (error || !data || typeof data !== "object" || Array.isArray(data)) return null;
+    if (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[applicants] get_applicant_details_for_project failed:", error.message);
+      }
+      return null;
+    }
+    return normalizeApplicantDetailsPayload(data);
+  } catch (err) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[applicants] get_applicant_details_for_project exception:", err);
+    }
+    return null;
+  }
+}
 
-    const row = data as ApplicantDetailsJson;
-    if (!Array.isArray(row.applicants) || row.applicants.length === 0) return null;
-    return row;
+/** Table roster when available; otherwise keep embedded JSON (legacy rows). */
+export function mergeApplicantDetailsPreferTable<
+  T extends { applicant_details?: ApplicantDetailsJson | null },
+>(projectData: T | null | undefined, fromTable: ApplicantDetailsJson | null): T | null | undefined {
+  if (!projectData) return projectData;
+  if (fromTable == null) return projectData;
+  return {
+    ...projectData,
+    applicant_details: fromTable,
+  };
+}
+
+/** Attach table-sourced applicant_details onto a project record. */
+export async function enrichProjectRecordWithApplicants<
+  T extends { id?: string; applicant_details?: ApplicantDetailsJson | null },
+>(supabase: SupabaseClient, project: T | null | undefined): Promise<T | null | undefined> {
+  const projectId = project?.id?.trim();
+  if (!projectId) return project;
+
+  const fromTable = await fetchApplicantDetailsFromTable(supabase, projectId);
+  return mergeApplicantDetailsPreferTable(project, fromTable) ?? project;
+}
+
+/** Table first, then preview RPC (also table-backed). */
+export async function fetchApplicantDetailsWithFallback(
+  supabase: SupabaseClient,
+  projectId: string | undefined | null
+): Promise<ApplicantDetailsJson | null> {
+  const fromTable = await fetchApplicantDetailsFromTable(supabase, projectId);
+  if (fromTable) return fromTable;
+
+  const id = projectId?.trim();
+  if (!id) return null;
+
+  try {
+    const { data, error } = await supabase.rpc("get_project_for_preview", {
+      p_project_id: id,
+    });
+    if (error || !data || typeof data !== "object" || Array.isArray(data)) return null;
+    return normalizeApplicantDetailsPayload(
+      (data as { applicant_details?: unknown }).applicant_details
+    );
   } catch {
     return null;
   }
 }
 
-export function mergeApplicantDetailsPreferTable<
-  T extends { applicant_details?: ApplicantDetailsJson | null },
->(projectData: T | null | undefined, fromTable: ApplicantDetailsJson | null): T | null | undefined {
-  if (!projectData) return projectData;
-  const mergedDetails = mergeApplicantDetailsWithTable(
-    projectData.applicant_details,
-    fromTable
-  );
-  if (!Array.isArray(mergedDetails.applicants) || mergedDetails.applicants.length === 0) {
-    return projectData;
+/** Write roster to public.applicants; mirrors projects.applicant_details in DB. Owner session required. */
+export async function persistApplicantRosterForProject(
+  supabase: SupabaseClient,
+  projectId: string,
+  roster: ApplicantDetailsJson | unknown[]
+): Promise<{ error: string | null }> {
+  const applicants = Array.isArray(roster)
+    ? roster
+    : Array.isArray(roster.applicants)
+      ? roster.applicants
+      : [];
+  const serialized = serializeApplicantRosterForStorage(applicants);
+
+  const { error } = await supabase.rpc("replace_applicants_for_project", {
+    p_project_id: projectId,
+    p_roster: serialized,
+  });
+  return { error: error?.message ?? null };
+}
+
+/** Batch-load rosters from public.applicants for many projects. */
+export async function fetchApplicantDetailsMapForProjects(
+  supabase: SupabaseClient,
+  projectIds: string[]
+): Promise<Record<string, ApplicantDetailsJson>> {
+  const ids = [...new Set(projectIds.map((id) => id?.trim()).filter(Boolean))] as string[];
+  const map: Record<string, ApplicantDetailsJson> = {};
+  if (!ids.length) return map;
+
+  for (const id of ids) {
+    map[id] = { applicants: [] };
   }
-  return {
-    ...projectData,
-    applicant_details: mergedDetails,
-  };
+
+  const { data, error } = await supabase
+    .from("applicants")
+    .select("project_id, user_id, applicant_details")
+    .in("project_id", ids);
+
+  if (error || !data) return map;
+
+  for (const row of data) {
+    const projectId = String(row.project_id ?? "");
+    if (!projectId || !map[projectId]) continue;
+    const details =
+      row.applicant_details && typeof row.applicant_details === "object" && !Array.isArray(row.applicant_details)
+        ? (row.applicant_details as Record<string, unknown>)
+        : {};
+    map[projectId].applicants!.push({
+      ...details,
+      user_id: String(row.user_id ?? ""),
+    });
+  }
+
+  return map;
 }

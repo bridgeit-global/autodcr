@@ -15,6 +15,8 @@ import { clearAllProjectLibraryFiles, getProjectLibraryFile } from "../utils/pro
 import { useProjectData } from "../hooks/useProjectData";
 import { fetchProjectForEdit } from "../utils/fetchProjectForEdit";
 import { buildProjectUpdatePayload, countPayloadSections } from "../utils/projectUpdatePayload";
+import { serializeApplicantRosterForStorage } from "../utils/applicantRecordFields";
+import { persistApplicantRosterForProject } from "../utils/resolveApplicantDetailsForProject";
 
 type RequiredPage = {
   key: string;
@@ -301,7 +303,9 @@ function DashboardLayoutContent({
     if (applicantsList && (applicantsList as any[]).length > 0) {
       const existingApplicants = existingData?.applicant_details?.applicants || [];
       if (!deepEqual(applicantsList, existingApplicants)) {
-        payload.applicant_details = { applicants: applicantsList };
+        payload.applicant_details = serializeApplicantRosterForStorage(
+          applicantsList as unknown[]
+        );
       }
     }
 
@@ -479,7 +483,7 @@ function DashboardLayoutContent({
             p_status: "draft",
             p_project_info: payload.project_info ?? {},
             p_save_plot_details: payload.save_plot_details ?? {},
-            p_applicant_details: payload.applicant_details ?? {},
+            p_applicant_details: {},
             p_building_details: payload.building_details ?? {},
             p_area_details: payload.area_details ?? {},
             p_project_library: payload.project_library ?? {},
@@ -495,6 +499,16 @@ function DashboardLayoutContent({
           }
 
           finalProjectId = extractProjectIdFromRpc(data);
+          if (finalProjectId && payload.applicant_details) {
+            const { error: rosterError } = await persistApplicantRosterForProject(
+              supabase,
+              finalProjectId,
+              payload.applicant_details as { applicants?: unknown[] }
+            );
+            if (rosterError) {
+              console.warn("replace_applicants_for_project after draft create:", rosterError);
+            }
+          }
         }
       }
 
@@ -743,7 +757,7 @@ function DashboardLayoutContent({
           p_status: payload.status,
           p_project_info: payload.project_info,
           p_save_plot_details: payload.save_plot_details,
-          p_applicant_details: payload.applicant_details,
+          p_applicant_details: {},
           p_building_details: payload.building_details,
           p_area_details: payload.area_details,
           p_project_library: payload.project_library,
@@ -760,6 +774,16 @@ function DashboardLayoutContent({
 
         console.log("Created project:", data);
         finalProjectId = extractProjectIdFromRpc(data);
+        if (finalProjectId && payload.applicant_details) {
+          const { error: rosterError } = await persistApplicantRosterForProject(
+            supabase,
+            finalProjectId,
+            payload.applicant_details as { applicants?: unknown[] }
+          );
+          if (rosterError) {
+            console.warn("replace_applicants_for_project after create:", rosterError);
+          }
+        }
       }
 
       // Upload Project Library documents now (after project is created/updated)

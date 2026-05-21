@@ -119,7 +119,7 @@ export async function POST(
 
     const { data: projectRow, error: projErr } = await admin
       .from("projects")
-      .select("id, user_id, application_urls, architect_user_id, applicant_details")
+      .select("id, user_id, application_urls, architect_user_id")
       .eq("id", projectId.trim())
       .maybeSingle();
 
@@ -134,10 +134,21 @@ export async function POST(
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
 
+    const { data: roster, error: rosterErr } = await admin.rpc("get_applicant_details_for_project", {
+      p_project_id: projectId.trim(),
+    });
+
+    if (rosterErr) {
+      return NextResponse.json(
+        { error: "Failed to load applicant roster.", details: rosterErr.message },
+        { status: 500 }
+      );
+    }
+
     const projectContext: SigningProjectContext = {
       user_id: projectRow.user_id,
       architect_user_id: projectRow.architect_user_id,
-      applicant_details: projectRow.applicant_details as unknown as NonNullable<SigningProjectContext>["applicant_details"],
+      applicant_details: roster as NonNullable<SigningProjectContext>["applicant_details"],
     };
 
     if (

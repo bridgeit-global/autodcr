@@ -1,4 +1,5 @@
 import { isPageSaved, loadDraft } from "@/app/utils/draftStorage";
+import { serializeApplicantRosterForStorage } from "@/app/utils/applicantRecordFields";
 import type { ProjectRecord } from "@/app/utils/fetchProjectForEdit";
 
 function hasMeaningfulValue(val: unknown): boolean {
@@ -131,7 +132,7 @@ export function buildProjectUpdatePayload(input: BuildPayloadInput): ProjectUpda
       partialUpdate
     )
   ) {
-    payload.applicant_details = { applicants: applicantsList };
+    payload.applicant_details = serializeApplicantRosterForStorage(applicantsList);
   }
 
   if (

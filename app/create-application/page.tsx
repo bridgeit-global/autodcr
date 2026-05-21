@@ -658,13 +658,12 @@ export default function CreateApplicationPage() {
       if (!rpcError && rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
         applicantDetails = (rpcData as { applicant_details?: unknown }).applicant_details;
       } else {
-        const { data, error } = await supabase
-          .from("projects")
-          .select("applicant_details")
-          .eq("id", selectedProject)
-          .single();
-        if (cancelled || error) return;
-        applicantDetails = data?.applicant_details;
+        const { data: rosterData, error: rosterError } = await supabase.rpc(
+          "get_applicant_details_for_project",
+          { p_project_id: selectedProject }
+        );
+        if (cancelled || rosterError) return;
+        applicantDetails = rosterData;
       }
 
       setProjects((prev) =>
