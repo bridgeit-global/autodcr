@@ -62,7 +62,7 @@ export function DashboardAlertModalProvider({ children }: { children: ReactNode 
               <button
                 type="button"
                 onClick={hide}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all"
               >
                 OK
               </button>

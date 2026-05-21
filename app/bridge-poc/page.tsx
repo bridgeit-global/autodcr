@@ -1115,7 +1115,7 @@ export default function BridgePocPage() {
           <button
             onClick={() => void runUploadedPdfSigningFlow()}
             disabled={pdfFlowLoading}
-            className="mt-3 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 rounded bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pdfFlowLoading ? "Signing uploaded PDF..." : "Sign Uploaded PDF with DSC"}
           </button>

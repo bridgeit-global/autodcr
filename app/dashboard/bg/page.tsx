@@ -8,6 +8,7 @@ import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 type BGFormData = {
   zone: string;
@@ -349,10 +350,8 @@ export default function BGDetailsPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              className={`px-4 py-2 rounded-lg font-semibold shadow transition-colors ${
-                isSaved
-                  ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                  : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+              className={`px-4 py-2 rounded-lg font-semibold ${
+                isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
               } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
               disabled={isReadOnlyMode}
               onClick={handleSubmit(onSubmit)}

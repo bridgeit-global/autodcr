@@ -6,6 +6,7 @@ import { supabase } from "@/app/utils/supabase";
 import ChangePasswordModal from "./ChangePasswordModal";
 import ProfileModal from "./ProfileModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
+import { TEXT_BRAND, TEXT_CAPTION, TEXT_NAV } from "@/app/utils/typography";
 
 interface DashboardHeaderProps {
   sessionTime: string;
@@ -171,8 +172,8 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
             <span className="text-sm text-white font-bold">DD</span>
           </div>
           <div className="leading-tight">
-            <div className="text-base font-semibold">Draft Desk</div>
-            <div className="text-xs text-gray-500">Create Project Dashboard</div>
+            <div className={TEXT_BRAND}>Draft Desk</div>
+            <div className={TEXT_CAPTION}>Create Project Dashboard</div>
           </div>
         </button>
 
@@ -182,7 +183,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
         {/* Right: Session + actions + user */}
         <div className="flex items-center gap-3 min-w-[220px] justify-end">
           {/* Session Timer */}
-          <div className="hidden lg:block text-xs text-gray-500">
+          <div className={`hidden lg:block ${TEXT_CAPTION}`}>
             Session: <span className="font-semibold text-gray-700">{sessionTime}</span>
           </div>
 
@@ -231,8 +232,8 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
                 {formatUserName().slice(0, 1).toUpperCase()}
               </div>
               <div className="text-left leading-tight">
-                <div className="text-sm font-medium text-gray-900">{formatUserName()}</div>
-                <div className="text-xs text-gray-500">{getUserRole() || "User"}</div>
+                <div className={`${TEXT_NAV} text-gray-900`}>{formatUserName()}</div>
+                <div className={TEXT_CAPTION}>{getUserRole() || "User"}</div>
               </div>
               <svg
                 className={`w-4 h-4 transition-transform ${
@@ -288,7 +289,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
           {isDashboardPage && (
             <button
               onClick={() => setShowBackWarning(true)}
-              className="p-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-xl shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105"
+              className="p-2.5 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-xl transition-all duration-200 transform hover:scale-105"
               aria-label="Back to Dashboard"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -326,7 +327,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
               </button>
               <button
                 type="button"
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all"
                 onClick={() => {
                   setShowBackWarning(false);
                   router.push("/userdashboard");

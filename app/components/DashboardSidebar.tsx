@@ -6,6 +6,8 @@ import { isPageSaved, loadDraft, saveDraft } from "@/app/utils/draftStorage";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import { useEffect, useState } from "react";
+import { BTN_PRIMARY, NAV_ITEM_ACTIVE, NAV_ITEM_ACTIVE_BAR } from "@/app/utils/buttonClasses";
+import { TEXT_CAPTION, TEXT_NAV, TEXT_TITLE_MD } from "@/app/utils/typography";
 
 type DashboardSidebarProps = {
   collapsed: boolean;
@@ -581,14 +583,14 @@ const DashboardSidebar = ({
         {/* Title + toggle */}
         <div className="flex items-center justify-between mb-4 shrink-0">
           {!collapsed && !isReadOnlyMode && (
-            <h2 className="hidden md:block text-lg font-bold text-gray-900">
+            <h2 className={`hidden md:block ${TEXT_TITLE_MD}`}>
               {isEditMode ? "EDIT PROJECT" : "CREATE PROJECT"}
             </h2>
           )}
           {!collapsed && isReadOnlyMode && (
             <div className="hidden md:block min-w-0 pr-2">
-              <p className="text-xs font-semibold text-gray-900 break-words leading-tight">{selectedApplication || "-"}</p>
-              <p className="text-[11px] text-gray-600 break-all leading-tight mt-0.5">{selectedApplicationNo || "-"}</p>
+              <p className={`font-semibold break-words leading-tight ${TEXT_CAPTION} text-gray-900`}>{selectedApplication || "-"}</p>
+              <p className={`break-all leading-tight mt-0.5 ${TEXT_CAPTION}`}>{selectedApplicationNo || "-"}</p>
             </div>
           )}
           <button
@@ -723,7 +725,7 @@ const DashboardSidebar = ({
                 className={`hidden md:block w-full font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0 ${
                   updateDisabled
                     ? "bg-emerald-400 text-white cursor-not-allowed"
-                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                    : BTN_PRIMARY
                 }`}
               >
                 {isProjectDataLoading
@@ -739,7 +741,7 @@ const DashboardSidebar = ({
               <button
                 type="button"
                 onClick={onSubmitProjectClick}
-                className="hidden md:block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-sm shadow-sm shrink-0"
+                className={`hidden md:block w-full ${BTN_PRIMARY} font-semibold py-2 px-4 rounded-xl mb-6 text-sm shrink-0`}
               >
                 Submit Project
               </button>
@@ -772,14 +774,14 @@ const DashboardSidebar = ({
                 key={item.id}
                 onClick={() => handleNavigation(item.path)}
                 className={`relative w-full flex items-center ${justifyClass} px-4 py-3 rounded-xl transition-colors ${
-                  isActive ? "bg-emerald-100 text-emerald-800" : "text-gray-700 hover:bg-gray-100"
+                  isActive ? NAV_ITEM_ACTIVE : "text-gray-700 hover:bg-gray-100"
                 }`}
               >
                 {/* Active indicator bar */}
                 {isActive && (
-                  <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-emerald-600" />
+                  <span className={`absolute left-0 top-2 bottom-2 w-1 rounded-r-full ${NAV_ITEM_ACTIVE_BAR}`} />
                 )}
-                <span className="text-sm font-medium flex items-center gap-2">
+                <span className={`${TEXT_NAV} flex items-center gap-2`}>
                   <span
                     className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg text-emerald-700 shrink-0"
                     aria-hidden="true"
@@ -831,7 +833,7 @@ const DashboardSidebar = ({
               </button>
               <button
                 type="button"
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${BTN_PRIMARY}`}
                 onClick={() => {
                   const target = pendingPath;
                   restoreSectionDraftToLastSaved(pathname.replace(/\/$/, ""));

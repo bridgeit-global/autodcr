@@ -852,7 +852,7 @@ export default function TemplatePage() {
                   </button>
                   <button
                     onClick={openDscModal}
-                    className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                    className="px-4 py-2 text-sm font-medium bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-lg"
                   >
                     Sign using DSC
                   </button>

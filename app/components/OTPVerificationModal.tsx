@@ -441,7 +441,7 @@ const OTPVerificationModal: React.FC<Props> = ({
                   disabled={isLoading}
                   className={`w-full py-3 rounded-lg font-semibold text-white transition-all duration-200
                     ${otp.join('').length === 6 && !isLoading
-                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-200'
+                      ? 'bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all shadow-lg shadow-emerald-200'
                       : 'bg-gray-300 cursor-not-allowed'
                     }`}
                 >

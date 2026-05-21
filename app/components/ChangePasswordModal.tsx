@@ -739,7 +739,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                     disabled={!isCurrentPasswordVerified || !isNewPasswordValid()}
                     className={`mt-3 w-full px-4 py-2 rounded-md text-sm font-medium transition ${
                       isCurrentPasswordVerified && isNewPasswordValid()
-                        ? "bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                        ? "bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all cursor-pointer"
                         : "bg-gray-300 text-gray-500 cursor-not-allowed"
                     }`}
                   >
@@ -767,7 +767,7 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-700 transition disabled:bg-emerald-300 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-5 py-2 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-md text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   disabled={isSubmitting || submitSuccess || !isOTPVerified}
                 >
                   {isSubmitting ? (

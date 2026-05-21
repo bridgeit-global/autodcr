@@ -10,6 +10,7 @@ import { supabase } from "@/app/utils/supabase";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -956,10 +957,8 @@ export default function ApplicantDetailsPage() {
               {!isReadOnlyMode && (
                 <button
                   type="submit"
-                  className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                    isSaved
-                      ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                      : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                  className={`px-6 py-2 rounded-lg font-semibold ${
+                    isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
                   }`}
                 >
                   {isSaved ? "Saved" : "Save"}

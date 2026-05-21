@@ -3,7 +3,7 @@ import SiteFooter from "../components/SiteFooter";
 
 export default function OwnerRegistrationPage() {
   return (
-    <div className="min-h-screen bg-white/90 text-zinc-900 backdrop-blur-sm">
+    <div className="min-h-screen bg-gray-100">
       <main className="py-8">
         <RegistrationForm title="Owner Registration" />
       </main>

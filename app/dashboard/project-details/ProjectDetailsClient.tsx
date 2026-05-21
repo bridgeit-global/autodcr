@@ -16,6 +16,7 @@ import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 
 type ProjectFormData = {
@@ -1437,7 +1438,7 @@ export default function ProjectDetailsClient() {
                 onClick={() => setActiveTab(tab.id)}
                   className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                     isActive
-                    ? "bg-emerald-600 text-white shadow-md ring-1 ring-emerald-600"
+                    ? `${BTN_PRIMARY} shadow-md ring-1 ring-emerald-700`
                     : "text-gray-600 hover:text-gray-900 hover:bg-white/70"
                   }`}
               >
@@ -1472,10 +1473,8 @@ export default function ProjectDetailsClient() {
             {!isReadOnlyMode && (
               <button
                 type="submit"
-                className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                  isProjectInfoSaved
-                    ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                    : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                className={`px-6 py-2 rounded-lg font-semibold ${
+                  isProjectInfoSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
                 }`}
               >
                 {isProjectInfoSaved ? "Saved" : "Save"}
@@ -1695,10 +1694,8 @@ export default function ProjectDetailsClient() {
                 {!isReadOnlyMode && (
                   <button
                     type="submit"
-                    className={`px-6 py-2 rounded-lg font-semibold shadow transition-colors ${
-                      isSavePlotSaved
-                        ? "bg-emerald-700 hover:bg-emerald-800 text-white"
-                        : "bg-emerald-200 hover:bg-emerald-300 text-emerald-800"
+                    className={`px-6 py-2 rounded-lg font-semibold ${
+                      isSavePlotSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
                     }`}
                   >
                     {isSavePlotSaved ? "Saved" : "Save"}
@@ -2001,7 +1998,7 @@ export default function ProjectDetailsClient() {
                           />
                           <button
                             type="button"
-                            className="px-3 py-2 text-sm font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600"
+                            className={`px-3 py-2 text-sm font-medium rounded-lg ${BTN_PRIMARY}`}
                             onClick={(event) => {
                               const input = (event.currentTarget.previousSibling as HTMLInputElement) || null;
                               if (input && input.value) {

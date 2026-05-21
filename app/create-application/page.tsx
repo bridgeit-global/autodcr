@@ -1247,7 +1247,7 @@ export default function CreateApplicationPage() {
                     </button>
                     <button
                       type="button"
-                      className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-emerald-300 transition-colors"
+                      className="rounded-xl bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all px-5 py-2 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                       disabled={
                         isSubmitting ||
                         !selectedProject ||

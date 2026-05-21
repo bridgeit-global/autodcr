@@ -433,7 +433,7 @@ export default function BridgeSignModal({
                   <a
                     href={signedUrl}
                     download={signedFileName}
-                    className="inline-flex items-center rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
+                    className="inline-flex items-center rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all px-3 py-1.5 text-xs font-semibold"
                   >
                     Download {signedFileName}
                   </a>
@@ -462,7 +462,7 @@ export default function BridgeSignModal({
                 type="button"
                 onClick={() => void handleSign()}
                 disabled={!canSign}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSigning ? "Signing..." : "Sign with DSC"}
               </button>

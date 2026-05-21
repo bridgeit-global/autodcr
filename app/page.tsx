@@ -27,27 +27,27 @@ const TILES: Tile[] = [
 	{
 		title: "DASHBOARDS",
 		items: ["Proposal Summary", "SWM Summary"],
-		color: "bg-amber-700",
+		color: "",
 	},
 	{
 		title: "PAYMENT",
 		items: ["Online Payment", "Payment through Credit Note"],
-		color: "bg-green-700",
+		color: "",
 	},
 	{
 		title: "CITIZEN SEARCH",
 		items: ["For Citizens"],
-		color: "bg-teal-700",
+		color: "",
 	},
 	{
 		title: "SEARCH",
 		items: ["Consultant", "Developer"],
-		color: "bg-sky-700",
+		color: "",
 	},
 	{
 		title: "REGISTRATION",
-		items: ["Owner","Consultant", "Department", "BMC Contractors"],
-		color: "bg-indigo-800",
+		items: ["Owner", "Consultant", "Department", "BMC Contractors"],
+		color: "",
 	},
 ];
 
@@ -114,7 +114,7 @@ const VIDEOS: VideoItem[] = [
 
 export default function Home() {
 	return (
-		<div className="min-h-screen bg-white/90 text-zinc-900 backdrop-blur-sm">
+		<div className="min-h-screen bg-gray-100">
 			<Header />
 			<main>
 				<Login slides={SLIDES} />
