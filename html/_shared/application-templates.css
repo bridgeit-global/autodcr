@@ -147,12 +147,18 @@ body {
 .to-content {
   width: 93%;
   vertical-align: top;
-  overflow-wrap: break-word;
+  overflow-wrap: normal;
+  word-break: normal;
   line-height: 1.35;
 }
 
 .to-content p {
   margin: 0;
+}
+
+/* To, block: each line (header + address 1/2/3) stays on one row without breaking mid-line. */
+.to-content p.bp-recipient-line {
+  white-space: nowrap;
 }
 
 .to-content p:empty {
