@@ -32,6 +32,21 @@ export function isLegacySubAppointmentHtml(html: string): boolean {
 }
 
 /**
+ * "To," header — two lines (room for QR beside address block):
+ * line1: Executive Engineer (E.S./W.S.) - I
+ * line2: O/o The Dy. Ch. Eng. (B.P.) (+ zone suffix)
+ */
+export function buildBuildingProposalToHeaderLines(
+  baseDesignation: string,
+  officerLine: string
+): { line1: string; line2: string } {
+  const line1 = baseDesignation.trim().replace(/,\s*$/, "");
+  let line2 = officerLine.trim();
+  if (line2 && !/,\s*$/.test(line2)) line2 = `${line2},`;
+  return { line1, line2 };
+}
+
+/**
  * Legacy Word/Storage templates put officer designation and "E. S.," on separate
  * `<p>` lines; merge into one line: "O/o The Dy. Ch. Eng. (B.P.) E. S.,"
  */

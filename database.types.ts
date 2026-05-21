@@ -94,6 +94,33 @@ export type Database = {
           },
         ]
       }
+      building_proposal_offices: {
+        Row: {
+          id: string
+          line1: string
+          line2: string
+          line3: string
+          officer_name: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          line1: string
+          line2: string
+          line3: string
+          officer_name: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          line1?: string
+          line2?: string
+          line3?: string
+          officer_name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       projects: {
         Row: {
           applicant_details: Json

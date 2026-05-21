@@ -19,6 +19,7 @@ import {
   sameUserId,
 } from "@/app/utils/applicationSigning";
 import { isCleanAppointmentLetterType } from "@/app/utils/cleanAppointmentLetterTypes";
+import { fetchBuildingProposalOffices } from "@/app/utils/fetchBuildingProposalOffices";
 import {
   fetchApplicantDetailsFromTable,
   mergeApplicantDetailsPreferTable,
@@ -435,9 +436,10 @@ async function buildApplicationPreviewContext(
   const localMeta = readLocalStoredUserMetadata();
   const templateType = mapSelectedApplicationToTemplate(selectedApplication);
 
-  const applicantDetailsFromTable = projectId
-    ? await fetchApplicantDetailsFromTable(supabase, projectId)
-    : null;
+  const [applicantDetailsFromTable, buildingProposalOfficesByKey] = await Promise.all([
+    projectId ? fetchApplicantDetailsFromTable(supabase, projectId) : null,
+    fetchBuildingProposalOffices(supabase),
+  ]);
   const effectiveProjectData =
     mergeApplicantDetailsPreferTable(projectData, applicantDetailsFromTable) ?? projectData;
 
@@ -731,6 +733,9 @@ async function buildApplicationPreviewContext(
     },
     consultantLookupUserIds,
     projectData: effectiveProjectData,
+    ...(buildingProposalOfficesByKey
+      ? { buildingProposalOfficesByKey }
+      : {}),
     // Pass letterVariant for all types that have an acceptance template.
     ...(TYPES_WITH_ACCEPTANCE.has(templateType)
       ? {

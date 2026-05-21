@@ -6,12 +6,19 @@ import {
   formatAddressLinesForLetterDisplay,
   stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
+import { buildBuildingProposalToHeaderLines } from "@/app/utils/cleanAppointmentLetterTypes";
 import {
   templateConsultantApplicantKeywords,
   templateTypeToPdfTokenSuffix,
 } from "@/app/utils/consultantTemplateTokens";
+import {
+  resolveBuildingProposalOffice,
+  type BuildingProposalAddressBlock,
+} from "@/app/utils/resolveBuildingProposalOffice";
 import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
+
+export type { BuildingProposalAddressBlock } from "@/app/utils/resolveBuildingProposalOffice";
 
 export { templateConsultantApplicantKeywords, templateTypeToPdfTokenSuffix } from "@/app/utils/consultantTemplateTokens";
 
@@ -45,6 +52,8 @@ export type ApplicationPreviewSource = {
   consultantEmail?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
   consultantLookupUserIds?: string[];
+  /** Building Proposal offices from `public.building_proposal_offices` (keyed by slug). */
+  buildingProposalOfficesByKey?: Record<string, BuildingProposalAddressBlock>;
   /**
    * For all types that have an acceptance letter: `appointment` → default template,
    * `acceptance` → `{type}_acceptance.html` in Application_Templates.
@@ -99,56 +108,6 @@ export type ApplicationPreviewSource = {
   } | null;
 };
 
-type BuildingProposalAddressBlock = {
-  officerName: string;
-  line1: string;
-  line2: string;
-  line3: string;
-};
-
-const BP_CITY: BuildingProposalAddressBlock = {
-  officerName: "SHRI. VIJAY TAWDE",
-  line1:
-    "Dy. Chief Engineer (Building Proposal) - City, New Municipal Building, C.S. No. 355 / B,",
-  line2: "Bhagwan Walmiki Chowk, Vidyalankar Marg, Opp. Hanuman Mandir, Antop Hill,",
-  line3: "Wadala (East), Mumbai - 400 037",
-};
-
-const BP_WESTERN_I: BuildingProposalAddressBlock = {
-  officerName: "SHRI. BAJIRAO PATIL",
-  line1: "",
-  line2: "Hinduhrudaysamrat Balasaheb Thackeray Market, 6th to 9th Floor, New Majas Market,",
-  line3: "Poonam Nagar, Opp. J. V. Link Road, Jogeshwari (East), Mumbai - 400 093",
-};
-
-const BP_WESTERN_II: BuildingProposalAddressBlock = {
-  officerName: "SHRI. CHANDRAKANT CHAUDHARI",
-  line1:
-    "Dy. Chief Engineer, Building Proposals (W. S. - II) 1st Floor, C Wing, Municipal Building, Near Sanskruti Complex, 90 Feet D. P. Road,",
-  line2: "Kandivali (East), Mumbai- 400 101",
-  line3: "",
-};
-
-const BP_EASTERN: BuildingProposalAddressBlock = {
-  officerName: "SHRI. MEHUL PAINTER",
-  line1: "Near Raj Legacy (Residential Complex),",
-  line2: "Paper Mill Compound,L. B. S. Marg,",
-  line3: "Vikhroli (West), Mumbai - 400 083",
-};
-
-const BP_SPECIAL_CELL: BuildingProposalAddressBlock = {
-  officerName: "SHRI. RAJENDRA JADHAV",
-  line1: "Dy. Chief Engineer (Building Proposal), Special Cell, Ground Floor, Municipal Training Center,",
-  line2: "Raheja Vihar Complex, Chandivali Farm Road, Powai, Andheri (East), Mumbai - 400 072",
-  line3: "",
-};
-
-function normalizeWardPrefix(ward?: string): string {
-  const s = (ward || "").trim().toUpperCase();
-  if (!s) return "";
-  return s.charAt(0);
-}
-
 /** Pincode for EEBP acceptance “Mumbai - …” line (project info or BP address line 3). */
 function resolveAcceptanceEebpPincode(
   projectPincode?: string,
@@ -159,23 +118,6 @@ function resolveAcceptanceEebpPincode(
   const line3 = (buildingProposalLine3 || "").trim();
   const match = line3.match(/Mumbai\s*-\s*([\d][\d\s]{4,})/i);
   return match ? match[1].replace(/\s+/g, " ").trim() : "";
-}
-
-function resolveBuildingProposalAddress(
-  region?: string,
-  ward?: string
-): BuildingProposalAddressBlock | undefined {
-  const normalizedRegion = (region || "").trim().toLowerCase();
-  if (normalizedRegion === "city") return BP_CITY;
-  if (normalizedRegion === "eastern") return BP_EASTERN;
-  if (normalizedRegion.includes("special")) return BP_SPECIAL_CELL;
-  if (normalizedRegion === "western") {
-    const wardPrefix = normalizeWardPrefix(ward);
-    // Western split: outer wards (R/T) use WS-II, others default to WS-I.
-    if (wardPrefix === "R" || wardPrefix === "T") return BP_WESTERN_II;
-    return BP_WESTERN_I;
-  }
-  return undefined;
 }
 
 export function mapSelectedApplicationToTemplate(
@@ -607,9 +549,10 @@ export function mapToPdfFieldValues(
           : normalizedClientEntityType === "partnership firm"
             ? "Partner"
             : clientCompanyDesignation;
-  const buildingProposalAddressRaw = resolveBuildingProposalAddress(
+  const buildingProposalAddressRaw = resolveBuildingProposalOffice(
     regionForProjectToken,
-    wardForProjectToken
+    wardForProjectToken,
+    source?.buildingProposalOfficesByKey
   );
   const buildingProposalAddressFormatted = buildingProposalAddressRaw
     ? formatAddressLinesForLetterDisplay(
@@ -638,6 +581,13 @@ export function mapToPdfFieldValues(
     (regionForProjectToken || "").trim().toLowerCase() === "western"
       ? "The Executive Engineer (W.S.) - I"
       : "The Executive Engineer (E.S.) - I";
+  const buildingProposalOfficerLine = [officerDesignationDisplay, officerZoneSuffix]
+    .filter((part) => part.trim().length > 0)
+    .join(" ");
+  const buildingProposalToHeader = buildBuildingProposalToHeaderLines(
+    buildingProposalBaseDesignation,
+    buildingProposalOfficerLine
+  );
   const suffix = templateTypeToPdfTokenSuffix(templateType);
   const genericConsultantTemplateTokens: Record<string, string> = {
     [`project_Consultant_${suffix}`]: consultantRoleLabel,
@@ -707,9 +657,16 @@ export function mapToPdfFieldValues(
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
     project_BuildingProposal_OfficerDesignation: officerDesignationDisplay,
     project_BuildingProposal_ZoneSuffix: officerZoneSuffix,
-    project_BuildingProposal_OfficerLine: [officerDesignationDisplay, officerZoneSuffix]
-      .filter((part) => part.trim().length > 0)
-      .join(" "),
+    project_BuildingProposal_OfficerLine: buildingProposalOfficerLine,
+    project_BuildingProposal_ToHeaderLine1: buildingProposalToHeader.line1,
+    project_BuildingProposal_ToHeaderLine2: buildingProposalToHeader.line2,
+    project_BuildingProposal_ToHeaderLine: [
+      buildingProposalToHeader.line1,
+      buildingProposalToHeader.line2.replace(/,\s*$/, ""),
+    ]
+      .filter(Boolean)
+      .join(", ")
+      .concat(","),
     project_addressline1_BuildingProposal: buildingProposalAddress?.line1 || "",
     project_addressline2_BuildingProposal: buildingProposalAddress?.line2 || "",
     project_addressline3_BuildingProposal: buildingProposalAddress?.line3 || "",
@@ -790,6 +747,12 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_BuildingProposal_OfficerDesignation: "Building proposal — officer designation",
   project_BuildingProposal_ZoneSuffix: "Building proposal — zone suffix",
   project_BuildingProposal_OfficerLine: "Building proposal — officer line",
+  project_BuildingProposal_ToHeaderLine1:
+    "Building proposal — To header line 1 (Executive Engineer)",
+  project_BuildingProposal_ToHeaderLine2:
+    "Building proposal — To header line 2 (O/o Dy. Ch. Eng.)",
+  project_BuildingProposal_ToHeaderLine:
+    "Building proposal — To header (combined, legacy)",
   project_addressline1_BuildingProposal: "Building proposal — address line 1",
   project_addressline2_BuildingProposal: "Building proposal — address line 2",
   project_addressline3_BuildingProposal: "Building proposal — address line 3",

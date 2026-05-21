@@ -231,19 +231,6 @@ export const generateArchitectLicensedSurveyor: TemplateGenerator = async (
     fields
   );
   yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false,
-    undefined,
-    bottomMargin
-  );
-  yPosition -= lineHeight;
   yPosition = addText(page, fields.OfficeAddress, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
   yPosition -= lineHeight * 2;
 
@@ -344,19 +331,6 @@ export const generateStructuralEngineer: TemplateGenerator = async (
     fields
   );
   yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false,
-    undefined,
-    bottomMargin
-  );
-  yPosition -= lineHeight;
   yPosition = addText(page, fields.OfficeAddress, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
   yPosition -= lineHeight * 2;
 
@@ -443,17 +417,6 @@ export const generateFireSafetyConsultant: TemplateGenerator = async (
   yPosition = addText(
     page,
     `O/o The Deputy Chief Engineer (Building Proposal) ${fields.ZoneName},`,
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
     margin,
     yPosition,
     12,
@@ -553,17 +516,6 @@ export const generateMEConsultant: TemplateGenerator = async (
     false
   );
   yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
   yPosition = addText(page, fields.OfficeAddress, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
   yPosition -= lineHeight * 2;
 
@@ -647,17 +599,6 @@ export const generatePlumber: TemplateGenerator = async (
   yPosition = addText(
     page,
     `O/o The Deputy Chief Engineer (Building Proposal) ${fields.ZoneName},`,
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
     margin,
     yPosition,
     12,
@@ -757,17 +698,6 @@ export const generateParkingConsultant: TemplateGenerator = async (
     false
   );
   yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
   yPosition = addText(page, fields.OfficeAddress, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
   yPosition -= lineHeight * 2;
 
@@ -851,17 +781,6 @@ export const generateRainwaterConsultant: TemplateGenerator = async (
   yPosition = addText(
     page,
     `O/o The Deputy Chief Engineer (Building Proposal) ${fields.ZoneName},`,
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
     margin,
     yPosition,
     12,
@@ -961,17 +880,6 @@ export const generateSiteSupervisor: TemplateGenerator = async (
     false
   );
   yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
   yPosition = addText(page, fields.OfficeAddress, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
   yPosition -= lineHeight * 2;
 
@@ -1055,17 +963,6 @@ export const generateHorticulturist: TemplateGenerator = async (
   yPosition = addText(
     page,
     `O/o The Deputy Chief Engineer (Building Proposal) ${fields.ZoneName},`,
-    margin,
-    yPosition,
-    12,
-    font,
-    boldFont,
-    false
-  );
-  yPosition -= lineHeight;
-  yPosition = addText(
-    page,
-    "Brihanmumbai Municipal Corporation,",
     margin,
     yPosition,
     12,
