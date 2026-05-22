@@ -21,6 +21,7 @@
 /build
 
 # misc
+.puppeteer-profiles/
 .DS_Store
 *.pem
 

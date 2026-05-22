@@ -62,6 +62,8 @@ export type ApplicationPreviewSource = {
   letterVariant?: "appointment" | "acceptance";
   /** @deprecated Use `letterVariant` instead. Kept for backward compatibility. */
   architectHtmlVariant?: "appointment" | "acceptance";
+  /** When set, HTML preview embeds a QR for this URL (skips DB lookup). */
+  savedPdfUrlForQr?: string | null;
   projectData?: {
     title?: string;
     /** The architect's Supabase auth UUID stored at the project level (projects.architect_user_id). Used as a fallback to fetch architect metadata when the applicant row lacks a user_id. */
@@ -1422,20 +1424,25 @@ function getSavedPdfQrMarkupOutsideLetterRoot(html: string): string {
   return "";
 }
 
-/**
- * Wraps the populated HTML with a `@page` margin override + Paged.js
- * (loaded from a CDN inside the iframe so it costs nothing in the app bundle).
- *
- * Paged.js is a CSS Paged Media polyfill: it interprets `@page` rules and
- * splits the document into actual A4 page boxes (`.pagedjs_page`), which we
- * then style as white sheets with drop shadow so the preview looks like the
- * reference `architect appointment letter.pdf` (multiple pages, not one
- * scrolling document). Native browser text rendering = razor-sharp at any
- * zoom; Print/Save as PDF uses the same `@page` rules → vector PDF output
- * matches the on-screen pagination exactly.
- */
-function injectPaginatedStyles(html: string, templateType?: TemplateType): string {
-  html = prependFloatingSavedPdfQrIntoLetterRoot(html);
+/** App origin for preview iframe (blob URLs cannot resolve root-relative `/pagedjs/…`). */
+function resolvePreviewAppOrigin(): string {
+  if (typeof window !== "undefined") {
+    const origin = window.location?.origin?.trim();
+    if (origin && origin !== "null") return origin;
+  }
+  const env = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (env) return env.replace(/\/$/, "");
+  return "http://127.0.0.1:3000";
+}
+
+function escapeCssUrlValue(url: string): string {
+  return url.replace(/\\/g, "%5C").replace(/'/g, "%27");
+}
+
+function resolveLetterheadUrlFromHtml(
+  html: string,
+  ownerLetterheadUrl?: string | null
+): string {
   const metaHtml = htmlWithoutSavedPdfQrInjection(html);
   const dataUriMatch = metaHtml.match(
     /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
@@ -1446,11 +1453,41 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
   const cssBackgroundShorthandMatch = metaHtml.match(
     /background\s*:\s*[^;]*url\((['"]?)(.*?)\1\)[^;]*;/i
   );
-  const letterheadUrl =
+  let letterheadUrl =
     dataUriMatch?.[0] ||
-    cssBackgroundImageMatch?.[2] ||
-    cssBackgroundShorthandMatch?.[2] ||
+    cssBackgroundImageMatch?.[2]?.trim() ||
+    cssBackgroundShorthandMatch?.[2]?.trim() ||
+    ownerLetterheadUrl?.trim() ||
     "";
+  if (letterheadUrl.includes("$project_Letterhead")) letterheadUrl = "";
+  if (!letterheadUrl && ownerLetterheadUrl?.trim()) {
+    letterheadUrl = ownerLetterheadUrl.trim();
+  }
+  return letterheadUrl;
+}
+
+/**
+ * Wraps the populated HTML with a `@page` margin override + Paged.js
+ * (served from the running app at `/pagedjs/paged.polyfill.js`).
+ *
+ * Paged.js is a CSS Paged Media polyfill: it interprets `@page` rules and
+ * splits the document into actual A4 page boxes (`.pagedjs_page`), which we
+ * then style as white sheets with drop shadow so the preview looks like the
+ * reference `architect appointment letter.pdf` (multiple pages, not one
+ * scrolling document). Native browser text rendering = razor-sharp at any
+ * zoom; Print/Save as PDF uses the same `@page` rules → vector PDF output
+ * matches the on-screen pagination exactly.
+ */
+function injectPaginatedStyles(
+  html: string,
+  templateType?: TemplateType,
+  ownerLetterheadUrl?: string | null
+): string {
+  html = prependFloatingSavedPdfQrIntoLetterRoot(html);
+  const metaHtml = htmlWithoutSavedPdfQrInjection(html);
+  const letterheadUrl = resolveLetterheadUrlFromHtml(html, ownerLetterheadUrl);
+  const letterheadCssUrl = letterheadUrl ? escapeCssUrlValue(letterheadUrl) : "";
+  const previewOrigin = resolvePreviewAppOrigin();
   const isArchitectTemplate = templateType === "Architect";
   // Acceptance letters use the same clean HTML format as the Architect template,
   // so apply the same compact page margins regardless of consultant type.
@@ -1523,6 +1560,7 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
     : "";
 
   const head = `
+<base href="${previewOrigin}/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
@@ -1662,10 +1700,10 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
   }
   .pagedjs_page {
     background-color: #ffffff;
-    ${letterheadUrl ? `background-image: url('${letterheadUrl}');` : ""}
-    ${letterheadUrl ? "background-repeat: no-repeat;" : ""}
-    ${letterheadUrl ? "background-size: 210mm 297mm;" : ""}
-    ${letterheadUrl ? "background-position: top center;" : ""}
+    ${letterheadCssUrl ? `background-image: url('${letterheadCssUrl}');` : ""}
+    ${letterheadCssUrl ? "background-repeat: no-repeat;" : ""}
+    ${letterheadCssUrl ? "background-size: 210mm 297mm;" : ""}
+    ${letterheadCssUrl ? "background-position: top center;" : ""}
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     margin: 0 auto 16px auto;
     overflow: visible;
@@ -1694,7 +1732,7 @@ function injectPaginatedStyles(html: string, templateType?: TemplateType): strin
   ${authorityAppointmentPagedCss}
 </style>
 ${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
-<script src="https://unpkg.com/pagedjs/dist/paged.polyfill.js"></script>`;
+<script src="${previewOrigin}/pagedjs/paged.polyfill.js"></script>`;
 
   let out = html;
   if (/<\/head>/i.test(out)) {
@@ -1856,12 +1894,41 @@ ${SAVED_PDF_QR_LOCK_SCRIPT_INLINE}
  * The API replaces the sentinel with a QR image of the matching `application_urls` entry
  * (`templateType`, or `Architect_acceptance` for the Architect acceptance letter).
  */
+/** One session refresh, parallel HTML fetches (dual appointment + acceptance). */
+export async function generateApplicationPreviewHtmlBatch(
+  items: Array<{
+    fields: TemplateFields;
+    templateType: TemplateType;
+    source?: ApplicationPreviewSource;
+  }>,
+  accessToken?: string
+): Promise<string[]> {
+  let token = accessToken?.trim();
+  if (!token) {
+    await supabase.auth.refreshSession();
+    const { data: sessionData } = await supabase.auth.getSession();
+    token = sessionData.session?.access_token?.trim();
+  }
+  return Promise.all(
+    items.map((item) =>
+      fetchApplicationPreviewHtmlRaw(item.fields, item.templateType, item.source, {
+        accessToken: token,
+        skipSessionRefresh: true,
+      })
+    )
+  );
+}
+
 export async function generateApplicationPreviewHtml(
   fields: TemplateFields,
   templateType: TemplateType,
-  source?: ApplicationPreviewSource
+  source?: ApplicationPreviewSource,
+  accessToken?: string
 ): Promise<string> {
-  const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source);
+  const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source, {
+    accessToken,
+    skipSessionRefresh: Boolean(accessToken),
+  });
   // Legacy Word-export plumber layout (cc-start); clean templates use letter-header + injectPaginatedStyles.
   if (
     templateType === "Plumber" &&
@@ -1870,19 +1937,25 @@ export async function generateApplicationPreviewHtml(
   ) {
     return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
   }
-  return injectPaginatedStyles(rawHtml, templateType);
+  return injectPaginatedStyles(rawHtml, templateType, source?.ownerLetterheadUrl);
 }
 
 export async function fetchApplicationPreviewHtmlRaw(
   fields: TemplateFields,
   templateType: TemplateType,
-  source?: ApplicationPreviewSource
+  source?: ApplicationPreviewSource,
+  opts?: { accessToken?: string; skipSessionRefresh?: boolean }
 ): Promise<string> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
 
-  await supabase.auth.refreshSession();
-  const { data: sessionData } = await supabase.auth.getSession();
-  const access_token = sessionData.session?.access_token;
+  let access_token = opts?.accessToken?.trim();
+  if (!access_token && !opts?.skipSessionRefresh) {
+    await supabase.auth.refreshSession();
+  }
+  if (!access_token) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    access_token = sessionData.session?.access_token;
+  }
 
   const response = await fetch("/api/application-preview-html", {
     method: "POST",
@@ -1897,6 +1970,9 @@ export async function fetchApplicationPreviewHtmlRaw(
       ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
       ...((source?.letterVariant === "acceptance" || source?.architectHtmlVariant === "acceptance")
         ? { letterVariant: "acceptance" as const }
+        : {}),
+      ...(source?.savedPdfUrlForQr?.trim()
+        ? { savedPdfUrlForQr: source.savedPdfUrlForQr.trim() }
         : {}),
     }),
   });
@@ -2087,6 +2163,15 @@ export function injectMockArchitectSignatureIntoPreviewHtml(
  * {@link generateApplicationPreviewHtml} + {@link injectMockOwnerSignatureIntoPreviewHtml}
  * for mock-signed saves (avoid iframe snapshots post-Paged.js).
  */
+function base64ToPdfBlob(base64: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
 export async function generateApplicationPreviewPdfFromHtml(
   html: string,
   templateType: TemplateType
@@ -2106,5 +2191,42 @@ export async function generateApplicationPreviewPdfFromHtml(
       ? payload.error
       : `Chromium PDF route failed (${response.status}).`;
   throw new Error(message);
+}
+
+/** One Chromium launch for appointment + acceptance (much faster than two separate POSTs). */
+export async function generateApplicationPreviewPdfBatchFromHtml(
+  items: { html: string; templateType: TemplateType }[]
+): Promise<Blob[]> {
+  if (items.length < 1) {
+    throw new Error("At least one HTML document is required for batch PDF render.");
+  }
+  const response = await fetch("/api/application-preview-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      renders: items.map(({ html, templateType }) => ({ html, templateType })),
+    }),
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    error?: string;
+    pdfs?: string[];
+  } | null;
+  if (!response.ok) {
+    const message =
+      typeof payload?.error === "string"
+        ? payload.error
+        : `Chromium PDF batch failed (${response.status}).`;
+    throw new Error(message);
+  }
+  const pdfs = payload?.pdfs;
+  if (!Array.isArray(pdfs) || pdfs.length !== items.length) {
+    throw new Error("Chromium PDF batch returned an unexpected response.");
+  }
+  return pdfs.map((b64, i) => {
+    if (typeof b64 !== "string" || !b64.trim()) {
+      throw new Error(`Chromium PDF batch item ${i} was empty.`);
+    }
+    return base64ToPdfBlob(b64);
+  });
 }
 
