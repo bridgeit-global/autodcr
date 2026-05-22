@@ -1058,6 +1058,11 @@ function loadPdfDeps() {
 export function prewarmPreviewPdfRuntime(): void {
   if (typeof window === "undefined") return;
   void loadPdfDeps();
+  void fetch("/api/application-preview-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ warmup: true }),
+  }).catch(() => undefined);
 }
 
 type RasterizeDomOptions = {
@@ -2193,13 +2198,22 @@ export async function generateApplicationPreviewPdfFromHtml(
   throw new Error(message);
 }
 
-/** One Chromium launch for appointment + acceptance (much faster than two separate POSTs). */
-export async function generateApplicationPreviewPdfBatchFromHtml(
+function pdfBatchErrorMessage(status: number, payload: { error?: string } | null): string {
+  if (typeof payload?.error === "string" && payload.error.trim()) {
+    return payload.error;
+  }
+  if (status === 504) {
+    return (
+      "PDF generation timed out on the server (504). Wait a few seconds and try signing again. " +
+      "If this keeps happening, confirm the Vercel project uses Pro with at least 60s function duration."
+    );
+  }
+  return `Chromium PDF batch failed (${status}).`;
+}
+
+async function fetchApplicationPreviewPdfBatch(
   items: { html: string; templateType: TemplateType }[]
 ): Promise<Blob[]> {
-  if (items.length < 1) {
-    throw new Error("At least one HTML document is required for batch PDF render.");
-  }
   const response = await fetch("/api/application-preview-pdf", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2212,11 +2226,7 @@ export async function generateApplicationPreviewPdfBatchFromHtml(
     pdfs?: string[];
   } | null;
   if (!response.ok) {
-    const message =
-      typeof payload?.error === "string"
-        ? payload.error
-        : `Chromium PDF batch failed (${response.status}).`;
-    throw new Error(message);
+    throw new Error(pdfBatchErrorMessage(response.status, payload));
   }
   const pdfs = payload?.pdfs;
   if (!Array.isArray(pdfs) || pdfs.length !== items.length) {
@@ -2228,5 +2238,24 @@ export async function generateApplicationPreviewPdfBatchFromHtml(
     }
     return base64ToPdfBlob(b64);
   });
+}
+
+/** One Chromium launch for appointment + acceptance (much faster than two separate POSTs). */
+export async function generateApplicationPreviewPdfBatchFromHtml(
+  items: { html: string; templateType: TemplateType }[]
+): Promise<Blob[]> {
+  if (items.length < 1) {
+    throw new Error("At least one HTML document is required for batch PDF render.");
+  }
+  try {
+    return await fetchApplicationPreviewPdfBatch(items);
+  } catch (firstErr) {
+    const shouldRetry =
+      firstErr instanceof Error &&
+      (firstErr.message.includes("(504)") || firstErr.message.includes("timed out"));
+    if (!shouldRetry) throw firstErr;
+    await new Promise<void>((r) => setTimeout(r, 2500));
+    return await fetchApplicationPreviewPdfBatch(items);
+  }
 }
 

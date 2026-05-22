@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
 		"/api/application-preview-pdf": [
 			"./node_modules/@sparticuz/chromium/**",
 			"./node_modules/@sparticuz/chromium/bin/**",
+			"./public/pagedjs/**",
 		],
 		"/api/application-preview-html": ["./html/**"],
 	},

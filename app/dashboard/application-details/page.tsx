@@ -1614,7 +1614,7 @@ export default function ApplicationDetailsPage() {
   // the first Preview click feels instant rather than spending ~300-500ms on
   // dynamic imports.
   useEffect(() => {
-    if (!isReadOnlyMode) return;
+    if (!projectId) return;
     type IdleHandle = number;
     type IdleWindow = Window & {
       requestIdleCallback?: (cb: IdleRequestCallback, opts?: { timeout: number }) => IdleHandle;
@@ -1628,7 +1628,7 @@ export default function ApplicationDetailsPage() {
       if (w.cancelIdleCallback) w.cancelIdleCallback(handle);
       else window.clearTimeout(handle as unknown as number);
     };
-  }, [isReadOnlyMode]);
+  }, [projectId]);
 
   const handleMockSignComplete = async () => {
     if (!projectId) {
