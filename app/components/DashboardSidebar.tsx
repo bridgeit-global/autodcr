@@ -680,6 +680,11 @@ const DashboardSidebar = ({
                 {applicationSignSlot.unavailableHint}
               </p>
             )}
+            {!collapsed && applicationSignSlot.statusText && (
+              <p className="hidden md:block text-[11px] text-amber-900 mb-1.5">
+                {applicationSignSlot.statusText}
+              </p>
+            )}
             <button
               type="button"
               onClick={() => {

@@ -361,15 +361,20 @@ async function injectSavedPdfQrHtml(
     authorizationToken: string | null;
     /** `projects.application_urls` key to encode in the QR (defaults to `templateType`). */
     applicationUrlsKey?: string;
+    /** When set (e.g. predicted Storage public URL before first upload), skips DB lookup. */
+    savedPdfUrlForQr?: string | null;
   }
 ): Promise<string> {
-  let pdfUrl: string | undefined;
+  let pdfUrl: string | undefined =
+    typeof opts.savedPdfUrlForQr === "string" && opts.savedPdfUrlForQr.trim()
+      ? opts.savedPdfUrlForQr.trim()
+      : undefined;
   const urlsKey =
     typeof opts.applicationUrlsKey === "string" && opts.applicationUrlsKey.trim()
       ? opts.applicationUrlsKey.trim()
       : opts.templateType;
 
-  if (opts.projectId?.trim() && opts.authorizationToken) {
+  if (!pdfUrl && opts.projectId?.trim() && opts.authorizationToken) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: { Authorization: `Bearer ${opts.authorizationToken}` },
@@ -572,6 +577,8 @@ export async function POST(request: NextRequest) {
       letterVariant?: "appointment" | "acceptance";
       /** @deprecated Back-compat alias for `letterVariant`. */
       architectHtmlVariant?: "appointment" | "acceptance";
+      /** Pre-known PDF URL for QR (e.g. deterministic Storage URL before first upload). */
+      savedPdfUrlForQr?: string;
     };
 
     if (!body.templateType || !body.fields) {
@@ -675,6 +682,7 @@ export async function POST(request: NextRequest) {
       templateType: body.templateType,
       authorizationToken: token,
       applicationUrlsKey: acceptanceUrlsKey,
+      savedPdfUrlForQr: body.savedPdfUrlForQr,
     });
 
     if (process.env.NODE_ENV === "development") {

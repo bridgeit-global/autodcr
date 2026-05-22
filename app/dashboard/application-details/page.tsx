@@ -29,12 +29,14 @@ import {
   getAuthUserId,
   updateApplicationForSigning,
 } from "@/app/utils/ownerApplicationRpc";
+import { resolveSavedPdfUrlForQr } from "@/app/utils/projectSavedApplicationPdfUrl";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
   buildDetailsFieldRowsForUi,
   generateApplicationPreviewHtml,
-  generateApplicationPreviewPdf,
+  generateApplicationPreviewHtmlBatch,
+  generateApplicationPreviewPdfBatchFromHtml,
   generateApplicationPreviewPdfFromHtml,
   injectMockConsultantSignatureIntoPreviewHtml,
   injectMockOwnerSignatureIntoPreviewHtml,
@@ -622,12 +624,12 @@ async function buildApplicationPreviewContext(
     ),
   ];
   let ownerMetaSnapshot: unknown = null;
-  for (const ownerLookupUserId of ownerLookupUserIds) {
-    const ownerMeta = await fetchRawUserMetadataFromApi(
-      userMetadata,
-      [ownerLookupUserId],
-      ownerApplicant?.email
-    );
+  const ownerMetaResults = await Promise.all(
+    ownerLookupUserIds.map((ownerLookupUserId) =>
+      fetchRawUserMetadataFromApi(userMetadata, [ownerLookupUserId], ownerApplicant?.email)
+    )
+  );
+  for (const ownerMeta of ownerMetaResults) {
     if (!ownerMeta) continue;
     ownerMetaSnapshot = ownerMeta;
     if (!clientCompanyDesignation) {
@@ -804,12 +806,6 @@ function applicationTemplateSavedInUrls(
   return typeof e === "string" && e.trim().length > 0;
 }
 
-function hasApplicationUrlKey(raw: unknown, key: string): boolean {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-  const v = (raw as Record<string, unknown>)[key];
-  return typeof v === "string" && v.trim().length > 0;
-}
-
 /** Stored PDF URL for preview (dual-letter types: appointment vs acceptance). */
 function getStoredApplicationPdfUrl(
   raw: unknown,
@@ -837,32 +833,247 @@ function storedPdfUrlWithCacheBuster(
   return `${url}${sep}v=${encodeURIComponent(version)}`;
 }
 
-/** Build a signed PDF blob for one letter variant (appointment or acceptance). */
-async function buildConsultantSignedPdfBlob(
-  previewBase: BuildApplicationPreviewContextInput,
-  variant: "appointment" | "acceptance",
-  signatures: { owner: boolean; consultant: boolean }
-): Promise<Blob> {
-  const built = await buildApplicationPreviewContext({
-    ...previewBase,
-    letterVariant: variant,
+type BuiltApplicationPreview = {
+  fields: TemplateFields;
+  templateType: TemplateType;
+  previewSource: ApplicationPreviewSource;
+};
+
+/** HTML for save/sign PDFs with QR (stored or predicted public URL). */
+async function buildApplicationSavePdfHtml(
+  built: BuiltApplicationPreview,
+  applicationUrlsKey: string,
+  urlsRaw: unknown,
+  projectId: string,
+  signatures?: { owner: boolean; consultant: boolean; variant?: "appointment" | "acceptance" }
+): Promise<string> {
+  const savedPdfUrlForQr = resolveSavedPdfUrlForQr(projectId, applicationUrlsKey, urlsRaw);
+  let html = await generateApplicationPreviewHtml(built.fields, built.templateType, {
+    ...built.previewSource,
+    savedPdfUrlForQr,
   });
-  let html = await generateApplicationPreviewHtml(
-    built.fields,
-    built.templateType,
-    built.previewSource
-  );
-  if (signatures.owner) {
+  if (signatures?.owner) {
     html = injectMockOwnerSignatureIntoPreviewHtml(html, built.templateType);
   }
-  if (signatures.consultant) {
+  if (signatures?.consultant) {
+    const variant = signatures.variant ?? built.previewSource.letterVariant ?? "appointment";
     const injectSecondColumn =
       variant === "acceptance" || built.templateType === "Architect";
     if (injectSecondColumn) {
       html = injectMockConsultantSignatureIntoPreviewHtml(html, built.templateType);
     }
   }
+  return html;
+}
+
+/** One Chromium PDF pass with QR (stored or predicted public URL). */
+async function buildApplicationSavePdfBlob(
+  built: BuiltApplicationPreview,
+  applicationUrlsKey: string,
+  urlsRaw: unknown,
+  projectId: string,
+  signatures?: { owner: boolean; consultant: boolean; variant?: "appointment" | "acceptance" }
+): Promise<Blob> {
+  const html = await buildApplicationSavePdfHtml(
+    built,
+    applicationUrlsKey,
+    urlsRaw,
+    projectId,
+    signatures
+  );
   return generateApplicationPreviewPdfFromHtml(html, built.templateType);
+}
+
+function dualLetterBuiltContexts(
+  base: BuiltApplicationPreview,
+  _templateType: TemplateType
+): { appointment: BuiltApplicationPreview; acceptance: BuiltApplicationPreview } {
+  return {
+    appointment: {
+      fields: base.fields,
+      templateType: base.templateType,
+      previewSource: {
+        ...base.previewSource,
+        letterVariant: "appointment",
+        architectHtmlVariant: undefined,
+      },
+    },
+    acceptance: {
+      fields: base.fields,
+      templateType: base.templateType,
+      previewSource: {
+        ...base.previewSource,
+        letterVariant: "acceptance",
+        architectHtmlVariant: "acceptance",
+      },
+    },
+  };
+}
+
+/** Appointment + acceptance: one context build, parallel HTML, parallel PDF pages, one upload. */
+async function buildDualLetterPdfBlobs(
+  previewBase: BuildApplicationPreviewContextInput,
+  templateType: TemplateType,
+  urlsRaw: unknown,
+  signatures?: { owner: boolean; consultant: boolean },
+  cachedBase?: BuiltApplicationPreview | null,
+  accessToken?: string
+): Promise<{
+  appointmentBlob: Blob;
+  acceptanceBlob: Blob;
+  acceptanceKey: string;
+}> {
+  if (!previewBase.projectId?.trim()) {
+    throw new Error("Missing project for PDF save.");
+  }
+  const projectId = previewBase.projectId;
+  const acceptanceKey =
+    ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`;
+
+  const base =
+    cachedBase ??
+    (await buildApplicationPreviewContext({
+      ...previewBase,
+      letterVariant: "appointment",
+    }));
+  const { appointment: appointmentBuilt, acceptance: acceptanceBuilt } =
+    dualLetterBuiltContexts(base, templateType);
+
+  const appointmentQr = resolveSavedPdfUrlForQr(projectId, templateType, urlsRaw);
+  const acceptanceQr = resolveSavedPdfUrlForQr(projectId, acceptanceKey, urlsRaw);
+
+  const applySignatures = (
+    html: string,
+    variant: "appointment" | "acceptance"
+  ): string => {
+    if (!signatures?.owner && !signatures?.consultant) return html;
+    let out = html;
+    if (signatures.owner) {
+      out = injectMockOwnerSignatureIntoPreviewHtml(out, templateType);
+    }
+    if (
+      signatures.consultant &&
+      (variant === "acceptance" || templateType === "Architect")
+    ) {
+      out = injectMockConsultantSignatureIntoPreviewHtml(out, templateType);
+    }
+    return out;
+  };
+
+  let [appointmentHtml, acceptanceHtml] = await generateApplicationPreviewHtmlBatch(
+    [
+      {
+        fields: appointmentBuilt.fields,
+        templateType,
+        source: { ...appointmentBuilt.previewSource, savedPdfUrlForQr: appointmentQr },
+      },
+      {
+        fields: acceptanceBuilt.fields,
+        templateType,
+        source: { ...acceptanceBuilt.previewSource, savedPdfUrlForQr: acceptanceQr },
+      },
+    ],
+    accessToken
+  );
+  appointmentHtml = applySignatures(appointmentHtml, "appointment");
+  acceptanceHtml = applySignatures(acceptanceHtml, "acceptance");
+
+  const [appointmentBlob, acceptanceBlob] = await generateApplicationPreviewPdfBatchFromHtml([
+    { html: appointmentHtml, templateType },
+    { html: acceptanceHtml, templateType },
+  ]);
+
+  return { appointmentBlob, acceptanceBlob, acceptanceKey };
+}
+
+/** Consultant acceptance step: one PDF + one upload (owner step already saved appointment). */
+async function buildAcceptanceLetterPdfBlob(
+  previewBase: BuildApplicationPreviewContextInput,
+  templateType: TemplateType,
+  urlsRaw: unknown,
+  signatures: { owner: boolean; consultant: boolean }
+): Promise<{ acceptanceBlob: Blob; acceptanceKey: string }> {
+  if (!previewBase.projectId?.trim()) {
+    throw new Error("Missing project for PDF save.");
+  }
+  const acceptanceKey =
+    ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`;
+  const base = await buildApplicationPreviewContext({
+    ...previewBase,
+    letterVariant: "acceptance",
+  });
+  const { acceptance: acceptanceBuilt } = dualLetterBuiltContexts(base, templateType);
+  const acceptanceQr = resolveSavedPdfUrlForQr(
+    previewBase.projectId,
+    acceptanceKey,
+    urlsRaw
+  );
+  let acceptanceHtml = await generateApplicationPreviewHtml(
+    acceptanceBuilt.fields,
+    templateType,
+    { ...acceptanceBuilt.previewSource, savedPdfUrlForQr: acceptanceQr }
+  );
+  if (signatures.owner) {
+    acceptanceHtml = injectMockOwnerSignatureIntoPreviewHtml(acceptanceHtml, templateType);
+  }
+  if (signatures.consultant) {
+    acceptanceHtml = injectMockConsultantSignatureIntoPreviewHtml(acceptanceHtml, templateType);
+  }
+  const [acceptanceBlob] = await generateApplicationPreviewPdfBatchFromHtml([
+    { html: acceptanceHtml, templateType },
+  ]);
+  return { acceptanceBlob, acceptanceKey };
+}
+
+async function submitSavedApplicationPdfs(params: {
+  projectId: string;
+  templateType: TemplateType;
+  authToken: string;
+  authUserId: string;
+  applicationUrlsKey: string;
+  appointmentBlob?: Blob;
+  acceptanceBlob?: Blob | null;
+  acceptanceUrlsKey?: string;
+}): Promise<{ publicUrl?: string }> {
+  const slug = (key: string) => key.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+  const formData = new FormData();
+  formData.append("projectId", params.projectId);
+  formData.append("templateType", params.templateType);
+  formData.append("user_id", params.authUserId);
+  if (params.appointmentBlob) {
+    formData.append("pdf", params.appointmentBlob, `${slug(params.applicationUrlsKey)}.pdf`);
+    formData.append("applicationUrlsKey", params.applicationUrlsKey);
+  }
+  if (params.acceptanceBlob && params.acceptanceUrlsKey) {
+    formData.append("pdf_acceptance", params.acceptanceBlob, `${slug(params.acceptanceUrlsKey)}.pdf`);
+    formData.append("applicationUrlsKey_acceptance", params.acceptanceUrlsKey);
+  }
+
+  const response = await fetch("/api/save-application-pdf", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${params.authToken}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => null)) as {
+      error?: string;
+      details?: string;
+    } | null;
+    const msg =
+      typeof errBody?.error === "string"
+        ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+        : `Save failed (${response.status}).`;
+    throw new Error(msg);
+  }
+
+  const jsonBody = (await response.json().catch(() => null)) as { publicUrl?: string } | null;
+  return {
+    publicUrl:
+      typeof jsonBody?.publicUrl === "string" && jsonBody.publicUrl.trim()
+        ? jsonBody.publicUrl.trim()
+        : undefined,
+  };
 }
 
 /** Persist appointment + acceptance PDFs for any dual-letter consultant type. */
@@ -870,32 +1081,67 @@ async function persistDualLetterPdfs(
   previewBase: BuildApplicationPreviewContextInput,
   templateType: TemplateType,
   signatures: { owner: boolean; consultant: boolean },
-  upload: (pdfBlob: Blob, applicationUrlsKey: string) => Promise<{ publicUrl?: string }>
+  auth: { token: string; userId: string },
+  opts?: { acceptanceOnly?: boolean },
+  cachedBase?: BuiltApplicationPreview | null
 ): Promise<{ appointmentUrl: string | null; acceptanceUrl: string | null }> {
-  const acceptanceKey = ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`;
-  const variants: Array<{
-    variant: "appointment" | "acceptance";
-    urlsKey: string;
-  }> = [
-    { variant: "appointment", urlsKey: templateType },
-    { variant: "acceptance", urlsKey: acceptanceKey },
-  ];
-
-  // Upload sequentially so each save-application-pdf merge to application_urls
-  // sees the previous keys (parallel uploads were dropping e.g. "Architect").
-  let appointmentUrl: string | null = null;
-  let acceptanceUrl: string | null = null;
-  for (const { variant, urlsKey } of variants) {
-    const blobInitial = await buildConsultantSignedPdfBlob(previewBase, variant, signatures);
-    await upload(blobInitial, urlsKey);
-    const blobWithQr = await buildConsultantSignedPdfBlob(previewBase, variant, signatures);
-    const { publicUrl } = await upload(blobWithQr, urlsKey);
-    const trimmed = typeof publicUrl === "string" && publicUrl.trim() ? publicUrl.trim() : null;
-    if (variant === "appointment") appointmentUrl = trimmed;
-    else acceptanceUrl = trimmed;
+  let urlsRaw: unknown = previewBase.projectData?.application_urls;
+  if (previewBase.projectId?.trim()) {
+    const { data: urlsRow } = await supabase
+      .from("projects")
+      .select("application_urls")
+      .eq("id", previewBase.projectId)
+      .maybeSingle();
+    if (urlsRow?.application_urls != null) urlsRaw = urlsRow.application_urls;
   }
 
-  return { appointmentUrl, acceptanceUrl };
+  if (!previewBase.projectId?.trim()) {
+    throw new Error("Missing project for PDF save.");
+  }
+
+  if (opts?.acceptanceOnly) {
+    const { acceptanceBlob, acceptanceKey } = await buildAcceptanceLetterPdfBlob(
+      previewBase,
+      templateType,
+      urlsRaw,
+      signatures
+    );
+    await submitSavedApplicationPdfs({
+      projectId: previewBase.projectId,
+      templateType,
+      authToken: auth.token,
+      authUserId: auth.userId,
+      applicationUrlsKey: templateType,
+      acceptanceBlob,
+      acceptanceUrlsKey: acceptanceKey,
+    });
+    return { appointmentUrl: null, acceptanceUrl: null };
+  }
+
+  const { appointmentBlob, acceptanceBlob, acceptanceKey } = await buildDualLetterPdfBlobs(
+    previewBase,
+    templateType,
+    urlsRaw,
+    signatures,
+    cachedBase,
+    auth.token
+  );
+
+  const { publicUrl } = await submitSavedApplicationPdfs({
+    projectId: previewBase.projectId,
+    templateType,
+    authToken: auth.token,
+    authUserId: auth.userId,
+    appointmentBlob,
+    applicationUrlsKey: templateType,
+    acceptanceBlob,
+    acceptanceUrlsKey: acceptanceKey,
+  });
+
+  const appointmentUrl =
+    typeof publicUrl === "string" && publicUrl.trim() ? publicUrl.trim() : null;
+
+  return { appointmentUrl, acceptanceUrl: null };
 }
 
 export default function ApplicationDetailsPage() {
@@ -948,18 +1194,33 @@ export default function ApplicationDetailsPage() {
     previewSource: ApplicationPreviewSource;
   } | null>(null);
   const saveApplicationPdfRef = useRef<() => Promise<void>>(async () => Promise.resolve());
+  const saveInFlightRef = useRef(false);
+  const signInFlightRef = useRef(false);
   const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const signDirectlyRef = useRef<() => Promise<void>>(async () => Promise.resolve());
-  const buildApplicationPreviewPdfBlob = async (): Promise<Blob> => {
+  const buildApplicationPreviewPdfBlob = async (
+    urlsRaw?: unknown,
+    accessToken?: string
+  ): Promise<Blob> => {
     const ctx = previewPdfContextRef.current;
     if (!ctx) {
       throw new Error("Preview data is missing. Close the preview and click Preview again.");
     }
-    return generateApplicationPreviewPdf(
+    if (!projectId?.trim()) {
+      throw new Error("Missing project.");
+    }
+    const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
+      projectId,
+      ctx.templateType,
+      urlsRaw
+    );
+    const html = await generateApplicationPreviewHtml(
       ctx.fields,
       ctx.templateType,
-      ctx.previewSource
+      { ...ctx.previewSource, savedPdfUrlForQr },
+      accessToken
     );
+    return generateApplicationPreviewPdfFromHtml(html, ctx.templateType);
   };
 
   useEffect(() => {
@@ -1374,6 +1635,10 @@ export default function ApplicationDetailsPage() {
       setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
       return;
     }
+    if (signInFlightRef.current || isSigningPdf) {
+      return;
+    }
+    signInFlightRef.current = true;
 
     let resolvedApplicationId = applicationId;
     if (!resolvedApplicationId?.trim() && selectedApplication) {
@@ -1392,18 +1657,21 @@ export default function ApplicationDetailsPage() {
       setSavePdfError(
         "Missing application id. Use Application Details from the user dashboard (application number link) so signing can update your application."
       );
+      signInFlightRef.current = false;
       return;
     }
 
     const ctx = previewPdfContextRef.current;
     if (!ctx) {
       setSavePdfError("Preview context is missing. Close the preview and open Preview again.");
+      signInFlightRef.current = false;
       return;
     }
 
     setIsSigningPdf(true);
     setSavePdfMessage(null);
     setSavePdfError(null);
+    setSidebarPdfStatus(null);
 
     try {
       const {
@@ -1498,6 +1766,8 @@ export default function ApplicationDetailsPage() {
           setSavePdfMessage(
             `Your signature is already saved. The ${secondRoleLabel} will complete the acceptance letter.`
           );
+          signInFlightRef.current = false;
+          setIsSigningPdf(false);
           return;
         }
         if (!sameUserId(uid, appointedSecondId)) {
@@ -1515,48 +1785,6 @@ export default function ApplicationDetailsPage() {
           throw new Error("Only the project owner can sign this application.");
         }
       }
-
-      const uploadSignedPdf = async (pdfBlob: Blob, applicationUrlsKey: string) => {
-        const keySlug = applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-        const formData = new FormData();
-        formData.append("pdf", pdfBlob, `${keySlug}.pdf`);
-        formData.append("templateType", ctx.templateType);
-        formData.append("applicationUrlsKey", applicationUrlsKey);
-        formData.append("user_id", authUser.id);
-
-        const response = await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/save-application-pdf`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: formData,
-          }
-        );
-
-        if (!response.ok) {
-          const errBody = (await response.json().catch(() => null)) as {
-            error?: string;
-            details?: string;
-          } | null;
-          const msg =
-            typeof errBody?.error === "string"
-              ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
-              : `Save failed (${response.status}).`;
-          throw new Error(msg);
-        }
-
-        const jsonBody = (await response.json().catch(() => null)) as {
-          publicUrl?: string;
-        } | null;
-        return {
-          publicUrl:
-            typeof jsonBody?.publicUrl === "string" && jsonBody.publicUrl.trim()
-              ? jsonBody.publicUrl.trim()
-              : undefined,
-        };
-      };
 
       let publicUrl: string | null = null;
 
@@ -1605,16 +1833,29 @@ export default function ApplicationDetailsPage() {
       };
 
       if (hasDualLetters) {
+        const consultantSigning = ownerSigned && !architectSigned;
+        setSidebarPdfStatus(
+          consultantSigning
+            ? "Signing acceptance letter…"
+            : "Signing appointment & acceptance…"
+        );
         const { appointmentUrl } = await persistDualLetterPdfs(
           previewBase,
           ctx.templateType,
           {
             owner: true,
-            consultant: (ownerSigned && !architectSigned) || canSignBoth,
+            consultant: consultantSigning || canSignBoth,
           },
-          uploadSignedPdf
+          { token: authToken, userId: authUser.id },
+          { acceptanceOnly: consultantSigning },
+          {
+            fields: ctx.fields,
+            templateType: ctx.templateType,
+            previewSource: ctx.previewSource,
+          }
         );
         publicUrl = appointmentUrl;
+        setSidebarPdfStatus(null);
 
         const nowIso = new Date().toISOString();
 
@@ -1729,18 +1970,39 @@ export default function ApplicationDetailsPage() {
           return;
         }
       } else {
-        const buildSignedBlob = async () => {
-          const baseHtml = await generateApplicationPreviewHtml(
-            ctx.fields,
-            ctx.templateType,
-            ctx.previewSource
-          );
-          const htmlWithSign = injectMockOwnerSignatureIntoPreviewHtml(baseHtml, ctx.templateType);
-          return generateApplicationPreviewPdfFromHtml(htmlWithSign, ctx.templateType);
-        };
-        await uploadSignedPdf(await buildSignedBlob(), ctx.templateType);
-        const uploaded = await uploadSignedPdf(await buildSignedBlob(), ctx.templateType);
+        setSidebarPdfStatus("Signing application…");
+        let urlsRawSign: unknown = projectForPdf?.application_urls;
+        if (!urlsRawSign && projectId) {
+          const { data: urlsRow } = await supabase
+            .from("projects")
+            .select("application_urls")
+            .eq("id", projectId)
+            .maybeSingle();
+          urlsRawSign = urlsRow?.application_urls;
+        }
+        const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
+          projectId,
+          ctx.templateType,
+          urlsRawSign
+        );
+        let signHtml = await generateApplicationPreviewHtml(
+          ctx.fields,
+          ctx.templateType,
+          { ...ctx.previewSource, savedPdfUrlForQr },
+          authToken
+        );
+        signHtml = injectMockOwnerSignatureIntoPreviewHtml(signHtml, ctx.templateType);
+        const signedBlob = await generateApplicationPreviewPdfFromHtml(signHtml, ctx.templateType);
+        const uploaded = await submitSavedApplicationPdfs({
+          projectId,
+          templateType: ctx.templateType,
+          authToken,
+          authUserId: authUser.id,
+          appointmentBlob: signedBlob,
+          applicationUrlsKey: ctx.templateType,
+        });
         publicUrl = uploaded.publicUrl ?? null;
+        setSidebarPdfStatus(null);
       }
 
       if (hasDualLetters) {
@@ -1811,7 +2073,9 @@ export default function ApplicationDetailsPage() {
       const message = err instanceof Error ? err.message : "Failed to save signed PDF.";
       setSavePdfError(message);
     } finally {
+      signInFlightRef.current = false;
       setIsSigningPdf(false);
+      setSidebarPdfStatus(null);
     }
   };
 
@@ -1821,11 +2085,15 @@ export default function ApplicationDetailsPage() {
       setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
       return;
     }
-    try {
-      setSavePdfError(null);
-      setSavePdfMessage(null);
-      setIsSigningPdf(true);
+    if (signInFlightRef.current || isSigningPdf) {
+      return;
+    }
+    signInFlightRef.current = true;
+    setIsSigningPdf(true);
+    setSavePdfError(null);
+    setSavePdfMessage(null);
 
+    try {
       let projectForSign = projectData;
       if (!projectForSign) {
         const coreSelect =
@@ -1866,12 +2134,12 @@ export default function ApplicationDetailsPage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to prepare signing context.";
       setSavePdfError(message);
+      signInFlightRef.current = false;
       setIsSigningPdf(false);
       return;
     }
 
-    // isSigningPdf is still true; handleMockSignComplete will set it false in its own finally.
-    setIsSigningPdf(false);
+    signInFlightRef.current = false;
     await handleMockSignComplete();
   };
 
@@ -1882,6 +2150,10 @@ export default function ApplicationDetailsPage() {
       setSavePdfError("Missing project.");
       return;
     }
+    if (saveInFlightRef.current || isSavingPdf) {
+      return;
+    }
+    saveInFlightRef.current = true;
     setIsSavingPdf(true);
     setSavePdfMessage(null);
     setSavePdfError(null);
@@ -1927,35 +2199,14 @@ export default function ApplicationDetailsPage() {
       }
 
       const uploadPdfBlob = async (pdfBlob: Blob, applicationUrlsKey: string) => {
-        const keySlug = applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-        const formData = new FormData();
-        formData.append("pdf", pdfBlob, `${keySlug}.pdf`);
-        formData.append("templateType", ctx.templateType);
-        formData.append("applicationUrlsKey", applicationUrlsKey);
-        formData.append("user_id", authUser.id);
-
-        const response = await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/save-application-pdf`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: formData,
-          }
-        );
-
-        if (!response.ok) {
-          const errBody = (await response.json().catch(() => null)) as {
-            error?: string;
-            details?: string;
-          } | null;
-          const msg =
-            typeof errBody?.error === "string"
-              ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
-              : `Save failed (${response.status}).`;
-          throw new Error(msg);
-        }
+        await submitSavedApplicationPdfs({
+          projectId,
+          templateType: ctx.templateType,
+          authToken,
+          authUserId: authUser.id,
+          appointmentBlob: pdfBlob,
+          applicationUrlsKey,
+        });
       };
 
       const fetchApplicationUrls = async (): Promise<unknown> => {
@@ -1968,98 +2219,98 @@ export default function ApplicationDetailsPage() {
       };
 
       if (stageBeforeSave === "draft" && isDualLetterType(ctx.templateType)) {
-        const acceptanceKey = ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
-        const saveDualVariant = async (
-          variant: "appointment" | "acceptance",
-          applicationUrlsKey: string,
-          urlsRawInitial: unknown
-        ) => {
-          const hadKey = hasApplicationUrlKey(urlsRawInitial, applicationUrlsKey);
-          const built = await buildApplicationPreviewContext({
-            userMetadata,
-            projectData,
-            selectedApplication,
-            applicationNo,
-            applicationCreatedAt,
-            projectId,
-            letterVariant: variant,
-          });
-          const blob1 = await generateApplicationPreviewPdf(
-            built.fields,
-            built.templateType,
-            built.previewSource
-          );
-          if (hadKey) {
-            await uploadPdfBlob(blob1, applicationUrlsKey);
-          } else {
-            await uploadPdfBlob(blob1, applicationUrlsKey);
-            const blob2 = await generateApplicationPreviewPdf(
-              built.fields,
-              built.templateType,
-              built.previewSource
-            );
-            await uploadPdfBlob(blob2, applicationUrlsKey);
-          }
-        };
-
         setSidebarPdfStatus("Saving appointment & acceptance…");
         const urlsBeforeSave = await fetchApplicationUrls();
-        await Promise.all([
-          saveDualVariant("appointment", ctx.templateType, urlsBeforeSave),
-          saveDualVariant("acceptance", acceptanceKey, urlsBeforeSave),
-        ]);
 
-        const refreshed = await buildApplicationPreviewContext({
+        const previewBase: BuildApplicationPreviewContextInput = {
           userMetadata,
           projectData,
           selectedApplication,
           applicationNo,
           applicationCreatedAt,
           projectId,
-          letterVariant,
-        });
-        previewPdfContextRef.current = {
-          fields: refreshed.fields,
-          templateType: refreshed.templateType,
-          previewSource: refreshed.previewSource,
         };
-        const htmlWithQr = await generateApplicationPreviewHtml(
-          refreshed.fields,
-          refreshed.templateType,
-          refreshed.previewSource
+
+        const cachedBase: BuiltApplicationPreview = {
+          fields: ctx.fields,
+          templateType: ctx.templateType,
+          previewSource: ctx.previewSource,
+        };
+
+        const { appointmentBlob, acceptanceBlob, acceptanceKey } = await buildDualLetterPdfBlobs(
+          previewBase,
+          ctx.templateType,
+          urlsBeforeSave,
+          undefined,
+          cachedBase,
+          authToken
         );
-        setPreviewHtml(htmlWithQr);
-        const urlsAfterSave = await fetchApplicationUrls();
-        setPdfSavedForCurrentPreview(
-          applicationTemplateSavedInUrls(urlsAfterSave, ctx.templateType)
-        );
+
+        await submitSavedApplicationPdfs({
+          projectId,
+          templateType: ctx.templateType,
+          authToken,
+          authUserId: authUser.id,
+          appointmentBlob,
+          applicationUrlsKey: ctx.templateType,
+          acceptanceBlob,
+          acceptanceUrlsKey: acceptanceKey,
+        });
+
+        setPdfSavedForCurrentPreview(true);
         setSidebarPdfStatus(null);
+
+        void (async () => {
+          const { acceptance: acceptanceCtx } = dualLetterBuiltContexts(
+            cachedBase,
+            ctx.templateType
+          );
+          const variantCtx =
+            letterVariant === "acceptance" ? acceptanceCtx : cachedBase;
+          const urlsAfterSave = await fetchApplicationUrls();
+          const qrKey =
+            letterVariant === "acceptance"
+              ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ??
+                  `${ctx.templateType}_acceptance`)
+              : ctx.templateType;
+          const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
+            projectId,
+            qrKey,
+            urlsAfterSave
+          );
+          const htmlWithQr = await generateApplicationPreviewHtml(
+            variantCtx.fields,
+            variantCtx.templateType,
+            { ...variantCtx.previewSource, savedPdfUrlForQr },
+            authToken
+          );
+          previewPdfContextRef.current = {
+            fields: variantCtx.fields,
+            templateType: variantCtx.templateType,
+            previewSource: variantCtx.previewSource,
+          };
+          setPreviewHtml(htmlWithQr);
+        })();
       } else {
         const urlsRaw = await fetchApplicationUrls();
-        const hadTemplateUrl =
-          urlsRaw &&
-          typeof urlsRaw === "object" &&
-          !Array.isArray(urlsRaw) &&
-          typeof (urlsRaw as Record<string, unknown>)[ctx.templateType] === "string" &&
-          String((urlsRaw as Record<string, unknown>)[ctx.templateType]).trim().length > 0;
-
-        if (hadTemplateUrl) {
-          const blobWithQr = await buildApplicationPreviewPdfBlob();
-          await uploadPdfBlob(blobWithQr, ctx.templateType);
-        } else {
-          const blob = await buildApplicationPreviewPdfBlob();
-          await uploadPdfBlob(blob, ctx.templateType);
-          const blobWithQr = await buildApplicationPreviewPdfBlob();
-          await uploadPdfBlob(blobWithQr, ctx.templateType);
-        }
-
-        const htmlWithQr = await generateApplicationPreviewHtml(
-          ctx.fields,
-          ctx.templateType,
-          ctx.previewSource
-        );
-        setPreviewHtml(htmlWithQr);
+        const blob = await buildApplicationPreviewPdfBlob(urlsRaw, authToken);
+        await uploadPdfBlob(blob, ctx.templateType);
         setPdfSavedForCurrentPreview(true);
+
+        void (async () => {
+          const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
+            projectId,
+            ctx.templateType,
+            await fetchApplicationUrls()
+          );
+          const htmlWithQr = await generateApplicationPreviewHtml(
+            ctx.fields,
+            ctx.templateType,
+            { ...ctx.previewSource, savedPdfUrlForQr },
+            authToken
+          );
+          setPreviewHtml(htmlWithQr);
+        })();
       }
 
       if (applicationId) {
@@ -2103,6 +2354,7 @@ export default function ApplicationDetailsPage() {
       const message = err instanceof Error ? err.message : "Failed to save PDF.";
       setSavePdfError(message);
     } finally {
+      saveInFlightRef.current = false;
       setIsSavingPdf(false);
       setSidebarPdfStatus(null);
     }
@@ -2168,6 +2420,7 @@ export default function ApplicationDetailsPage() {
       disabled: isSavingPdf || isSigningPdf,
       busy: isSigningPdf,
       subtitle: avail.subtitle,
+      statusText: sidebarPdfStatus ?? undefined,
       actionAvailable: avail.actionAvailable,
       unavailableHint: avail.idleReason,
     });
@@ -2180,6 +2433,7 @@ export default function ApplicationDetailsPage() {
     applicationWorkflowStage,
     isSavingPdf,
     isSigningPdf,
+    sidebarPdfStatus,
     setSignApplicationSlot,
     mockSignAvailability,
   ]);

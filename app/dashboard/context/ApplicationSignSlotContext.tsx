@@ -23,6 +23,8 @@ export type ApplicationSignSlot = {
   actionAvailable?: boolean;
   /** Short hint shown when `actionAvailable === false` (e.g. “Waiting for architect…”). */
   unavailableHint?: string;
+  /** Progress line while signing (e.g. generating PDFs). */
+  statusText?: string;
 } | null;
 
 type ApplicationSignSlotContextValue = {

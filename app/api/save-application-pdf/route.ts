@@ -5,6 +5,8 @@ import {
   canUserSaveApplicationPdf,
   type SigningProjectContext,
 } from "@/app/utils/applicationSigning";
+import { isValidApplicationUrlsKey } from "@/app/utils/applicationPdfUrlKeys";
+import { applicationUrlsKeyToStorageSlug } from "@/app/utils/projectSavedApplicationPdfUrl";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
@@ -14,16 +16,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Uploads the saved appointment PDF to Storage and merges
- * `application_urls` on `projects`.
- * Uses the service role for Storage/DB so client Storage RLS cannot block saves.
- * Caller must present a valid Bearer token; authorized: project owner, appointed
- * architect, or consultant on the applicants roster.
+ * Uploads a saved application PDF to Storage and merges `application_urls` on `projects`.
+ * `projectId` is sent in formData (flat route — nested `/api/projects/[id]/save-application-pdf`
+ * is not reliably registered under Turbopack in dev).
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+export async function POST(request: NextRequest) {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json({ error: "Supabase environment variables are missing." }, { status: 500 });
@@ -38,15 +35,17 @@ export async function POST(
       );
     }
 
-    const { projectId } = await params;
-    if (!projectId?.trim()) {
-      return NextResponse.json({ error: "projectId is required." }, { status: 400 });
-    }
-
     const authHeader = request.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "").trim();
     if (!token) {
       return NextResponse.json({ error: "Authorization required." }, { status: 401 });
+    }
+
+    const formData = await request.formData();
+    const projectIdRaw = formData.get("projectId");
+    const projectId = typeof projectIdRaw === "string" ? projectIdRaw.trim() : "";
+    if (!projectId) {
+      return NextResponse.json({ error: "projectId is required." }, { status: 400 });
     }
 
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -62,16 +61,21 @@ export async function POST(
       return NextResponse.json({ error: "Invalid or expired session." }, { status: 401 });
     }
 
-    const formData = await request.formData();
     const templateTypeRaw = formData.get("templateType");
     const applicationUrlsKeyRaw = formData.get("applicationUrlsKey");
+    const applicationUrlsKeyAcceptanceRaw = formData.get("applicationUrlsKey_acceptance");
     const userIdField = formData.get("user_id");
     const fileField = formData.get("pdf") ?? formData.get("file");
+    const fileAcceptance = formData.get("pdf_acceptance");
 
     const templateType = typeof templateTypeRaw === "string" ? templateTypeRaw.trim() : "";
     const applicationUrlsKeyInput =
       typeof applicationUrlsKeyRaw === "string" ? applicationUrlsKeyRaw.trim() : "";
     const applicationUrlsKey = applicationUrlsKeyInput || templateType;
+    const applicationUrlsKeyAcceptance =
+      typeof applicationUrlsKeyAcceptanceRaw === "string"
+        ? applicationUrlsKeyAcceptanceRaw.trim()
+        : "";
     const claimedUserId = typeof userIdField === "string" ? userIdField.trim() : "";
 
     if (!claimedUserId || claimedUserId !== user.id) {
@@ -85,43 +89,45 @@ export async function POST(
       return NextResponse.json({ error: "Invalid templateType." }, { status: 400 });
     }
 
-    const VALID_ACCEPTANCE_URL_KEYS = new Set([
-      "Architect_acceptance",
-      "Licensed_Surveyor_acceptance",
-      "Fire_Safety_acceptance",
-      "Landscape_Consultant_acceptance",
-      "Geotechnical_Consultant_acceptance",
-      "ME_Consultant_acceptance",
-      "Plumber_acceptance",
-      "Town_Planner_acceptance",
-      "Structural_Engineer_acceptance",
-      "Environmental_Consultant_acceptance",
-      "PMC_Project_Manager_acceptance",
-    ]);
+    const hasAppointmentPdf = fileField instanceof Blob && fileField.size > 0;
+    const hasAcceptancePdf =
+      fileAcceptance instanceof Blob &&
+      fileAcceptance.size > 0 &&
+      applicationUrlsKeyAcceptance.length > 0;
 
-    const keyIsValid =
-      applicationUrlsKey === templateType || VALID_ACCEPTANCE_URL_KEYS.has(applicationUrlsKey);
+    if (!hasAppointmentPdf && !hasAcceptancePdf) {
+      return NextResponse.json({ error: "Missing or empty PDF file." }, { status: 400 });
+    }
 
-    if (!keyIsValid) {
+    if (hasAppointmentPdf && !isValidApplicationUrlsKey(applicationUrlsKey, templateType)) {
       return NextResponse.json(
         { error: "applicationUrlsKey must match templateType or be a valid acceptance key." },
         { status: 400 }
       );
     }
 
-    if (!(fileField instanceof Blob) || fileField.size < 1) {
-      return NextResponse.json({ error: "Missing or empty PDF file." }, { status: 400 });
+    if (hasAcceptancePdf && !isValidApplicationUrlsKey(applicationUrlsKeyAcceptance, templateType)) {
+      return NextResponse.json(
+        { error: "applicationUrlsKey_acceptance must be a valid acceptance key." },
+        { status: 400 }
+      );
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data: projectRow, error: projErr } = await admin
-      .from("projects")
-      .select("id, user_id, application_urls, architect_user_id")
-      .eq("id", projectId.trim())
-      .maybeSingle();
+    const [{ data: projectRow, error: projErr }, { data: roster, error: rosterErr }] =
+      await Promise.all([
+        admin
+          .from("projects")
+          .select("id, user_id, application_urls, architect_user_id")
+          .eq("id", projectId)
+          .maybeSingle(),
+        admin.rpc("get_applicant_details_for_project", {
+          p_project_id: projectId,
+        }),
+      ]);
 
     if (projErr) {
       return NextResponse.json(
@@ -133,10 +139,6 @@ export async function POST(
     if (!projectRow) {
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
-
-    const { data: roster, error: rosterErr } = await admin.rpc("get_applicant_details_for_project", {
-      p_project_id: projectId.trim(),
-    });
 
     if (rosterErr) {
       return NextResponse.json(
@@ -161,29 +163,6 @@ export async function POST(
       return NextResponse.json({ error: "Project not found or access denied." }, { status: 403 });
     }
 
-    const storageSlug = applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-    const path = `${projectId.trim()}/saved-applications/${storageSlug}.pdf`;
-
-    const buffer = Buffer.from(await fileField.arrayBuffer());
-
-    const { error: upErr } = await admin.storage.from("project-library").upload(path, buffer, {
-      upsert: true,
-      contentType: "application/pdf",
-    });
-
-    if (upErr) {
-      return NextResponse.json(
-        { error: "Storage upload failed.", details: upErr.message },
-        { status: 500 }
-      );
-    }
-
-    const { data: pub } = admin.storage.from("project-library").getPublicUrl(path);
-    const publicUrl = pub.publicUrl?.trim();
-    if (!publicUrl) {
-      return NextResponse.json({ error: "Could not resolve public URL for upload." }, { status: 500 });
-    }
-
     const prevRaw = projectRow.application_urls;
     const prev: Record<string, string> =
       prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)
@@ -194,12 +173,44 @@ export async function POST(
           ) as Record<string, string>
         : {};
 
-    const nextUrls = { ...prev, [applicationUrlsKey]: publicUrl };
+    type UploadTarget = { blob: Blob; urlsKey: string };
+    const targets: UploadTarget[] = [];
+    if (hasAppointmentPdf && fileField instanceof Blob) {
+      targets.push({ blob: fileField, urlsKey: applicationUrlsKey });
+    }
+    if (hasAcceptancePdf && fileAcceptance instanceof Blob) {
+      targets.push({ blob: fileAcceptance, urlsKey: applicationUrlsKeyAcceptance });
+    }
+
+    const urlEntries = await Promise.all(
+      targets.map(async ({ blob, urlsKey }) => {
+        const storageSlug = applicationUrlsKeyToStorageSlug(urlsKey);
+        const storagePath = `${projectId}/saved-applications/${storageSlug}.pdf`;
+        const buffer = Buffer.from(await blob.arrayBuffer());
+        const { error: upErr } = await admin.storage
+          .from("project-library")
+          .upload(storagePath, buffer, {
+            upsert: true,
+            contentType: "application/pdf",
+          });
+        if (upErr) {
+          throw new Error(`Storage upload failed for ${urlsKey}: ${upErr.message}`);
+        }
+        const { data: pub } = admin.storage.from("project-library").getPublicUrl(storagePath);
+        const publicUrl = pub.publicUrl?.trim();
+        if (!publicUrl) {
+          throw new Error(`Could not resolve public URL for ${urlsKey}.`);
+        }
+        return [urlsKey, publicUrl] as const;
+      })
+    );
+
+    const nextUrls = { ...prev, ...Object.fromEntries(urlEntries) };
 
     const { error: updErr } = await admin
       .from("projects")
       .update({ application_urls: nextUrls })
-      .eq("id", projectId.trim());
+      .eq("id", projectId);
 
     if (updErr) {
       return NextResponse.json(
@@ -208,9 +219,14 @@ export async function POST(
       );
     }
 
+    const primaryKey = hasAppointmentPdf
+      ? applicationUrlsKey
+      : applicationUrlsKeyAcceptance;
+    const publicUrl = nextUrls[primaryKey];
     return NextResponse.json({
       success: true,
       publicUrl,
+      publicUrls: nextUrls,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Save failed.";
