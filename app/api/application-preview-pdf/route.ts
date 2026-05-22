@@ -21,6 +21,8 @@ type RequestBody = {
   templateType?: string;
   /** Render multiple letters in one browser session (faster than separate POSTs). */
   renders?: PdfRenderItem[];
+  /** Launch Chromium once so the next save/sign is faster (no PDF returned). */
+  warmup?: boolean;
 };
 
 const isLambdaLikeRuntime = Boolean(process.env.VERCEL || process.env.AWS_REGION);
@@ -171,7 +173,7 @@ async function waitFontsAndRasterSettle(page: import("puppeteer-core").Page): Pr
 async function waitCssBackgroundImagesLoaded(
   page: import("puppeteer-core").Page
 ): Promise<void> {
-  await page.evaluate(async () => {
+  await page.evaluate(async (assetTimeoutMs) => {
     const urls = new Set<string>();
     document.querySelectorAll("*").forEach((el) => {
       const bg = getComputedStyle(el).backgroundImage;
@@ -187,16 +189,16 @@ async function waitCssBackgroundImagesLoaded(
             img.onload = () => resolve();
             img.onerror = () => resolve();
             img.src = src;
-            window.setTimeout(() => resolve(), 12_000);
+            window.setTimeout(() => resolve(), assetTimeoutMs);
           })
       )
     );
-  });
-  await new Promise<void>((r) => setTimeout(() => r(), 200));
+  }, ASSET_LOAD_TIMEOUT_MS);
+  await new Promise<void>((r) => setTimeout(() => r(), isLambdaLikeRuntime ? 80 : 200));
 }
 
 async function waitImgElementsLoaded(page: import("puppeteer-core").Page): Promise<void> {
-  await page.evaluate(async () => {
+  await page.evaluate(async (assetTimeoutMs) => {
     await Promise.all(
       Array.from(document.images).map(
         (img) =>
@@ -207,11 +209,11 @@ async function waitImgElementsLoaded(page: import("puppeteer-core").Page): Promi
             }
             img.addEventListener("load", () => resolve(), { once: true });
             img.addEventListener("error", () => resolve(), { once: true });
-            window.setTimeout(() => resolve(), 12_000);
+            window.setTimeout(() => resolve(), assetTimeoutMs);
           })
       )
     );
-  });
+  }, ASSET_LOAD_TIMEOUT_MS);
 }
 
 async function waitNextPaintFrames(page: import("puppeteer-core").Page): Promise<void> {
@@ -238,8 +240,9 @@ export async function POST(request: NextRequest) {
   });
 }
 
-/** Paged.js loads from CDN and can exceed 10s; never hard-fail the whole save. */
-const PAGEDJS_LAYOUT_TIMEOUT_MS = 60_000;
+/** Vercel caps function duration (often 60s Pro / 10s Hobby); keep Paged.js wait within budget. */
+const PAGEDJS_LAYOUT_TIMEOUT_MS = isLambdaLikeRuntime ? 22_000 : 60_000;
+const ASSET_LOAD_TIMEOUT_MS = isLambdaLikeRuntime ? 6_000 : 12_000;
 
 async function waitForLetterLayoutReady(
   page: import("puppeteer-core").Page
@@ -310,7 +313,8 @@ async function htmlToPdfBuffer(
 
     if (slimHtml) {
       await page.setContent(slimHtml, PDF_SLIM_WAIT);
-      await waitForLetterLayoutReady(page);
+      // Slim HTML is already paginated — skip a second full Paged.js wait (saves ~20s on Vercel).
+      await waitFontsAndRasterSettle(page);
     } else {
       await page.evaluate(() => {
         const pagesRoot = document.querySelector(".pagedjs_pages");
@@ -385,9 +389,54 @@ async function withBrowser<T>(
   }
 }
 
+async function renderPdfItemsInBrowser(
+  items: { html: string }[]
+): Promise<Uint8Array[]> {
+  return withBrowser(async (browser) => {
+    const buffers: Uint8Array[] = [];
+    const renderOne = async (html: string) => {
+      const page = await browser.newPage();
+      try {
+        await page.setDefaultNavigationTimeout(120_000);
+        await page.setDefaultTimeout(120_000);
+        await page.setViewport({ width: 1240, height: 1754 });
+        return await htmlToPdfBuffer(page, html);
+      } finally {
+        await page.close().catch(() => undefined);
+      }
+    };
+
+    if (isLambdaLikeRuntime) {
+      // Sequential on Vercel: lower peak memory and fewer 504s vs parallel tabs.
+      for (const item of items) {
+        buffers.push(await renderOne(item.html));
+      }
+    } else {
+      const parallel = await Promise.all(items.map((item) => renderOne(item.html)));
+      buffers.push(...parallel);
+    }
+    return buffers;
+  });
+}
+
 async function renderPreviewPdf(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as RequestBody;
+
+    if (body.warmup === true) {
+      await withBrowser(async (browser) => {
+        const page = await browser.newPage();
+        try {
+          await page.setContent("<!DOCTYPE html><html><body></body></html>", {
+            waitUntil: "domcontentloaded",
+            timeout: 30_000,
+          });
+        } finally {
+          await page.close().catch(() => undefined);
+        }
+      });
+      return NextResponse.json({ ok: true });
+    }
 
     if (Array.isArray(body.renders) && body.renders.length > 0) {
       const items = body.renders.map((item) => ({
@@ -400,21 +449,7 @@ async function renderPreviewPdf(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ error: "At most 4 PDFs per batch request." }, { status: 400 });
       }
 
-      const buffers = await withBrowser(async (browser) => {
-        return Promise.all(
-          items.map(async (item) => {
-            const page = await browser.newPage();
-            try {
-              await page.setDefaultNavigationTimeout(120_000);
-              await page.setDefaultTimeout(120_000);
-              await page.setViewport({ width: 1240, height: 1754 });
-              return await htmlToPdfBuffer(page, item.html);
-            } finally {
-              await page.close().catch(() => undefined);
-            }
-          })
-        );
-      });
+      const buffers = await renderPdfItemsInBrowser(items);
 
       return NextResponse.json({
         pdfs: buffers.map((buf) => Buffer.from(buf).toString("base64")),
@@ -426,17 +461,7 @@ async function renderPreviewPdf(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "html is required." }, { status: 400 });
     }
 
-    const pdf = await withBrowser(async (browser) => {
-      const page = await browser.newPage();
-      try {
-        await page.setDefaultNavigationTimeout(120_000);
-        await page.setDefaultTimeout(120_000);
-        await page.setViewport({ width: 1240, height: 1754 });
-        return await htmlToPdfBuffer(page, html);
-      } finally {
-        await page.close().catch(() => undefined);
-      }
-    });
+    const [pdf] = await renderPdfItemsInBrowser([{ html }]);
 
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
