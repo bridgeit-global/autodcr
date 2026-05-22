@@ -1,7 +1,7 @@
 {
   "functions": {
     "app/api/application-preview-pdf/route.ts": {
-      "memory": 3008,
+      "memory": 1024,
       "maxDuration": 60
     },
     "app/api/save-application-pdf/route.ts": {
