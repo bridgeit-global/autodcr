@@ -15,7 +15,9 @@ import { clearAllProjectLibraryFiles, getProjectLibraryFile } from "../utils/pro
 import { useProjectData } from "../hooks/useProjectData";
 import { fetchProjectForEdit } from "../utils/fetchProjectForEdit";
 import { buildProjectUpdatePayload, countPayloadSections } from "../utils/projectUpdatePayload";
-import { serializeApplicantRosterForStorage } from "../utils/applicantRecordFields";
+import {
+  serializeApplicantRosterForStorage,
+} from "../utils/applicantRecordFields";
 import { persistApplicantRosterForProject } from "../utils/resolveApplicantDetailsForProject";
 import {
   canCreateProjectAsArchitect,
@@ -78,11 +80,12 @@ function readSessionUserMeta() {
   return readSessionUserMetaFromStorage();
 }
 
+/** @returns Error message when roster could not be written to public.applicants */
 async function persistProjectApplicantRoster(
   projectId: string,
   sessionUserId: string,
   options: { applicantDetails?: unknown; isArchitectCreate: boolean }
-) {
+): Promise<string | null> {
   const draftApplicants = loadDraft<unknown[]>("draft-applicant-details-applicants", []);
   const base =
     options.applicantDetails && typeof options.applicantDetails === "object"
@@ -93,19 +96,27 @@ async function persistProjectApplicantRoster(
     ? ensureArchitectInApplicantRoster(base, sessionUserId, readSessionUserMetaFromStorage())
     : base;
 
-  const list = Array.isArray((roster as { applicants?: unknown[] }).applicants)
+  const applicantRows = Array.isArray((roster as { applicants?: unknown[] }).applicants)
     ? (roster as { applicants: unknown[] }).applicants
     : [];
-  if (list.length === 0) return;
+
+  const serialized = serializeApplicantRosterForStorage(applicantRows);
+  if (serialized.applicants.length === 0) {
+    return (
+      "Applicant roster was not saved. On Applicant Details, add Owner (and other roles) using the directory dropdown, then save again."
+    );
+  }
 
   const { error: rosterError } = await persistApplicantRosterForProject(
     supabase,
     projectId,
-    roster
+    serialized
   );
   if (rosterError) {
     console.warn("replace_applicants_for_project after project save:", rosterError);
+    return rosterError;
   }
+  return null;
 }
 
 type ProjectCreatePayload = {
@@ -634,12 +645,21 @@ function DashboardLayoutContent({
           }
 
           finalProjectId = createdId;
-          if (finalProjectId) {
-            await persistProjectApplicantRoster(finalProjectId, sessionUserId, {
-              applicantDetails: payload.applicant_details,
-              isArchitectCreate: Boolean(isArchitectCreate),
-            });
-          }
+        }
+      }
+
+      if (finalProjectId) {
+        const rosterErr = await persistProjectApplicantRoster(finalProjectId, sessionUserId, {
+          applicantDetails: payload.applicant_details,
+          isArchitectCreate: Boolean(isArchitectCreate),
+        });
+        if (rosterErr) {
+          setSubmitError(rosterErr);
+          showAlert({ title: "Applicants not saved", message: rosterErr });
+          return;
+        }
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem("lastProjectId", finalProjectId);
         }
       }
 
@@ -926,11 +946,20 @@ function DashboardLayoutContent({
         }
 
         finalProjectId = createdId;
-        if (finalProjectId) {
-          await persistProjectApplicantRoster(finalProjectId, userId, {
-            applicantDetails: payload.applicant_details,
-            isArchitectCreate: Boolean(isArchitectCreate),
-          });
+      }
+
+      if (finalProjectId) {
+        const rosterErr = await persistProjectApplicantRoster(finalProjectId, userId, {
+          applicantDetails: payload.applicant_details,
+          isArchitectCreate: Boolean(isArchitectCreate),
+        });
+        if (rosterErr) {
+          setSubmitError(rosterErr);
+          showAlert({ title: "Applicants not saved", message: rosterErr });
+          return;
+        }
+        if (!isActuallyEditMode && typeof window !== "undefined") {
+          window.sessionStorage.setItem("lastProjectId", finalProjectId);
         }
       }
 
@@ -954,9 +983,8 @@ function DashboardLayoutContent({
 
           if (uploadError) {
             console.error("Error uploading project library doc:", uploadError);
-            // Don't fail the whole project submission; just show message.
             setSubmitError(uploadError.message);
-    } else {
+          } else {
             const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
             uploads.push({
               name: local.name,
