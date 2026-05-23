@@ -103,7 +103,7 @@ export async function DELETE(
 
     const { data: projectRow, error: projErr } = await admin
       .from("projects")
-      .select("id, user_id, application_urls, applicant_details")
+      .select("id, user_id, architect_user_id, application_urls, applicant_details")
       .eq("id", projectId)
       .maybeSingle();
 
@@ -111,7 +111,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
 
-    if (String(projectRow.user_id) !== user.id) {
+    const uid = String(user.id);
+    const canManage =
+      String(projectRow.user_id) === uid ||
+      String(projectRow.architect_user_id || "") === uid;
+    if (!canManage) {
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 

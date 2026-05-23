@@ -1,16 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/app/utils/supabase";
 import {
   applicantTypeToPermissionTitle,
   normalizeProjectId,
 } from "@/app/utils/applicantAppointmentPermissions";
+import {
+  isAppointedArchitect,
+  isArchitectConsultantRole,
+} from "@/app/utils/projectAccess";
 
 export type DashboardProject = {
   id: string;
   title: string;
   status?: string;
+  user_id?: string;
+  architect_user_id?: string;
   project_info?: { proposalNo?: string };
   save_plot_details?: {
     selectedSurveyNos?: string[];
@@ -24,6 +30,8 @@ type ProjectRow = {
   status: string | null;
   project_info: unknown;
   save_plot_details: unknown;
+  user_id?: string | null;
+  architect_user_id?: string | null;
 };
 
 function mapProjectRows(rows: ProjectRow[]): DashboardProject[] {
@@ -31,6 +39,8 @@ function mapProjectRows(rows: ProjectRow[]): DashboardProject[] {
     id: row.id,
     title: row.title,
     status: row.status ?? undefined,
+    user_id: row.user_id ?? undefined,
+    architect_user_id: row.architect_user_id ?? undefined,
     project_info: row.project_info as DashboardProject["project_info"],
     save_plot_details: row.save_plot_details as DashboardProject["save_plot_details"],
   }));
@@ -40,10 +50,14 @@ export function useDashboardProjects() {
   const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [isConsultant, setIsConsultant] = useState(false);
+  const [isArchitectConsultant, setIsArchitectConsultant] = useState(false);
   const [permissionTitlesByProject, setPermissionTitlesByProject] = useState<
     Record<string, string | null>
   >({});
   const [consultantType, setConsultantType] = useState<string | null>(null);
+  const [architectDelegateProjectIds, setArchitectDelegateProjectIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -55,6 +69,8 @@ export function useDashboardProjects() {
         setPermissionTitlesByProject({});
         setConsultantType(null);
         setIsConsultant(false);
+        setIsArchitectConsultant(false);
+        setArchitectDelegateProjectIds(new Set());
         return;
       }
 
@@ -65,6 +81,8 @@ export function useDashboardProjects() {
         setPermissionTitlesByProject({});
         setConsultantType(null);
         setIsConsultant(false);
+        setIsArchitectConsultant(false);
+        setArchitectDelegateProjectIds(new Set());
         return;
       }
 
@@ -94,7 +112,12 @@ export function useDashboardProjects() {
       }
 
       const consultant = role === "Consultant";
+      const architectConsultant = isArchitectConsultantRole({
+        role,
+        consultant_type: resolvedConsultantType,
+      });
       setIsConsultant(consultant);
+      setIsArchitectConsultant(architectConsultant);
       setConsultantType(consultant ? resolvedConsultantType || null : null);
 
       if (consultant) {
@@ -107,6 +130,7 @@ export function useDashboardProjects() {
           console.error("Error loading consultant projects:", projectsRes.error);
           setProjects([]);
           setPermissionTitlesByProject({});
+          setArchitectDelegateProjectIds(new Set());
           return;
         }
 
@@ -114,7 +138,15 @@ export function useDashboardProjects() {
           console.error("Error loading consultant applicant rows:", applicantsRes.error);
         }
 
-        setProjects(mapProjectRows((projectsRes.data ?? []) as ProjectRow[]));
+        const projectRows = (projectsRes.data ?? []) as ProjectRow[];
+        const delegateIds = new Set<string>();
+        for (const row of projectRows) {
+          if (isAppointedArchitect(row, userId)) {
+            delegateIds.add(normalizeProjectId(row.id));
+          }
+        }
+        setArchitectDelegateProjectIds(delegateIds);
+        setProjects(mapProjectRows(projectRows));
 
         const defaultTitle = resolvedConsultantType
           ? applicantTypeToPermissionTitle(resolvedConsultantType)
@@ -156,6 +188,7 @@ export function useDashboardProjects() {
           console.error("Error loading owner projects:", fallbackError);
           setProjects([]);
           setPermissionTitlesByProject({});
+          setArchitectDelegateProjectIds(new Set());
           return;
         }
         ownerRows = (fallbackData ?? []) as ProjectRow[];
@@ -163,6 +196,7 @@ export function useDashboardProjects() {
 
       setProjects(mapProjectRows(ownerRows));
       setPermissionTitlesByProject({});
+      setArchitectDelegateProjectIds(new Set());
       setConsultantType(null);
     } finally {
       setLoading(false);
@@ -173,10 +207,18 @@ export function useDashboardProjects() {
     void loadProjects();
   }, [loadProjects]);
 
+  const hasArchitectDelegateAccess = useMemo(
+    () => architectDelegateProjectIds.size > 0,
+    [architectDelegateProjectIds]
+  );
+
   return {
     projects,
     loading,
     isConsultant,
+    isArchitectConsultant,
+    hasArchitectDelegateAccess,
+    architectDelegateProjectIds,
     consultantType,
     permissionTitlesByProject,
     reloadProjects: loadProjects,

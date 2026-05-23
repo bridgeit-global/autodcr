@@ -1,4 +1,5 @@
 import { supabase } from "@/app/utils/supabase";
+import { isAppointedArchitect } from "@/app/utils/projectAccess";
 import { fetchApplicantDetailsMapForProjects } from "@/app/utils/resolveApplicantDetailsForProject";
 
 export type OwnerProjectSelectRow = {
@@ -58,6 +59,46 @@ export async function fetchOwnerProjectsForSelect(): Promise<OwnerProjectSelectR
     }
     rows = (data ?? []) as ProjectRow[];
   }
+
+  const eligible = rows.filter((row) => isProjectEligibleForNewApplication(row.status));
+  const rosterByProject = await fetchApplicantDetailsMapForProjects(
+    supabase,
+    eligible.map((row) => row.id)
+  );
+
+  return eligible.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status ?? undefined,
+    project_info: row.project_info as OwnerProjectSelectRow["project_info"],
+    save_plot_details: row.save_plot_details as OwnerProjectSelectRow["save_plot_details"],
+    applicant_details: rosterByProject[row.id] ?? { applicants: [] },
+  }));
+}
+
+type ConsultantProjectRpcRow = ProjectRow & {
+  user_id?: string | null;
+  architect_user_id?: string | null;
+};
+
+/** Projects an architect consultant can manage (appointed architect on the project). */
+export async function fetchManageableProjectsForSelect(): Promise<OwnerProjectSelectRow[]> {
+  const { data: authData } = await supabase.auth.getUser();
+  const userId = authData?.user?.id;
+  if (!userId) return [];
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc("get_projects_for_consultant", {
+    p_consultant_id: userId,
+  });
+
+  if (rpcError) {
+    console.error("get_projects_for_consultant failed:", rpcError.message);
+    return [];
+  }
+
+  const rows = ((rpcData ?? []) as ConsultantProjectRpcRow[]).filter((row) =>
+    isAppointedArchitect(row, userId)
+  );
 
   const eligible = rows.filter((row) => isProjectEligibleForNewApplication(row.status));
   const rosterByProject = await fetchApplicantDetailsMapForProjects(

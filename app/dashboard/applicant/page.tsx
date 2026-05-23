@@ -15,6 +15,11 @@ import {
   addressLinesFromResidential,
   serializeApplicantRosterForStorage,
 } from "@/app/utils/applicantRecordFields";
+import {
+  canCreateProjectAsArchitect,
+  ensureArchitectInApplicantRoster,
+  readSessionUserMetaFromStorage,
+} from "@/app/utils/projectAccess";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -704,12 +709,21 @@ export default function ApplicantDetailsPage() {
     const headers: HeadersInit = { "Content-Type": "application/json" };
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
+    const meta = readSessionUserMetaFromStorage();
+    const rosterForSave = canCreateProjectAsArchitect(meta)
+      ? ensureArchitectInApplicantRoster(
+          { applicants: roster },
+          authUserId ?? userId,
+          meta
+        )
+      : { applicants: roster };
+
     const response = await fetch(`/api/projects/${projectId}`, {
       method: "PUT",
       headers,
       body: JSON.stringify({
         user_id: userId,
-        applicant_details: serializeApplicantRosterForStorage(roster),
+        applicant_details: serializeApplicantRosterForStorage(rosterForSave.applicants),
       }),
     });
 
@@ -925,6 +939,9 @@ export default function ApplicantDetailsPage() {
     }
   };
 
+  const isArchitectCreatingProject =
+    canCreateProjectAsArchitect(userMetadata) && !isEditMode && !isReadOnlyMode;
+
   if (isLoading) {
     return (
       <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
@@ -945,6 +962,12 @@ export default function ApplicantDetailsPage() {
         <div className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
           <div className="bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
             <h2 className="text-xl font-bold text-gray-900">Applicants</h2>
+            {isArchitectCreatingProject && (
+              <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                Add a project Owner from the directory before submitting the project. The owner
+                will sign applications in In Process; you can manage everything else.
+              </p>
+            )}
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm text-gray-900 border-collapse">

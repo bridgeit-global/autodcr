@@ -17,6 +17,12 @@ import { fetchProjectForEdit } from "../utils/fetchProjectForEdit";
 import { buildProjectUpdatePayload, countPayloadSections } from "../utils/projectUpdatePayload";
 import { serializeApplicantRosterForStorage } from "../utils/applicantRecordFields";
 import { persistApplicantRosterForProject } from "../utils/resolveApplicantDetailsForProject";
+import {
+  canCreateProjectAsArchitect,
+  ensureArchitectInApplicantRoster,
+  readSessionUserMetaFromStorage,
+  validateOwnerForArchitectProject,
+} from "../utils/projectAccess";
 
 type RequiredPage = {
   key: string;
@@ -66,6 +72,97 @@ function extractProjectIdFromRpc(data: any): string | null {
     return data.id || data.project_id || data.projectId || null;
   }
   return null;
+}
+
+function readSessionUserMeta() {
+  return readSessionUserMetaFromStorage();
+}
+
+async function persistProjectApplicantRoster(
+  projectId: string,
+  sessionUserId: string,
+  options: { applicantDetails?: unknown; isArchitectCreate: boolean }
+) {
+  const draftApplicants = loadDraft<unknown[]>("draft-applicant-details-applicants", []);
+  const base =
+    options.applicantDetails && typeof options.applicantDetails === "object"
+      ? options.applicantDetails
+      : { applicants: draftApplicants };
+
+  const roster = options.isArchitectCreate
+    ? ensureArchitectInApplicantRoster(base, sessionUserId, readSessionUserMetaFromStorage())
+    : base;
+
+  const list = Array.isArray((roster as { applicants?: unknown[] }).applicants)
+    ? (roster as { applicants: unknown[] }).applicants
+    : [];
+  if (list.length === 0) return;
+
+  const { error: rosterError } = await persistApplicantRosterForProject(
+    supabase,
+    projectId,
+    roster
+  );
+  if (rosterError) {
+    console.warn("replace_applicants_for_project after project save:", rosterError);
+  }
+}
+
+type ProjectCreatePayload = {
+  title: string;
+  status: string;
+  project_info?: Record<string, unknown>;
+  save_plot_details?: Record<string, unknown>;
+  building_details?: Record<string, unknown>;
+  area_details?: Record<string, unknown>;
+  project_library?: Record<string, unknown>;
+  bg_details?: Record<string, unknown>;
+};
+
+async function rpcCreateProject(
+  sessionUserId: string,
+  ownerUserId: string | null,
+  payload: ProjectCreatePayload
+): Promise<{ projectId: string | null; errorMessage: string | null }> {
+  const meta = readSessionUserMeta();
+  const isArchitectCreate =
+    canCreateProjectAsArchitect(meta) && ownerUserId && ownerUserId !== sessionUserId;
+
+  if (isArchitectCreate) {
+    const { data, error } = await supabase.rpc("create_project_by_architect", {
+      p_owner_user_id: ownerUserId,
+      p_title: payload.title,
+      p_status: payload.status,
+      p_project_info: payload.project_info ?? {},
+      p_save_plot_details: payload.save_plot_details ?? {},
+      p_applicant_details: {},
+      p_building_details: payload.building_details ?? {},
+      p_area_details: payload.area_details ?? {},
+      p_project_library: payload.project_library ?? {},
+      p_bg_details: payload.bg_details ?? {},
+    });
+    if (error) {
+      return { projectId: null, errorMessage: error.message || "Failed to create project." };
+    }
+    return { projectId: extractProjectIdFromRpc(data), errorMessage: null };
+  }
+
+  const { data, error } = await supabase.rpc("create_project", {
+    p_user_id: sessionUserId,
+    p_title: payload.title,
+    p_status: payload.status,
+    p_project_info: payload.project_info ?? {},
+    p_save_plot_details: payload.save_plot_details ?? {},
+    p_applicant_details: {},
+    p_building_details: payload.building_details ?? {},
+    p_area_details: payload.area_details ?? {},
+    p_project_library: payload.project_library ?? {},
+    p_bg_details: payload.bg_details ?? {},
+  });
+  if (error) {
+    return { projectId: null, errorMessage: error.message || "Failed to create project." };
+  }
+  return { projectId: extractProjectIdFromRpc(data), errorMessage: null };
 }
 
 /** Sections not yet saved (local draft flags), with routes for direct navigation. */
@@ -415,6 +512,30 @@ function DashboardLayoutContent({
         return;
       }
 
+      const sessionUserId = payload.user_id;
+      const meta = readSessionUserMeta();
+      const isArchitectCreate =
+        canCreateProjectAsArchitect(meta) && !isActuallyEditMode;
+      let ownerUserIdForCreate: string | null = null;
+      if (isArchitectCreate) {
+        const applicantsList = loadDraft("draft-applicant-details-applicants", []);
+        const ownerCheck = validateOwnerForArchitectProject(
+          applicantsList as Array<{
+            user_id?: string;
+            userId?: string;
+            applicantType?: string;
+            applicant_type?: string;
+          }>,
+          sessionUserId
+        );
+        if (!ownerCheck.ok) {
+          setSubmitError(ownerCheck.message);
+          showAlert({ title: "Owner required", message: ownerCheck.message });
+          return;
+        }
+        ownerUserIdForCreate = ownerCheck.ownerUserId;
+      }
+
       let finalProjectId: string | null = null;
 
       if (isActuallyEditMode && currentProjectId && verifiedProjectData) {
@@ -442,15 +563,28 @@ function DashboardLayoutContent({
         const result = await response.json();
         finalProjectId = result.project?.id || currentProjectId;
       } else {
-        // Check if a draft with the same title already exists for this user
-        const { data: existingDrafts } = await supabase
-          .from("projects")
-          .select("id")
-          .eq("user_id", payload.user_id)
-          .eq("title", payload.title)
-          .eq("status", "draft")
-          .limit(1);
-        const existingDraft = existingDrafts && existingDrafts.length > 0 ? existingDrafts[0] : null;
+        let existingDraft: { id: string } | null = null;
+        if (isArchitectCreate && ownerUserIdForCreate) {
+          const { data: architectDrafts } = await supabase
+            .from("projects")
+            .select("id")
+            .eq("architect_user_id", sessionUserId)
+            .eq("title", payload.title)
+            .eq("status", "draft")
+            .limit(1);
+          existingDraft =
+            architectDrafts && architectDrafts.length > 0 ? architectDrafts[0] : null;
+        } else {
+          const { data: existingDrafts } = await supabase
+            .from("projects")
+            .select("id")
+            .eq("user_id", payload.user_id)
+            .eq("title", payload.title)
+            .eq("status", "draft")
+            .limit(1);
+          existingDraft =
+            existingDrafts && existingDrafts.length > 0 ? existingDrafts[0] : null;
+        }
 
         if (existingDraft) {
           // Update the existing draft instead of creating a duplicate
@@ -477,37 +611,34 @@ function DashboardLayoutContent({
 
           finalProjectId = existingDraft.id;
         } else {
-          const { data, error } = await supabase.rpc("create_project", {
-            p_user_id: payload.user_id,
-            p_title: payload.title,
-            p_status: "draft",
-            p_project_info: payload.project_info ?? {},
-            p_save_plot_details: payload.save_plot_details ?? {},
-            p_applicant_details: {},
-            p_building_details: payload.building_details ?? {},
-            p_area_details: payload.area_details ?? {},
-            p_project_library: payload.project_library ?? {},
-            p_bg_details: payload.bg_details ?? {},
-          });
+          const { projectId: createdId, errorMessage } = await rpcCreateProject(
+            sessionUserId,
+            ownerUserIdForCreate,
+            {
+              title: payload.title,
+              status: "draft",
+              project_info: payload.project_info,
+              save_plot_details: payload.save_plot_details,
+              building_details: payload.building_details,
+              area_details: payload.area_details,
+              project_library: payload.project_library,
+              bg_details: payload.bg_details,
+            }
+          );
 
-          if (error) {
-            console.error("Error saving draft via Supabase RPC:", error);
-            const message = error.message || "Failed to save draft.";
-            setSubmitError(message);
-            showAlert({ title: "Draft save failed", message });
+          if (errorMessage) {
+            console.error("Error saving draft via Supabase RPC:", errorMessage);
+            setSubmitError(errorMessage);
+            showAlert({ title: "Draft save failed", message: errorMessage });
             return;
           }
 
-          finalProjectId = extractProjectIdFromRpc(data);
-          if (finalProjectId && payload.applicant_details) {
-            const { error: rosterError } = await persistApplicantRosterForProject(
-              supabase,
-              finalProjectId,
-              payload.applicant_details as { applicants?: unknown[] }
-            );
-            if (rosterError) {
-              console.warn("replace_applicants_for_project after draft create:", rosterError);
-            }
+          finalProjectId = createdId;
+          if (finalProjectId) {
+            await persistProjectApplicantRoster(finalProjectId, sessionUserId, {
+              applicantDetails: payload.applicant_details,
+              isArchitectCreate: Boolean(isArchitectCreate),
+            });
           }
         }
       }
@@ -703,6 +834,28 @@ function DashboardLayoutContent({
         return;
       }
 
+      const meta = readSessionUserMeta();
+      const isArchitectCreate =
+        canCreateProjectAsArchitect(meta) && !isActuallyEditMode;
+      let ownerUserIdForCreate: string | null = null;
+      if (isArchitectCreate) {
+        const ownerCheck = validateOwnerForArchitectProject(
+          applicantsList as Array<{
+            user_id?: string;
+            userId?: string;
+            applicantType?: string;
+            applicant_type?: string;
+          }>,
+          userId
+        );
+        if (!ownerCheck.ok) {
+          setSubmitError(ownerCheck.message);
+          showAlert({ title: "Owner required", message: ownerCheck.message });
+          return;
+        }
+        ownerUserIdForCreate = ownerCheck.ownerUserId;
+      }
+
       let finalProjectId: string | null = null;
 
       if (isActuallyEditMode && currentProjectId) {
@@ -750,39 +903,34 @@ function DashboardLayoutContent({
         finalProjectId = result.project?.id || currentProjectId;
         setSubmitSuccessMessage("Project updated successfully.");
       } else {
-        // Create new project - Call Supabase RPC directly from the client so auth.uid() matches the logged-in user
-        const { data, error } = await supabase.rpc("create_project", {
-          p_user_id: payload.user_id,
-          p_title: payload.title,
-          p_status: payload.status,
-          p_project_info: payload.project_info,
-          p_save_plot_details: payload.save_plot_details,
-          p_applicant_details: {},
-          p_building_details: payload.building_details,
-          p_area_details: payload.area_details,
-          p_project_library: payload.project_library,
-          p_bg_details: payload.bg_details,
-        });
+        const { projectId: createdId, errorMessage } = await rpcCreateProject(
+          userId,
+          ownerUserIdForCreate,
+          {
+            title: payload.title,
+            status: payload.status,
+            project_info: payload.project_info as Record<string, unknown> | undefined,
+            save_plot_details: payload.save_plot_details as Record<string, unknown> | undefined,
+            building_details: payload.building_details as Record<string, unknown> | undefined,
+            area_details: payload.area_details as Record<string, unknown> | undefined,
+            project_library: payload.project_library as Record<string, unknown> | undefined,
+            bg_details: payload.bg_details as Record<string, unknown> | undefined,
+          }
+        );
 
-        if (error) {
-          console.error("Error creating project via Supabase RPC:", error);
-          const message = error.message || "Failed to create project.";
-          setSubmitError(message);
-          showAlert({ title: "Project submission failed", message });
+        if (errorMessage) {
+          console.error("Error creating project via Supabase RPC:", errorMessage);
+          setSubmitError(errorMessage);
+          showAlert({ title: "Project submission failed", message: errorMessage });
           return;
         }
 
-        console.log("Created project:", data);
-        finalProjectId = extractProjectIdFromRpc(data);
-        if (finalProjectId && payload.applicant_details) {
-          const { error: rosterError } = await persistApplicantRosterForProject(
-            supabase,
-            finalProjectId,
-            payload.applicant_details as { applicants?: unknown[] }
-          );
-          if (rosterError) {
-            console.warn("replace_applicants_for_project after create:", rosterError);
-          }
+        finalProjectId = createdId;
+        if (finalProjectId) {
+          await persistProjectApplicantRoster(finalProjectId, userId, {
+            applicantDetails: payload.applicant_details,
+            isArchitectCreate: Boolean(isArchitectCreate),
+          });
         }
       }
 
