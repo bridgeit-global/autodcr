@@ -100,6 +100,13 @@ export async function persistApplicantRosterForProject(
       : [];
   const serialized = serializeApplicantRosterForStorage(applicants);
 
+  if (serialized.applicants.length === 0) {
+    return {
+      error:
+        "No applicants were saved. Add each person from the directory dropdown so they are linked to an account.",
+    };
+  }
+
   const { error } = await supabase.rpc("replace_applicants_for_project", {
     p_project_id: projectId,
     p_roster: serialized,

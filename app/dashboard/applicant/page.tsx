@@ -272,7 +272,20 @@ export default function ApplicantDetailsPage() {
   const { showAlert } = useDashboardAlertModal();
   const { isEditMode, isLoading, projectData } = useProjectData();
   const searchParams = useSearchParams();
-  const projectId = searchParams.get("projectId");
+  const projectIdFromUrl = searchParams.get("projectId");
+  const [storedProjectId, setStoredProjectId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (projectIdFromUrl) {
+      setStoredProjectId(null);
+      return;
+    }
+    if (typeof window === "undefined") return;
+    const fromSession = window.sessionStorage.getItem("lastProjectId")?.trim();
+    if (fromSession) setStoredProjectId(fromSession);
+  }, [projectIdFromUrl]);
+
+  const projectId = projectIdFromUrl || storedProjectId;
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const [authUserId, setAuthUserId] = useState<string | null>(null);
 
@@ -690,7 +703,7 @@ export default function ApplicantDetailsPage() {
   }
 
   const persistApplicantsToProject = async (roster: ApplicantRow[]): Promise<boolean> => {
-    if (!isEditMode || !projectId || projectData?.status === "draft") return true;
+    if (!projectId) return true;
 
     const userId =
       typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
@@ -718,12 +731,22 @@ export default function ApplicantDetailsPage() {
         )
       : { applicants: roster };
 
+    const serialized = serializeApplicantRosterForStorage(rosterForSave.applicants);
+    if (serialized.applicants.length === 0) {
+      showAlert({
+        title: "Could not save applicants",
+        message:
+          "Select each applicant from the directory dropdown so they are linked to an account (Owner must be chosen from the list).",
+      });
+      return false;
+    }
+
     const response = await fetch(`/api/projects/${projectId}`, {
       method: "PUT",
       headers,
       body: JSON.stringify({
         user_id: userId,
-        applicant_details: serializeApplicantRosterForStorage(rosterForSave.applicants),
+        applicant_details: serialized,
       }),
     });
 
@@ -888,8 +911,7 @@ export default function ApplicantDetailsPage() {
     setApplicants(updatedApplicants);
     saveDraft("draft-applicant-details-applicants", updatedApplicants);
 
-    const isDraft = projectData?.status === "draft";
-    if (isEditMode && projectId && !isDraft) {
+    if (projectId) {
       try {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
