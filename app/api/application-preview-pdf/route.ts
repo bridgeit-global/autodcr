@@ -315,6 +315,21 @@ async function htmlToPdfBuffer(
       await page.setContent(slimHtml, PDF_SLIM_WAIT);
       // Slim HTML is already paginated — skip a second full Paged.js wait (saves ~20s on Vercel).
       await waitFontsAndRasterSettle(page);
+      // #region agent log
+      fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+        body: JSON.stringify({
+          sessionId: "9d94e9",
+          runId: "post-fix",
+          hypothesisId: "F",
+          location: "application-preview-pdf/route.ts:htmlToPdfBuffer",
+          message: "Chromium PDF layout",
+          data: { layout, usedSlimHtml: true, hasQr: html.includes("app-saved-pdf-qr") },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } else {
       await page.evaluate(() => {
         const pagesRoot = document.querySelector(".pagedjs_pages");
@@ -330,6 +345,21 @@ async function htmlToPdfBuffer(
           if (!el.closest(".pagedjs_page")) el.remove();
         });
       });
+      // #region agent log
+      fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+        body: JSON.stringify({
+          sessionId: "9d94e9",
+          runId: "post-fix",
+          hypothesisId: "F",
+          location: "application-preview-pdf/route.ts:htmlToPdfBuffer",
+          message: "Chromium PDF layout",
+          data: { layout, usedSlimHtml: false, hasQr: html.includes("app-saved-pdf-qr") },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     }
     }
   }

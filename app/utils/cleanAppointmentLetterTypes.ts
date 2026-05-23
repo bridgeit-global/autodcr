@@ -21,6 +21,57 @@ export function isCleanAppointmentLetterType(templateType: TemplateType): boolea
   return CLEAN_APPOINTMENT_HTML_TYPES.has(templateType);
 }
 
+/** Legacy dual-letter types (Architect, Licensed Surveyor, …) whose Chromium PDF layout diverges from iframe HTML. */
+const LEGACY_DUAL_LETTER_HTML_TYPES = new Set<TemplateType>([
+  "Architect",
+  "Licensed Surveyor",
+  "Fire Safety Consultant",
+  "Landscape Consultant",
+  "Geotechnical Consultant",
+  "M&E Consultant",
+  "Plumber",
+  "Town Planner",
+  "Structural Engineer",
+  "Environmental Consultant",
+  "PMC / Project Manager",
+]);
+
+export function isLegacyDualLetterHtmlType(templateType: TemplateType): boolean {
+  return LEGACY_DUAL_LETTER_HTML_TYPES.has(templateType);
+}
+
+/**
+ * Word-export dual letters (Architect, Licensed Surveyor): injecting the saved-PDF QR
+ * before Chromium paginates duplicates/overlaps content. Render once without QR, upload,
+ * then re-render with QR using the stored URL.
+ */
+export function dualLetterPdfNeedsQrFreeFirstPass(templateType: TemplateType): boolean {
+  return isLegacyDualLetterHtmlType(templateType) && !isCleanAppointmentLetterType(templateType);
+}
+
+/** QR repass after upload is for unsigned saves only; QR + mock signatures breaks Chromium layout. */
+export function shouldRunLegacyDualLetterQrRepass(
+  templateType: TemplateType,
+  signatures?: { owner?: boolean; consultant?: boolean }
+): boolean {
+  if (!dualLetterPdfNeedsQrFreeFirstPass(templateType)) return false;
+  return !signatures?.owner && !signatures?.consultant;
+}
+
+/**
+ * In-process preview: legacy dual-letter letters use live HTML (matches draft iframe).
+ * Stored PDF is kept for approved/verified (signed document fidelity).
+ */
+export function shouldUseStoredPdfPreview(
+  templateType: TemplateType,
+  workflowStage: string
+): boolean {
+  if (isCleanAppointmentLetterType(templateType)) return false;
+  if (isLegacyDualLetterHtmlType(templateType)) return false;
+  if (workflowStage === "approved_verified") return true;
+  return workflowStage === "in_process";
+}
+
 /** Old Word-style template (Sub: / Letter of Appointment of…) still in Storage. */
 export function isLegacySubAppointmentHtml(html: string): boolean {
   if (!html.trim()) return false;
