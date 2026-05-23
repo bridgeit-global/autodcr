@@ -608,9 +608,13 @@ function UserDashboardContent() {
     projects,
     loading: projectsLoading,
     isConsultant,
+    isArchitectConsultant,
+    architectDelegateProjectIds,
     consultantType,
     permissionTitlesByProject,
   } = useDashboardProjects();
+
+  const canUseOwnerProjectActions = !isConsultant || isArchitectConsultant;
   // Project filter: "ALL" means don't filter
   const [selectedProject, setSelectedProject] = useState("ALL");
   const [selectedApplicationType, setSelectedApplicationType] = useState("General");
@@ -760,12 +764,23 @@ function UserDashboardContent() {
       }
       applicationRows = (data ?? []) as ApplicationRow[];
     }
-    if (isConsultant && selectedApplicationType === "General") {
+    if (isConsultant && !isArchitectConsultant && selectedApplicationType === "General") {
       const consultantDefaultTitle = consultantType
         ? applicantTypeToPermissionTitle(consultantType)
         : null;
       applicationRows = applicationRows.filter((row) => {
         const projectKey = normalizeProjectId(row.project_id);
+        const allowedTitle =
+          permissionTitlesByProject[projectKey] ?? consultantDefaultTitle;
+        return permissionTypeMatchesTitle(row.permission_type, allowedTitle);
+      });
+    } else if (isArchitectConsultant && selectedApplicationType === "General") {
+      applicationRows = applicationRows.filter((row) => {
+        const projectKey = normalizeProjectId(row.project_id);
+        if (architectDelegateProjectIds.has(projectKey)) return true;
+        const consultantDefaultTitle = consultantType
+          ? applicantTypeToPermissionTitle(consultantType)
+          : null;
         const allowedTitle =
           permissionTitlesByProject[projectKey] ?? consultantDefaultTitle;
         return permissionTypeMatchesTitle(row.permission_type, allowedTitle);
@@ -845,6 +860,8 @@ function UserDashboardContent() {
     selectedApplicationType,
     selectedProject,
     isConsultant,
+    isArchitectConsultant,
+    architectDelegateProjectIds,
     consultantType,
     permissionTitlesByProject,
   ]);
@@ -854,7 +871,7 @@ function UserDashboardContent() {
   }, [loadDraftCounts]);
 
   const handleDeleteApplication = async (applicationId: string) => {
-    if (isConsultant) return;
+    if (isConsultant && !isArchitectConsultant) return;
 
     const { data: sessionData } = await supabase.auth.getSession();
     const authToken = sessionData.session?.access_token;
@@ -1099,7 +1116,7 @@ function UserDashboardContent() {
 
           {/* Right Sidebar - Announcements */}
           <div className="w-80 space-y-4">
-            {!isConsultant && (
+            {canUseOwnerProjectActions && (
             <motion.div className="flex items-center gap-2 w-full">
               <button
                 onClick={() => setIsProjectModalOpen(true)}
@@ -1172,7 +1189,7 @@ function UserDashboardContent() {
               return a.workflowStage === want;
             }
           )}
-          onDeleteApplication={isConsultant ? undefined : handleDeleteApplication}
+          onDeleteApplication={canUseOwnerProjectActions ? handleDeleteApplication : undefined}
           onOpenApplicationDetails={handleOpenApplicationDetails}
         />
       )}

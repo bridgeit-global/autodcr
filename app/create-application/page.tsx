@@ -14,10 +14,12 @@ import {
   getAuthUserId,
 } from "@/app/utils/ownerApplicationRpc";
 import {
+  fetchManageableProjectsForSelect,
   fetchOwnerProjectsForSelect,
   getProjectPlanningAuthority,
   type OwnerProjectSelectRow,
 } from "@/app/utils/ownerProjects";
+import { canCreateProjectAsArchitect } from "@/app/utils/projectAccess";
 
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 
@@ -632,7 +634,31 @@ export default function CreateApplicationPage() {
     let cancelled = false;
     (async () => {
       setProjectsLoading(true);
-      const rows = await fetchOwnerProjectsForSelect();
+      const { data: authData } = await supabase.auth.getUser();
+      const meta = authData.user?.user_metadata as {
+        role?: string;
+        consultant_type?: string;
+      };
+      let role = meta?.role ?? "";
+      let consultantType = meta?.consultant_type ?? "";
+      if (typeof window !== "undefined") {
+        try {
+          const stored = localStorage.getItem("userMetadata");
+          if (stored) {
+            const parsed = JSON.parse(stored) as { role?: string; consultant_type?: string };
+            if (!role) role = parsed.role ?? "";
+            if (!consultantType) consultantType = parsed.consultant_type ?? "";
+          }
+          if (!consultantType) {
+            consultantType = localStorage.getItem("consultantType") ?? "";
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const rows = canCreateProjectAsArchitect({ role, consultant_type: consultantType })
+        ? await fetchManageableProjectsForSelect()
+        : await fetchOwnerProjectsForSelect();
       if (!cancelled) {
         setProjects(rows);
         setProjectsLoading(false);

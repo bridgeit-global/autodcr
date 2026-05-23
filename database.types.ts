@@ -350,7 +350,32 @@ export type Database = {
           status: string
           project_info: Json
           save_plot_details: Json
+          user_id: string
+          architect_user_id: string | null
         }[]
+      }
+      can_manage_project: {
+        Args: { p_project_id: string }
+        Returns: boolean
+      }
+      user_can_manage_project: {
+        Args: { p_project_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      create_project_by_architect: {
+        Args: {
+          p_owner_user_id: string
+          p_title: string
+          p_status?: string
+          p_project_info?: Json
+          p_save_plot_details?: Json
+          p_applicant_details?: Json
+          p_building_details?: Json
+          p_area_details?: Json
+          p_project_library?: Json
+          p_bg_details?: Json
+        }
+        Returns: Json
       }
       sync_applicants_for_project: {
         Args: { p_project_id: string }

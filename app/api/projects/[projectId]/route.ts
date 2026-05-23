@@ -91,7 +91,7 @@ export async function PUT(
 
     const { data: projectCheck, error: checkError } = await readClient
       .from("projects")
-      .select("id, user_id")
+      .select("id, user_id, architect_user_id")
       .eq("id", projectId)
       .maybeSingle();
 
@@ -111,9 +111,12 @@ export async function PUT(
     }
 
     const projectUserId = String(projectCheck.user_id || "");
-    if (projectUserId !== requestUserId) {
+    const projectArchitectId = String(projectCheck.architect_user_id || "");
+    const canManage =
+      projectUserId === requestUserId || projectArchitectId === requestUserId;
+    if (!canManage) {
       return NextResponse.json(
-        { error: "Unauthorized - You can only update your own projects" },
+        { error: "Unauthorized - You do not have permission to update this project" },
         { status: 403 }
       );
     }
@@ -170,10 +173,17 @@ export async function PUT(
       }
       const { data: urlsRow, error: urlsErr } = await supabase
         .from("projects")
-        .select("application_urls")
+        .select("application_urls, user_id, architect_user_id")
         .eq("id", projectId)
-        .eq("user_id", userId)
         .maybeSingle();
+
+      if (
+        urlsRow &&
+        String(urlsRow.user_id || "") !== requestUserId &&
+        String(urlsRow.architect_user_id || "") !== requestUserId
+      ) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      }
 
       if (urlsErr) {
         console.error("application_urls fetch failed:", urlsErr);
@@ -223,13 +233,8 @@ export async function PUT(
     let data: Record<string, unknown> | null = null;
 
     if (Object.keys(updateData).length > 0) {
-      const { data: updated, error } = await supabase
-        .from("projects")
-        .update(updateData)
-        .eq("id", projectId)
-        .eq("user_id", userId)
-        .select()
-        .single();
+      const updateQuery = supabase.from("projects").update(updateData).eq("id", projectId);
+      const { data: updated, error } = await updateQuery.select().single();
 
       if (error) {
         console.error("Error updating project:", error);
@@ -244,8 +249,15 @@ export async function PUT(
         .from("projects")
         .select("*")
         .eq("id", projectId)
-        .eq("user_id", userId)
         .maybeSingle();
+
+      if (
+        existing &&
+        String(existing.user_id || "") !== requestUserId &&
+        String(existing.architect_user_id || "") !== requestUserId
+      ) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      }
 
       if (fetchError) {
         console.error("Error loading project after applicant save:", fetchError);
