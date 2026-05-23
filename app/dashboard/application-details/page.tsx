@@ -18,7 +18,12 @@ import {
   resolveAppointedSecondSignerUserId,
   sameUserId,
 } from "@/app/utils/applicationSigning";
-import { isCleanAppointmentLetterType } from "@/app/utils/cleanAppointmentLetterTypes";
+import {
+  dualLetterPdfNeedsQrFreeFirstPass,
+  isCleanAppointmentLetterType,
+  shouldRunLegacyDualLetterQrRepass,
+  shouldUseStoredPdfPreview,
+} from "@/app/utils/cleanAppointmentLetterTypes";
 import { fetchBuildingProposalOffices } from "@/app/utils/fetchBuildingProposalOffices";
 import {
   fetchApplicantDetailsFromTable,
@@ -747,6 +752,37 @@ async function buildApplicationPreviewContext(
   };
 
   const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
+  // #region agent log
+  if (templateType === "Architect") {
+    const archApplicant = (effectiveProjectData?.applicant_details?.applicants || []).find((a) =>
+      (a.applicantType || a.applicant_type || "").toLowerCase().includes("architect")
+    );
+    fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+      body: JSON.stringify({
+        sessionId: "9d94e9",
+        runId: "post-fix",
+        hypothesisId: "C",
+        location: "application-details/page.tsx:buildApplicationPreviewContext",
+        message: "Architect preview context built",
+        data: {
+          templateType,
+          architectUserId: effectiveProjectData?.architect_user_id ?? null,
+          consultantLookupUserIds,
+          architectApplicantHasUserId: Boolean(archApplicant?.user_id || archApplicant?.userId),
+          architectApplicantHasName: Boolean(archApplicant?.name?.trim()),
+          architectApplicantHasAddr1: Boolean(archApplicant?.address_line1?.trim()),
+          fieldNameArchitect: Boolean(fieldMapping["project_Name_Architect."]?.trim()),
+          fieldCompanyArchitect: Boolean(fieldMapping.project_Company_Name_Architect?.trim()),
+          fieldAddr1Architect: Boolean(fieldMapping["project_Address_line1_Architect"]?.trim()),
+          fieldRegNoArchitect: Boolean(fieldMapping.project_RegNo_Architect?.trim()),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   return { fields, previewSource, templateType, fieldMapping };
 }
 
@@ -807,6 +843,31 @@ function applicationTemplateSavedInUrls(
 }
 
 /** Stored PDF URL for preview (dual-letter types: appointment vs acceptance). */
+async function fetchProjectApplicationUrls(
+  projectId: string,
+  seed?: unknown
+): Promise<unknown> {
+  if (seed && typeof seed === "object" && !Array.isArray(seed)) {
+    return seed;
+  }
+  const { data: urlsRow } = await supabase
+    .from("projects")
+    .select("application_urls")
+    .eq("id", projectId)
+    .maybeSingle();
+  const fromRow = urlsRow?.application_urls;
+  if (fromRow && typeof fromRow === "object" && !Array.isArray(fromRow)) {
+    return fromRow;
+  }
+  const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+    p_project_id: projectId,
+  });
+  if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+    return (rpcData as PreviewProjectData).application_urls;
+  }
+  return undefined;
+}
+
 function getStoredApplicationPdfUrl(
   raw: unknown,
   templateType: TemplateType,
@@ -917,7 +978,8 @@ async function buildDualLetterPdfBlobs(
   urlsRaw: unknown,
   signatures?: { owner: boolean; consultant: boolean },
   cachedBase?: BuiltApplicationPreview | null,
-  accessToken?: string
+  accessToken?: string,
+  opts?: { omitSavedPdfQr?: boolean }
 ): Promise<{
   appointmentBlob: Blob;
   acceptanceBlob: Blob;
@@ -939,8 +1001,12 @@ async function buildDualLetterPdfBlobs(
   const { appointment: appointmentBuilt, acceptance: acceptanceBuilt } =
     dualLetterBuiltContexts(base, templateType);
 
-  const appointmentQr = resolveSavedPdfUrlForQr(projectId, templateType, urlsRaw);
-  const acceptanceQr = resolveSavedPdfUrlForQr(projectId, acceptanceKey, urlsRaw);
+  const appointmentQr = opts?.omitSavedPdfQr
+    ? undefined
+    : resolveSavedPdfUrlForQr(projectId, templateType, urlsRaw);
+  const acceptanceQr = opts?.omitSavedPdfQr
+    ? undefined
+    : resolveSavedPdfUrlForQr(projectId, acceptanceKey, urlsRaw);
 
   const applySignatures = (
     html: string,
@@ -965,12 +1031,18 @@ async function buildDualLetterPdfBlobs(
       {
         fields: appointmentBuilt.fields,
         templateType,
-        source: { ...appointmentBuilt.previewSource, savedPdfUrlForQr: appointmentQr },
+        source: {
+          ...appointmentBuilt.previewSource,
+          ...(appointmentQr ? { savedPdfUrlForQr: appointmentQr } : {}),
+        },
       },
       {
         fields: acceptanceBuilt.fields,
         templateType,
-        source: { ...acceptanceBuilt.previewSource, savedPdfUrlForQr: acceptanceQr },
+        source: {
+          ...acceptanceBuilt.previewSource,
+          ...(acceptanceQr ? { savedPdfUrlForQr: acceptanceQr } : {}),
+        },
       },
     ],
     accessToken
@@ -991,7 +1063,8 @@ async function buildAcceptanceLetterPdfBlob(
   previewBase: BuildApplicationPreviewContextInput,
   templateType: TemplateType,
   urlsRaw: unknown,
-  signatures: { owner: boolean; consultant: boolean }
+  signatures: { owner: boolean; consultant: boolean },
+  opts?: { omitSavedPdfQr?: boolean }
 ): Promise<{ acceptanceBlob: Blob; acceptanceKey: string }> {
   if (!previewBase.projectId?.trim()) {
     throw new Error("Missing project for PDF save.");
@@ -1003,15 +1076,20 @@ async function buildAcceptanceLetterPdfBlob(
     letterVariant: "acceptance",
   });
   const { acceptance: acceptanceBuilt } = dualLetterBuiltContexts(base, templateType);
-  const acceptanceQr = resolveSavedPdfUrlForQr(
-    previewBase.projectId,
-    acceptanceKey,
-    urlsRaw
-  );
+  const acceptanceQr = opts?.omitSavedPdfQr
+    ? undefined
+    : resolveSavedPdfUrlForQr(
+        previewBase.projectId,
+        acceptanceKey,
+        urlsRaw
+      );
   let acceptanceHtml = await generateApplicationPreviewHtml(
     acceptanceBuilt.fields,
     templateType,
-    { ...acceptanceBuilt.previewSource, savedPdfUrlForQr: acceptanceQr }
+    {
+      ...acceptanceBuilt.previewSource,
+      ...(acceptanceQr ? { savedPdfUrlForQr: acceptanceQr } : {}),
+    }
   );
   if (signatures.owner) {
     acceptanceHtml = injectMockOwnerSignatureIntoPreviewHtml(acceptanceHtml, templateType);
@@ -1100,11 +1178,14 @@ async function persistDualLetterPdfs(
   }
 
   if (opts?.acceptanceOnly) {
+    const qrFreeFirst = dualLetterPdfNeedsQrFreeFirstPass(templateType);
+    const runQrRepass = shouldRunLegacyDualLetterQrRepass(templateType, signatures);
     const { acceptanceBlob, acceptanceKey } = await buildAcceptanceLetterPdfBlob(
       previewBase,
       templateType,
       urlsRaw,
-      signatures
+      signatures,
+      { omitSavedPdfQr: qrFreeFirst }
     );
     await submitSavedApplicationPdfs({
       projectId: previewBase.projectId,
@@ -1115,16 +1196,43 @@ async function persistDualLetterPdfs(
       acceptanceBlob,
       acceptanceUrlsKey: acceptanceKey,
     });
+    if (runQrRepass) {
+      const { data: urlsRow } = await supabase
+        .from("projects")
+        .select("application_urls")
+        .eq("id", previewBase.projectId)
+        .maybeSingle();
+      const urlsAfter = urlsRow?.application_urls;
+      const { acceptanceBlob: acceptanceWithQr, acceptanceKey: key2 } =
+        await buildAcceptanceLetterPdfBlob(
+          previewBase,
+          templateType,
+          urlsAfter,
+          signatures
+        );
+      await submitSavedApplicationPdfs({
+        projectId: previewBase.projectId,
+        templateType,
+        authToken: auth.token,
+        authUserId: auth.userId,
+        applicationUrlsKey: templateType,
+        acceptanceBlob: acceptanceWithQr,
+        acceptanceUrlsKey: key2,
+      });
+    }
     return { appointmentUrl: null, acceptanceUrl: null };
   }
 
+  const qrFreeFirst = dualLetterPdfNeedsQrFreeFirstPass(templateType);
+  const runQrRepass = shouldRunLegacyDualLetterQrRepass(templateType, signatures);
   const { appointmentBlob, acceptanceBlob, acceptanceKey } = await buildDualLetterPdfBlobs(
     previewBase,
     templateType,
     urlsRaw,
     signatures,
     cachedBase,
-    auth.token
+    auth.token,
+    { omitSavedPdfQr: qrFreeFirst }
   );
 
   const { publicUrl } = await submitSavedApplicationPdfs({
@@ -1137,6 +1245,53 @@ async function persistDualLetterPdfs(
     acceptanceBlob,
     acceptanceUrlsKey: acceptanceKey,
   });
+
+  if (runQrRepass) {
+    const { data: urlsRow } = await supabase
+      .from("projects")
+      .select("application_urls")
+      .eq("id", previewBase.projectId)
+      .maybeSingle();
+    const urlsAfter = urlsRow?.application_urls;
+    const repass = await buildDualLetterPdfBlobs(
+      previewBase,
+      templateType,
+      urlsAfter,
+      undefined,
+      cachedBase,
+      auth.token
+    );
+    await submitSavedApplicationPdfs({
+      projectId: previewBase.projectId,
+      templateType,
+      authToken: auth.token,
+      authUserId: auth.userId,
+      appointmentBlob: repass.appointmentBlob,
+      applicationUrlsKey: templateType,
+      acceptanceBlob: repass.acceptanceBlob,
+      acceptanceUrlsKey: repass.acceptanceKey,
+    });
+  } else if (qrFreeFirst && (signatures.owner || signatures.consultant)) {
+    // #region agent log
+    fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+      body: JSON.stringify({
+        sessionId: "9d94e9",
+        runId: "post-fix",
+        hypothesisId: "G",
+        location: "application-details/page.tsx:persistDualLetterPdfs",
+        message: "Skipped QR repass on sign (signatures + QR breaks legacy PDF)",
+        data: {
+          templateType,
+          ownerSig: signatures.owner,
+          consultantSig: signatures.consultant,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }
 
   const appointmentUrl =
     typeof publicUrl === "string" && publicUrl.trim() ? publicUrl.trim() : null;
@@ -1439,30 +1594,42 @@ export default function ApplicationDetailsPage() {
         });
 
       const preferLiveHtmlPreview = isCleanAppointmentLetterType(templateType);
+      const useStoredPdfPreview = shouldUseStoredPdfPreview(
+        templateType,
+        workflowStageForPreview
+      );
 
-      if (
-        !preferLiveHtmlPreview &&
-        (workflowStageForPreview === "in_process" ||
-          workflowStageForPreview === "approved_verified") &&
-        projectId
-      ) {
-        let raw = projectForPreview.application_urls;
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          const { data: urlsRow } = await supabase
-            .from("projects")
-            .select("application_urls")
-            .eq("id", projectId)
-            .maybeSingle();
-          raw = urlsRow?.application_urls;
-        }
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
-            p_project_id: projectId,
-          });
-          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-            raw = (rpcData as PreviewProjectData).application_urls;
-          }
-        }
+      // #region agent log
+      if (templateType === "Architect") {
+        fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+          body: JSON.stringify({
+            sessionId: "9d94e9",
+            runId: "post-fix",
+            hypothesisId: "D",
+            location: "application-details/page.tsx:loadPreviewContent",
+            message: "Architect preview load decision",
+            data: {
+              workflowStageForPreview,
+              preferLiveHtmlPreview,
+              useStoredPdfPreview,
+              fieldNameArchitect: Boolean(fieldMapping["project_Name_Architect."]?.trim()),
+              fieldCompanyArchitect: Boolean(fieldMapping.project_Company_Name_Architect?.trim()),
+              fieldAddr1Architect: Boolean(fieldMapping["project_Address_line1_Architect"]?.trim()),
+              projectArchitectUserId: projectForPreview?.architect_user_id ?? null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
+
+      if (useStoredPdfPreview && projectId) {
+        const raw = await fetchProjectApplicationUrls(
+          projectId,
+          projectForPreview.application_urls
+        );
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
         const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
 
@@ -1471,6 +1638,31 @@ export default function ApplicationDetailsPage() {
             ownerSignedAt,
             architectSignedAt,
           });
+          // #region agent log
+          if (templateType === "Architect") {
+            fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+              body: JSON.stringify({
+                sessionId: "9d94e9",
+                runId: "post-fix",
+                hypothesisId: "E",
+                location: "application-details/page.tsx:loadPreviewContent:storedPdf",
+                message: "Using stored PDF for architect preview",
+                data: {
+                  workflowStageForPreview,
+                  resolvedVariant,
+                  hasSavedPdfUrl: Boolean(savedPdfUrl),
+                  liveFieldNameArchitect: Boolean(fieldMapping["project_Name_Architect."]?.trim()),
+                  liveFieldAddr1Architect: Boolean(
+                    fieldMapping["project_Address_line1_Architect"]?.trim()
+                  ),
+                },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+          }
+          // #endregion
           previewPdfContextRef.current = { fields, templateType, previewSource };
           setPdfSavedForCurrentPreview(true);
           setPreviewReadyForSave(true);
@@ -1495,15 +1687,45 @@ export default function ApplicationDetailsPage() {
         }
       }
 
-      let html = await generateApplicationPreviewHtml(
-        fields,
-        templateType,
-        previewSource
-      );
-
       const resolvedPreviewVariant = isDualLetterType(templateType)
         ? variant
         : "appointment";
+      const urlsRawForQr =
+        workflowStageForPreview !== "draft" && projectId
+          ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls)
+          : undefined;
+      const qrKey =
+        resolvedPreviewVariant === "acceptance"
+          ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`)
+          : templateType;
+      const savedPdfUrlForQr =
+        projectId && urlsRawForQr
+          ? resolveSavedPdfUrlForQr(projectId, qrKey, urlsRawForQr)
+          : undefined;
+      const storedPdfUrl = urlsRawForQr
+        ? getStoredApplicationPdfUrl(urlsRawForQr, templateType, resolvedPreviewVariant)
+        : null;
+      if (storedPdfUrl) {
+        setStoredSigningPdfUrl(
+          storedPdfUrlWithCacheBuster(storedPdfUrl, {
+            ownerSignedAt,
+            architectSignedAt,
+          })
+        );
+      }
+
+      const { data: previewSessionData } = await supabase.auth.getSession();
+      const previewAuthToken = previewSessionData.session?.access_token;
+
+      let html = await generateApplicationPreviewHtml(
+        fields,
+        templateType,
+        savedPdfUrlForQr
+          ? { ...previewSource, savedPdfUrlForQr }
+          : previewSource,
+        previewAuthToken
+      );
+
       if (ownerSignedAt?.trim()) {
         html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
       }
@@ -1521,8 +1743,12 @@ export default function ApplicationDetailsPage() {
       }
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
-      if (resetSaveState) {
+      const pdfAlreadySaved =
+        workflowStageForPreview !== "draft" && Boolean(storedPdfUrl);
+      if (resetSaveState && !pdfAlreadySaved) {
         setPdfSavedForCurrentPreview(false);
+      } else if (pdfAlreadySaved) {
+        setPdfSavedForCurrentPreview(true);
       }
       setPreviewReadyForSave(true);
       setPreviewUrl((prev) => {
@@ -1530,6 +1756,27 @@ export default function ApplicationDetailsPage() {
         return null;
       });
       setPreviewHtml(html);
+      // #region agent log
+      if (templateType === "Architect") {
+        fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+          body: JSON.stringify({
+            sessionId: "9d94e9",
+            runId: "post-fix",
+            hypothesisId: "E",
+            location: "application-details/page.tsx:loadPreviewContent:liveHtml",
+            message: "Using live HTML for architect preview",
+            data: {
+              workflowStageForPreview,
+              hasSavedPdfUrlForQr: Boolean(savedPdfUrlForQr),
+              pdfAlreadySaved,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
       setPreviewFieldMapping(fieldMapping);
       setPreviewOpen(true);
     } catch (error: unknown) {
@@ -2161,10 +2408,56 @@ export default function ApplicationDetailsPage() {
     const stageBeforeSave = applicationWorkflowStage;
     try {
       let ctx = previewPdfContextRef.current;
-      if (!ctx) {
+      // #region agent log
+      fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+        body: JSON.stringify({
+          sessionId: "9d94e9",
+          runId: "post-fix",
+          hypothesisId: "A",
+          location: "application-details/page.tsx:handleSaveApplicationPdf:entry",
+          message: "Save application clicked",
+          data: {
+            stageBeforeSave,
+            ctxCached: Boolean(ctx),
+            projectArchitectUserId: projectData?.architect_user_id ?? null,
+            stateHasApplicantDetails: Boolean(projectData?.applicant_details?.applicants?.length),
+            selectedApplication,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      const saveTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
+      const mustRefreshContextForSave =
+        stageBeforeSave === "draft" && isDualLetterType(saveTemplateType);
+      if (mustRefreshContextForSave || !ctx) {
+        let projectForSave = projectData;
+        if (projectId) {
+          const coreSelect =
+            "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
+          const { data: directData } = await supabase
+            .from("projects")
+            .select(coreSelect)
+            .eq("id", projectId)
+            .single();
+          if (directData) {
+            projectForSave = directData as PreviewProjectData;
+            setProjectData(projectForSave);
+          } else {
+            const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+              p_project_id: projectId,
+            });
+            if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+              projectForSave = rpcData as PreviewProjectData;
+              setProjectData(projectForSave);
+            }
+          }
+        }
         const built = await buildApplicationPreviewContext({
           userMetadata,
-          projectData,
+          projectData: projectForSave,
           selectedApplication,
           applicationNo,
           applicationCreatedAt,
@@ -2197,6 +2490,34 @@ export default function ApplicationDetailsPage() {
       if (!authToken) {
         throw new Error("Missing session token. Please log in again.");
       }
+
+      // #region agent log
+      if (ctx.templateType === "Architect") {
+        const saveFieldMapping = mapToPdfFieldValues(ctx.fields, ctx.previewSource, ctx.templateType);
+        fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+          body: JSON.stringify({
+            sessionId: "9d94e9",
+            runId: "post-fix",
+            hypothesisId: "B",
+            location: "application-details/page.tsx:handleSaveApplicationPdf:preUpload",
+            message: "Architect fields at save time",
+            data: {
+              ctxCachedAtSave: Boolean(previewPdfContextRef.current === ctx),
+              previewSourceArchitectUserId: ctx.previewSource.projectData?.architect_user_id ?? null,
+              consultantLookupUserIds: ctx.previewSource.consultantLookupUserIds ?? [],
+              fieldNameArchitect: Boolean(saveFieldMapping["project_Name_Architect."]?.trim()),
+              fieldCompanyArchitect: Boolean(saveFieldMapping.project_Company_Name_Architect?.trim()),
+              fieldAddr1Architect: Boolean(saveFieldMapping["project_Address_line1_Architect"]?.trim()),
+              fieldRegNoArchitect: Boolean(saveFieldMapping.project_RegNo_Architect?.trim()),
+              isDualLetterDraft: stageBeforeSave === "draft" && isDualLetterType(ctx.templateType),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
 
       const uploadPdfBlob = async (pdfBlob: Blob, applicationUrlsKey: string) => {
         await submitSavedApplicationPdfs({
@@ -2237,13 +2558,16 @@ export default function ApplicationDetailsPage() {
           previewSource: ctx.previewSource,
         };
 
+        const qrFreeFirst = dualLetterPdfNeedsQrFreeFirstPass(ctx.templateType);
+        const runQrRepass = shouldRunLegacyDualLetterQrRepass(ctx.templateType);
         const { appointmentBlob, acceptanceBlob, acceptanceKey } = await buildDualLetterPdfBlobs(
           previewBase,
           ctx.templateType,
           urlsBeforeSave,
           undefined,
           cachedBase,
-          authToken
+          authToken,
+          { omitSavedPdfQr: qrFreeFirst }
         );
 
         await submitSavedApplicationPdfs({
@@ -2256,6 +2580,48 @@ export default function ApplicationDetailsPage() {
           acceptanceBlob,
           acceptanceUrlsKey: acceptanceKey,
         });
+
+        if (runQrRepass) {
+          setSidebarPdfStatus("Adding QR to saved PDFs…");
+          const urlsAfterSave = await fetchProjectApplicationUrls(projectId);
+          const repass = await buildDualLetterPdfBlobs(
+            previewBase,
+            ctx.templateType,
+            urlsAfterSave,
+            undefined,
+            cachedBase,
+            authToken
+          );
+          await submitSavedApplicationPdfs({
+            projectId,
+            templateType: ctx.templateType,
+            authToken,
+            authUserId: authUser.id,
+            appointmentBlob: repass.appointmentBlob,
+            applicationUrlsKey: ctx.templateType,
+            acceptanceBlob: repass.acceptanceBlob,
+            acceptanceUrlsKey: repass.acceptanceKey,
+          });
+          // #region agent log
+          fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
+            body: JSON.stringify({
+              sessionId: "9d94e9",
+              runId: "post-fix",
+              hypothesisId: "F",
+              location: "application-details/page.tsx:handleSaveApplicationPdf:qrRepass",
+              message: "Legacy dual-letter PDF saved with QR repass",
+              data: {
+                templateType: ctx.templateType,
+                qrFreeFirst,
+                hasUrlsAfterSave: Boolean(urlsAfterSave),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+        }
 
         setPdfSavedForCurrentPreview(true);
         setSidebarPdfStatus(null);
