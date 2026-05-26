@@ -835,6 +835,25 @@ export default function CreateApplicationPage() {
       return;
     }
 
+    // Notify owner + consultant via email (fire-and-forget)
+    if ("applicationId" in result) {
+      supabase.auth.getSession().then(({ data: { session: notifSession } }) => {
+        const notifToken = notifSession?.access_token;
+        if (notifToken) {
+          fetch(`/api/applications/${result.applicationId}/notify`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${notifToken}`,
+            },
+            body: JSON.stringify({ stage: "draft" }),
+          }).catch((err) =>
+            console.error("Application notification request failed:", err)
+          );
+        }
+      });
+    }
+
     setExistingPermissionTypes((prev) =>
       prev.includes(selectedPermissionRecord.title)
         ? prev

@@ -1010,6 +1010,27 @@ function DashboardLayoutContent({
         await clearAllProjectLibraryFiles(PROJECT_LIBRARY_MAX_FILES);
       }
 
+      // Notify applicants via email (fire-and-forget — don't block redirect)
+      if (finalProjectId) {
+        supabase.auth.getSession().then(({ data: { session: notifSession } }) => {
+          const notifToken = notifSession?.access_token;
+          if (notifToken) {
+            fetch(`/api/projects/${finalProjectId}/notify-applicants`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${notifToken}`,
+              },
+              body: JSON.stringify({
+                type: isActuallyEditMode ? "updated" : "submitted",
+              }),
+            }).catch((err) =>
+              console.error("Applicant notification request failed:", err)
+            );
+          }
+        });
+      }
+
       // Clear drafts for a fresh new project the next time user comes in (only in create mode)
       if (!isActuallyEditMode) {
         clearProjectDrafts();
