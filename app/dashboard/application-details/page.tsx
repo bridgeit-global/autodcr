@@ -1299,6 +1299,27 @@ async function persistDualLetterPdfs(
   return { appointmentUrl, acceptanceUrl: null };
 }
 
+function fireApplicationNotification(
+  appId: string,
+  stage: "draft" | "in_process" | "approved_verified"
+) {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    const token = session?.access_token;
+    if (token) {
+      fetch(`/api/applications/${appId}/notify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ stage }),
+      }).catch((err) =>
+        console.error("Application notification request failed:", err)
+      );
+    }
+  });
+}
+
 export default function ApplicationDetailsPage() {
   const { userMetadata } = useUserMetadata();
   const router = useRouter();
@@ -2135,9 +2156,11 @@ export default function ApplicationDetailsPage() {
             setApplicationWorkflowStage("approved_verified");
             setOwnerSignedAt(nowIso);
             setArchitectSignedAt(nowIso);
+            if (resolvedApplicationId) fireApplicationNotification(resolvedApplicationId, "approved_verified");
           } else {
             setApplicationWorkflowStage("in_process");
             setOwnerSignedAt(nowIso);
+            if (resolvedApplicationId) fireApplicationNotification(resolvedApplicationId, "in_process");
           }
           setPdfSavedForCurrentPreview(true);
           setSavePdfMessage(null);
@@ -2178,6 +2201,7 @@ export default function ApplicationDetailsPage() {
           }
           setApplicationWorkflowStage("approved_verified");
           setArchitectSignedAt(nowIso);
+          if (resolvedApplicationId) fireApplicationNotification(resolvedApplicationId, "approved_verified");
           setPdfSavedForCurrentPreview(true);
           setSavePdfMessage(null);
           if (previewUrl?.startsWith("blob:")) {
@@ -2277,6 +2301,7 @@ export default function ApplicationDetailsPage() {
 
       setApplicationWorkflowStage("approved_verified");
       setOwnerSignedAt(nowIso);
+      if (applicationId) fireApplicationNotification(applicationId, "approved_verified");
       setPdfSavedForCurrentPreview(true);
       setSavePdfMessage(null);
 
@@ -2693,6 +2718,7 @@ export default function ApplicationDetailsPage() {
           );
         } else {
           setApplicationWorkflowStage("in_process");
+          if (applicationId) fireApplicationNotification(applicationId, "in_process");
           if (stageBeforeSave === "draft") {
             setPreviewOpen(false);
             setSavePdfMessage(null);
