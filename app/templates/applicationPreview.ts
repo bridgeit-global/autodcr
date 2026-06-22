@@ -15,6 +15,7 @@ import {
   resolveBuildingProposalOffice,
   type BuildingProposalAddressBlock,
 } from "@/app/utils/resolveBuildingProposalOffice";
+import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
@@ -54,6 +55,8 @@ export type ApplicationPreviewSource = {
   consultantLookupUserIds?: string[];
   /** Building Proposal offices from `public.building_proposal_offices` (keyed by slug). */
   buildingProposalOfficesByKey?: Record<string, BuildingProposalAddressBlock>;
+  /** Fire Brigade RCC offices (`correspondence_type = fire_consultant`). */
+  fireConsultantOfficesByKey?: Record<string, BuildingProposalAddressBlock>;
   /**
    * For all types that have an acceptance letter: `appointment` → default template,
    * `acceptance` → `{type}_acceptance.html` in Application_Templates.
@@ -284,6 +287,13 @@ export function mapApplicationPreviewFields(
   const joined = joinProposedCsOrCtsNos(source).trim();
   const ctsNo = joined ? bracketSurveyNumberList(joined) : source.applicationNo || "-";
   const isLicensedSurveyorLetter = templateType === "Licensed Surveyor";
+  const isFireConsultantLetter = templateType === "Fire Safety Consultant";
+  const fireBrigadeAddress = isFireConsultantLetter
+    ? resolveFireBrigadeOffice(
+        savePlot.ward,
+        source.fireConsultantOfficesByKey
+      )
+    : undefined;
 
   return {
     CurrentDate: formatApplicationDate(source.applicationCreatedAt),
@@ -308,6 +318,14 @@ export function mapApplicationPreviewFields(
     RegValidityDate: isLicensedSurveyorLetter
       ? formatCoaExpiryDisplay(source.lbsExpiryDate) || "-"
       : formatCoaExpiryDisplay(source.coaExpiryDate) || "-",
+    ...(fireBrigadeAddress
+      ? {
+          CorrespondenceOfficerName: fireBrigadeAddress.officerName,
+          CorrespondenceLine1: fireBrigadeAddress.line1,
+          CorrespondenceLine2: fireBrigadeAddress.line2,
+          CorrespondenceLine3: fireBrigadeAddress.line3,
+        }
+      : {}),
     // TODO: Map final backend fields once mapping contract is finalized:
     // - project_Proposal_Number
     // - consultant registration and validity
@@ -551,6 +569,7 @@ export function mapToPdfFieldValues(
           : normalizedClientEntityType === "partnership firm"
             ? "Partner"
             : clientCompanyDesignation;
+  const isFireConsultantLetter = templateType === "Fire Safety Consultant";
   const buildingProposalAddressRaw = resolveBuildingProposalOffice(
     regionForProjectToken,
     wardForProjectToken,
@@ -563,7 +582,7 @@ export function mapToPdfFieldValues(
         buildingProposalAddressRaw.line3
       )
     : null;
-  const buildingProposalAddress = buildingProposalAddressFormatted
+  let buildingProposalAddress = buildingProposalAddressFormatted
     ? {
         officerName: buildingProposalAddressRaw!.officerName,
         line1: buildingProposalAddressFormatted.line1,
@@ -571,25 +590,53 @@ export function mapToPdfFieldValues(
         line3: buildingProposalAddressFormatted.line3,
       }
     : undefined;
-  const officerDesignationDisplay =
-    "O/o The Dy. Ch. Eng. (B.P.)";
-  const officerZoneSuffix =
+  let officerDesignationDisplay = "O/o The Dy. Ch. Eng. (B.P.)";
+  let officerZoneSuffix =
     (regionForProjectToken || "").trim().toLowerCase() === "eastern"
       ? "E. S.,"
       : (regionForProjectToken || "").trim().toLowerCase() === "western"
         ? "W. S.,"
-      : "";
-  const buildingProposalBaseDesignation =
+        : "";
+  let buildingProposalBaseDesignation =
     (regionForProjectToken || "").trim().toLowerCase() === "western"
       ? "The Executive Engineer (W.S.) - I"
       : "The Executive Engineer (E.S.) - I";
-  const buildingProposalOfficerLine = [officerDesignationDisplay, officerZoneSuffix]
+  let buildingProposalOfficerLine = [officerDesignationDisplay, officerZoneSuffix]
     .filter((part) => part.trim().length > 0)
     .join(" ");
-  const buildingProposalToHeader = buildBuildingProposalToHeaderLines(
+  let buildingProposalToHeader = buildBuildingProposalToHeaderLines(
     buildingProposalBaseDesignation,
     buildingProposalOfficerLine
   );
+
+  if (isFireConsultantLetter) {
+    const fireBrigadeAddressRaw = resolveFireBrigadeOffice(
+      wardForProjectToken,
+      source?.fireConsultantOfficesByKey
+    );
+    if (fireBrigadeAddressRaw) {
+      const fireAddressFormatted = formatAddressLinesForLetterDisplay(
+        fireBrigadeAddressRaw.line2,
+        fireBrigadeAddressRaw.line3,
+        ""
+      );
+      buildingProposalAddress = {
+        officerName: fireBrigadeAddressRaw.officerName,
+        line1: fireAddressFormatted.line1,
+        line2: fireAddressFormatted.line2,
+        line3: fireAddressFormatted.line3,
+      };
+      buildingProposalBaseDesignation = "";
+      officerDesignationDisplay = "";
+      officerZoneSuffix = "";
+      buildingProposalOfficerLine = "";
+      const fireLine2 = fireBrigadeAddressRaw.line1.trim();
+      buildingProposalToHeader = {
+        line1: fireBrigadeAddressRaw.officerName.trim(),
+        line2: fireLine2.endsWith(",") ? fireLine2 : `${fireLine2},`,
+      };
+    }
+  }
   const suffix = templateTypeToPdfTokenSuffix(templateType);
   const genericConsultantTemplateTokens: Record<string, string> = {
     [`project_Consultant_${suffix}`]: consultantRoleLabel,

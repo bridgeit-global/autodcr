@@ -24,7 +24,10 @@ import {
   shouldRunLegacyDualLetterQrRepass,
   shouldUseStoredPdfPreview,
 } from "@/app/utils/cleanAppointmentLetterTypes";
-import { fetchBuildingProposalOffices } from "@/app/utils/fetchBuildingProposalOffices";
+import {
+  fetchBuildingProposalOffices,
+  fetchFireConsultantOffices,
+} from "@/app/utils/fetchBuildingProposalOffices";
 import {
   fetchApplicantDetailsFromTable,
   mergeApplicantDetailsPreferTable,
@@ -443,10 +446,12 @@ async function buildApplicationPreviewContext(
   const localMeta = readLocalStoredUserMetadata();
   const templateType = mapSelectedApplicationToTemplate(selectedApplication);
 
-  const [applicantDetailsFromTable, buildingProposalOfficesByKey] = await Promise.all([
-    projectId ? fetchApplicantDetailsFromTable(supabase, projectId) : null,
-    fetchBuildingProposalOffices(supabase),
-  ]);
+  const [applicantDetailsFromTable, buildingProposalOfficesByKey, fireConsultantOfficesByKey] =
+    await Promise.all([
+      projectId ? fetchApplicantDetailsFromTable(supabase, projectId) : null,
+      fetchBuildingProposalOffices(supabase),
+      fetchFireConsultantOffices(supabase),
+    ]);
   const effectiveProjectData =
     mergeApplicantDetailsPreferTable(projectData, applicantDetailsFromTable) ?? projectData;
 
@@ -703,6 +708,7 @@ async function buildApplicationPreviewContext(
       clientAddressLine2,
       clientAddressLine3,
       projectData,
+      ...(fireConsultantOfficesByKey ? { fireConsultantOfficesByKey } : {}),
     },
     templateType
   );
@@ -742,6 +748,9 @@ async function buildApplicationPreviewContext(
     projectData: effectiveProjectData,
     ...(buildingProposalOfficesByKey
       ? { buildingProposalOfficesByKey }
+      : {}),
+    ...(fireConsultantOfficesByKey
+      ? { fireConsultantOfficesByKey }
       : {}),
     // Pass letterVariant for all types that have an acceptance template.
     ...(TYPES_WITH_ACCEPTANCE.has(templateType)

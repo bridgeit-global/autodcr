@@ -19,6 +19,11 @@ export type TemplateFields = {
   ConsultantType: string;
   CouncilRegNo: string;
   RegValidityDate: string;
+  /** Fire Consultant letter — Dy. Chief Fire Officer block (optional). */
+  CorrespondenceOfficerName?: string;
+  CorrespondenceLine1?: string;
+  CorrespondenceLine2?: string;
+  CorrespondenceLine3?: string;
 };
 
 export type TemplateGenerator = (
@@ -400,12 +405,12 @@ export const generateFireSafetyConsultant: TemplateGenerator = async (
   yPosition = addText(page, `Date: ${fields.CurrentDate}`, margin, yPosition, 12, font, boldFont, false);
   yPosition -= lineHeight * 2;
 
-  // To section
+  // To section — Fire Brigade RCC
   yPosition = addText(page, "To,", margin, yPosition, 12, font, boldFont, false);
   yPosition -= lineHeight;
   yPosition = addText(
     page,
-    `The Assistant Engineer (Survey) - ${fields.WardName}`,
+    fields.CorrespondenceOfficerName || "The Dy. Chief Fire Officer",
     margin,
     yPosition,
     12,
@@ -416,7 +421,7 @@ export const generateFireSafetyConsultant: TemplateGenerator = async (
   yPosition -= lineHeight;
   yPosition = addText(
     page,
-    `O/o The Deputy Chief Engineer (Building Proposal) ${fields.ZoneName},`,
+    fields.CorrespondenceLine1 || "Mumbai Fire Brigade,",
     margin,
     yPosition,
     12,
@@ -425,8 +430,15 @@ export const generateFireSafetyConsultant: TemplateGenerator = async (
     false
   );
   yPosition -= lineHeight;
-  yPosition = addText(page, fields.OfficeAddress, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
-  yPosition -= lineHeight * 2;
+  if (fields.CorrespondenceLine2) {
+    yPosition = addText(page, fields.CorrespondenceLine2, margin, yPosition, 12, font, boldFont, false);
+    yPosition -= lineHeight;
+  }
+  if (fields.CorrespondenceLine3) {
+    yPosition = addText(page, fields.CorrespondenceLine3, margin, yPosition, 12, font, boldFont, false, undefined, bottomMargin, fields);
+    yPosition -= lineHeight;
+  }
+  yPosition -= lineHeight;
 
   // Subject
   const subjectText = `Subject: Appointment of Fire Safety Consultant for plot bearing C.T.S. No. ${fields.CTSNo} of Village - ${fields.VillageName}, Taluka - ${fields.TalukaName}, District - ${fields.DistrictName}, situated at ${fields.RoadWidth} wide ${fields.RoadName}, off ${fields.MainRoadWidth} wide ${fields.MainRoadName}, within BMC Limits of ${fields.WardName}.`;
