@@ -36,7 +36,7 @@ function resolveOfficeKey(
 
 /**
  * Resolve BMC Building Proposal office address from plot region/ward.
- * Address rows must come from `public.building_proposal_offices` via `officesByKey`.
+ * Rows must come from `building_proposal_offices` where correspondence_type = building_proposal.
  */
 export function resolveBuildingProposalOffice(
   region?: string,

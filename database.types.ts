@@ -96,6 +96,7 @@ export type Database = {
       }
       building_proposal_offices: {
         Row: {
+          correspondence_type: string
           id: string
           line1: string
           line2: string
@@ -104,6 +105,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          correspondence_type?: string
           id: string
           line1: string
           line2: string
@@ -112,6 +114,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          correspondence_type?: string
           id?: string
           line1?: string
           line2?: string
