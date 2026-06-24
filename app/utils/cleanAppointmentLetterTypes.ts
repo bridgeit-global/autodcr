@@ -59,17 +59,14 @@ export function shouldRunLegacyDualLetterQrRepass(
 }
 
 /**
- * In-process preview: legacy dual-letter letters use live HTML (matches draft iframe).
- * Stored PDF is kept for approved/verified (signed document fidelity).
+ * After draft save (in_process) or final approval, preview the stored PDF from storage
+ * instead of regenerating HTML — matches the letterhead/layout that was saved.
  */
 export function shouldUseStoredPdfPreview(
-  templateType: TemplateType,
+  _templateType: TemplateType,
   workflowStage: string
 ): boolean {
-  if (isCleanAppointmentLetterType(templateType)) return false;
-  if (isLegacyDualLetterHtmlType(templateType)) return false;
-  if (workflowStage === "approved_verified") return true;
-  return workflowStage === "in_process";
+  return workflowStage === "in_process" || workflowStage === "approved_verified";
 }
 
 /** Old Word-style template (Sub: / Letter of Appointment of…) still in Storage. */

@@ -439,6 +439,20 @@ p.closing-line {
   align-self: flex-end;
 }
 
+.dsc-stamp-slot {
+  width: 180px;
+  height: 60px;
+}
+
+.owner-signature .dsc-stamp-slot--owner {
+  align-self: flex-end;
+  margin-bottom: 6px;
+}
+
+.signature-table .dsc-stamp-slot {
+  margin-bottom: 6px;
+}
+
 .cc-box.cc-architect {
   page-break-before: auto;
 }

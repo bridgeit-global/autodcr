@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import DscPinModal from "@/app/components/DscPinModal";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import {
@@ -37,7 +38,10 @@ import {
   getAuthUserId,
   updateApplicationForSigning,
 } from "@/app/utils/ownerApplicationRpc";
-import { resolveSavedPdfUrlForQr } from "@/app/utils/projectSavedApplicationPdfUrl";
+import {
+  readApplicationUrlFromUrls,
+  resolveSavedPdfUrlForQr,
+} from "@/app/utils/projectSavedApplicationPdfUrl";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
@@ -56,6 +60,14 @@ import {
   prewarmPreviewPdfRuntime,
   type PdfDetailsFieldRow,
 } from "@/app/templates/applicationPreview";
+import { base64ToBlob, blobToBase64 } from "@/app/lib/bridge/pdfChunker";
+import {
+  resolveDscStampRectFromPdf,
+  type DscStampLayout,
+  type DscStampRole,
+} from "@/app/lib/bridge/dscStampPlacement";
+import { preparePdfForNativeSigning } from "@/app/lib/bridge/pdfSigningPrep";
+import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
 
 type PreviewProjectData = {
   title?: string;
@@ -108,6 +120,95 @@ type MockSignAvailability = {
   idleReason?: string;
   subtitle: string;
 };
+
+function resolveDscStampRole(templateType: TemplateType, signingAcceptance: boolean): DscStampRole {
+  if (signingAcceptance && isDualLetterType(templateType)) {
+    return "consultant";
+  }
+  return "owner";
+}
+
+function resolveDscStampLayout(templateType: TemplateType, signingAcceptance: boolean): DscStampLayout {
+  if (isCleanAppointmentLetterType(templateType) && !signingAcceptance) {
+    return "cleanRight";
+  }
+  return "dualColumn";
+}
+
+function resolveSlotIdForSigning(slot: Record<string, unknown>, fallbackIndex: number): number | null {
+  const raw = slot.slotId ?? slot.id ?? slot.slot ?? slot.slotID;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim() && !Number.isNaN(Number(raw))) return Number(raw);
+  if (Number.isInteger(fallbackIndex) && fallbackIndex >= 0) return fallbackIndex;
+  return null;
+}
+
+function pickSignerLabel(cert: { subject?: string; label?: string; id: string }): string {
+  const match = cert.subject?.match(/CN\s*=\s*([^,]+)/i);
+  return (
+    match?.[1]?.trim() ||
+    cert.label?.trim() ||
+    cert.subject?.trim() ||
+    `Cert ${cert.id.slice(0, 8)}`
+  );
+}
+
+async function signPdfBlobWithDsc(
+  blob: Blob,
+  fileName: string,
+  pinHint: string | undefined,
+  templateType: TemplateType,
+  signingAcceptance: boolean,
+  stampOptions?: { role?: DscStampRole; layout?: DscStampLayout }
+): Promise<Blob> {
+  await pingHost();
+  const slots = await listSlots();
+  const usableSlots = slots
+    .map((slot, index) => {
+      const slotId = resolveSlotIdForSigning(slot as unknown as Record<string, unknown>, index);
+      return slotId === null ? null : { ...slot, slotId };
+    })
+    .filter((slot): slot is (typeof slots)[number] & { slotId: number } => slot !== null);
+  if (usableSlots.length === 0) {
+    throw new Error("No DSC slot detected. Insert token and retry.");
+  }
+  const preferred = usableSlots.find((s) => s.tokenPresent) ?? usableSlots[0];
+  const certs = await listCertsForSlot(preferred.slotId);
+  const cert = certs[0];
+  if (!cert) {
+    throw new Error("No DSC certificate found on the selected token.");
+  }
+
+  const sourceBuffer = await blob.arrayBuffer();
+  const role = stampOptions?.role ?? resolveDscStampRole(templateType, signingAcceptance);
+  const layout = stampOptions?.layout ?? resolveDscStampLayout(templateType, signingAcceptance);
+  const stampRect = await resolveDscStampRectFromPdf(sourceBuffer, role, layout);
+
+  const prepared = await preparePdfForNativeSigning(sourceBuffer, {
+    stamp: {
+      ...stampRect,
+      signerLabel: pickSignerLabel(cert),
+      signedAt: new Date(),
+      reason: "Document approval",
+    },
+  });
+  const preparedBlob = new Blob([new Uint8Array(prepared)], {
+    type: blob.type || "application/pdf",
+  });
+  const signed = await signPdf({
+    pdfBase64: await blobToBase64(preparedBlob),
+    slotId: preferred.slotId,
+    certId: cert.id,
+    fileName,
+    contentType: preparedBlob.type,
+    pinHint,
+    certSource: "fresh_slot_lookup",
+  });
+  if (!signed.signedPdfBase64) {
+    throw new Error("DSC signing failed: connector returned empty payload.");
+  }
+  return base64ToBlob(signed.signedPdfBase64, "application/pdf");
+}
 
 function computeMockSignAvailability(args: {
   templateType: TemplateType;
@@ -954,6 +1055,35 @@ async function buildApplicationSavePdfBlob(
   return generateApplicationPreviewPdfFromHtml(html, built.templateType);
 }
 
+/** Load the unsigned PDF for a specific letter (appointment vs acceptance), not the preview tab URL. */
+async function loadUnsignedLetterPdfForSigning(params: {
+  urlsRaw: unknown;
+  urlsKey: string;
+  letterVariant: "appointment" | "acceptance";
+  previewBase: BuildApplicationPreviewContextInput;
+  projectId: string;
+}): Promise<{ blob: Blob; builtFresh: boolean }> {
+  const storedUrl = readApplicationUrlFromUrls(params.urlsRaw, params.urlsKey);
+  if (storedUrl && /^https?:\/\//.test(storedUrl)) {
+    const res = await fetch(storedUrl);
+    if (res.ok) {
+      return { blob: await res.blob(), builtFresh: false };
+    }
+  }
+
+  const built = await buildApplicationPreviewContext({
+    ...params.previewBase,
+    letterVariant: params.letterVariant,
+  });
+  const blob = await buildApplicationSavePdfBlob(
+    built,
+    params.urlsKey,
+    params.urlsRaw,
+    params.projectId
+  );
+  return { blob, builtFresh: true };
+}
+
 function dualLetterBuiltContexts(
   base: BuiltApplicationPreview,
   _templateType: TemplateType
@@ -1121,7 +1251,7 @@ async function submitSavedApplicationPdfs(params: {
   appointmentBlob?: Blob;
   acceptanceBlob?: Blob | null;
   acceptanceUrlsKey?: string;
-}): Promise<{ publicUrl?: string }> {
+}): Promise<{ publicUrl?: string; publicUrls?: Record<string, string> }> {
   const slug = (key: string) => key.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
   const formData = new FormData();
   formData.append("projectId", params.projectId);
@@ -1154,11 +1284,18 @@ async function submitSavedApplicationPdfs(params: {
     throw new Error(msg);
   }
 
-  const jsonBody = (await response.json().catch(() => null)) as { publicUrl?: string } | null;
+  const jsonBody = (await response.json().catch(() => null)) as {
+    publicUrl?: string;
+    publicUrls?: Record<string, string>;
+  } | null;
   return {
     publicUrl:
       typeof jsonBody?.publicUrl === "string" && jsonBody.publicUrl.trim()
         ? jsonBody.publicUrl.trim()
+        : undefined,
+    publicUrls:
+      jsonBody?.publicUrls && typeof jsonBody.publicUrls === "object"
+        ? jsonBody.publicUrls
         : undefined,
   };
 }
@@ -1369,6 +1506,10 @@ export default function ApplicationDetailsPage() {
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [signedDocSuccessDialogOpen, setSignedDocSuccessDialogOpen] = useState(false);
   const [pendingDashboardUrl, setPendingDashboardUrl] = useState<string | null>(null);
+  const [dscPinModalOpen, setDscPinModalOpen] = useState(false);
+  const [dscPinInput, setDscPinInput] = useState("");
+  const [dscPinError, setDscPinError] = useState<string | null>(null);
+  const [dscPinSubmitting, setDscPinSubmitting] = useState(false);
   const { setSlot } = useApplicationPdfSaveSlot();
   const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
   const [autoMockSignAfterPreviewOpen, setAutoMockSignAfterPreviewOpen] = useState(false);
@@ -1382,7 +1523,7 @@ export default function ApplicationDetailsPage() {
   const saveInFlightRef = useRef(false);
   const signInFlightRef = useRef(false);
   const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
-  const signDirectlyRef = useRef<() => Promise<void>>(async () => Promise.resolve());
+  const signDirectlyRef = useRef<(pin?: string) => Promise<void>>(async () => Promise.resolve());
   const buildApplicationPreviewPdfBlob = async (
     urlsRaw?: unknown,
     accessToken?: string
@@ -1736,12 +1877,27 @@ export default function ApplicationDetailsPage() {
         ? getStoredApplicationPdfUrl(urlsRawForQr, templateType, resolvedPreviewVariant)
         : null;
       if (storedPdfUrl) {
-        setStoredSigningPdfUrl(
-          storedPdfUrlWithCacheBuster(storedPdfUrl, {
-            ownerSignedAt,
-            architectSignedAt,
-          })
-        );
+        const resolvedStoredUrl = storedPdfUrlWithCacheBuster(storedPdfUrl, {
+          ownerSignedAt,
+          architectSignedAt,
+        });
+        setStoredSigningPdfUrl(resolvedStoredUrl);
+        const hasRecordedSignature = Boolean(ownerSignedAt?.trim() || architectSignedAt?.trim());
+        const preferStoredPdf =
+          hasRecordedSignature || workflowStageForPreview === "in_process";
+        if (preferStoredPdf) {
+          previewPdfContextRef.current = { fields, templateType, previewSource };
+          setPdfSavedForCurrentPreview(true);
+          setPreviewReadyForSave(true);
+          setPreviewHtml(null);
+          setPreviewUrl((prev) => {
+            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+            return resolvedStoredUrl;
+          });
+          setPreviewFieldMapping(fieldMapping);
+          setPreviewOpen(true);
+          return;
+        }
       }
 
       const { data: previewSessionData } = await supabase.auth.getSession();
@@ -2361,7 +2517,10 @@ export default function ApplicationDetailsPage() {
   };
 
   /** Sign silently (no preview modal): build context then run the signing pipeline. */
-  const handleSignDirectly = async () => {
+  const handleSignDirectly = async (pin?: string) => {
+    if (!pin?.trim()) {
+      throw new Error("Please enter your DSC PIN.");
+    }
     if (!projectId) {
       setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
       return;
@@ -2374,6 +2533,7 @@ export default function ApplicationDetailsPage() {
     setSavePdfError(null);
     setSavePdfMessage(null);
 
+    let resolvedApplicationId = applicationId;
     try {
       let projectForSign = projectData;
       if (!projectForSign) {
@@ -2401,30 +2561,274 @@ export default function ApplicationDetailsPage() {
         throw new Error("Project data could not be loaded.");
       }
 
-      const { fields, previewSource, templateType } = await buildApplicationPreviewContext({
+      resolvedApplicationId = applicationId;
+      if (!resolvedApplicationId?.trim() && selectedApplication) {
+        const { data: appLookup } = await supabase
+          .from("applications")
+          .select("id")
+          .eq("project_id", projectId)
+          .eq("permission_type", selectedApplication)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (appLookup?.id) resolvedApplicationId = appLookup.id;
+      }
+      if (!resolvedApplicationId?.trim()) {
+        throw new Error(
+          "Missing application id. Use Application Details from the user dashboard (application number link)."
+        );
+      }
+
+      const {
+        data: { user: authUser },
+        error: authUserErr,
+      } = await supabase.auth.getUser();
+      if (authUserErr || !authUser?.id) {
+        throw new Error("Not signed in. Please log in again.");
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData.session?.access_token;
+      if (!authToken) throw new Error("Missing session token. Please log in again.");
+
+      const { data: appSignRow, error: appSignErr } = await fetchApplicationForSigning(
+        resolvedApplicationId
+      );
+      if (appSignErr || !appSignRow) {
+        throw new Error("Could not load application signing state.");
+      }
+
+      const templateTypeForSign = mapSelectedApplicationToTemplate(selectedApplication);
+      const isDualForSign = isDualLetterType(templateTypeForSign);
+      const ownerAlreadySignedForContext =
+        typeof appSignRow.owner_signed_at === "string" &&
+        appSignRow.owner_signed_at.trim().length > 0;
+      const signingLetterVariant: "appointment" | "acceptance" =
+        isDualForSign && ownerAlreadySignedForContext ? "acceptance" : "appointment";
+
+      const previewBase: BuildApplicationPreviewContextInput = {
         userMetadata,
         projectData: projectForSign,
         selectedApplication,
         applicationNo,
         applicationCreatedAt,
         projectId,
-        letterVariant,
+      };
+
+      const { fields, previewSource, templateType } = await buildApplicationPreviewContext({
+        ...previewBase,
+        letterVariant: signingLetterVariant,
       });
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
+
+      const ctx = previewPdfContextRef.current;
+      setSidebarPdfStatus("Signing application with DSC…");
+      let urlsRaw: unknown = projectForSign.application_urls;
+      if (projectId) {
+        const { data: urlsRow } = await supabase
+          .from("projects")
+          .select("application_urls")
+          .eq("id", projectId)
+          .maybeSingle();
+        urlsRaw = urlsRow?.application_urls ?? urlsRaw;
+      }
+
+      const isDual = isDualLetterType(ctx.templateType);
+      const ownerAlreadySigned =
+        typeof appSignRow.owner_signed_at === "string" && appSignRow.owner_signed_at.trim().length > 0;
+      const signingAcceptance = isDual && ownerAlreadySigned;
+      const primaryLetterVariant: "appointment" | "acceptance" = signingAcceptance
+        ? "acceptance"
+        : "appointment";
+      const key = signingAcceptance
+        ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`)
+        : ctx.templateType;
+
+      const { blob: unsignedBlob, builtFresh: primaryBuiltFresh } =
+        await loadUnsignedLetterPdfForSigning({
+          urlsRaw,
+          urlsKey: key,
+          letterVariant: primaryLetterVariant,
+          previewBase,
+          projectId,
+        });
+      if (primaryBuiltFresh) {
+        const seeded = await submitSavedApplicationPdfs({
+          projectId,
+          templateType: ctx.templateType,
+          authToken,
+          authUserId: authUser.id,
+          appointmentBlob: unsignedBlob,
+          applicationUrlsKey: key,
+        });
+        if (seeded.publicUrl) {
+          urlsRaw = {
+            ...(urlsRaw && typeof urlsRaw === "object" && !Array.isArray(urlsRaw)
+              ? (urlsRaw as Record<string, string>)
+              : {}),
+            ...(seeded.publicUrls ?? { [key]: seeded.publicUrl }),
+          };
+        }
+      }
+      const signedBlob = await signPdfBlobWithDsc(
+        unsignedBlob,
+        `${ctx.templateType.replace(/[/\\]/g, "-")}-application.pdf`,
+        pin,
+        ctx.templateType,
+        signingAcceptance
+      );
+
+      let acceptanceUpload: { acceptanceBlob?: Blob; acceptanceUrlsKey?: string } = {};
+      if (isDual && !signingAcceptance) {
+        const acceptanceKey =
+          ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
+        const { blob: acceptanceUnsigned, builtFresh: acceptanceBuiltFresh } =
+          await loadUnsignedLetterPdfForSigning({
+            urlsRaw,
+            urlsKey: acceptanceKey,
+            letterVariant: "acceptance",
+            previewBase,
+            projectId,
+          });
+        if (acceptanceBuiltFresh) {
+          const seededAcceptance = await submitSavedApplicationPdfs({
+            projectId,
+            templateType: ctx.templateType,
+            authToken,
+            authUserId: authUser.id,
+            applicationUrlsKey: ctx.templateType,
+            acceptanceBlob: acceptanceUnsigned,
+            acceptanceUrlsKey: acceptanceKey,
+          });
+          if (seededAcceptance.publicUrls) {
+            urlsRaw = {
+              ...(urlsRaw && typeof urlsRaw === "object" && !Array.isArray(urlsRaw)
+                ? (urlsRaw as Record<string, string>)
+                : {}),
+              ...seededAcceptance.publicUrls,
+            };
+          }
+        }
+        const signedAcceptance = await signPdfBlobWithDsc(
+          acceptanceUnsigned,
+          `${ctx.templateType.replace(/[/\\]/g, "-")}-acceptance.pdf`,
+          pin,
+          ctx.templateType,
+          false,
+          { role: "owner", layout: "dualColumn" }
+        );
+        acceptanceUpload = {
+          acceptanceBlob: signedAcceptance,
+          acceptanceUrlsKey: acceptanceKey,
+        };
+      }
+
+      const uploaded = await submitSavedApplicationPdfs({
+        projectId,
+        templateType: ctx.templateType,
+        authToken,
+        authUserId: authUser.id,
+        appointmentBlob: signedBlob,
+        applicationUrlsKey: key,
+        ...acceptanceUpload,
+      });
+
+      const nowIso = new Date().toISOString();
+      const patch = signingAcceptance
+        ? {
+            architect_signed_at: nowIso,
+            architect_signed_by: authUser.id,
+            workflow_stage: "approved_verified" as const,
+          }
+        : isDual
+          ? {
+              owner_signed_at: nowIso,
+              owner_signed_by: authUser.id,
+              workflow_stage: "in_process" as const,
+            }
+          : {
+              owner_signed_at: nowIso,
+              owner_signed_by: authUser.id,
+              workflow_stage: "approved_verified" as const,
+            };
+
+      const { ok, error } = await updateApplicationForSigning(resolvedApplicationId, authUser.id, patch);
+      if (!ok || error) {
+        throw new Error(
+          "Signed PDF was saved, but application stage update failed. Please retry once."
+        );
+      }
+
+      setPdfSavedForCurrentPreview(true);
+      setSavePdfMessage(null);
+      setSavePdfError(null);
+      const mergedUrls =
+        uploaded.publicUrls ??
+        (uploaded.publicUrl ? { [key]: uploaded.publicUrl } : undefined);
+      const previewVariant = isDual ? letterVariant : "appointment";
+      const previewStoredUrl =
+        mergedUrls != null
+          ? getStoredApplicationPdfUrl(mergedUrls, ctx.templateType, previewVariant)
+          : uploaded.publicUrl;
+      if (previewStoredUrl) {
+        const pdfUrl = storedPdfUrlWithCacheBuster(previewStoredUrl, {
+          ownerSignedAt: patch.workflow_stage === "in_process" ? nowIso : ownerSignedAt,
+          architectSignedAt: patch.workflow_stage === "approved_verified" && signingAcceptance ? nowIso : architectSignedAt,
+        });
+        setStoredSigningPdfUrl(pdfUrl);
+        setPreviewHtml(null);
+        setPreviewUrl((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return pdfUrl;
+        });
+      }
+
+      if (patch.workflow_stage === "in_process") {
+        setApplicationWorkflowStage("in_process");
+        setOwnerSignedAt(nowIso);
+        fireApplicationNotification(resolvedApplicationId, "in_process");
+        setSaveSuccessDialogOpen(true);
+      } else {
+        setApplicationWorkflowStage("approved_verified");
+        if (signingAcceptance) setArchitectSignedAt(nowIso);
+        else setOwnerSignedAt(nowIso);
+        fireApplicationNotification(resolvedApplicationId, "approved_verified");
+        setSignedDocSuccessDialogOpen(true);
+      }
+      setPreviewOpen(false);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to prepare signing context.";
+      const message = err instanceof Error ? err.message : "Failed to complete DSC signing.";
       setSavePdfError(message);
+      throw err;
+    } finally {
       signInFlightRef.current = false;
       setIsSigningPdf(false);
-      return;
+      setSidebarPdfStatus(null);
     }
-
-    signInFlightRef.current = false;
-    await handleMockSignComplete();
   };
 
   signDirectlyRef.current = handleSignDirectly;
+
+  const handleDscPinConfirm = async () => {
+    const pin = dscPinInput.trim();
+    if (!pin) {
+      setDscPinError("Please enter your DSC PIN.");
+      return;
+    }
+    setDscPinSubmitting(true);
+    setDscPinError(null);
+    try {
+      await signDirectlyRef.current(pin);
+      setDscPinModalOpen(false);
+      setDscPinInput("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to complete signing.";
+      setDscPinError(msg);
+    } finally {
+      setDscPinSubmitting(false);
+    }
+  };
 
   const handleSaveApplicationPdf = async () => {
     if (!projectId) {
@@ -2592,18 +2996,18 @@ export default function ApplicationDetailsPage() {
           previewSource: ctx.previewSource,
         };
 
-        const qrFreeFirst = dualLetterPdfNeedsQrFreeFirstPass(ctx.templateType);
-        const runQrRepass = shouldRunLegacyDualLetterQrRepass(ctx.templateType);
-        const { appointmentBlob, acceptanceBlob, acceptanceKey } = await buildDualLetterPdfBlobs(
-          previewBase,
+        const { appointment: appointmentCtx, acceptance: acceptanceCtx } = dualLetterBuiltContexts(
+          cachedBase,
+          ctx.templateType
+        );
+        // Save appointment first using the same single-pass renderer as the
+        // stable in-process flow, then save acceptance against fresh URLs.
+        const appointmentBlob = await buildApplicationSavePdfBlob(
+          appointmentCtx,
           ctx.templateType,
           urlsBeforeSave,
-          undefined,
-          cachedBase,
-          authToken,
-          { omitSavedPdfQr: qrFreeFirst }
+          projectId
         );
-
         await submitSavedApplicationPdfs({
           projectId,
           templateType: ctx.templateType,
@@ -2611,51 +3015,26 @@ export default function ApplicationDetailsPage() {
           authUserId: authUser.id,
           appointmentBlob,
           applicationUrlsKey: ctx.templateType,
+        });
+
+        const urlsAfterAppointment = await fetchApplicationUrls();
+        const acceptanceKey =
+          ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
+        const acceptanceBlob = await buildApplicationSavePdfBlob(
+          acceptanceCtx,
+          acceptanceKey,
+          urlsAfterAppointment,
+          projectId
+        );
+        await submitSavedApplicationPdfs({
+          projectId,
+          templateType: ctx.templateType,
+          authToken,
+          authUserId: authUser.id,
+          applicationUrlsKey: ctx.templateType,
           acceptanceBlob,
           acceptanceUrlsKey: acceptanceKey,
         });
-
-        if (runQrRepass) {
-          setSidebarPdfStatus("Adding QR to saved PDFs…");
-          const urlsAfterSave = await fetchProjectApplicationUrls(projectId);
-          const repass = await buildDualLetterPdfBlobs(
-            previewBase,
-            ctx.templateType,
-            urlsAfterSave,
-            undefined,
-            cachedBase,
-            authToken
-          );
-          await submitSavedApplicationPdfs({
-            projectId,
-            templateType: ctx.templateType,
-            authToken,
-            authUserId: authUser.id,
-            appointmentBlob: repass.appointmentBlob,
-            applicationUrlsKey: ctx.templateType,
-            acceptanceBlob: repass.acceptanceBlob,
-            acceptanceUrlsKey: repass.acceptanceKey,
-          });
-          // #region agent log
-          fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-            body: JSON.stringify({
-              sessionId: "9d94e9",
-              runId: "post-fix",
-              hypothesisId: "F",
-              location: "application-details/page.tsx:handleSaveApplicationPdf:qrRepass",
-              message: "Legacy dual-letter PDF saved with QR repass",
-              data: {
-                templateType: ctx.templateType,
-                qrFreeFirst,
-                hasUrlsAfterSave: Boolean(urlsAfterSave),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-        }
 
         setPdfSavedForCurrentPreview(true);
         setSidebarPdfStatus(null);
@@ -2816,7 +3195,9 @@ export default function ApplicationDetailsPage() {
     setSignApplicationSlot({
       onSign: async () => {
         if (!avail.actionAvailable) return;
-        await signDirectlyRef.current();
+        setDscPinError(null);
+        setDscPinInput("");
+        setDscPinModalOpen(true);
       },
       disabled: isSavingPdf || isSigningPdf,
       busy: isSigningPdf,
@@ -2946,36 +3327,6 @@ export default function ApplicationDetailsPage() {
         saveCompleted={pdfSavedForCurrentPreview}
         saveFeedbackError={savePdfError}
         saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
-        getPdfBlob={
-          applicationWorkflowStage === "approved_verified"
-            ? undefined
-            : storedSigningPdfUrl &&
-                (storedSigningPdfUrl.startsWith("https://") ||
-                  storedSigningPdfUrl.startsWith("http://") ||
-                  storedSigningPdfUrl.startsWith("/"))
-              ? async () => {
-                  const res = await fetch(storedSigningPdfUrl);
-                  if (!res.ok) throw new Error("Could not load the saved PDF.");
-                  return res.blob();
-                }
-              : previewUrl &&
-                  (previewUrl.startsWith("https://") ||
-                    previewUrl.startsWith("http://") ||
-                    previewUrl.startsWith("/"))
-                ? async () => {
-                    const res = await fetch(previewUrl);
-                    if (!res.ok) throw new Error("Could not load the saved PDF.");
-                    return res.blob();
-                  }
-                : previewHtml && applicationWorkflowStage !== "draft"
-                  ? () => buildApplicationPreviewPdfBlob()
-                  : undefined
-        }
-        signingFileName={
-          previewPdfContextRef.current
-            ? `${previewPdfContextRef.current.templateType.replace(/[/\\]/g, "-").replace(/\s+/g, "_")}-application.pdf`
-            : undefined
-        }
         hideSaveButton={true}
         showMockSignButton={
           applicationWorkflowStage === "in_process" && mockSignAvailability.actionAvailable
@@ -3053,6 +3404,19 @@ export default function ApplicationDetailsPage() {
           </div>
         </div>
       )}
+
+      <DscPinModal
+        open={dscPinModalOpen}
+        pin={dscPinInput}
+        busy={dscPinSubmitting || isSigningPdf}
+        error={dscPinError}
+        onPinChange={setDscPinInput}
+        onClose={() => {
+          if (dscPinSubmitting || isSigningPdf) return;
+          setDscPinModalOpen(false);
+        }}
+        onConfirm={handleDscPinConfirm}
+      />
     </div>
   );
 }

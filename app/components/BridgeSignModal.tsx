@@ -2,7 +2,7 @@
 
 /**
  * DSC signing modal: PING → LIST_SLOTS → pick slot → LIST_CERTS → pick cert →
- * optional visible stamp on PDF preview → SIGN_PDF_* (chunked).
+ * auto stamp placement → SIGN_PDF_* (chunked).
  */
 
 import React, { useEffect, useState } from "react";
@@ -10,12 +10,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 
 import CustomSelect from "@/app/components/CustomSelect";
-import DscStampPdfViewer, { StampRect } from "@/app/components/DscStampPdfViewer";
 import { base64ToBlob } from "@/app/lib/bridge/pdfChunker";
 import { CertInfo } from "@/app/lib/bridge/protocol";
 import { useStepwiseSigning } from "@/app/lib/bridge/useStepwiseSigning";
 
 const MAX_SIGN_PDF_BLOB_SIZE = 8 * 1024 * 1024;
+const AUTO_STAMP_RECT = {
+  pageIndex: 0,
+  pdfX: 100,
+  pdfY: 600,
+  pdfWidth: 180,
+  pdfHeight: 60,
+};
 
 const CN_RE = /CN\s*=\s*([^,]+)/i;
 
@@ -96,8 +102,6 @@ export default function BridgeSignModal({
   const [isResolvingBlob, setIsResolvingBlob] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [signedFileName, setSignedFileName] = useState<string>("signed.pdf");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [stampRect, setStampRect] = useState<StampRect | null>(null);
 
   const dscBusy = isLoadingSlots || isLoadingCerts;
 
@@ -150,20 +154,6 @@ export default function BridgeSignModal({
     };
   }, [open, pdfBlob, getPdfBlob]);
 
-  useEffect(() => {
-    if (!resolvedBlob || !open) {
-      setPreviewUrl(null);
-      setStampRect(null);
-      return;
-    }
-    const url = URL.createObjectURL(resolvedBlob);
-    setPreviewUrl(url);
-    setStampRect(null);
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [resolvedBlob, open]);
-
   useEffect(
     () => () => {
       if (signedUrl) URL.revokeObjectURL(signedUrl);
@@ -202,18 +192,11 @@ export default function BridgeSignModal({
     }
 
     const cert = certsForSelectedSlot.find((c) => c.id === selectedCertId);
-    const stamp =
-      stampRect !== null
-        ? {
-            pageIndex: stampRect.pageIndex,
-            pdfX: stampRect.pdfX,
-            pdfY: stampRect.pdfY,
-            pdfWidth: stampRect.pdfWidth,
-            pdfHeight: stampRect.pdfHeight,
-            signerLabel: resolveSignerLabel(cert),
-            signedAt: new Date(),
-          }
-        : undefined;
+    const stamp = {
+      ...AUTO_STAMP_RECT,
+      signerLabel: resolveSignerLabel(cert),
+      signedAt: new Date(),
+    };
 
     const result = await signCurrentPdf(resolvedBlob, {
       fileName: fileName || "generated.pdf",
@@ -349,14 +332,10 @@ export default function BridgeSignModal({
                   <p className="text-xs text-gray-600">No PDF supplied yet.</p>
                 )}
 
-                {previewUrl && !blobError && resolvedBlob && !blobTooLarge ? (
-                  <DscStampPdfViewer
-                    key={previewUrl}
-                    fileUrl={previewUrl}
-                    stampRect={stampRect}
-                    onStampChange={setStampRect}
-                    disabled={isSigning}
-                  />
+                {!blobError && resolvedBlob && !blobTooLarge ? (
+                  <p className="text-xs text-gray-500">
+                    Signature stamp is placed automatically at the configured position.
+                  </p>
                 ) : null}
               </div>
 
