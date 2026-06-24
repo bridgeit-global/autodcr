@@ -9,10 +9,6 @@ const ApplicationStoredPdfViewer = dynamic(() => import("./ApplicationStoredPdfV
   ssr: false,
 }) as React.ComponentType<{ fileUrl: string }>;
 
-const BridgeSignModal = dynamic(() => import("./BridgeSignModal"), {
-  ssr: false,
-});
-
 type DocumentPreviewModalProps = {
   open: boolean;
   onClose: () => void;
@@ -36,10 +32,6 @@ type DocumentPreviewModalProps = {
   /** Shown inside the modal so save errors/success are visible over the backdrop. */
   saveFeedbackError?: string | null;
   saveFeedbackSuccess?: string | null;
-  /** When set, enables “Sign with DSC” (same PDF bytes as upload/save flow). */
-  getPdfBlob?: () => Promise<Blob>;
-  /** Default download/filename for signing (optional). */
-  signingFileName?: string;
   /** Hide the Save / Saved toolbar control (e.g. preview-only flows). */
   hideSaveButton?: boolean;
   /** Show a loading state in the preview body while HTML/PDF is being prepared. */
@@ -78,8 +70,6 @@ export default function DocumentPreviewModal({
   saveCompleted,
   saveFeedbackError,
   saveFeedbackSuccess,
-  getPdfBlob,
-  signingFileName,
   hideSaveButton = false,
   isLoading = false,
   loadError = null,
@@ -101,7 +91,6 @@ export default function DocumentPreviewModal({
   const sidebarAutoCommitDoneRef = useRef(false);
   /** Prevents parallel afterInject when load + timer both fire. */
   const sidebarAutoAfterInjectLockRef = useRef(false);
-  const [signModalOpen, setSignModalOpen] = useState(false);
   const [mockSignApplied, setMockSignApplied] = useState(false);
   /** Mock Sign: covers inject + fonts + parent upload until the pipeline finishes. */
   const [signPipelineBusy, setSignPipelineBusy] = useState(false);
@@ -397,14 +386,11 @@ export default function DocumentPreviewModal({
   const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
   const useCompactPreviewLayout =
     isHtmlPreview || isStoredPdfPreview || (!hasContent && (isLoading || Boolean(loadError)));
-  const canSign = Boolean(getPdfBlob);
-
   const saveUiBusy = Boolean(isSaving);
   const previewReloadBusy = Boolean(isLoading && hasContent);
 
   const handleCloseAll = () => {
     if (saveUiBusy) return;
-    setSignModalOpen(false);
     onClose();
   };
 
@@ -502,33 +488,6 @@ export default function DocumentPreviewModal({
                       <option value="acceptance">Acceptance</option>
                     </select>
                   </label>
-                )}
-                {canSign && (
-                  <button
-                    onClick={() => setSignModalOpen(true)}
-                    disabled={saveUiBusy}
-                    className="h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
-                    aria-label="Sign with DSC"
-                    type="button"
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M12 2v8" />
-                      <path d="M5 10h14" />
-                      <path d="M5 14a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4" />
-                      <path d="M9 22h6" />
-                    </svg>
-                    Sign with DSC
-                  </button>
                 )}
                 {((htmlContent && !fileUrl) || isStoredPdfPreview) && (
                   <button
@@ -710,15 +669,6 @@ export default function DocumentPreviewModal({
   return (
     <>
       {createPortal(modalContent, document.body)}
-      {canSign && (
-        <BridgeSignModal
-          open={signModalOpen}
-          onClose={() => setSignModalOpen(false)}
-          getPdfBlob={getPdfBlob}
-          fileName={signingFileName || "application-preview.pdf"}
-          title={title ? `Sign "${title}" with DSC` : "Sign Document with DSC"}
-        />
-      )}
     </>
   );
 }

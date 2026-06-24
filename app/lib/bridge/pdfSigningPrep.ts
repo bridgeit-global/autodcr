@@ -71,7 +71,21 @@ async function preparePdfFresh(
     name: options.stamp?.signerLabel ?? DEFAULT_SIGNER,
     location: DEFAULT_LOCATION,
     signatureLength: SIGNATURE_LENGTH,
+    widgetRect: options.stamp
+      ? [
+          options.stamp.pdfX,
+          options.stamp.pdfY,
+          options.stamp.pdfX + options.stamp.pdfWidth,
+          options.stamp.pdfY + options.stamp.pdfHeight,
+        ]
+      : [0, 0, 0, 0],
   });
+
+  const targetPageIndex = options.stamp?.pageIndex ?? 0;
+  if (targetPageIndex !== 0) {
+    relocateLastWidgetToPage(pdfDoc, targetPageIndex);
+  }
+
   return await pdfDoc.save({ useObjectStreams: false });
 }
 

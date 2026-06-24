@@ -148,6 +148,14 @@ const validateCertId = (rawCertId: string): CertIdValidation => {
   return { looksHex, evenLength, normalizedHex };
 };
 
+const AUTO_STAMP_RECT: StampRect = {
+  pageIndex: 0,
+  pdfX: 100,
+  pdfY: 600,
+  pdfWidth: 180,
+  pdfHeight: 60,
+};
+
 function StampOverlay({
   stamp,
   pageDims,
@@ -542,21 +550,19 @@ export default function BridgePocPage() {
       setPdfFlowProgress("Preparing PDF for signing...");
       const originalPdfBuffer = await pdfToSignFile.arrayBuffer();
 
-      let stamp: DscStampSpec | undefined;
-      if (stampRect) {
-        const certForStamp = (certsBySlot[selectedSlotIdNumber] ?? []).find(
-          (c) => c.id === resolvedCertId
-        );
-        stamp = {
-          pageIndex: stampRect.pageIndex,
-          pdfX: stampRect.pdfX,
-          pdfY: stampRect.pdfY,
-          pdfWidth: stampRect.pdfWidth,
-          pdfHeight: stampRect.pdfHeight,
-          signerLabel: resolveSignerLabel(certForStamp),
-          signedAt: new Date(),
-        };
-      }
+      const certForStamp = (certsBySlot[selectedSlotIdNumber] ?? []).find(
+        (c) => c.id === resolvedCertId
+      );
+      const effectiveRect = stampRect ?? AUTO_STAMP_RECT;
+      const stamp: DscStampSpec = {
+        pageIndex: effectiveRect.pageIndex,
+        pdfX: effectiveRect.pdfX,
+        pdfY: effectiveRect.pdfY,
+        pdfWidth: effectiveRect.pdfWidth,
+        pdfHeight: effectiveRect.pdfHeight,
+        signerLabel: resolveSignerLabel(certForStamp),
+        signedAt: new Date(),
+      };
 
       const preparedPdfBytes = await preparePdfForNativeSigning(originalPdfBuffer, { stamp });
       assertPdfHasSigningMarkers(preparedPdfBytes);
@@ -969,35 +975,11 @@ export default function BridgePocPage() {
               <div className="md:col-span-2">
                 <div className="mb-2 flex flex-wrap items-center gap-3">
                   <span className="text-sm font-medium text-gray-700">Visible DSC stamp:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStampRect(null);
-                      setIsPlacingStamp(true);
-                      setDragState(null);
-                    }}
-                    className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                  >
-                    {stampRect ? "Re-place stamp" : "Place stamp"}
-                  </button>
-                  {stampRect ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setStampRect(null);
-                        setIsPlacingStamp(false);
-                      }}
-                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
-                    >
-                      Clear
-                    </button>
-                  ) : null}
+                  <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 border border-emerald-200">
+                    Auto placement enabled
+                  </span>
                   <span className="text-xs text-gray-600">
-                    {isPlacingStamp
-                      ? "Drag a rectangle on any page to position the stamp."
-                      : stampRect
-                        ? `Page ${stampRect.pageIndex + 1} · ${stampRect.pdfWidth.toFixed(0)}×${stampRect.pdfHeight.toFixed(0)} pt`
-                        : "No visible stamp will be drawn (signing only)."}
+                    Fixed position: Page 1 · {AUTO_STAMP_RECT.pdfWidth}×{AUTO_STAMP_RECT.pdfHeight} pt
                   </span>
                 </div>
                 <div
