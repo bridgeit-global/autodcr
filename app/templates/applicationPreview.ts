@@ -2177,27 +2177,45 @@ export function injectMockConsultantSignatureIntoPreviewHtml(
   }
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const cells = parsed.querySelectorAll(".signature-table tr td");
-  if (cells.length < 2) return html;
-  const consultantCell = cells[1];
-  const signatureLine = consultantCell?.querySelector(".signature-line");
-  if (!consultantCell || !signatureLine) return html;
-  if (
-    consultantCell.querySelector("#preview-dummy-consultant-sign") ||
-    consultantCell.querySelector("#preview-dummy-architect-sign")
-  ) {
+  if (cells.length >= 2) {
+    const consultantCell = cells[1];
+    const signatureLine = consultantCell?.querySelector(".signature-line");
+    if (consultantCell && signatureLine) {
+      if (
+        consultantCell.querySelector("#preview-dummy-consultant-sign") ||
+        consultantCell.querySelector("#preview-dummy-architect-sign")
+      ) {
+        return html;
+      }
+
+      ensurePreviewSignatureFont(parsed);
+      const label = mockSecondSignerLabel(templateType);
+      const wrap = buildMockSignatureWrap(
+        parsed,
+        "preview-dummy-consultant-sign",
+        label,
+        "1.5deg"
+      );
+      consultantCell.insertBefore(wrap, signatureLine);
+      (signatureLine as HTMLElement).style.marginTop = "4px";
+      return parsed.documentElement.outerHTML;
+    }
+  }
+
+  const consultantSlot = parsed.querySelector(".dsc-stamp-slot--consultant");
+  if (!consultantSlot || consultantSlot.querySelector("#preview-dummy-consultant-sign")) {
     return html;
   }
 
   ensurePreviewSignatureFont(parsed);
-  const label = mockSecondSignerLabel(templateType);
-  const wrap = buildMockSignatureWrap(
+  const slotLabel = mockSecondSignerLabel(templateType);
+  const slotWrap = buildMockSignatureWrap(
     parsed,
     "preview-dummy-consultant-sign",
-    label,
+    slotLabel,
     "1.5deg"
   );
-  consultantCell.insertBefore(wrap, signatureLine);
-  (signatureLine as HTMLElement).style.marginTop = "4px";
+  consultantSlot.appendChild(slotWrap);
   return parsed.documentElement.outerHTML;
 }
 

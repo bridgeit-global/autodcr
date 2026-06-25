@@ -20,6 +20,7 @@ import {
   sameUserId,
 } from "@/app/utils/applicationSigning";
 import {
+  consultantSignsAppointmentLetter,
   dualLetterPdfNeedsQrFreeFirstPass,
   isCleanAppointmentLetterType,
   shouldRunLegacyDualLetterQrRepass,
@@ -66,7 +67,11 @@ import {
   type DscStampLayout,
   type DscStampRole,
 } from "@/app/lib/bridge/dscStampPlacement";
-import { preparePdfForNativeSigning } from "@/app/lib/bridge/pdfSigningPrep";
+import {
+  pdfHasCompletedSignature,
+  pdfHasUnsignedSignaturePlaceholder,
+  preparePdfForNativeSigning,
+} from "@/app/lib/bridge/pdfSigningPrep";
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
 
 type PreviewProjectData = {
@@ -296,6 +301,71 @@ function computeMockSignAvailability(args: {
     idleReason: "Only the project owner can sign.",
     subtitle: "Only the project owner can sign this application.",
   };
+}
+
+type DirectSignPermissionOutcome =
+  | { allowed: true }
+  | { allowed: false; softMessage: string };
+
+function checkDirectSignPermissions(args: {
+  templateType: TemplateType;
+  authUserId: string;
+  ownerSigned: boolean;
+  architectSigned: boolean;
+  projectData: PreviewProjectData | null;
+  projectRowUserId: string | null | undefined;
+  appointedSecondId: string | null | undefined;
+}): DirectSignPermissionOutcome {
+  const {
+    templateType,
+    authUserId,
+    ownerSigned,
+    architectSigned,
+    projectData,
+    projectRowUserId,
+    appointedSecondId,
+  } = args;
+  const hasDualLetters = isDualLetterType(templateType);
+  const uid = authUserId.trim();
+  const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
+  const secondRoleLabel =
+    templateType === "Architect"
+      ? "architect"
+      : mockSecondSignerLabel(templateType).toLowerCase();
+
+  if (hasDualLetters && architectSigned) {
+    throw new Error("This application is already fully signed.");
+  }
+
+  if (hasDualLetters && !ownerSigned) {
+    if (sameUserId(uid, appointedSecondId) && !isAnySameUserId(uid, ownerSignerIds)) {
+      throw new Error("The owner has not signed yet.");
+    }
+    if (!isAnySameUserId(uid, ownerSignerIds)) {
+      throw new Error("Only the project owner can sign at this step.");
+    }
+  } else if (hasDualLetters && ownerSigned && !architectSigned) {
+    if (isAnySameUserId(uid, ownerSignerIds) && !sameUserId(uid, appointedSecondId)) {
+      return {
+        allowed: false,
+        softMessage: `Your signature is already saved. The ${secondRoleLabel} will complete the acceptance letter.`,
+      };
+    }
+    if (!sameUserId(uid, appointedSecondId)) {
+      throw new Error(`Only the appointed ${secondRoleLabel} can complete this signature step.`);
+    }
+    if (!appointedSecondId?.trim()) {
+      throw new Error(
+        `This project has no appointed ${secondRoleLabel}. Add them on Applicant Details before signing.`
+      );
+    }
+  } else if (!hasDualLetters) {
+    if (!isAnySameUserId(uid, ownerSignerIds)) {
+      throw new Error("Only the project owner can sign this application.");
+    }
+  }
+
+  return { allowed: true };
 }
 
 function pickCoaRegNoFromMeta(meta: unknown): string | undefined {
@@ -1055,20 +1125,54 @@ async function buildApplicationSavePdfBlob(
   return generateApplicationPreviewPdfFromHtml(html, built.templateType);
 }
 
-/** Load the unsigned PDF for a specific letter (appointment vs acceptance), not the preview tab URL. */
+/** Load the PDF for signing for a specific letter (appointment vs acceptance). */
 async function loadUnsignedLetterPdfForSigning(params: {
   urlsRaw: unknown;
   urlsKey: string;
   letterVariant: "appointment" | "acceptance";
   previewBase: BuildApplicationPreviewContextInput;
   projectId: string;
+  /** Consultant step: must load owner-signed acceptance from storage; never rebuild unsigned. */
+  requireOwnerSignedPdf?: boolean;
+  /** Bust CDN/browser cache when loading stored PDF (match preview URL versioning). */
+  cacheVersion?: string | null;
 }): Promise<{ blob: Blob; builtFresh: boolean }> {
-  const storedUrl = readApplicationUrlFromUrls(params.urlsRaw, params.urlsKey);
+  let storedUrl = readApplicationUrlFromUrls(params.urlsRaw, params.urlsKey);
+  if (storedUrl && params.cacheVersion?.trim()) {
+    storedUrl = storedPdfUrlWithCacheBuster(storedUrl, {
+      ownerSignedAt: params.cacheVersion,
+    });
+  }
   if (storedUrl && /^https?:\/\//.test(storedUrl)) {
-    const res = await fetch(storedUrl);
+    const res = await fetch(storedUrl, { cache: "no-store" });
     if (res.ok) {
-      return { blob: await res.blob(), builtFresh: false };
+      const blob = await res.blob();
+      if (params.requireOwnerSignedPdf) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        if (!pdfHasCompletedSignature(bytes)) {
+          if (pdfHasUnsignedSignaturePlaceholder(bytes)) {
+            throw new Error(
+              "The acceptance letter PDF was prepared but the owner's digital signature is not complete. Ask the owner to sign again from IN Process."
+            );
+          }
+          throw new Error(
+            "The acceptance letter PDF does not contain the owner's digital signature. " +
+              "Use Preview → switch Letter to Acceptance to verify (Appointment may already be signed). " +
+              "If the acceptance letter is unsigned, ask the owner to sign again from IN Process — both letters are saved together."
+          );
+        }
+      }
+      return { blob, builtFresh: false };
     }
+    if (params.requireOwnerSignedPdf) {
+      throw new Error(
+        "Could not load the owner-signed acceptance PDF. Save and sign as owner first, then try again."
+      );
+    }
+  } else if (params.requireOwnerSignedPdf) {
+    throw new Error(
+      "Owner-signed acceptance PDF not found. Ask the owner to sign first, then try again."
+    );
   }
 
   const built = await buildApplicationPreviewContext({
@@ -1158,7 +1262,7 @@ async function buildDualLetterPdfBlobs(
     }
     if (
       signatures.consultant &&
-      (variant === "acceptance" || templateType === "Architect")
+      (variant === "acceptance" || consultantSignsAppointmentLetter(templateType))
     ) {
       out = injectMockConsultantSignatureIntoPreviewHtml(out, templateType);
     }
@@ -1666,6 +1770,24 @@ export default function ApplicationDetailsPage() {
     return "owner_only";
   }, [
     previewTemplateType,
+    ownerSignedAt,
+    architectSignedAt,
+    projectData,
+    authUserId,
+  ]);
+
+  useEffect(() => {
+    if (!isReadOnlyMode || !isDualLetterType(previewTemplateType)) return;
+    if (applicationWorkflowStage !== "in_process") return;
+    if (!ownerSignedAt?.trim() || architectSignedAt?.trim()) return;
+    const appointedId = resolveAppointedSecondSignerUserId(projectData, previewTemplateType);
+    if (authUserId && sameUserId(authUserId, appointedId)) {
+      setLetterVariant("acceptance");
+    }
+  }, [
+    isReadOnlyMode,
+    previewTemplateType,
+    applicationWorkflowStage,
     ownerSignedAt,
     architectSignedAt,
     projectData,
@@ -2267,10 +2389,14 @@ export default function ApplicationDetailsPage() {
 
       if (hasDualLetters) {
         const consultantSigning = ownerSigned && !architectSigned;
+        const consultantDualAppointment =
+          consultantSigning && consultantSignsAppointmentLetter(ctx.templateType);
         setSidebarPdfStatus(
-          consultantSigning
-            ? "Signing acceptance letter…"
-            : "Signing appointment & acceptance…"
+          consultantDualAppointment
+            ? "Signing acceptance & appointment…"
+            : consultantSigning
+              ? "Signing acceptance letter…"
+              : "Signing appointment & acceptance…"
         );
         const { appointmentUrl } = await persistDualLetterPdfs(
           previewBase,
@@ -2280,7 +2406,9 @@ export default function ApplicationDetailsPage() {
             consultant: consultantSigning || canSignBoth,
           },
           { token: authToken, userId: authUser.id },
-          { acceptanceOnly: consultantSigning },
+          consultantDualAppointment
+            ? undefined
+            : { acceptanceOnly: consultantSigning },
           {
             fields: ctx.fields,
             templateType: ctx.templateType,
@@ -2623,7 +2751,6 @@ export default function ApplicationDetailsPage() {
       previewPdfContextRef.current = { fields, templateType, previewSource };
 
       const ctx = previewPdfContextRef.current;
-      setSidebarPdfStatus("Signing application with DSC…");
       let urlsRaw: unknown = projectForSign.application_urls;
       if (projectId) {
         const { data: urlsRow } = await supabase
@@ -2634,10 +2761,46 @@ export default function ApplicationDetailsPage() {
         urlsRaw = urlsRow?.application_urls ?? urlsRaw;
       }
 
+      const ownerSignedAtRow =
+        typeof appSignRow.owner_signed_at === "string" && appSignRow.owner_signed_at.trim().length > 0
+          ? appSignRow.owner_signed_at
+          : null;
+      const architectSignedAtRow =
+        typeof appSignRow.architect_signed_at === "string" &&
+        appSignRow.architect_signed_at.trim().length > 0
+          ? appSignRow.architect_signed_at
+          : null;
+      const appointedSecondId = resolveAppointedSecondSignerUserId(
+        projectForSign,
+        ctx.templateType
+      );
+      const permission = checkDirectSignPermissions({
+        templateType: ctx.templateType,
+        authUserId: authUser.id,
+        ownerSigned: Boolean(ownerSignedAtRow),
+        architectSigned: Boolean(architectSignedAtRow),
+        projectData: projectForSign,
+        projectRowUserId: projectForSign.user_id,
+        appointedSecondId,
+      });
+      if (!permission.allowed) {
+        setSavePdfMessage(permission.softMessage);
+        signInFlightRef.current = false;
+        setIsSigningPdf(false);
+        setSidebarPdfStatus(null);
+        return;
+      }
+
       const isDual = isDualLetterType(ctx.templateType);
-      const ownerAlreadySigned =
-        typeof appSignRow.owner_signed_at === "string" && appSignRow.owner_signed_at.trim().length > 0;
+      const ownerAlreadySigned = Boolean(ownerSignedAtRow);
       const signingAcceptance = isDual && ownerAlreadySigned;
+      const consultantDualAppointment =
+        signingAcceptance && consultantSignsAppointmentLetter(ctx.templateType);
+      setSidebarPdfStatus(
+        consultantDualAppointment
+          ? "Signing acceptance & appointment with DSC…"
+          : "Signing application with DSC…"
+      );
       const primaryLetterVariant: "appointment" | "acceptance" = signingAcceptance
         ? "acceptance"
         : "appointment";
@@ -2652,8 +2815,10 @@ export default function ApplicationDetailsPage() {
           letterVariant: primaryLetterVariant,
           previewBase,
           projectId,
+          requireOwnerSignedPdf: signingAcceptance,
+          cacheVersion: ownerSignedAtRow,
         });
-      if (primaryBuiltFresh) {
+      if (primaryBuiltFresh && !signingAcceptance) {
         const seeded = await submitSavedApplicationPdfs({
           projectId,
           templateType: ctx.templateType,
@@ -2671,16 +2836,50 @@ export default function ApplicationDetailsPage() {
           };
         }
       }
+      const signFileName = signingAcceptance
+        ? `${ctx.templateType.replace(/[/\\]/g, "-")}-acceptance-consultant.pdf`
+        : `${ctx.templateType.replace(/[/\\]/g, "-")}-application.pdf`;
       const signedBlob = await signPdfBlobWithDsc(
         unsignedBlob,
-        `${ctx.templateType.replace(/[/\\]/g, "-")}-application.pdf`,
+        signFileName,
         pin,
         ctx.templateType,
-        signingAcceptance
+        signingAcceptance,
+        signingAcceptance ? { role: "consultant", layout: "dualColumn" } : undefined
       );
 
       let acceptanceUpload: { acceptanceBlob?: Blob; acceptanceUrlsKey?: string } = {};
-      if (isDual && !signingAcceptance) {
+      let appointmentUpload: { appointmentBlob?: Blob; applicationUrlsKey?: string } = {};
+
+      if (consultantDualAppointment) {
+        const acceptanceKey =
+          ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
+        acceptanceUpload = {
+          acceptanceBlob: signedBlob,
+          acceptanceUrlsKey: acceptanceKey,
+        };
+        const { blob: appointmentUnsigned } = await loadUnsignedLetterPdfForSigning({
+          urlsRaw,
+          urlsKey: ctx.templateType,
+          letterVariant: "appointment",
+          previewBase,
+          projectId,
+          requireOwnerSignedPdf: true,
+          cacheVersion: ownerSignedAtRow,
+        });
+        const signedAppointment = await signPdfBlobWithDsc(
+          appointmentUnsigned,
+          `${ctx.templateType.replace(/[/\\]/g, "-")}-appointment-consultant.pdf`,
+          pin,
+          ctx.templateType,
+          false,
+          { role: "consultant", layout: "dualColumn" }
+        );
+        appointmentUpload = {
+          appointmentBlob: signedAppointment,
+          applicationUrlsKey: ctx.templateType,
+        };
+      } else if (isDual && !signingAcceptance) {
         const acceptanceKey =
           ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
         const { blob: acceptanceUnsigned, builtFresh: acceptanceBuiltFresh } =
@@ -2729,8 +2928,12 @@ export default function ApplicationDetailsPage() {
         templateType: ctx.templateType,
         authToken,
         authUserId: authUser.id,
-        appointmentBlob: signedBlob,
-        applicationUrlsKey: key,
+        appointmentBlob: consultantDualAppointment
+          ? appointmentUpload.appointmentBlob
+          : signedBlob,
+        applicationUrlsKey: consultantDualAppointment
+          ? appointmentUpload.applicationUrlsKey!
+          : key,
         ...acceptanceUpload,
       });
 
@@ -2766,7 +2969,11 @@ export default function ApplicationDetailsPage() {
       const mergedUrls =
         uploaded.publicUrls ??
         (uploaded.publicUrl ? { [key]: uploaded.publicUrl } : undefined);
-      const previewVariant = isDual ? letterVariant : "appointment";
+      const previewVariant = signingAcceptance
+        ? "acceptance"
+        : isDual
+          ? letterVariant
+          : "appointment";
       const previewStoredUrl =
         mergedUrls != null
           ? getStoredApplicationPdfUrl(mergedUrls, ctx.templateType, previewVariant)
@@ -2774,7 +2981,10 @@ export default function ApplicationDetailsPage() {
       if (previewStoredUrl) {
         const pdfUrl = storedPdfUrlWithCacheBuster(previewStoredUrl, {
           ownerSignedAt: patch.workflow_stage === "in_process" ? nowIso : ownerSignedAt,
-          architectSignedAt: patch.workflow_stage === "approved_verified" && signingAcceptance ? nowIso : architectSignedAt,
+          architectSignedAt:
+            patch.workflow_stage === "approved_verified" && signingAcceptance
+              ? nowIso
+              : architectSignedAt,
         });
         setStoredSigningPdfUrl(pdfUrl);
         setPreviewHtml(null);
@@ -2782,6 +2992,9 @@ export default function ApplicationDetailsPage() {
           if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
           return pdfUrl;
         });
+      }
+      if (signingAcceptance) {
+        setLetterVariant("acceptance");
       }
 
       if (patch.workflow_stage === "in_process") {

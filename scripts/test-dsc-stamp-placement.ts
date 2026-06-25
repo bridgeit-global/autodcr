@@ -69,6 +69,9 @@ async function run() {
   if (consultantRect.pdfX < 280) {
     throw new Error(`Expected consultant stamp on right, got pdfX=${consultantRect.pdfX}`);
   }
+  if (Math.abs(consultantRect.pdfX - 320) > 2) {
+    throw new Error(`Expected consultant stamp left-aligned at x=320, got pdfX=${consultantRect.pdfX}`);
+  }
   const architectGapBottom = 210 + 12;
   if (ownerRect.pdfY > 260) {
     throw new Error(`Owner stamp should be in signature block, got pdfY=${ownerRect.pdfY}`);
@@ -115,6 +118,47 @@ async function run() {
     );
   }
 
+  const acceptanceConsultantPdf = await makeLetterPdf([
+    { text: "Thanking you,", x: 56, y: 280 },
+    { text: "Yours faithfully,", x: 56, y: 255 },
+    { text: "For Tata,", x: 56, y: 240 },
+    { text: "Director", x: 56, y: 130 },
+    { text: "Approved and confirmed,", x: 320, y: 255 },
+    { text: "For Tata,", x: 320, y: 240 },
+    { text: "M&E Consultant", x: 320, y: 130 },
+    { text: "For information & record please.", x: 56, y: 70 },
+  ]);
+  const acceptanceConsultantRect = await resolveDscStampRectFromPdf(
+    acceptanceConsultantPdf,
+    "consultant",
+    "dualColumn"
+  );
+  console.log("Acceptance consultant:", acceptanceConsultantRect);
+  if (acceptanceConsultantRect.pdfX > 360) {
+    throw new Error(
+      `Acceptance consultant stamp should align with right column, got pdfX=${acceptanceConsultantRect.pdfX}`
+    );
+  }
+  if (acceptanceConsultantRect.pdfX < 280) {
+    throw new Error(
+      `Expected acceptance consultant stamp on right, got pdfX=${acceptanceConsultantRect.pdfX}`
+    );
+  }
+  if (Math.abs(acceptanceConsultantRect.pdfX - 320) > 2) {
+    throw new Error(
+      `Expected acceptance consultant stamp at x=320, got pdfX=${acceptanceConsultantRect.pdfX}`
+    );
+  }
+  const consultantGapTop = 240;
+  const consultantGapBottom = 130 + 12;
+  const expectedConsultantY =
+    consultantGapBottom + 12 + (consultantGapTop - consultantGapBottom - 60 - 24) / 2;
+  if (Math.abs(acceptanceConsultantRect.pdfY - expectedConsultantY) > 1) {
+    throw new Error(
+      `Expected balanced acceptance consultant stamp at pdfY=${expectedConsultantY}, got pdfY=${acceptanceConsultantRect.pdfY}`
+    );
+  }
+
   const consultantOnlyPdf = await makeLetterPdf([
     { text: "Thanking you,", x: 56, y: 280 },
     { text: "Yours faithfully,", x: 56, y: 250 },
@@ -130,6 +174,32 @@ async function run() {
   console.log("Consultant-only:", consultantOnlyRect);
   if (consultantOnlyRect.pdfX < 280) {
     throw new Error(`Expected consultant stamp on right, got pdfX=${consultantOnlyRect.pdfX}`);
+  }
+  if (Math.abs(consultantOnlyRect.pdfX - 320) > 2) {
+    throw new Error(`Expected consultant-only stamp at x=320, got pdfX=${consultantOnlyRect.pdfX}`);
+  }
+
+  const lsAppointmentPdf = await makeLetterPdf([
+    { text: "Thanking You,", x: 56, y: 300 },
+    { text: "Yours faithfully,", x: 56, y: 250 },
+    { text: "For Tata,", x: 56, y: 235 },
+    { text: "Director", x: 56, y: 210 },
+    { text: "Owner Name", x: 56, y: 190 },
+    { text: "Approved and confirmed", x: 288, y: 250 },
+    { text: "For Tata,", x: 288, y: 235 },
+    { text: "Licensed Surveyor", x: 288, y: 210 },
+  ]);
+  const lsConsultantRect = await resolveDscStampRectFromPdf(
+    lsAppointmentPdf,
+    "consultant",
+    "dualColumn"
+  );
+  console.log("Licensed Surveyor appointment consultant:", lsConsultantRect);
+  if (lsConsultantRect.pdfX < 260) {
+    throw new Error(`Expected LS consultant stamp on right, got pdfX=${lsConsultantRect.pdfX}`);
+  }
+  if (Math.abs(lsConsultantRect.pdfX - 288) > 4) {
+    throw new Error(`Expected LS consultant stamp at x=288, got pdfX=${lsConsultantRect.pdfX}`);
   }
 
   console.log("All placement checks passed.");

@@ -39,6 +39,20 @@ const SIGNATURE_LINE_ASCENT = 12;
 const LEFT_MARGIN = 56;
 const RIGHT_MARGIN = 30;
 
+function consultantFallbackRect(pageIndex: number, pageWidth = 595.28): DscStampRect {
+  return {
+    pageIndex,
+    pdfX: Math.round(pageWidth / 2 + 20),
+    pdfY: 160,
+    pdfWidth: STAMP_WIDTH,
+    pdfHeight: STAMP_HEIGHT,
+  };
+}
+
+function isInRightColumn(line: TextLine, pageMidX: number): boolean {
+  return line.x >= pageMidX * 0.55;
+}
+
 let workerConfigured = false;
 
 function ensurePdfWorker(): void {
@@ -61,6 +75,7 @@ type TextLine = {
   text: string;
   x: number;
   y: number;
+  endX?: number;
 };
 
 function normalizeText(value: string): string {
@@ -73,10 +88,13 @@ function clusterToLine(cluster: TextItemPos[]): TextLine {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+  const xs = cluster.map((item) => item.x);
+  const rights = cluster.map((item) => item.x + item.width);
   return {
     text,
-    x: Math.min(...cluster.map((item) => item.x)),
+    x: Math.min(...xs),
     y: Math.max(...cluster.map((item) => item.y)),
+    endX: Math.max(...rights),
   };
 }
 
@@ -267,6 +285,59 @@ function findDualColumnStampTopLine(
   return findColumnForLine(lines, pageMidX, side, thankYou) ?? thankYou;
 }
 
+function findRightColumnSignatureLeftX(
+  lines: TextLine[],
+  pageMidX: number,
+  thankYou: TextLine | null
+): number | null {
+  const approved = findLine(lines, "approved and confirmed", (line) =>
+    isInRightColumn(line, pageMidX)
+  );
+  if (approved) return approved.x;
+
+  const forLine = findColumnForLine(lines, pageMidX, "right", thankYou);
+  if (forLine) return forLine.x;
+
+  const introLines = lines.filter((line) => {
+    if (!isInRightColumn(line, pageMidX)) return false;
+    if (thankYou && line.y > thankYou.y + 10) return false;
+    if (thankYou && line.y >= thankYou.y - 8) return false;
+    const text = normalizeText(line.text);
+    if (isThankYouLine(text) || isInformationRecordLine(text)) return false;
+    return text.includes("approved and confirmed") || text.startsWith("for ");
+  });
+  if (introLines.length > 0) {
+    return Math.min(...introLines.map((line) => line.x));
+  }
+  return null;
+}
+
+function findConsultantSignatureAnchor(
+  lines: TextLine[],
+  pageMidX: number,
+  thankYou: TextLine | null
+): TextLine | null {
+  return (
+    findColumnSignatureAnchor(lines, pageMidX, "right", thankYou) ??
+    findColumnSignatureAnchor(lines, pageMidX, "right", null) ??
+    findLine(lines, "consultant", (line) => isInRightColumn(line, pageMidX)) ??
+    findLine(lines, "plumber", (line) => isInRightColumn(line, pageMidX)) ??
+    findLine(lines, "architect", (line) => isInRightColumn(line, pageMidX))
+  );
+}
+
+function findConsultantStampTopLine(
+  lines: TextLine[],
+  pageMidX: number,
+  thankYou: TextLine | null
+): TextLine | null {
+  return (
+    findDualColumnStampTopLine(lines, pageMidX, "right", thankYou) ??
+    findLine(lines, "approved and confirmed", (line) => isInRightColumn(line, pageMidX)) ??
+    thankYou
+  );
+}
+
 function computeStampRect(args: {
   anchor: TextLine;
   pageWidth: number;
@@ -283,7 +354,11 @@ function computeStampRect(args: {
   } else if (layout === "dualColumn" && role === "owner") {
     pdfX = LEFT_MARGIN;
   } else if (layout === "dualColumn" && role === "consultant") {
-    pdfX = pageWidth - RIGHT_MARGIN - STAMP_WIDTH;
+    const pageMidX = pageWidth / 2;
+    const thankYou = findLine(lines, "thanking you");
+    pdfX =
+      findRightColumnSignatureLeftX(lines, pageMidX, thankYou) ??
+      Math.round(pageMidX + 20);
   } else {
     pdfX = Math.max(LEFT_MARGIN, Math.min(anchor.x, pageWidth - RIGHT_MARGIN - STAMP_WIDTH));
   }
@@ -348,12 +423,12 @@ export async function resolveDscStampRectFromPdf(
       anchor = findDualColumnStampTopLine(lines, pageMidX, "left", thankYou) ?? thankYou;
     } else if (layout === "dualColumn" && role === "consultant") {
       const thankYou = findLine(lines, "thanking you");
-      signatureAnchor = findColumnSignatureAnchor(lines, pageMidX, "right", thankYou);
-      anchor = findDualColumnStampTopLine(lines, pageMidX, "right", thankYou) ?? thankYou;
+      anchor = findConsultantStampTopLine(lines, pageMidX, thankYou);
+      signatureAnchor = findConsultantSignatureAnchor(lines, pageMidX, thankYou);
     }
 
     if (!anchor) {
-      return { ...fallback, pageIndex };
+      return consultantFallbackRect(pageIndex, pageWidth);
     }
 
     if (
@@ -361,13 +436,17 @@ export async function resolveDscStampRectFromPdf(
       (layout === "cleanRight" && role === "owner")
     ) {
       if (!signatureAnchor) {
-        return { ...fallback, pageIndex };
+        return role === "consultant"
+          ? consultantFallbackRect(pageIndex, pageWidth)
+          : { ...fallback, pageIndex };
       }
     }
 
     const rect = computeStampRect({ anchor, pageWidth, role, layout, lines, signatureAnchor });
     return { ...rect, pageIndex };
   } catch {
-    return { ...fallback, pageIndex: 0 };
+    return role === "consultant"
+      ? consultantFallbackRect(0)
+      : { ...fallback, pageIndex: 0 };
   }
 }

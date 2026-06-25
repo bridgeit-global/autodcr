@@ -21,6 +21,11 @@ export function isCleanAppointmentLetterType(templateType: TemplateType): boolea
   return CLEAN_APPOINTMENT_HTML_TYPES.has(templateType);
 }
 
+/** Architect and Licensed Surveyor: consultant DSC on both appointment and acceptance letters. */
+export function consultantSignsAppointmentLetter(templateType: TemplateType): boolean {
+  return templateType === "Architect" || templateType === "Licensed Surveyor";
+}
+
 /** Legacy dual-letter types (Architect, Licensed Surveyor, …) whose Chromium PDF layout diverges from iframe HTML. */
 const LEGACY_DUAL_LETTER_HTML_TYPES = new Set<TemplateType>([
   "Architect",

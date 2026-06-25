@@ -329,22 +329,79 @@ function u8Equal(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/**
- * Scan the PDF for any `/Type /Sig` entry whose paired `/Contents` hex string
- * holds non-zero bytes — i.e. a completed signature, not a placeholder. We
- * never want to rewrite such a file in place; the only safe edit is an
- * incremental update.
- */
-function pdfHasCompletedSignature(bytes: Uint8Array): boolean {
-  const text = new TextDecoder("latin1").decode(bytes);
-  if (!/\/Type\s*\/Sig\b/.test(text)) return false;
-  const contentsPattern = /\/Contents\s*<([0-9a-fA-F\s]*)>/g;
-  let match: RegExpExecArray | null;
-  while ((match = contentsPattern.exec(text)) !== null) {
-    const hex = match[1].replace(/\s+/g, "");
-    if (hex.length > 0 && /[1-9a-fA-F]/.test(hex)) return true;
+function indexOfBytes(haystack: Uint8Array, needle: string, from = 0): number {
+  const nb = new TextEncoder().encode(needle);
+  outer: for (let i = from; i <= haystack.length - nb.length; i += 1) {
+    for (let j = 0; j < nb.length; j += 1) if (haystack[i + j] !== nb[j]) continue outer;
+    return i;
   }
-  return false;
+  return -1;
+}
+
+function isPdfWs(b: number): boolean {
+  return b === 0x20 || b === 0x0a || b === 0x0d || b === 0x09 || b === 0x0c;
+}
+
+function isPdfHexZeroByte(b: number): boolean {
+  return b === 0x30 || isPdfWs(b);
+}
+
+type ScannedSignature = { isPlaceholder: boolean };
+
+/** Byte-level scan — matches native-host placeholder detection heuristics. */
+function scanPdfSignatures(bytes: Uint8Array): ScannedSignature[] {
+  const results: ScannedSignature[] = [];
+  let from = 0;
+  while (from < bytes.length) {
+    const idx = indexOfBytes(bytes, "/ByteRange", from);
+    if (idx === -1) break;
+    from = idx + "/ByteRange".length;
+    let i = idx + "/ByteRange".length;
+    while (i < bytes.length && isPdfWs(bytes[i])) i += 1;
+    if (i >= bytes.length || bytes[i] !== 0x5b) continue;
+    let brEnd = -1;
+    for (let k = i; k < bytes.length; k += 1) {
+      if (bytes[k] === 0x5d) {
+        brEnd = k;
+        break;
+      }
+    }
+    if (brEnd === -1) continue;
+    const brBody = new TextDecoder("latin1").decode(bytes.subarray(i + 1, brEnd));
+    const hasAst = brBody.includes("*");
+    const cIdx = indexOfBytes(bytes, "/Contents", brEnd);
+    if (cIdx === -1) continue;
+    let j = cIdx + "/Contents".length;
+    while (j < bytes.length && isPdfWs(bytes[j])) j += 1;
+    if (j >= bytes.length || bytes[j] !== 0x3c) continue;
+    let cClose = -1;
+    for (let k = j + 1; k < bytes.length; k += 1) {
+      if (bytes[k] === 0x3e) {
+        cClose = k;
+        break;
+      }
+    }
+    if (cClose === -1) continue;
+    const cBody = bytes.subarray(j + 1, cClose);
+    const isPlaceholder =
+      hasAst || (cBody.length > 0 && [...cBody].every((b) => isPdfHexZeroByte(b)));
+    results.push({ isPlaceholder });
+  }
+  return results;
+}
+
+/**
+ * True when at least one `/ByteRange` + `/Contents` pair is filled (not a placeholder).
+ * Uses byte scanning instead of regex so incremental-update PDFs are detected reliably.
+ */
+export function pdfHasCompletedSignature(bytes: Uint8Array): boolean {
+  return scanPdfSignatures(bytes).some((s) => !s.isPlaceholder);
+}
+
+/** Prepared for signing but CMS not yet written (placeholder ByteRange or zero Contents). */
+export function pdfHasUnsignedSignaturePlaceholder(bytes: Uint8Array): boolean {
+  const scanned = scanPdfSignatures(bytes);
+  return scanned.some((s) => s.isPlaceholder) && !pdfHasCompletedSignature(bytes);
 }
 
 function findStartxref(bytes: Uint8Array): number {
