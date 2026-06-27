@@ -87,25 +87,68 @@ function StampOverlay({
         top: `${box.top}px`,
         width: `${box.width}px`,
         height: `${box.height}px`,
-        border: "1.5px solid #1e40af",
-        background: "rgba(219,234,254,0.45)",
+        border: "1px dashed #9ca3af",
+        background: "transparent",
         pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+        padding: "2px 4px",
+        boxSizing: "border-box",
+        overflow: "hidden",
       }}
     >
-      <div
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <svg
+        aria-hidden
+        viewBox="0 0 100 100"
+        fill="none"
         style={{
           position: "absolute",
-          left: 0,
-          top: -18,
-          fontSize: 11,
-          fontWeight: 600,
-          color: "#1e40af",
-          background: "rgba(255,255,255,0.85)",
-          padding: "1px 6px",
-          borderRadius: 4,
+          left: "2%",
+          top: "10%",
+          width: "46%",
+          height: "80%",
+          pointerEvents: "none",
         }}
       >
-        DSC stamp · page {stamp.pageIndex + 1}
+        <g opacity={0.28} transform="translate(2 2)">
+          <path
+            d="M22 76 L38 88 L92 18"
+            stroke="#374151"
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeLinejoin="miter"
+          />
+        </g>
+        <path
+          d="M22 76 L38 88 L92 18"
+          stroke="#111827"
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeLinejoin="miter"
+        />
+        <path
+          d="M22 76 L38 88 L92 18"
+          stroke="#22c55e"
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeLinejoin="miter"
+          opacity={0.62}
+        />
+      </svg>
+      <div
+        style={{
+          position: "relative",
+          fontSize: Math.max(8, box.width * 0.05),
+          color: "#111827",
+          lineHeight: 1.25,
+        }}
+      >
+        <div style={{ fontWeight: 700 }}>Signature valid</div>
+        <div style={{ fontWeight: 400 }}>Digitally signed by</div>
+        <div style={{ fontWeight: 400 }}>…</div>
+        <div style={{ fontWeight: 400 }}>Date: …</div>
+      </div>
       </div>
     </div>
   );
