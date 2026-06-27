@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
-import DscPinModal from "@/app/components/DscPinModal";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import {
@@ -70,6 +69,10 @@ import {
 import {
   pdfHasCompletedSignature,
   pdfHasUnsignedSignaturePlaceholder,
+  assertPdfPriorSignaturesPreserved,
+  assertPdfOriginalPrefixPreserved,
+  countCompletedSignatures,
+  pdfHasByteRangeMarker,
   preparePdfForNativeSigning,
 } from "@/app/lib/bridge/pdfSigningPrep";
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
@@ -185,6 +188,9 @@ async function signPdfBlobWithDsc(
   }
 
   const sourceBuffer = await blob.arrayBuffer();
+  const sourceBytes = new Uint8Array(sourceBuffer);
+  const hadPriorSignatureMarkers = pdfHasByteRangeMarker(sourceBytes);
+  const ownerSignedInput = pdfHasCompletedSignature(sourceBytes);
   const role = stampOptions?.role ?? resolveDscStampRole(templateType, signingAcceptance);
   const layout = stampOptions?.layout ?? resolveDscStampLayout(templateType, signingAcceptance);
   const stampRect = await resolveDscStampRectFromPdf(sourceBuffer, role, layout);
@@ -212,7 +218,22 @@ async function signPdfBlobWithDsc(
   if (!signed.signedPdfBase64) {
     throw new Error("DSC signing failed: connector returned empty payload.");
   }
-  return base64ToBlob(signed.signedPdfBase64, "application/pdf");
+  const signedBlob = base64ToBlob(signed.signedPdfBase64, "application/pdf");
+  const signedBytes = new Uint8Array(await signedBlob.arrayBuffer());
+  const priorSigCount = countCompletedSignatures(sourceBytes);
+  const afterSigCount = countCompletedSignatures(signedBytes);
+  if (afterSigCount !== priorSigCount + 1) {
+    throw new Error(
+      `DSC signing did not add exactly one signature (before: ${priorSigCount}, after: ${afterSigCount}).`
+    );
+  }
+  if (hadPriorSignatureMarkers) {
+    assertPdfOriginalPrefixPreserved(sourceBytes, signedBytes);
+    if (ownerSignedInput) {
+      assertPdfPriorSignaturesPreserved(sourceBytes, signedBytes);
+    }
+  }
+  return signedBlob;
 }
 
 function computeMockSignAvailability(args: {
@@ -1149,6 +1170,14 @@ async function loadUnsignedLetterPdfForSigning(params: {
       const blob = await res.blob();
       if (params.requireOwnerSignedPdf) {
         const bytes = new Uint8Array(await blob.arrayBuffer());
+        const completedSigCount = countCompletedSignatures(bytes);
+        if (completedSigCount >= 2) {
+          throw new Error(
+            "This acceptance PDF already has two digital signatures baked in. " +
+              "If Adobe shows Rev. 1 as invalid, that file was produced by an older signing build and cannot be repaired in place. " +
+              "Reset the application to draft, save fresh unsigned letters, then have the owner and consultant sign again."
+          );
+        }
         if (!pdfHasCompletedSignature(bytes)) {
           if (pdfHasUnsignedSignaturePlaceholder(bytes)) {
             throw new Error(
@@ -1610,10 +1639,6 @@ export default function ApplicationDetailsPage() {
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [signedDocSuccessDialogOpen, setSignedDocSuccessDialogOpen] = useState(false);
   const [pendingDashboardUrl, setPendingDashboardUrl] = useState<string | null>(null);
-  const [dscPinModalOpen, setDscPinModalOpen] = useState(false);
-  const [dscPinInput, setDscPinInput] = useState("");
-  const [dscPinError, setDscPinError] = useState<string | null>(null);
-  const [dscPinSubmitting, setDscPinSubmitting] = useState(false);
   const { setSlot } = useApplicationPdfSaveSlot();
   const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
   const [autoMockSignAfterPreviewOpen, setAutoMockSignAfterPreviewOpen] = useState(false);
@@ -1627,7 +1652,7 @@ export default function ApplicationDetailsPage() {
   const saveInFlightRef = useRef(false);
   const signInFlightRef = useRef(false);
   const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
-  const signDirectlyRef = useRef<(pin?: string) => Promise<void>>(async () => Promise.resolve());
+  const signDirectlyRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const buildApplicationPreviewPdfBlob = async (
     urlsRaw?: unknown,
     accessToken?: string
@@ -2645,10 +2670,7 @@ export default function ApplicationDetailsPage() {
   };
 
   /** Sign silently (no preview modal): build context then run the signing pipeline. */
-  const handleSignDirectly = async (pin?: string) => {
-    if (!pin?.trim()) {
-      throw new Error("Please enter your DSC PIN.");
-    }
+  const handleSignDirectly = async () => {
     if (!projectId) {
       setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
       return;
@@ -2842,7 +2864,7 @@ export default function ApplicationDetailsPage() {
       const signedBlob = await signPdfBlobWithDsc(
         unsignedBlob,
         signFileName,
-        pin,
+        undefined,
         ctx.templateType,
         signingAcceptance,
         signingAcceptance ? { role: "consultant", layout: "dualColumn" } : undefined
@@ -2870,7 +2892,7 @@ export default function ApplicationDetailsPage() {
         const signedAppointment = await signPdfBlobWithDsc(
           appointmentUnsigned,
           `${ctx.templateType.replace(/[/\\]/g, "-")}-appointment-consultant.pdf`,
-          pin,
+          undefined,
           ctx.templateType,
           false,
           { role: "consultant", layout: "dualColumn" }
@@ -2912,7 +2934,7 @@ export default function ApplicationDetailsPage() {
         const signedAcceptance = await signPdfBlobWithDsc(
           acceptanceUnsigned,
           `${ctx.templateType.replace(/[/\\]/g, "-")}-acceptance.pdf`,
-          pin,
+          undefined,
           ctx.templateType,
           false,
           { role: "owner", layout: "dualColumn" }
@@ -3022,26 +3044,6 @@ export default function ApplicationDetailsPage() {
   };
 
   signDirectlyRef.current = handleSignDirectly;
-
-  const handleDscPinConfirm = async () => {
-    const pin = dscPinInput.trim();
-    if (!pin) {
-      setDscPinError("Please enter your DSC PIN.");
-      return;
-    }
-    setDscPinSubmitting(true);
-    setDscPinError(null);
-    try {
-      await signDirectlyRef.current(pin);
-      setDscPinModalOpen(false);
-      setDscPinInput("");
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to complete signing.";
-      setDscPinError(msg);
-    } finally {
-      setDscPinSubmitting(false);
-    }
-  };
 
   const handleSaveApplicationPdf = async () => {
     if (!projectId) {
@@ -3408,9 +3410,7 @@ export default function ApplicationDetailsPage() {
     setSignApplicationSlot({
       onSign: async () => {
         if (!avail.actionAvailable) return;
-        setDscPinError(null);
-        setDscPinInput("");
-        setDscPinModalOpen(true);
+        await signDirectlyRef.current();
       },
       disabled: isSavingPdf || isSigningPdf,
       busy: isSigningPdf,
@@ -3617,19 +3617,6 @@ export default function ApplicationDetailsPage() {
           </div>
         </div>
       )}
-
-      <DscPinModal
-        open={dscPinModalOpen}
-        pin={dscPinInput}
-        busy={dscPinSubmitting || isSigningPdf}
-        error={dscPinError}
-        onPinChange={setDscPinInput}
-        onClose={() => {
-          if (dscPinSubmitting || isSigningPdf) return;
-          setDscPinModalOpen(false);
-        }}
-        onConfirm={handleDscPinConfirm}
-      />
     </div>
   );
 }

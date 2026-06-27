@@ -184,6 +184,25 @@ function fakeSignInPlace(bytes: Uint8Array): Uint8Array {
   return out;
 }
 
+function assertFormalDscAppearance(pdfBytes: Uint8Array, label: string): void {
+  const s = new TextDecoder("latin1").decode(pdfBytes);
+  if (s.includes("0.94 0.97 1.0 rg")) {
+    throw new Error(`${label}: legacy blue-fill DSC appearance detected`);
+  }
+  const hasGreenCheck =
+    s.includes("0.0 0.55 0.0 RG") ||
+    s.includes("0 0.55 0 RG") ||
+    /\/C[Aa] 0\.(3\d|4\d|5)/.test(s) ||
+    (s.includes("ExtGState") && s.includes("/GS-"));
+  if (!hasGreenCheck) {
+    throw new Error(`${label}: formal DSC green checkmark stroke not found`);
+  }
+  if (s.includes("/Helvetica-Bold") || s.includes("Signature valid")) {
+    return;
+  }
+  throw new Error(`${label}: formal DSC page appearance markers not found`);
+}
+
 async function main() {
   const baseBytes = await buildBasePdf();
 
@@ -202,6 +221,7 @@ async function main() {
     },
   });
   assertPdfHasSigningMarkers(preparedFresh);
+  assertFormalDscAppearance(preparedFresh, "fresh prepared");
   console.log(`fresh prepared PDF: ${preparedFresh.length} bytes`);
   const freshByteRangeCount = countOccurrences(preparedFresh, "/ByteRange");
   assert(freshByteRangeCount === 1, `expected 1 /ByteRange in fresh prep, got ${freshByteRangeCount}`);
@@ -224,6 +244,8 @@ async function main() {
       reason: "Document approval",
     },
   });
+  // Incremental prep must not redraw page /Contents (would invalidate Rev. 1 in Adobe).
+  assertFormalDscAppearance(preparedSecond, "incremental prepared (widget AP)");
   console.log(`incrementally prepared PDF: ${preparedSecond.length} bytes`);
 
   // Original byte prefix must be preserved verbatim — this is the whole point
@@ -287,6 +309,15 @@ async function main() {
     `first signature's byte range digest changed!\n  before: ${digestPriorBytes}\n  after:  ${digestAfterBytes}`
   );
   console.log("first signature's hashed byte range is byte-identical across revisions");
+
+  const fullySigned = fakeSignInPlace(preparedSecond);
+  assert(fullySigned.length === preparedSecond.length, "second sign must preserve file length");
+  const digestAfterSecondSign = digestByteRange(fullySigned, firstSigByteRange);
+  assert(
+    digestPriorBytes === digestAfterSecondSign,
+    `first signature digest changed after second native sign!\n  before: ${digestPriorBytes}\n  after:  ${digestAfterSecondSign}`
+  );
+  console.log("first signature still valid after second native sign");
 
   console.log("\nALL CHECKS PASSED");
 }

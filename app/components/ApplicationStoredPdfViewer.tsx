@@ -3,10 +3,56 @@
 import { useEffect, useRef, useState } from "react";
 import * as pdfjs from "pdfjs-dist";
 
+type PreviewLinkService = Parameters<pdfjs.AnnotationLayer["render"]>[0]["linkService"];
+type PreviewDownloadManager = Parameters<pdfjs.AnnotationLayer["render"]>[0]["downloadManager"];
+
 const PDF_WORKER_URL = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 
 type ApplicationStoredPdfViewerProps = {
   fileUrl: string;
+};
+
+/** Minimal link service for annotation-layer rendering (signature widgets). */
+function createPreviewLinkService(pagesCount: number): PreviewLinkService {
+  let page = 1;
+  let rotation = 0;
+  return {
+    externalLinkEnabled: true,
+    get pagesCount() {
+      return pagesCount;
+    },
+    get page() {
+      return page;
+    },
+    set page(value: number) {
+      page = value;
+    },
+    get rotation() {
+      return rotation;
+    },
+    set rotation(value: number) {
+      rotation = value;
+    },
+    get isInPresentationMode() {
+      return false;
+    },
+    goToDestination: async () => {},
+    goToPage: () => {},
+    addLinkAttributes: () => {},
+    getDestinationHash: () => "#",
+    getAnchorUrl: () => "#",
+    setHash: () => {},
+    executeNamedAction: () => {},
+    executeSetOCGState: () => {},
+    cachePageRef: () => {},
+  };
+}
+
+const previewDownloadManager: PreviewDownloadManager = {
+  downloadUrl: () => {},
+  downloadData: () => {},
+  openOrDownloadData: () => false,
+  download: () => {},
 };
 
 /**
@@ -59,8 +105,34 @@ export default function ApplicationStoredPdfViewer({ fileUrl }: ApplicationStore
         if (cancelled) return;
 
         const pageWrap = document.createElement("div");
-        pageWrap.className = "bg-white";
+        pageWrap.className = "bg-white relative";
         pageWrap.appendChild(canvas);
+
+        const annotations = await page.getAnnotations({ intent: "display" });
+        if (annotations.length > 0) {
+          const annotationDiv = document.createElement("div");
+          annotationDiv.className = "absolute left-0 top-0";
+          pageWrap.appendChild(annotationDiv);
+
+          const annotationLayer = new pdfjs.AnnotationLayer({
+            div: annotationDiv,
+            page,
+            viewport,
+            accessibilityManager: null,
+            annotationCanvasMap: null,
+            l10n: null,
+          });
+          await annotationLayer.render({
+            viewport,
+            div: annotationDiv,
+            annotations,
+            page,
+            linkService: createPreviewLinkService(pdf.numPages),
+            downloadManager: previewDownloadManager,
+            renderForms: true,
+          });
+        }
+
         container.appendChild(pageWrap);
       }
 

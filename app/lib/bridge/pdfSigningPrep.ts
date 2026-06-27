@@ -1,4 +1,5 @@
 import { pdflibAddPlaceholder } from "@signpdf/placeholder-pdf-lib";
+import { FontNames } from "@pdf-lib/standard-fonts";
 import {
   PDFArray,
   PDFDict,
@@ -6,10 +7,18 @@ import {
   PDFFont,
   PDFHexString,
   PDFName,
+  PDFNumber,
   PDFObject,
+  PDFOperator,
+  PDFPage,
   PDFRef,
   PDFString,
+  StandardFontEmbedder,
   StandardFonts,
+  LineCapStyle,
+  degrees,
+  drawSvgPath,
+  drawText,
   rgb,
 } from "pdf-lib";
 
@@ -50,10 +59,20 @@ export async function preparePdfForNativeSigning(
   options: PrepareOptions = {}
 ): Promise<Uint8Array> {
   const originalBytes = new Uint8Array(input);
-  if (pdfHasCompletedSignature(originalBytes)) {
-    return preparePdfIncremental(originalBytes, options);
+
+  // Unsigned PDFs never contain /ByteRange — safe to build a fresh placeholder.
+  if (indexOfBytes(originalBytes, "/ByteRange") === -1) {
+    return preparePdfFresh(input, options);
   }
-  return preparePdfFresh(input, options);
+
+  // Any PDF that already carries /ByteRange must NEVER be full-rewritten via
+  // pdfDoc.save() — that invalidates prior PKCS#7 signatures (Adobe Rev.1 ✗).
+  const prepared = await preparePdfIncremental(originalBytes, options);
+  assertOriginalPrefixPreserved(originalBytes, prepared);
+  if (pdfHasCompletedSignature(originalBytes)) {
+    assertPriorSignaturesPreserved(originalBytes, prepared);
+  }
+  return prepared;
 }
 
 async function preparePdfFresh(
@@ -62,7 +81,7 @@ async function preparePdfFresh(
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(input, { updateMetadata: false });
   if (options.stamp) {
-    await drawDscStampOnPage(pdfDoc, options.stamp);
+    await drawFormalDscStampOnPage(pdfDoc, options.stamp);
   }
   pdflibAddPlaceholder({
     pdfDoc,
@@ -102,13 +121,14 @@ async function preparePdfIncremental(
     throw new Error("Cannot perform incremental update: catalog has no indirect reference.");
   }
 
-  // Snapshot serialised form of every existing indirect object. After the
-  // placeholder mutations, anything new or whose bytes differ goes into the
-  // incremental revision.
   const snapshot = new Map<string, Uint8Array>();
   for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
     snapshot.set(refKey(ref), serialiseObject(obj));
   }
+
+  // Never redraw page /Contents on an already-signed PDF — Adobe reports
+  // "1 Page(s) Modified" and invalidates Rev. 1. Put the formal stamp on the
+  // new signature widget's appearance stream instead (see below).
 
   pdflibAddPlaceholder({
     pdfDoc,
@@ -127,27 +147,15 @@ async function preparePdfIncremental(
       : [0, 0, 0, 0],
   });
 
-  // pdflibAddPlaceholder always inserts the new widget into the first page.
-  // For multi-page docs we need it on the user-selected stamp page; relocate it.
   const targetPageIndex = options.stamp?.pageIndex ?? 0;
   if (targetPageIndex !== 0) {
     relocateLastWidgetToPage(pdfDoc, targetPageIndex);
   }
-
-  // pdflibAddPlaceholder hardcodes the widget's partial field name to
-  // "Signature1". On an already-signed PDF that name collides with the
-  // existing signature field — Adobe sees two AcroForm fields with the same
-  // /T value, treats the duplicate as orphaned, and surfaces the dreaded
-  // "Annotations Deleted: Widget annot on page 1" warning in the signature
-  // panel. Rename the new widget so every signature field carries a unique /T.
   renameLastWidgetForUniqueness(pdfDoc);
-
   if (options.stamp) {
-    await populateLastWidgetAppearance(pdfDoc, options.stamp);
+    await embedFormalStampOnLastWidgetAppearance(pdfDoc, options.stamp);
   }
 
-  // Diff: emit everything whose serialised form differs from the snapshot, or
-  // which is brand new.
   const toEmit: Array<{ ref: PDFRef; bytes: Uint8Array }> = [];
   for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
     const current = serialiseObject(obj);
@@ -348,6 +356,51 @@ function isPdfHexZeroByte(b: number): boolean {
 
 type ScannedSignature = { isPlaceholder: boolean };
 
+/** Signature dicts are small; never scan past this window after `/ByteRange [...]` for `/Contents`. */
+const SIG_DICT_SEARCH_WINDOW = 2048;
+/** Reserved `/Contents` hex placeholder length (see SIGNATURE_LENGTH). */
+const SIG_CONTENTS_HEX_MAX = 65536;
+
+function findSignatureDictSearchLimit(bytes: Uint8Array, brEnd: number): number {
+  return Math.min(bytes.length, brEnd + SIG_DICT_SEARCH_WINDOW);
+}
+
+function findContentsHexAfterByteRange(
+  bytes: Uint8Array,
+  brEnd: number,
+): { cOpen: number; cClose: number } | null {
+  const tokenSearchLimit = findSignatureDictSearchLimit(bytes, brEnd);
+  let searchFrom = brEnd + 1;
+  while (searchFrom < tokenSearchLimit) {
+    const cIdx = indexOfBytes(bytes, "/Contents", searchFrom);
+    if (cIdx === -1 || cIdx >= tokenSearchLimit) return null;
+    let j = cIdx + "/Contents".length;
+    while (j < bytes.length && isPdfWs(bytes[j])) j += 1;
+    if (j >= bytes.length || bytes[j] !== 0x3c) {
+      searchFrom = cIdx + "/Contents".length;
+      continue;
+    }
+    const hexCloseLimit = Math.min(bytes.length, j + 1 + SIG_CONTENTS_HEX_MAX);
+    let cClose = -1;
+    for (let k = j + 1; k < hexCloseLimit; k += 1) {
+      if (bytes[k] === 0x3e) {
+        cClose = k;
+        break;
+      }
+    }
+    if (cClose !== -1) return { cOpen: j, cClose };
+    searchFrom = cIdx + "/Contents".length;
+  }
+  return null;
+}
+
+function parseByteRangeBody(brBody: string): [number, number, number, number] | null {
+  if (brBody.includes("*")) return null;
+  const nums = brBody.trim().split(/\s+/).map(Number);
+  if (nums.length !== 4 || nums.some((n) => !Number.isFinite(n))) return null;
+  return nums as [number, number, number, number];
+}
+
 /** Byte-level scan — matches native-host placeholder detection heuristics. */
 function scanPdfSignatures(bytes: Uint8Array): ScannedSignature[] {
   const results: ScannedSignature[] = [];
@@ -355,10 +408,12 @@ function scanPdfSignatures(bytes: Uint8Array): ScannedSignature[] {
   while (from < bytes.length) {
     const idx = indexOfBytes(bytes, "/ByteRange", from);
     if (idx === -1) break;
-    from = idx + "/ByteRange".length;
     let i = idx + "/ByteRange".length;
     while (i < bytes.length && isPdfWs(bytes[i])) i += 1;
-    if (i >= bytes.length || bytes[i] !== 0x5b) continue;
+    if (i >= bytes.length || bytes[i] !== 0x5b) {
+      from = idx + 1;
+      continue;
+    }
     let brEnd = -1;
     for (let k = i; k < bytes.length; k += 1) {
       if (bytes[k] === 0x5d) {
@@ -366,28 +421,148 @@ function scanPdfSignatures(bytes: Uint8Array): ScannedSignature[] {
         break;
       }
     }
-    if (brEnd === -1) continue;
+    if (brEnd === -1) {
+      from = idx + 1;
+      continue;
+    }
     const brBody = new TextDecoder("latin1").decode(bytes.subarray(i + 1, brEnd));
     const hasAst = brBody.includes("*");
-    const cIdx = indexOfBytes(bytes, "/Contents", brEnd);
-    if (cIdx === -1) continue;
-    let j = cIdx + "/Contents".length;
-    while (j < bytes.length && isPdfWs(bytes[j])) j += 1;
-    if (j >= bytes.length || bytes[j] !== 0x3c) continue;
-    let cClose = -1;
-    for (let k = j + 1; k < bytes.length; k += 1) {
-      if (bytes[k] === 0x3e) {
-        cClose = k;
-        break;
-      }
+    const contents = findContentsHexAfterByteRange(bytes, brEnd);
+    if (!contents) {
+      from = idx + 1;
+      continue;
     }
-    if (cClose === -1) continue;
-    const cBody = bytes.subarray(j + 1, cClose);
+    const cBody = bytes.subarray(contents.cOpen + 1, contents.cClose);
     const isPlaceholder =
       hasAst || (cBody.length > 0 && [...cBody].every((b) => isPdfHexZeroByte(b)));
     results.push({ isPlaceholder });
+    from = idx + 1;
   }
   return results;
+}
+
+function parseFilledByteRangesFromText(bytes: Uint8Array): Array<[number, number, number, number]> {
+  const text = new TextDecoder("latin1").decode(bytes);
+  const ranges: Array<[number, number, number, number]> = [];
+  const re = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const nums = match.slice(1, 5).map(Number);
+    if (nums.every((n) => Number.isFinite(n) && n >= 0)) {
+      ranges.push(nums as [number, number, number, number]);
+    }
+  }
+  return ranges;
+}
+
+function parseFilledByteRanges(bytes: Uint8Array): Array<[number, number, number, number]> {
+  const ranges: Array<[number, number, number, number]> = [];
+  let from = 0;
+  while (from < bytes.length) {
+    const idx = indexOfBytes(bytes, "/ByteRange", from);
+    if (idx === -1) break;
+    let i = idx + "/ByteRange".length;
+    while (i < bytes.length && isPdfWs(bytes[i])) i += 1;
+    if (i >= bytes.length || bytes[i] !== 0x5b) {
+      from = idx + 1;
+      continue;
+    }
+    const brStart = i;
+    let brEnd = -1;
+    for (let k = i; k < bytes.length; k += 1) {
+      if (bytes[k] === 0x5d) {
+        brEnd = k;
+        break;
+      }
+    }
+    if (brEnd === -1) {
+      from = idx + 1;
+      continue;
+    }
+    const brBody = new TextDecoder("latin1").decode(bytes.subarray(brStart + 1, brEnd));
+    const nums = parseByteRangeBody(brBody);
+    if (!nums) {
+      from = idx + 1;
+      continue;
+    }
+    const contents = findContentsHexAfterByteRange(bytes, brEnd);
+    if (!contents) {
+      from = idx + 1;
+      continue;
+    }
+    const cBody = bytes.subarray(contents.cOpen + 1, contents.cClose);
+    const isPlaceholder =
+      cBody.length > 0 && [...cBody].every((b) => isPdfHexZeroByte(b));
+    if (!isPlaceholder) {
+      ranges.push(nums);
+    }
+    from = idx + 1;
+  }
+  if (ranges.length > 0) return ranges;
+  return parseFilledByteRangesFromText(bytes);
+}
+
+function pdfHasFilledSignatureMarkFallback(bytes: Uint8Array): boolean {
+  const text = new TextDecoder("latin1").decode(bytes);
+  if (!/\/ByteRange\s*\[\s*\d+\s+\d+\s+\d+\s+\d+\s*\]/.test(text)) return false;
+  return /\/Contents\s*<[0-9A-Fa-f]*[1-9A-Fa-f][0-9A-Fa-f\s\r\n]*>/i.test(text);
+}
+
+function assertOriginalPrefixPreserved(originalBytes: Uint8Array, updated: Uint8Array): void {
+  if (updated.length < originalBytes.length) {
+    throw new Error(
+      "Incremental PDF update truncated the owner-signed file; prior signatures would be invalid."
+    );
+  }
+  for (let i = 0; i < originalBytes.length; i += 1) {
+    if (updated[i] !== originalBytes[i]) {
+      throw new Error(
+        `Incremental PDF update modified owner-signed byte at offset ${i}; prior signatures would be invalid.`
+      );
+    }
+  }
+}
+
+function assertPriorSignaturesPreserved(before: Uint8Array, after: Uint8Array): void {
+  const ranges = parseFilledByteRanges(before);
+  if (ranges.length === 0 && pdfHasCompletedSignature(before)) {
+    throw new Error(
+      "Could not locate filled signature byte ranges in the owner-signed PDF. " +
+        "Refusing to continue — dual signing would invalidate the owner signature."
+    );
+  }
+  for (const [off1, len1, off2, len2] of ranges) {
+    const seg1Before = before.subarray(off1, off1 + len1);
+    const seg1After = after.subarray(off1, off1 + len1);
+    const seg2Before = before.subarray(off2, off2 + len2);
+    const seg2After = after.subarray(off2, off2 + len2);
+    if (!u8Equal(seg1Before, seg1After) || !u8Equal(seg2Before, seg2After)) {
+      throw new Error(
+        "PDF bytes covered by an existing signature were modified. " +
+          "Prior signatures would show as invalid in Adobe Acrobat."
+      );
+    }
+  }
+}
+
+/** Verify owner-signed byte ranges still match after incremental prep or native signing. */
+export function assertPdfPriorSignaturesPreserved(before: Uint8Array, after: Uint8Array): void {
+  assertPriorSignaturesPreserved(before, after);
+}
+
+/** Verify the owner-signed file prefix is byte-identical (dual-sign invariant). */
+export function assertPdfOriginalPrefixPreserved(originalBytes: Uint8Array, updated: Uint8Array): void {
+  assertOriginalPrefixPreserved(originalBytes, updated);
+}
+
+/** True when the PDF bytes contain a `/ByteRange` token (signed or prepared for signing). */
+export function pdfHasByteRangeMarker(bytes: Uint8Array): boolean {
+  return indexOfBytes(bytes, "/ByteRange") !== -1;
+}
+
+/** Count completed (non-placeholder) PKCS#7 signature fields in the PDF. */
+export function countCompletedSignatures(bytes: Uint8Array): number {
+  return scanPdfSignatures(bytes).filter((s) => !s.isPlaceholder).length;
 }
 
 /**
@@ -395,7 +570,8 @@ function scanPdfSignatures(bytes: Uint8Array): ScannedSignature[] {
  * Uses byte scanning instead of regex so incremental-update PDFs are detected reliably.
  */
 export function pdfHasCompletedSignature(bytes: Uint8Array): boolean {
-  return scanPdfSignatures(bytes).some((s) => !s.isPlaceholder);
+  if (scanPdfSignatures(bytes).some((s) => !s.isPlaceholder)) return true;
+  return pdfHasFilledSignatureMarkFallback(bytes);
 }
 
 /** Prepared for signing but CMS not yet written (placeholder ByteRange or zero Contents). */
@@ -506,106 +682,357 @@ function renameLastWidgetForUniqueness(pdfDoc: PDFDocument): void {
   lastDict.set(PDFName.of("T"), PDFString.of(candidate));
 }
 
+function formatDscStampDate(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} IST`;
+}
+
+function buildFormalDscStampTextLines(
+  signerLabel: string,
+  signedAt: Date,
+  titleFont: PDFFont,
+  bodyFont: PDFFont,
+  innerWidth: number,
+): Array<{ text: string; size: number; font: PDFFont }> {
+  const titleSize = DSC_STAMP_FONT_SIZES[0];
+  const bodySize = DSC_STAMP_FONT_SIZES[1];
+  const lines: Array<{ text: string; size: number; font: PDFFont }> = [];
+
+  for (const text of wrapToWidth("Signature valid", titleFont, titleSize, innerWidth)) {
+    lines.push({ text, size: titleSize, font: titleFont });
+  }
+  for (const text of wrapToWidth("Digitally signed by", bodyFont, bodySize, innerWidth)) {
+    lines.push({ text, size: bodySize, font: bodyFont });
+  }
+  for (const text of wrapToWidth(signerLabel, bodyFont, bodySize, innerWidth)) {
+    lines.push({ text, size: bodySize, font: bodyFont });
+  }
+  const dateText = `Date: ${formatDscStampDate(signedAt)}`;
+  for (const text of wrapToWidth(dateText, bodyFont, bodySize, innerWidth)) {
+    lines.push({ text, size: bodySize, font: bodyFont });
+  }
+  return lines;
+}
+
+const DSC_STAMP_FONT_SIZES = [12, 9] as const;
+const DSC_STAMP_LINE_GAP = 2.5;
+const DSC_STAMP_PAD_X = 4;
+const DSC_CHECKMARK_GREEN = rgb(0.1, 0.72, 0.18);
+const DSC_CHECKMARK_OUTLINE = rgb(0, 0, 0);
+const DSC_CHECKMARK_SHADOW = rgb(0.15, 0.15, 0.15);
+const DSC_CHECKMARK_GREEN_OPACITY = 0.62;
+const DSC_CHECKMARK_OUTLINE_THICKNESS = 7;
+const DSC_CHECKMARK_GREEN_THICKNESS = 5;
+
+type PdfPoint = { x: number; y: number };
+
+function computeCheckmarkGeometry(stamp: DscStampSpec): {
+  leg1Start: PdfPoint;
+  leg1End: PdfPoint;
+  leg2End: PdfPoint;
+} {
+  const x0 = stamp.pdfX;
+  const y0 = stamp.pdfY;
+  const w = stamp.pdfWidth;
+  const h = stamp.pdfHeight;
+
+  const size = Math.min(w * 0.46, h * 1.02);
+  const kneeX = x0 + w * 0.3;
+  const kneeY = y0 + h * 0.38;
+  const corner = { x: kneeX, y: kneeY - size * 0.28 };
+
+  return {
+    leg1Start: { x: kneeX - size * 0.3, y: kneeY + size * 0.06 },
+    leg1End: corner,
+    leg2End: { x: kneeX + size * 0.56, y: kneeY + size * 0.26 },
+  };
+}
+
+function checkmarkPathFromCorner(geom: ReturnType<typeof computeCheckmarkGeometry>): {
+  path: string;
+  originX: number;
+  originY: number;
+} {
+  const { leg1Start, leg1End, leg2End } = geom;
+  const toLocal = (p: PdfPoint): PdfPoint => ({
+    x: p.x - leg1End.x,
+    y: -(p.y - leg1End.y),
+  });
+  const p1 = toLocal(leg1Start);
+  const p2 = toLocal(leg2End);
+  return {
+    path: `M ${p1.x} ${p1.y} L 0 0 L ${p2.x} ${p2.y}`,
+    originX: leg1End.x,
+    originY: leg1End.y,
+  };
+}
+
+function drawCheckmarkStroke(
+  page: PDFPage,
+  geom: ReturnType<typeof computeCheckmarkGeometry>,
+  opts: { thickness: number; color: ReturnType<typeof rgb>; opacity: number; offsetX?: number; offsetY?: number },
+): void {
+  const { path, originX, originY } = checkmarkPathFromCorner(geom);
+  page.drawSvgPath(path, {
+    x: originX + (opts.offsetX ?? 0),
+    y: originY + (opts.offsetY ?? 0),
+    scale: 1,
+    borderColor: opts.color,
+    borderWidth: opts.thickness,
+    borderOpacity: opts.opacity,
+    borderLineCap: LineCapStyle.Round,
+  });
+}
+
+/** Adobe-style green checkmark watermark (shadow + black outline + green fill) behind stamp text. */
+function drawBackgroundCheckmark(page: PDFPage, stamp: DscStampSpec): void {
+  const geom = computeCheckmarkGeometry(stamp);
+
+  drawCheckmarkStroke(page, geom, {
+    thickness: DSC_CHECKMARK_OUTLINE_THICKNESS,
+    color: DSC_CHECKMARK_SHADOW,
+    opacity: 0.28,
+    offsetX: 1.8,
+    offsetY: -1.8,
+  });
+  drawCheckmarkStroke(page, geom, {
+    thickness: DSC_CHECKMARK_OUTLINE_THICKNESS,
+    color: DSC_CHECKMARK_OUTLINE,
+    opacity: 1,
+  });
+  drawCheckmarkStroke(page, geom, {
+    thickness: DSC_CHECKMARK_GREEN_THICKNESS,
+    color: DSC_CHECKMARK_GREEN,
+    opacity: DSC_CHECKMARK_GREEN_OPACITY,
+  });
+}
+
+async function getHelveticaRegularFont(pdfDoc: PDFDocument): Promise<PDFFont> {
+  const existingRef = findExistingHelveticaRef(pdfDoc);
+  if (existingRef) {
+    const embedder = StandardFontEmbedder.for(FontNames.Helvetica);
+    const font = PDFFont.of(existingRef, pdfDoc, embedder);
+    (font as unknown as { modified: boolean }).modified = false;
+    return font;
+  }
+  return pdfDoc.embedFont(StandardFonts.Helvetica);
+}
+
+function findExistingHelveticaRef(pdfDoc: PDFDocument): PDFRef | null {
+  const ctx = pdfDoc.context;
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict)) continue;
+    if (obj.get(PDFName.of("Type")) !== PDFName.of("Font")) continue;
+    if (obj.get(PDFName.of("Subtype")) !== PDFName.of("Type1")) continue;
+    const baseFont = obj.get(PDFName.of("BaseFont"));
+    if (!(baseFont instanceof PDFName)) continue;
+    const name = baseFont.decodeText();
+    if (name.includes("Helvetica") && !name.includes("Bold") && !name.includes("Oblique")) {
+      return ref;
+    }
+  }
+  return null;
+}
+
+/** Reuse an already-embedded Helvetica-Bold so incremental stamps share the owner's font ref (pdf.js otherwise falls back to regular). */
+function findExistingHelveticaBoldRef(pdfDoc: PDFDocument): PDFRef | null {
+  const ctx = pdfDoc.context;
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict)) continue;
+    if (obj.get(PDFName.of("Type")) !== PDFName.of("Font")) continue;
+    if (obj.get(PDFName.of("Subtype")) !== PDFName.of("Type1")) continue;
+    const baseFont = obj.get(PDFName.of("BaseFont"));
+    if (!(baseFont instanceof PDFName)) continue;
+    const name = baseFont.decodeText();
+    if (name.includes("Helvetica-Bold")) return ref;
+  }
+  return null;
+}
+
+async function getHelveticaBoldFont(pdfDoc: PDFDocument): Promise<PDFFont> {
+  const existingRef = findExistingHelveticaBoldRef(pdfDoc);
+  if (existingRef) {
+    const embedder = StandardFontEmbedder.for(FontNames.HelveticaBold);
+    const font = PDFFont.of(existingRef, pdfDoc, embedder);
+    // Already embedded in a prior signature revision — do not register again.
+    (font as unknown as { modified: boolean }).modified = false;
+    return font;
+  }
+  return pdfDoc.embedFont(StandardFonts.HelveticaBold);
+}
+
 /**
- * After pdflibAddPlaceholder has run, the most recently added field is our
- * new signature widget. Replace its empty `/AP /N` form XObject with a
- * self-contained appearance stream so the visible stamp renders correctly
- * without touching any existing page content streams.
+ * Put the formal DSC stamp on the newest signature widget's `/AP` stream.
+ * Used on incremental (second) signatures so page `/Contents` stays untouched
+ * and Rev. 1 remains valid in Adobe.
  */
-async function populateLastWidgetAppearance(
+async function embedFormalStampOnLastWidgetAppearance(
   pdfDoc: PDFDocument,
-  stamp: DscStampSpec
+  stamp: DscStampSpec,
 ): Promise<void> {
   const ctx = pdfDoc.context;
   const acroForm = pdfDoc.catalog.lookupMaybe(PDFName.of("AcroForm"), PDFDict);
   if (!acroForm) return;
   const fields = acroForm.lookupMaybe(PDFName.of("Fields"), PDFArray);
   if (!fields || fields.size() === 0) return;
-  const widgetRef = fields.get(fields.size() - 1);
-  if (!(widgetRef instanceof PDFRef)) return;
-  const widgetDict = ctx.lookup(widgetRef, PDFDict);
+
+  const lastRef = fields.get(fields.size() - 1);
+  if (!(lastRef instanceof PDFRef)) return;
+  const widgetDict = ctx.lookup(lastRef, PDFDict);
   if (!widgetDict) return;
-  const apDict = widgetDict.lookupMaybe(PDFName.of("AP"), PDFDict);
-  if (!apDict) return;
-  const apNRef = apDict.get(PDFName.of("N"));
-  if (!(apNRef instanceof PDFRef)) return;
 
-  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const rectArr = widgetDict.lookupMaybe(PDFName.of("Rect"), PDFArray);
+  if (!rectArr || rectArr.size() < 4) return;
+  const x1 = (rectArr.get(0) as PDFNumber).asNumber();
+  const y1 = (rectArr.get(1) as PDFNumber).asNumber();
+  const x2 = (rectArr.get(2) as PDFNumber).asNumber();
+  const y2 = (rectArr.get(3) as PDFNumber).asNumber();
+  const width = x2 - x1;
+  const height = y2 - y1;
+  if (width <= 0 || height <= 0) return;
 
-  const width = stamp.pdfWidth;
-  const height = stamp.pdfHeight;
-  const isoDate = stamp.signedAt.toISOString().replace("T", " ").slice(0, 19);
-  const lines: Array<{ text: string; bold: boolean; size: number }> = [
-    { text: "Digitally signed", bold: true, size: 8 },
-    { text: `By: ${stamp.signerLabel}`, bold: false, size: 7 },
-    { text: `Date: ${isoDate} UTC`, bold: false, size: 7 },
-    { text: `Reason: ${stamp.reason ?? DEFAULT_REASON}`, bold: false, size: 7 },
+  const bold = await getHelveticaBoldFont(pdfDoc);
+  const regular = await getHelveticaRegularFont(pdfDoc);
+  const black = rgb(0, 0, 0);
+
+  const localStamp: DscStampSpec = {
+    ...stamp,
+    pdfX: 0,
+    pdfY: 0,
+    pdfWidth: width,
+    pdfHeight: height,
+  };
+
+  const extGStates = new Map<number, string>();
+  const gsResources: Record<string, PDFRef> = {};
+  const geom = computeCheckmarkGeometry(localStamp);
+  const operators: PDFOperator[] = [
+    ...checkmarkStrokeOperators(ctx, geom, {
+      thickness: DSC_CHECKMARK_OUTLINE_THICKNESS,
+      color: DSC_CHECKMARK_SHADOW,
+      opacity: 0.28,
+      offsetX: 1.8,
+      offsetY: -1.8,
+    }, extGStates, gsResources),
+    ...checkmarkStrokeOperators(ctx, geom, {
+      thickness: DSC_CHECKMARK_OUTLINE_THICKNESS,
+      color: DSC_CHECKMARK_OUTLINE,
+      opacity: 1,
+    }, extGStates, gsResources),
+    ...checkmarkStrokeOperators(ctx, geom, {
+      thickness: DSC_CHECKMARK_GREEN_THICKNESS,
+      color: DSC_CHECKMARK_GREEN,
+      opacity: DSC_CHECKMARK_GREEN_OPACITY,
+    }, extGStates, gsResources),
   ];
 
-  const padX = 4;
-  const lineGap = 2;
-  const innerWidth = width - 2 * padX;
-  const ops: string[] = [];
-  // Background + border drawn in the form's own coordinate space (BBox).
-  ops.push("q");
-  ops.push("0.94 0.97 1.0 rg"); // fill colour
-  ops.push(`0 0 ${fmtNum(width)} ${fmtNum(height)} re f`);
-  ops.push("0 0.3 0.6 RG"); // stroke colour
-  ops.push("0.75 w");
-  ops.push(`0 0 ${fmtNum(width)} ${fmtNum(height)} re S`);
-  ops.push("0 0.2 0.5 rg"); // text colour
-  ops.push("BT");
-  let cursorY = height - 10;
-  for (const line of lines) {
-    if (cursorY < 2) break;
-    const font = line.bold ? helveticaBold : helvetica;
-    const fontTag = line.bold ? "F2" : "F1";
-    const truncated = truncateToWidth(line.text, font, line.size, innerWidth);
-    // Absolute placement via Tm avoids the leading/relative-Td bookkeeping
-    // that bit us when fonts of different sizes alternated.
-    ops.push(`/${fontTag} ${line.size} Tf`);
-    ops.push(`1 0 0 1 ${fmtNum(padX)} ${fmtNum(cursorY)} Tm`);
-    ops.push(`${encodeTextAsPdfHex(font, truncated)} Tj`);
-    cursorY -= line.size + lineGap;
+  const textX = DSC_STAMP_PAD_X;
+  const innerWidth = width - 2 * DSC_STAMP_PAD_X;
+  const textLines = buildFormalDscStampTextLines(
+    stamp.signerLabel,
+    stamp.signedAt,
+    bold,
+    regular,
+    innerWidth,
+  );
+  let cursorY = height - 11;
+  for (const line of textLines) {
+    operators.push(
+      ...drawText(line.font.encodeText(line.text), {
+        x: textX,
+        y: cursorY,
+        size: line.size,
+        font: line.font.name,
+        color: black,
+        rotate: degrees(0),
+        xSkew: degrees(0),
+        ySkew: degrees(0),
+      }),
+    );
+    cursorY -= line.size + DSC_STAMP_LINE_GAP;
   }
-  ops.push("ET");
-  ops.push("Q");
-  const contentStr = ops.join("\n") + "\n";
 
-  const newApStream = ctx.stream(contentStr, {
-    Type: "XObject",
-    Subtype: "Form",
-    FormType: 1,
-    BBox: [0, 0, width, height],
-    Resources: {
-      Font: {
-        F1: helvetica.ref,
-        F2: helveticaBold.ref,
-      },
-    },
+  const fontResources = {
+    [bold.name]: bold.ref,
+    [regular.name]: regular.ref,
+  };
+  const stream = ctx.formXObject(operators, {
+    Resources:
+      Object.keys(gsResources).length > 0
+        ? { Font: fontResources, ExtGState: gsResources }
+        : { Font: fontResources },
+    BBox: ctx.obj([0, 0, width, height]),
+    Matrix: ctx.obj([1, 0, 0, 1, 0, 0]),
   });
-  ctx.assign(apNRef, newApStream);
+  widgetDict.set(PDFName.of("AP"), ctx.obj({ N: ctx.register(stream) }));
 }
 
-function fmtNum(n: number): string {
-  // PDF readers accept up to ~5 fractional digits; round to keep streams short.
-  if (Number.isInteger(n)) return n.toString();
-  return n.toFixed(3).replace(/\.?0+$/, "");
+function checkmarkStrokeOperators(
+  ctx: PDFDocument["context"],
+  geom: ReturnType<typeof computeCheckmarkGeometry>,
+  opts: {
+    thickness: number;
+    color: ReturnType<typeof rgb>;
+    opacity?: number;
+    offsetX?: number;
+    offsetY?: number;
+  },
+  extGStates: Map<number, string>,
+  gsResources: Record<string, PDFRef>,
+): PDFOperator[] {
+  const { path, originX, originY } = checkmarkPathFromCorner(geom);
+  let graphicsState: string | PDFName | undefined;
+  if (opts.opacity !== undefined && opts.opacity < 1) {
+    let gsName = extGStates.get(opts.opacity);
+    if (!gsName) {
+      gsName = ctx.addRandomSuffix("GS", 6);
+      gsResources[gsName] = ctx.register(
+        ctx.obj({ Type: "ExtGState", ca: opts.opacity, CA: opts.opacity }),
+      );
+      extGStates.set(opts.opacity, gsName);
+    }
+    graphicsState = gsName;
+  }
+  return drawSvgPath(path, {
+    x: originX + (opts.offsetX ?? 0),
+    y: originY + (opts.offsetY ?? 0),
+    scale: 1,
+    borderColor: opts.color,
+    borderWidth: opts.thickness,
+    borderLineCap: LineCapStyle.Round,
+    color: undefined,
+    graphicsState,
+  });
 }
 
-/**
- * Encode `text` using the font's own encoding (WinAnsi for the standard 14
- * fonts) and return a PDF hex-string literal like `<48656C6C6F>`. Going
- * through `font.encodeText` keeps non-ASCII characters (`…`, accented signer
- * names) glyph-correct, which a raw `(...)` literal cannot guarantee since
- * the source string is UTF-16.
- */
-function encodeTextAsPdfHex(font: PDFFont, text: string): string {
-  const encoded = font.encodeText(text);
-  const buf = new Uint8Array(encoded.sizeInBytes());
-  encoded.copyBytesInto(buf, 0);
-  return new TextDecoder("latin1").decode(buf);
+/** Burn the formal stamp into page content so every PDF viewer shows it. */
+async function drawFormalDscStampOnPage(pdfDoc: PDFDocument, stamp: DscStampSpec): Promise<void> {
+  const page = pdfDoc.getPage(stamp.pageIndex);
+  drawBackgroundCheckmark(page, stamp);
+  const bold = await getHelveticaBoldFont(pdfDoc);
+  const regular = await getHelveticaRegularFont(pdfDoc);
+  const textX = stamp.pdfX + DSC_STAMP_PAD_X;
+  const innerWidth = stamp.pdfWidth - 2 * DSC_STAMP_PAD_X;
+  const textLines = buildFormalDscStampTextLines(
+    stamp.signerLabel,
+    stamp.signedAt,
+    bold,
+    regular,
+    innerWidth,
+  );
+  const black = rgb(0, 0, 0);
+
+  let cursorY = stamp.pdfY + stamp.pdfHeight - 11;
+  for (const line of textLines) {
+    page.drawText(line.text, {
+      x: textX,
+      y: cursorY,
+      size: line.size,
+      font: line.font,
+      color: black,
+    });
+    cursorY -= line.size + DSC_STAMP_LINE_GAP;
+  }
 }
 
 export function assertPdfHasSigningMarkers(pdfBytes: Uint8Array): void {
@@ -617,57 +1044,50 @@ export function assertPdfHasSigningMarkers(pdfBytes: Uint8Array): void {
   }
 }
 
-async function drawDscStampOnPage(pdfDoc: PDFDocument, s: DscStampSpec): Promise<void> {
-  const page = pdfDoc.getPage(s.pageIndex);
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+function wrapToWidth(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  if (!text) return [""];
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return [text];
 
-  page.drawRectangle({
-    x: s.pdfX,
-    y: s.pdfY,
-    width: s.pdfWidth,
-    height: s.pdfHeight,
-    borderColor: rgb(0, 0.3, 0.6),
-    borderWidth: 0.75,
-    color: rgb(0.94, 0.97, 1.0),
-  });
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [text];
 
-  const isoDate = s.signedAt.toISOString().replace("T", " ").slice(0, 19);
-  const lines: Array<{ text: string; font: PDFFont; size: number }> = [
-    { text: "Digitally signed", font: bold, size: 8 },
-    { text: `By: ${s.signerLabel}`, font, size: 7 },
-    { text: `Date: ${isoDate} UTC`, font, size: 7 },
-    { text: `Reason: ${s.reason ?? DEFAULT_REASON}`, font, size: 7 },
-  ];
+  const lines: string[] = [];
+  let current = "";
 
-  const padX = 4;
-  const lineGap = 2;
-  const innerWidth = s.pdfWidth - 2 * padX;
-  let cursorY = s.pdfY + s.pdfHeight - 10;
-  for (const line of lines) {
-    if (cursorY < s.pdfY + 2) break;
-    page.drawText(truncateToWidth(line.text, line.font, line.size, innerWidth), {
-      x: s.pdfX + padX,
-      y: cursorY,
-      size: line.size,
-      font: line.font,
-      color: rgb(0, 0.2, 0.5),
-    });
-    cursorY -= line.size + lineGap;
+  const flush = () => {
+    if (current) {
+      lines.push(current);
+      current = "";
+    }
+  };
+
+  const pushLongToken = (token: string) => {
+    let partial = "";
+    for (const ch of token) {
+      const next = partial + ch;
+      if (partial && font.widthOfTextAtSize(next, size) > maxWidth) {
+        lines.push(partial);
+        partial = ch;
+      } else {
+        partial = next;
+      }
+    }
+    current = partial;
+  };
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    flush();
+    if (font.widthOfTextAtSize(word, size) <= maxWidth) {
+      current = word;
+    } else {
+      pushLongToken(word);
+    }
   }
-}
-
-function truncateToWidth(text: string, font: PDFFont, size: number, maxWidth: number): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
-  const ellipsis = "…";
-  const ellipsisWidth = font.widthOfTextAtSize(ellipsis, size);
-  let lo = 0;
-  let hi = text.length;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    const w = font.widthOfTextAtSize(text.slice(0, mid), size) + ellipsisWidth;
-    if (w <= maxWidth) lo = mid;
-    else hi = mid - 1;
-  }
-  return text.slice(0, lo) + ellipsis;
+  flush();
+  return lines.length > 0 ? lines : [text];
 }
