@@ -18,6 +18,7 @@ import {
   resolveAppointedSecondSignerUserId,
   sameUserId,
 } from "@/app/utils/applicationSigning";
+import { canUserAccessApplication } from "@/app/utils/applicationAccess";
 import {
   consultantSignsAppointmentLetter,
   dualLetterPdfNeedsQrFreeFirstPass,
@@ -1046,9 +1047,15 @@ function applicationTemplateSavedInUrls(
 /** Stored PDF URL for preview (dual-letter types: appointment vs acceptance). */
 async function fetchProjectApplicationUrls(
   projectId: string,
-  seed?: unknown
+  seed?: unknown,
+  opts?: { forceFresh?: boolean }
 ): Promise<unknown> {
-  if (seed && typeof seed === "object" && !Array.isArray(seed)) {
+  if (
+    !opts?.forceFresh &&
+    seed &&
+    typeof seed === "object" &&
+    !Array.isArray(seed)
+  ) {
     return seed;
   }
   const { data: urlsRow } = await supabase
@@ -1093,6 +1100,17 @@ function storedPdfUrlWithCacheBuster(
   if (!version) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}v=${encodeURIComponent(version)}`;
+}
+
+function resolveStoredPreviewPdfUrl(
+  urlsRaw: unknown,
+  templateType: TemplateType,
+  letterVariant: "appointment" | "acceptance",
+  opts?: { ownerSignedAt?: string | null; architectSignedAt?: string | null }
+): string | null {
+  const storedUrl = getStoredApplicationPdfUrl(urlsRaw, templateType, letterVariant);
+  if (!storedUrl) return null;
+  return storedPdfUrlWithCacheBuster(storedUrl, opts);
 }
 
 type BuiltApplicationPreview = {
@@ -1580,7 +1598,7 @@ async function persistDualLetterPdfs(
 
 function fireApplicationNotification(
   appId: string,
-  stage: "draft" | "in_process" | "approved_verified"
+  stage: "draft" | "saved" | "in_process" | "approved_verified"
 ) {
   supabase.auth.getSession().then(({ data: { session } }) => {
     const token = session?.access_token;
@@ -1636,7 +1654,12 @@ export default function ApplicationDetailsPage() {
   const [ownerSignedAt, setOwnerSignedAt] = useState<string | null>(null);
   const [architectSignedAt, setArchitectSignedAt] = useState<string | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [applicationAccessState, setApplicationAccessState] = useState<
+    "loading" | "granted" | "denied"
+  >("loading");
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
+  const [applicationPdfSavedDialogOpen, setApplicationPdfSavedDialogOpen] =
+    useState(false);
   const [signedDocSuccessDialogOpen, setSignedDocSuccessDialogOpen] = useState(false);
   const [pendingDashboardUrl, setPendingDashboardUrl] = useState<string | null>(null);
   const { setSlot } = useApplicationPdfSaveSlot();
@@ -1745,6 +1768,71 @@ export default function ApplicationDetailsPage() {
     };
     void loadApplication();
   }, [isReadOnlyMode, applicationId]);
+
+  useEffect(() => {
+    if (!isReadOnlyMode || !applicationId || !projectId) {
+      setApplicationAccessState("granted");
+      return;
+    }
+    if (!projectData) return;
+
+    let cancelled = false;
+    const verifyAccess = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (!user?.id) {
+        setApplicationAccessState("denied");
+        return;
+      }
+
+      const { data, error } = await fetchApplicationForSigning(applicationId);
+      if (cancelled) return;
+      if (error || !data) {
+        setApplicationAccessState("denied");
+        return;
+      }
+
+      const applicants = projectData?.applicant_details?.applicants ?? [];
+      const granted = canUserAccessApplication({
+        authUserId: user.id,
+        project: projectData,
+        applicants,
+        permissionType: selectedApplication || data.permission_type || "",
+      });
+      setApplicationAccessState(granted ? "granted" : "denied");
+    };
+
+    setApplicationAccessState("loading");
+    void verifyAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isReadOnlyMode,
+    applicationId,
+    projectId,
+    projectData,
+    selectedApplication,
+  ]);
+
+  const handleAccessDeniedLogout = async () => {
+    const returnPath =
+      typeof window !== "undefined"
+        ? `${window.location.pathname}${window.location.search}`
+        : "/userdashboard";
+    try {
+      await supabase.auth.signOut({ scope: "global" });
+      ["consultantId", "consultantUserId", "consultantType", "userMetadata"].forEach(
+        (key) => localStorage.removeItem(key)
+      );
+      sessionStorage.clear();
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+    router.replace(`/?returnUrl=${encodeURIComponent(returnPath)}`);
+  };
 
   useEffect(() => {
     if (!isReadOnlyMode || !applicationId) {
@@ -1944,10 +2032,9 @@ export default function ApplicationDetailsPage() {
       // #endregion
 
       if (useStoredPdfPreview && projectId) {
-        const raw = await fetchProjectApplicationUrls(
-          projectId,
-          projectForPreview.application_urls
-        );
+        const raw = await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
+          forceFresh: true,
+        });
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
         const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
 
@@ -2010,7 +2097,9 @@ export default function ApplicationDetailsPage() {
         : "appointment";
       const urlsRawForQr =
         workflowStageForPreview !== "draft" && projectId
-          ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls)
+          ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
+              forceFresh: true,
+            })
           : undefined;
       const qrKey =
         resolvedPreviewVariant === "acceptance"
@@ -3255,35 +3344,20 @@ export default function ApplicationDetailsPage() {
         setSidebarPdfStatus(null);
 
         void (async () => {
-          const { acceptance: acceptanceCtx } = dualLetterBuiltContexts(
-            cachedBase,
-            ctx.templateType
-          );
-          const variantCtx =
-            letterVariant === "acceptance" ? acceptanceCtx : cachedBase;
           const urlsAfterSave = await fetchApplicationUrls();
-          const qrKey =
-            letterVariant === "acceptance"
-              ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ??
-                  `${ctx.templateType}_acceptance`)
-              : ctx.templateType;
-          const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
-            projectId,
-            qrKey,
-            urlsAfterSave
+          const pdfUrl = resolveStoredPreviewPdfUrl(
+            urlsAfterSave,
+            ctx.templateType,
+            letterVariant,
+            { ownerSignedAt, architectSignedAt }
           );
-          const htmlWithQr = await generateApplicationPreviewHtml(
-            variantCtx.fields,
-            variantCtx.templateType,
-            { ...variantCtx.previewSource, savedPdfUrlForQr },
-            authToken
-          );
-          previewPdfContextRef.current = {
-            fields: variantCtx.fields,
-            templateType: variantCtx.templateType,
-            previewSource: variantCtx.previewSource,
-          };
-          setPreviewHtml(htmlWithQr);
+          if (!pdfUrl) return;
+          setStoredSigningPdfUrl(pdfUrl);
+          setPreviewHtml(null);
+          setPreviewUrl((prev) => {
+            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+            return pdfUrl;
+          });
         })();
       } else {
         const urlsRaw = await fetchApplicationUrls();
@@ -3292,28 +3366,34 @@ export default function ApplicationDetailsPage() {
         setPdfSavedForCurrentPreview(true);
 
         void (async () => {
-          const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
-            projectId,
+          const urlsAfterSave = await fetchApplicationUrls();
+          const pdfUrl = resolveStoredPreviewPdfUrl(
+            urlsAfterSave,
             ctx.templateType,
-            await fetchApplicationUrls()
+            "appointment",
+            { ownerSignedAt, architectSignedAt }
           );
-          const htmlWithQr = await generateApplicationPreviewHtml(
-            ctx.fields,
-            ctx.templateType,
-            { ...ctx.previewSource, savedPdfUrlForQr },
-            authToken
-          );
-          setPreviewHtml(htmlWithQr);
+          if (!pdfUrl) return;
+          setStoredSigningPdfUrl(pdfUrl);
+          setPreviewHtml(null);
+          setPreviewUrl((prev) => {
+            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+            return pdfUrl;
+          });
         })();
       }
 
-      if (applicationId) {
+      if (applicationId && stageBeforeSave === "draft") {
+        setPreviewOpen(false);
+        setSavePdfMessage(null);
+
         const ownerIdForStage = await getAuthUserId();
         const { ok: stageOk, error: stageErr } = ownerIdForStage
           ? await updateApplicationForSigning(applicationId, ownerIdForStage, {
               workflow_stage: "in_process",
             })
           : { ok: false, error: new Error("Not signed in") };
+
         if (stageErr || !stageOk) {
           console.error("Failed to update application workflow_stage:", stageErr);
           setSavePdfMessage(
@@ -3321,26 +3401,21 @@ export default function ApplicationDetailsPage() {
           );
         } else {
           setApplicationWorkflowStage("in_process");
-          if (applicationId) fireApplicationNotification(applicationId, "in_process");
-          if (stageBeforeSave === "draft") {
-            setPreviewOpen(false);
-            setSavePdfMessage(null);
-            let deptApp: { department?: string } | null = null;
-            if (ownerIdForStage) {
-              const deptFetch = await fetchApplicationForSigning(applicationId);
-              deptApp = deptFetch.data;
-            }
-            const dept =
-              typeof deptApp?.department === "string" ? deptApp.department.trim() : "";
-            const dashboardUrl =
-              dept.length > 0
-                ? `/userdashboard?department=${encodeURIComponent(dept)}`
-                : "/userdashboard";
-            setPendingDashboardUrl(dashboardUrl);
-            setSaveSuccessDialogOpen(true);
-          } else {
-            setSavePdfMessage("Application PDF saved to project.");
+          fireApplicationNotification(applicationId, "saved");
+
+          let deptApp: { department?: string } | null = null;
+          if (ownerIdForStage) {
+            const deptFetch = await fetchApplicationForSigning(applicationId);
+            deptApp = deptFetch.data;
           }
+          const dept =
+            typeof deptApp?.department === "string" ? deptApp.department.trim() : "";
+          const dashboardUrl =
+            dept.length > 0
+              ? `/userdashboard?department=${encodeURIComponent(dept)}`
+              : "/userdashboard";
+          setPendingDashboardUrl(dashboardUrl);
+          setApplicationPdfSavedDialogOpen(true);
         }
       } else {
         setSavePdfMessage("Application PDF saved to project.");
@@ -3446,6 +3521,36 @@ export default function ApplicationDetailsPage() {
     );
   }
 
+  if (applicationAccessState === "loading") {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 flex justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600" />
+      </div>
+    );
+  }
+
+  if (applicationAccessState === "denied") {
+    return (
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        <section className="border border-red-200 rounded-2xl bg-white shadow-sm p-6">
+          <h2 className="text-xl font-bold text-gray-900">Access denied</h2>
+          <p className="text-sm text-gray-600 mt-2">
+            You do not have permission to view this application, or you may be signed in with the
+            wrong account. Please log in with the owner or consultant account that received the
+            notification email.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleAccessDeniedLogout()}
+            className="mt-4 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
+          >
+            Log out and sign in with another account
+          </button>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
       <section className="border border-gray-200 rounded-2xl bg-white shadow-sm p-6">
@@ -3538,6 +3643,7 @@ export default function ApplicationDetailsPage() {
         isSaving={isSavingPdf}
         saveDisabled={!projectId || !previewReadyForSave}
         saveCompleted={pdfSavedForCurrentPreview}
+        storedPdfDownloadUrl={storedSigningPdfUrl}
         saveFeedbackError={savePdfError}
         saveFeedbackSuccess={savePdfError ? null : savePdfMessage}
         hideSaveButton={true}
@@ -3551,6 +3657,39 @@ export default function ApplicationDetailsPage() {
         onLetterVariantChange={handleLetterVariantChange}
         letterVariantDisabled={isPreviewLoading || isSavingPdf || isSigningPdf}
       />
+
+      {applicationPdfSavedDialogOpen && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="application-pdf-saved-title"
+        >
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
+            <h2 id="application-pdf-saved-title" className="text-lg font-semibold text-gray-900">
+              Application saved
+            </h2>
+            <p className="text-sm text-gray-600 mt-3">
+              Your application PDF has been saved to the project. The application is now in{" "}
+              <span className="font-medium text-gray-800">In Process</span>.
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setApplicationPdfSavedDialogOpen(false);
+                  const url = pendingDashboardUrl ?? "/userdashboard";
+                  setPendingDashboardUrl(null);
+                  router.push(url);
+                }}
+                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {saveSuccessDialogOpen && (
         <div

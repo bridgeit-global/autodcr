@@ -15,13 +15,102 @@ const FROM_ADDRESS =
 
 export type NotificationType = "submitted" | "updated";
 
-export type ApplicationStage = "draft" | "in_process" | "approved_verified";
+export type ApplicationStage = "draft" | "saved" | "in_process" | "approved_verified";
 
-const STAGE_LABELS: Record<ApplicationStage, string> = {
-  draft: "Draft",
-  in_process: "In Process",
-  approved_verified: "Approved / Verified",
-};
+type RecipientKind = "owner" | "consultant";
+
+function resolveRecipientKind(role: string): RecipientKind {
+  return role.trim().toLowerCase() === "owner" ? "owner" : "consultant";
+}
+
+function getApplicationEmailContent(params: {
+  stage: ApplicationStage;
+  permissionType: string;
+  projectTitle: string;
+  recipientKind: RecipientKind;
+}): {
+  subject: string;
+  heading: string;
+  bodyText: string;
+  helperText: string;
+  ctaText: string;
+  headerColor: string;
+} {
+  const { stage, permissionType, projectTitle, recipientKind } = params;
+  const isOwner = recipientKind === "owner";
+
+  if (stage === "draft") {
+    if (isOwner) {
+      return {
+        subject: `New application created: ${permissionType} – ${projectTitle}`,
+        heading: "New Application Created",
+        bodyText: `A new <strong>${permissionType}</strong> application has been created for project <strong>${projectTitle}</strong>. It is currently saved as a draft.`,
+        helperText: "Use the link below to open and review the application.",
+        ctaText: "Open Application",
+        headerColor: "#6b7280",
+      };
+    }
+    return {
+      subject: `New application assigned to you: ${permissionType} – ${projectTitle}`,
+      heading: "New Application for Your Review",
+      bodyText: `A new <strong>${permissionType}</strong> application has been created for project <strong>${projectTitle}</strong> and you have been listed as the appointed consultant.`,
+      helperText: "Use the link below to open the application in the portal.",
+      ctaText: "Open Application",
+      headerColor: "#6b7280",
+    };
+  }
+
+  if (stage === "saved") {
+    if (isOwner) {
+      return {
+        subject: `Application saved: ${permissionType} – ${projectTitle}`,
+        heading: "Application PDF Saved",
+        bodyText: `Your <strong>${permissionType}</strong> application PDF for project <strong>${projectTitle}</strong> has been saved successfully. The application is now <strong>In Process</strong>.`,
+        helperText: "You can open the application below to review or sign when you are ready.",
+        ctaText: "View Application",
+        headerColor: "#2563eb",
+      };
+    }
+    return {
+      subject: `Application saved – please review: ${permissionType} – ${projectTitle}`,
+      heading: "Application Saved for Review",
+      bodyText: `The <strong>${permissionType}</strong> application PDF for project <strong>${projectTitle}</strong> has been saved by the owner. The application is now <strong>In Process</strong>. Please review the application details.`,
+      helperText: "Open the application below to review the saved document.",
+      ctaText: "Open Application",
+      headerColor: "#2563eb",
+    };
+  }
+
+  if (stage === "in_process") {
+    if (isOwner) {
+      return {
+        subject: `You signed successfully – awaiting consultant signature – ${projectTitle}`,
+        heading: "Awaiting Consultant Signature",
+        bodyText: `You have signed the <strong>${permissionType}</strong> for project <strong>${projectTitle}</strong>. The appointed consultant has been notified and their signature is now required.`,
+        helperText: "You can track the application status using the link below.",
+        ctaText: "View Application",
+        headerColor: "#d97706",
+      };
+    }
+    return {
+      subject: `Action required: Please sign appointment letter – ${projectTitle}`,
+      heading: "Your Signature Is Required",
+      bodyText: `The owner has signed the <strong>${permissionType}</strong> for project <strong>${projectTitle}</strong>. <strong>Your signature is now required</strong> to complete this appointment letter.`,
+      helperText: "Please log in, review the document, and sign the application using the link below.",
+      ctaText: "Sign Application",
+      headerColor: "#d97706",
+    };
+  }
+
+  return {
+    subject: `Application approved – all signatures complete – ${projectTitle}`,
+    heading: "Application Fully Approved",
+    bodyText: `All required signatures for <strong>${permissionType}</strong> on project <strong>${projectTitle}</strong> have been completed. The application is now approved and verified.`,
+    helperText: "Open the application below to view the signed document.",
+    ctaText: "View Application",
+    headerColor: "#059669",
+  };
+}
 
 export async function sendApplicantNotificationEmail(params: {
   to: string;
@@ -125,33 +214,26 @@ export async function sendApplicationStatusEmail(params: {
   permissionType: string;
   stage: ApplicationStage;
   projectUrl: string;
+  recipientRole?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  const { to, recipientName, projectTitle, permissionType, stage, projectUrl } =
-    params;
+  const {
+    to,
+    recipientName,
+    projectTitle,
+    permissionType,
+    stage,
+    projectUrl,
+    recipientRole = "",
+  } = params;
 
-  const stageLabel = STAGE_LABELS[stage] ?? stage;
-
-  const subjectByStage: Record<ApplicationStage, string> = {
-    draft: `New Application Created: ${permissionType} – ${projectTitle}`,
-    in_process: `Application In Process: ${permissionType} – ${projectTitle}`,
-    approved_verified: `Application Approved: ${permissionType} – ${projectTitle}`,
-  };
-
-  const bodyByStage: Record<ApplicationStage, string> = {
-    draft: `A new application <strong>${permissionType}</strong> has been created for the project <strong>${projectTitle}</strong>. The application is currently in <strong>Draft</strong> status.`,
-    in_process: `The application <strong>${permissionType}</strong> for the project <strong>${projectTitle}</strong> has been moved to <strong>In Process</strong>. The owner has signed the appointment letter and it is now awaiting the consultant's signature.`,
-    approved_verified: `The application <strong>${permissionType}</strong> for the project <strong>${projectTitle}</strong> has been <strong>Approved / Verified</strong>. All required signatures have been completed.`,
-  };
-
-  const headerColorByStage: Record<ApplicationStage, string> = {
-    draft: "#6b7280",
-    in_process: "#d97706",
-    approved_verified: "#059669",
-  };
-
-  const subject = subjectByStage[stage];
-  const bodyText = bodyByStage[stage];
-  const headerColor = headerColorByStage[stage];
+  const recipientKind = resolveRecipientKind(recipientRole);
+  const { subject, heading, bodyText, helperText, ctaText, headerColor } =
+    getApplicationEmailContent({
+      stage,
+      permissionType,
+      projectTitle,
+      recipientKind,
+    });
 
   const html = `
 <!DOCTYPE html>
@@ -167,7 +249,7 @@ export async function sendApplicationStatusEmail(params: {
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
           <tr>
             <td style="background-color:${headerColor};padding:28px 32px;">
-              <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">Application Status: ${stageLabel}</h1>
+              <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">${heading}</h1>
             </td>
           </tr>
           <tr>
@@ -179,13 +261,13 @@ export async function sendApplicationStatusEmail(params: {
                 ${bodyText}
               </p>
               <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">
-                Please log in to review the application details.
+                ${helperText}
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
                 <tr>
                   <td style="background-color:${headerColor};border-radius:8px;">
                     <a href="${projectUrl}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
-                      View Application
+                      ${ctaText}
                     </a>
                   </td>
                 </tr>

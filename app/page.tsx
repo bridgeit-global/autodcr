@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from "react";
 import Header from "./components/Header";
 import Login from "./components/Login";
 import ImportantMessage from "./components/ImportantMessage";
@@ -117,7 +118,9 @@ export default function Home() {
 		<div className="min-h-screen bg-gray-100">
 			<Header />
 			<main>
-				<Login slides={SLIDES} />
+				<Suspense fallback={null}>
+					<Login slides={SLIDES} />
+				</Suspense>
 				<ImportantMessage message={IMPORTANT_MESSAGE} />
 				<TileGrid tiles={TILES} />
 				<InfoBlocks
