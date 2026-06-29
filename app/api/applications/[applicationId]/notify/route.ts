@@ -6,16 +6,22 @@ import {
   type ApplicationStage,
 } from "@/app/utils/email";
 import { permissionTitleToApplicantType } from "@/app/utils/applicantAppointmentPermissions";
+import {
+  buildApplicationDetailsUrl,
+  getAppBaseUrl,
+  resolveApplicationNo,
+} from "@/app/utils/applicationDeepLink";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
 
-const appBaseUrl =
-  process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-
-const VALID_STAGES: ApplicationStage[] = ["draft", "in_process", "approved_verified"];
+const VALID_STAGES: ApplicationStage[] = [
+  "draft",
+  "saved",
+  "in_process",
+  "approved_verified",
+];
 
 function isValidEmail(value: string): boolean {
   if (!value || value === "-") return false;
@@ -46,7 +52,7 @@ export async function POST(
     const stage = VALID_STAGES.includes(body.stage) ? body.stage as ApplicationStage : null;
     if (!stage) {
       return NextResponse.json(
-        { error: "Valid stage is required (draft, in_process, approved_verified)." },
+        { error: "Valid stage is required (draft, saved, in_process, approved_verified)." },
         { status: 400 }
       );
     }
@@ -93,7 +99,7 @@ export async function POST(
 
     const { data: project, error: projErr } = await readClient
       .from("projects")
-      .select("user_id, architect_user_id")
+      .select("user_id, architect_user_id, project_info, save_plot_details")
       .eq("id", projectId)
       .maybeSingle();
 
@@ -101,7 +107,13 @@ export async function POST(
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
 
-    const projectUrl = `${appBaseUrl}/userdashboard`;
+    const applicationNo = resolveApplicationNo(project, application);
+    const projectUrl = buildApplicationDetailsUrl(getAppBaseUrl(), {
+      projectId,
+      applicationId,
+      applicationNo,
+      selectedApplication: permissionType,
+    });
 
     const { data: rosterData } = await readClient.rpc(
       "get_applicant_details_for_project",
@@ -148,6 +160,7 @@ export async function POST(
         permissionType,
         stage,
         projectUrl,
+        recipientRole: recipient.role,
       });
 
       results.push({ email: recipient.email, ...result });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, Suspense, useMemo } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import SiteFooter from "../components/SiteFooter";
 import DashboardHeader from "../components/DashboardHeader";
 import DashboardSidebar from "../components/DashboardSidebar";
@@ -25,6 +25,7 @@ import {
   readSessionUserMetaFromStorage,
   validateOwnerForArchitectProject,
 } from "../utils/projectAccess";
+import { sanitizeReturnUrl } from "../utils/applicationDeepLink";
 
 type RequiredPage = {
   key: string;
@@ -219,9 +220,33 @@ function DashboardLayoutContent({
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname();
   const { showAlert } = useDashboardAlertModal();
   const projectId = searchParams.get("projectId");
   const isEditMode = !!projectId;
+  const [authState, setAuthState] = useState<
+    "checking" | "authenticated" | "unauthenticated"
+  >("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      if (!session?.access_token) {
+        const qs = searchParams.toString();
+        const returnPath = sanitizeReturnUrl(
+          qs ? `${pathname}?${qs}` : pathname
+        );
+        router.replace(`/?returnUrl=${encodeURIComponent(returnPath)}`);
+        setAuthState("unauthenticated");
+        return;
+      }
+      setAuthState("authenticated");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, router, searchParams]);
   
   // Use useProjectData hook to verify project actually exists
   const { projectData: verifiedProjectData, isLoading: isProjectDataLoading, error: projectDataError } =
@@ -1046,6 +1071,14 @@ function DashboardLayoutContent({
       setIsSubmittingProject(false);
     }
   };
+
+  if (authState === "checking" || authState === "unauthenticated") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-gray-100 flex flex-col overflow-hidden">

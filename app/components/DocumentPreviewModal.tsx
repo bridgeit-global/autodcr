@@ -29,6 +29,8 @@ type DocumentPreviewModalProps = {
   saveDisabled?: boolean;
   /** After a successful save for this preview — shows “Saved” instead of Save. */
   saveCompleted?: boolean;
+  /** When PDF is saved to storage but preview is still HTML, download from this URL. */
+  storedPdfDownloadUrl?: string | null;
   /** Shown inside the modal so save errors/success are visible over the backdrop. */
   saveFeedbackError?: string | null;
   saveFeedbackSuccess?: string | null;
@@ -68,6 +70,7 @@ export default function DocumentPreviewModal({
   isSaving,
   saveDisabled,
   saveCompleted,
+  storedPdfDownloadUrl,
   saveFeedbackError,
   saveFeedbackSuccess,
   hideSaveButton = false,
@@ -384,6 +387,9 @@ export default function DocumentPreviewModal({
 
   const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
   const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
+  const downloadPdfUrl =
+    fileUrl ?? (saveCompleted && storedPdfDownloadUrl ? storedPdfDownloadUrl : null);
+  const showDownloadPdf = Boolean(downloadPdfUrl);
   const useCompactPreviewLayout =
     isHtmlPreview || isStoredPdfPreview || (!hasContent && (isLoading || Boolean(loadError)));
   const saveUiBusy = Boolean(isSaving);
@@ -413,33 +419,47 @@ export default function DocumentPreviewModal({
     }
   };
 
-  const handlePrintStoredPdf = async () => {
-    if (!fileUrl) return;
+  const deriveStoredPdfDownloadName = (): string => {
+    const url = downloadPdfUrl;
+    if (url) {
+      try {
+        const pathname = new URL(url).pathname;
+        const base = pathname.split("/").pop();
+        if (base?.toLowerCase().endsWith(".pdf")) {
+          return base.split("?")[0] ?? "document.pdf";
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (title?.trim()) {
+      const slug = title
+        .trim()
+        .replace(/[^\w\s-]/g, "")
+        .replace(/\s+/g, "_");
+      if (slug) return `${slug}.pdf`;
+    }
+    return "document.pdf";
+  };
+
+  /** Download the stored PDF bytes — preserves DSC signatures (print/save-as-PDF does not). */
+  const handleDownloadStoredPdf = async () => {
+    if (!downloadPdfUrl) return;
     try {
-      const res = await fetch(fileUrl);
+      const res = await fetch(downloadPdfUrl);
       if (!res.ok) throw new Error("Could not load the saved PDF.");
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.src = blobUrl;
-      document.body.appendChild(iframe);
-      iframe.onload = () => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } finally {
-          window.setTimeout(() => {
-            URL.revokeObjectURL(blobUrl);
-            iframe.remove();
-          }, 1500);
-        }
-      };
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = deriveStoredPdfDownloadName();
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
     } catch {
-      window.open(fileUrl, "_blank", "noopener,noreferrer");
+      window.open(downloadPdfUrl, "_blank", "noopener,noreferrer");
     }
   };
 
@@ -489,12 +509,35 @@ export default function DocumentPreviewModal({
                     </select>
                   </label>
                 )}
-                {((htmlContent && !fileUrl) || isStoredPdfPreview) && (
+                {showDownloadPdf && (
                   <button
-                    onClick={() => {
-                      if (isStoredPdfPreview) void handlePrintStoredPdf();
-                      else handlePrint();
-                    }}
+                    onClick={() => void handleDownloadStoredPdf()}
+                    disabled={saveUiBusy}
+                    className="h-9 px-3 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
+                    aria-label="Download saved PDF"
+                    type="button"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF
+                  </button>
+                )}
+                {htmlContent && !fileUrl && !showDownloadPdf && (
+                  <button
+                    onClick={handlePrint}
                     disabled={saveUiBusy}
                     className="h-9 px-3 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                     aria-label="Print or save as PDF"

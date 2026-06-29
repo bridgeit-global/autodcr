@@ -3,10 +3,11 @@
 import Image from "next/image";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
 import { supabase } from "../utils/supabase";
+import { sanitizeReturnUrl } from "@/app/utils/applicationDeepLink";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import { TEXT_BODY, TEXT_LABEL, TEXT_MUTED, TEXT_TITLE_PANEL } from "@/app/utils/typography";
 
@@ -95,6 +96,8 @@ function drawCaptchaOnCanvas(canvas: HTMLCanvasElement, num1: number, num2: numb
 
 const HeroSection = ({ slides }: HeroSectionProps) => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnUrl = sanitizeReturnUrl(searchParams.get("returnUrl"));
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -117,7 +120,19 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
 
   useEffect(() => {
     router.prefetch("/userdashboard");
-  }, [router]);
+    router.prefetch(returnUrl);
+  }, [router, returnUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled || !session?.access_token) return;
+      router.replace(returnUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router, returnUrl]);
 
   useLayoutEffect(() => {
     if (captcha === null) {
@@ -204,7 +219,7 @@ const HeroSection = ({ slides }: HeroSectionProps) => {
         localStorage.setItem("userMetadata", JSON.stringify(metadataToStore));
       }
 
-      router.push("/userdashboard");
+      router.push(returnUrl);
       reset();
     } catch (err) {
       setLoginError("An error occurred during login. Please try again.");
