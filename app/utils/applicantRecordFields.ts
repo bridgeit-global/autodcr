@@ -39,6 +39,74 @@ export function pickEntityNameFromUserMeta(
   );
 }
 
+/** Legal entity type from auth.users `raw_user_meta_data` or applicant row. */
+export function pickEntityTypeFromUserMeta(
+  meta: Record<string, unknown> | null | undefined
+): string {
+  if (!meta) return "";
+  return pickText(meta.entity_type, meta.entityType);
+}
+
+/** Registration entity types (must match RegistrationForm ENTITY_TYPES). */
+export const KNOWN_ENTITY_TYPES = [
+  "Proprietorship / Individual",
+  "Partnership Firm",
+  "Pvt. Ltd. / Ltd. Company",
+  "LLP",
+  "Trust / Society",
+  "Govt. / PSU / Local Body",
+] as const;
+
+export function isKnownEntityType(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  return KNOWN_ENTITY_TYPES.some((t) => t.toLowerCase() === normalized);
+}
+
+/** Prefer auth metadata `entity_type`; ignore company names stored in the wrong field. */
+export function resolveOwnerEntityTypeForDesignation(opts: {
+  applicantEntityType?: string | null;
+  ownerMeta?: Record<string, unknown> | null;
+  companyName?: string | null;
+}): string {
+  const company = opts.companyName?.trim().toLowerCase() || "";
+  const fromMeta = pickEntityTypeFromUserMeta(opts.ownerMeta);
+  if (fromMeta && isKnownEntityType(fromMeta)) return fromMeta;
+
+  const fromApplicant = opts.applicantEntityType?.trim() || "";
+  if (
+    fromApplicant &&
+    isKnownEntityType(fromApplicant) &&
+    fromApplicant.toLowerCase() !== company
+  ) {
+    return fromApplicant;
+  }
+
+  if (fromMeta && fromMeta.toLowerCase() !== company) return fromMeta;
+  return "";
+}
+
+/** Map owner `entity_type` to the signatory line under the DSC (e.g. Director). */
+export function entityTypeToSignatoryDesignation(entityType: string): string {
+  if (!isKnownEntityType(entityType)) return "";
+  const normalized = entityType.trim().toLowerCase();
+  switch (normalized) {
+    case "proprietorship / individual":
+    case "pvt. ltd. / ltd. company":
+      return "Director";
+    case "llp":
+      return "Designated Partner";
+    case "trust / society":
+      return "Trustee";
+    case "partnership firm":
+      return "Partner";
+    case "govt. / psu / local body":
+      return "Authorized Signatory";
+    default:
+      return "";
+  }
+}
+
 export type ApplicantRosterJson = { applicants: Record<string, unknown>[] };
 
 /** Canonical applicant row for public.applicants.applicant_details (includes address_line1–3). */
@@ -80,6 +148,8 @@ export function serializeApplicantRowForStorage(
   if (line1) out.address_line1 = line1;
   if (line2) out.address_line2 = line2;
   if (line3) out.address_line3 = line3;
+  const entityType = pickText(row.entity_type, row.entityType);
+  if (entityType) out.entity_type = entityType;
 
   return out;
 }

@@ -20,11 +20,16 @@ import {
 } from "../utils/applicantRecordFields";
 import { persistApplicantRosterForProject } from "../utils/resolveApplicantDetailsForProject";
 import {
+  applicantRosterHasOwner,
   canCreateProjectAsArchitect,
   ensureArchitectInApplicantRoster,
+  ensureOwnerInApplicantRoster,
   readSessionUserMetaFromStorage,
   validateOwnerForArchitectProject,
+  type ApplicantLike,
+  type OwnerApplicantMeta,
 } from "../utils/projectAccess";
+import { ensureProjectOwnerOnRoster } from "../utils/ownerApplicantRoster";
 import { sanitizeReturnUrl } from "../utils/applicationDeepLink";
 
 type RequiredPage = {
@@ -85,7 +90,11 @@ function readSessionUserMeta() {
 async function persistProjectApplicantRoster(
   projectId: string,
   sessionUserId: string,
-  options: { applicantDetails?: unknown; isArchitectCreate: boolean }
+  options: {
+    applicantDetails?: unknown;
+    isArchitectCreate: boolean;
+    projectOwnerUserId?: string | null;
+  }
 ): Promise<string | null> {
   const draftApplicants = loadDraft<unknown[]>("draft-applicant-details-applicants", []);
   const base =
@@ -93,9 +102,31 @@ async function persistProjectApplicantRoster(
       ? options.applicantDetails
       : { applicants: draftApplicants };
 
-  const roster = options.isArchitectCreate
-    ? ensureArchitectInApplicantRoster(base, sessionUserId, readSessionUserMetaFromStorage())
-    : base;
+  const sessionMeta = readSessionUserMetaFromStorage();
+  let roster: { applicants: unknown[] };
+
+  if (options.isArchitectCreate) {
+    roster = ensureArchitectInApplicantRoster(base, sessionUserId, sessionMeta);
+    const ownerUserId = options.projectOwnerUserId?.trim() || null;
+    if (ownerUserId) {
+      roster = await ensureProjectOwnerOnRoster(roster, ownerUserId, {
+        sessionUserId,
+      });
+    }
+  } else {
+    roster = {
+      applicants: Array.isArray((base as { applicants?: unknown[] }).applicants)
+        ? [...(base as { applicants: unknown[] }).applicants]
+        : [],
+    };
+    if (!applicantRosterHasOwner(roster.applicants as ApplicantLike[])) {
+      roster = ensureOwnerInApplicantRoster(
+        roster,
+        sessionUserId,
+        sessionMeta as OwnerApplicantMeta
+      );
+    }
+  }
 
   const applicantRows = Array.isArray((roster as { applicants?: unknown[] }).applicants)
     ? (roster as { applicants: unknown[] }).applicants
@@ -677,6 +708,7 @@ function DashboardLayoutContent({
         const rosterErr = await persistProjectApplicantRoster(finalProjectId, sessionUserId, {
           applicantDetails: payload.applicant_details,
           isArchitectCreate: Boolean(isArchitectCreate),
+          projectOwnerUserId: ownerUserIdForCreate,
         });
         if (rosterErr) {
           setSubmitError(rosterErr);
@@ -977,6 +1009,7 @@ function DashboardLayoutContent({
         const rosterErr = await persistProjectApplicantRoster(finalProjectId, userId, {
           applicantDetails: payload.applicant_details,
           isArchitectCreate: Boolean(isArchitectCreate),
+          projectOwnerUserId: ownerUserIdForCreate,
         });
         if (rosterErr) {
           setSubmitError(rosterErr);

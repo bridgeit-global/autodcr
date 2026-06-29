@@ -23,6 +23,8 @@ import {
   consultantSignsAppointmentLetter,
   dualLetterPdfNeedsQrFreeFirstPass,
   isCleanAppointmentLetterType,
+  prefersLiveHtmlApplicationPreview,
+  shouldPreviewStoredApplicationPdf,
   shouldRunLegacyDualLetterQrRepass,
   shouldUseStoredPdfPreview,
 } from "@/app/utils/cleanAppointmentLetterTypes";
@@ -43,6 +45,7 @@ import {
   readApplicationUrlFromUrls,
   resolveSavedPdfUrlForQr,
 } from "@/app/utils/projectSavedApplicationPdfUrl";
+import { resolveOwnerEntityTypeForDesignation } from "@/app/utils/applicantRecordFields";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
@@ -688,10 +691,13 @@ async function buildApplicationPreviewContext(
   let clientName =
     (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
     pickPersonFullNameFromMeta(ownerApplicant);
-  let clientCompanyDesignation =
-    ownerApplicant?.entity_type?.trim() ||
-    ownerApplicant?.entityType?.trim() ||
-    pickEntityTypeFromMeta(ownerApplicant);
+  let clientCompanyDesignation = resolveOwnerEntityTypeForDesignation({
+    applicantEntityType:
+      ownerApplicant?.entity_type?.trim() ||
+      ownerApplicant?.entityType?.trim() ||
+      pickEntityTypeFromMeta(ownerApplicant),
+    companyName: clientCompanyName,
+  });
   let ownerLetterheadUrl =
     ownerApplicant?.letterhead_url?.trim() ||
     ownerApplicant?.letterheadUrl?.trim() ||
@@ -863,7 +869,30 @@ async function buildApplicationPreviewContext(
     if (resolvedCompany) {
       clientCompanyName = resolvedCompany;
     }
+    if (
+      clientCompanyDesignation &&
+      resolvedCompany &&
+      clientCompanyDesignation.trim().toLowerCase() === resolvedCompany.trim().toLowerCase()
+    ) {
+      clientCompanyDesignation = "";
+    }
+    const resolvedType = pickEntityTypeFromMeta(ownerMeta);
+    if (resolvedType) {
+      clientCompanyDesignation = resolveOwnerEntityTypeForDesignation({
+        applicantEntityType: clientCompanyDesignation || resolvedType,
+        ownerMeta: ownerMeta as Record<string, unknown>,
+        companyName: resolvedCompany || clientCompanyName,
+      });
+    }
     if (clientCompanyDesignation && clientName && clientCompanyName) break;
+  }
+
+  if (!clientCompanyDesignation && ownerMetaSnapshot) {
+    clientCompanyDesignation = resolveOwnerEntityTypeForDesignation({
+      applicantEntityType: pickEntityTypeFromMeta(ownerMetaSnapshot),
+      ownerMeta: ownerMetaSnapshot as Record<string, unknown>,
+      companyName: clientCompanyName,
+    });
   }
 
   if (process.env.NODE_ENV === "development") {
@@ -1999,10 +2028,15 @@ export default function ApplicationDetailsPage() {
           letterVariant: variant,
         });
 
-      const preferLiveHtmlPreview = isCleanAppointmentLetterType(templateType);
+      const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
       const useStoredPdfPreview = shouldUseStoredPdfPreview(
         templateType,
         workflowStageForPreview
+      );
+      const previewStoredPdf = shouldPreviewStoredApplicationPdf(
+        templateType,
+        workflowStageForPreview,
+        { ownerSignedAt, architectSignedAt }
       );
 
       // #region agent log
@@ -2038,7 +2072,7 @@ export default function ApplicationDetailsPage() {
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
         const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
 
-        if (savedPdfUrl) {
+        if (savedPdfUrl && previewStoredPdf) {
           const pdfUrl = storedPdfUrlWithCacheBuster(savedPdfUrl, {
             ownerSignedAt,
             architectSignedAt,
@@ -2118,10 +2152,7 @@ export default function ApplicationDetailsPage() {
           architectSignedAt,
         });
         setStoredSigningPdfUrl(resolvedStoredUrl);
-        const hasRecordedSignature = Boolean(ownerSignedAt?.trim() || architectSignedAt?.trim());
-        const preferStoredPdf =
-          hasRecordedSignature || workflowStageForPreview === "in_process";
-        if (preferStoredPdf) {
+        if (previewStoredPdf) {
           previewPdfContextRef.current = { fields, templateType, previewSource };
           setPdfSavedForCurrentPreview(true);
           setPreviewReadyForSave(true);

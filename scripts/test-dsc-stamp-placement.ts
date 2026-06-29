@@ -202,6 +202,35 @@ async function run() {
     throw new Error(`Expected LS consultant stamp at x=288, got pdfX=${lsConsultantRect.pdfX}`);
   }
 
+  const longCompanyPdf = await makeLetterPdf([
+    { text: "Thanking You,", x: 56, y: 300 },
+    { text: "Yours faithfully,", x: 56, y: 268 },
+    { text: "For ParkourAI Engineering", x: 56, y: 252 },
+    { text: "Pvt Ltd.,", x: 56, y: 238 },
+    { text: "Director", x: 56, y: 198 },
+    { text: "Faisal Aziz Ansari", x: 56, y: 182 },
+    { text: "Approved and confirmed,", x: 320, y: 268 },
+    { text: "For ParkourAI Engineering", x: 320, y: 252 },
+    { text: "Pvt Ltd.,", x: 320, y: 238 },
+    { text: "Architect", x: 320, y: 198 },
+  ]);
+  const longCompanyOwnerRect = await resolveDscStampRectFromPdf(
+    longCompanyPdf,
+    "owner",
+    "dualColumn"
+  );
+  console.log("Long company owner:", longCompanyOwnerRect);
+  if (longCompanyOwnerRect.pdfY > 248) {
+    throw new Error(
+      `Long company stamp should sit below wrapped company lines, got pdfY=${longCompanyOwnerRect.pdfY}`
+    );
+  }
+  if (longCompanyOwnerRect.pdfY < 198 + 12) {
+    throw new Error(
+      `Long company stamp should sit above Director line, got pdfY=${longCompanyOwnerRect.pdfY}`
+    );
+  }
+
   console.log("All placement checks passed.");
 }
 

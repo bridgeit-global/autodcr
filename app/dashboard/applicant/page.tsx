@@ -16,10 +16,15 @@ import {
   serializeApplicantRosterForStorage,
 } from "@/app/utils/applicantRecordFields";
 import {
+  applicantRosterHasOwner,
   canCreateProjectAsArchitect,
   ensureArchitectInApplicantRoster,
+  ensureOwnerInApplicantRoster,
   readSessionUserMetaFromStorage,
+  sameUserId,
+  type OwnerApplicantMeta,
 } from "@/app/utils/projectAccess";
+import { ensureProjectOwnerOnRoster } from "@/app/utils/ownerApplicantRoster";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -48,6 +53,7 @@ type ApplicantRow = {
   address_line1?: string;
   address_line2?: string;
   address_line3?: string;
+  entity_type?: string;
 };
 
 type ConsultantDirectoryEntry = {
@@ -255,6 +261,56 @@ const sortApplicantsOwnerFirst = (rows: ApplicantRow[]): ApplicantRow[] => {
   return sorted.map((row, index) => ({ ...row, id: index + 1 }));
 };
 
+const mapStoredApplicantsToRows = (applicantsList: unknown[]): ApplicantRow[] =>
+  applicantsList.map((app: any, index: number) => ({
+    id: app.id || index + 1,
+    user_id: app.user_id || app.userId || undefined,
+    applicantType: app.applicantType || app.applicant_type || "",
+    name: app.name || "",
+    contactNumber: app.contactNumber || app.contact_number || "",
+    email: app.email || app.emailAddress || app.email_address || "",
+    registrationNo: app.registrationNumber || app.registration_number || app.registrationNo || "",
+    panNo: app.panNo || app.pan_no || app.pan || "",
+    licenseIssueDate: app.licenseIssueDate || app.license_issue_date || "",
+    residentialAddress: composeAddress(
+      pickText(app.address_line1, app.addressLine1),
+      pickText(app.address_line2, app.addressLine2),
+      pickText(app.address_line3, app.addressLine3),
+      pickText(app.residentialAddress, app.residential_address)
+    ),
+    officeAddress: app.officeAddress || app.office_address || "",
+    address_line1: pickText(app.address_line1, app.addressLine1),
+    address_line2: pickText(app.address_line2, app.addressLine2),
+    address_line3: pickText(app.address_line3, app.addressLine3),
+    entity_type: pickText(app.entity_type, app.entityType),
+  }));
+
+const mapRosterJsonToApplicantRows = (rows: unknown[]): ApplicantRow[] =>
+  sortApplicantsOwnerFirst(
+    rows.map((app, index) => {
+      const row = app as Record<string, unknown>;
+      return {
+        id: typeof row.id === "number" ? row.id : index + 1,
+        user_id: pickText(row.user_id, row.userId) || undefined,
+        applicantType: pickText(row.applicantType, row.applicant_type),
+        name: pickText(row.name) || "-",
+        contactNumber: pickText(row.contactNumber, row.contact_number) || "-",
+        email: pickText(row.email, row.emailAddress, row.email_address) || "-",
+        registrationNo:
+          pickText(row.registrationNo, row.registrationNumber, row.registration_number) || "-",
+        panNo: pickText(row.panNo, row.pan_no, row.pan) || "-",
+        licenseIssueDate: pickText(row.licenseIssueDate, row.license_issue_date) || "-",
+        residentialAddress:
+          pickText(row.residentialAddress, row.residential_address, row.address) || "-",
+        officeAddress: pickText(row.officeAddress, row.office_address, row.address) || "-",
+        address_line1: pickText(row.address_line1, row.addressLine1) || undefined,
+        address_line2: pickText(row.address_line2, row.addressLine2) || undefined,
+        address_line3: pickText(row.address_line3, row.addressLine3) || undefined,
+        entity_type: pickText(row.entity_type, row.entityType) || undefined,
+      };
+    })
+  );
+
 const APPLICANT_FORM_DEFAULTS: ApplicantFormData = {
   applicantType: "",
   plumbingConsultant: "",
@@ -355,30 +411,9 @@ export default function ApplicantDetailsPage() {
       console.log("[Applicant Details] Applicants list from backend:", applicantsList);
       
       if (applicantsList.length > 0) {
-        // Map backend applicants to ApplicantRow format
-        const mappedApplicants: ApplicantRow[] = applicantsList.map((app: any, index: number) => ({
-          id: app.id || index + 1,
-          user_id: app.user_id || app.userId || undefined,
-          applicantType: app.applicantType || app.applicant_type || "",
-          name: app.name || "",
-          contactNumber: app.contactNumber || app.contact_number || "",
-          email: app.email || app.emailAddress || app.email_address || "",
-          registrationNo: app.registrationNumber || app.registration_number || app.registrationNo || "",
-          panNo: app.panNo || app.pan_no || app.pan || "",
-          licenseIssueDate: app.licenseIssueDate || app.license_issue_date || "",
-          residentialAddress: composeAddress(
-            pickText(app.address_line1, app.addressLine1),
-            pickText(app.address_line2, app.addressLine2),
-            pickText(app.address_line3, app.addressLine3),
-            pickText(app.residentialAddress, app.residential_address)
-          ),
-          officeAddress: app.officeAddress || app.office_address || "",
-          address_line1: pickText(app.address_line1, app.addressLine1),
-          address_line2: pickText(app.address_line2, app.addressLine2),
-          address_line3: pickText(app.address_line3, app.addressLine3),
-        }));
-        
-        const orderedApplicants = sortApplicantsOwnerFirst(mappedApplicants);
+        const orderedApplicants = sortApplicantsOwnerFirst(
+          mapStoredApplicantsToRows(applicantsList)
+        );
         console.log("[Applicant Details] Mapped applicants:", orderedApplicants);
         setApplicants(orderedApplicants);
         saveDraft("draft-applicant-details-applicants", orderedApplicants);
@@ -389,6 +424,37 @@ export default function ApplicantDetailsPage() {
       }
     }
   }, [isEditMode, projectData, isLoading]);
+
+  // Architect-created projects: seed projects.user_id as Owner when roster is missing them.
+  // Owner-created projects use the auto-add effect below (logged-in owner is default row).
+  useEffect(() => {
+    if (userMetadata?.role !== "Consultant") return;
+    const ownerUserId = projectData?.user_id?.trim();
+    if (!ownerUserId || isLoading) return;
+    if (applicantRosterHasOwner(applicants)) return;
+
+    let cancelled = false;
+    const syncOwner = async () => {
+      const roster = await ensureProjectOwnerOnRoster({ applicants }, ownerUserId, {
+        sessionUserId: authUserId,
+      });
+      if (cancelled) return;
+      const nextApplicants = mapRosterJsonToApplicantRows(roster.applicants);
+      setApplicants(nextApplicants);
+      saveDraft("draft-applicant-details-applicants", nextApplicants);
+    };
+
+    void syncOwner();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    userMetadata?.role,
+    projectData?.user_id,
+    isLoading,
+    applicants,
+    authUserId,
+  ]);
 
   // If the form was previously saved (green button) and the user starts editing/adding
   // another applicant, move the button back to blue "Save"
@@ -460,25 +526,53 @@ export default function ApplicantDetailsPage() {
     loadDirectoryOptions();
   }, [selectedApplicantType]);
 
-  // Ensure logged-in user (owner or consultant) is always part of the applicants list (first row)
-  // Skip this in edit mode if we already have applicants loaded from project data
+  // Owner-created projects: logged-in owner is always the first applicant row.
+  // Consultants: logged-in consultant type is added when missing.
   useEffect(() => {
     if (!userMetadata) return;
-    // Don't auto-add user if we're in edit mode and have loaded project data
-    if (isEditMode && projectData && applicants.length > 0) return;
+
+    const isConsultant = userMetadata.role === "Consultant";
+    // Wait for auth id so the default Owner row gets projects.user_id / applicant user_id.
+    if (!isConsultant && !authUserId) return;
+
+    if (isEditMode && projectData && applicantRosterHasOwner(applicants)) return;
 
     setApplicants((prev) => {
-      const userRole = userMetadata.role;
-      const isConsultant = userRole === "Consultant";
       const applicantType = isConsultant ? (userMetadata.consultant_type || "") : "Owner";
 
-      // If a row with this applicantType already exists, keep as-is
-      const hasExistingRow = prev.some((a) => a.applicantType === applicantType);
-      if (hasExistingRow) return prev;
+      if (!isConsultant) {
+        const ownerIndex = prev.findIndex((a) => isOwnerApplicantType(a.applicantType));
+        if (ownerIndex >= 0) {
+          const existing = prev[ownerIndex];
+          const ownerEntityType =
+            existing.entity_type?.trim() || userMetadata.entity_type?.trim() || "";
+          if (!existing.user_id?.trim() && authUserId) {
+            const updated = prev.map((row, idx) =>
+              idx === ownerIndex
+                ? {
+                    ...row,
+                    user_id: authUserId,
+                    ...(ownerEntityType ? { entity_type: ownerEntityType } : {}),
+                  }
+                : row
+            );
+            return sortApplicantsOwnerFirst(updated);
+          }
+          if (!existing.entity_type?.trim() && ownerEntityType) {
+            const updated = prev.map((row, idx) =>
+              idx === ownerIndex ? { ...row, entity_type: ownerEntityType } : row
+            );
+            return sortApplicantsOwnerFirst(updated);
+          }
+          return prev;
+        }
+      } else if (prev.some((a) => a.applicantType === applicantType)) {
+        return prev;
+      }
 
       const userName =
-        (userMetadata.first_name || "") + 
-        (userMetadata.middle_name ? " " + userMetadata.middle_name : "") + 
+        (userMetadata.first_name || "") +
+        (userMetadata.middle_name ? " " + userMetadata.middle_name : "") +
         (userMetadata.last_name ? " " + userMetadata.last_name : "") ||
         "-";
 
@@ -585,6 +679,9 @@ export default function ApplicantDetailsPage() {
         address_line1: userAddressLine1 || undefined,
         address_line2: userAddressLine2 || undefined,
         address_line3: userAddressLine3 || undefined,
+        ...(!isConsultant && userMetadata.entity_type?.trim()
+          ? { entity_type: userMetadata.entity_type.trim() }
+          : {}),
       };
 
       const reindexed = prev.map((a, idx) => ({ ...a, id: idx + 2 }));
@@ -723,13 +820,27 @@ export default function ApplicantDetailsPage() {
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
     const meta = readSessionUserMetaFromStorage();
-    const rosterForSave = canCreateProjectAsArchitect(meta)
-      ? ensureArchitectInApplicantRoster(
-          { applicants: roster },
-          authUserId ?? userId,
-          meta
-        )
-      : { applicants: roster };
+    let rosterForSave: { applicants: unknown[] } = { applicants: roster };
+
+    if (canCreateProjectAsArchitect(meta)) {
+      rosterForSave = ensureArchitectInApplicantRoster(
+        rosterForSave,
+        authUserId ?? userId,
+        meta
+      );
+      const ownerUserId = projectData?.user_id?.trim();
+      if (ownerUserId) {
+        rosterForSave = await ensureProjectOwnerOnRoster(rosterForSave, ownerUserId, {
+          sessionUserId: authUserId ?? userId,
+        });
+      }
+    } else if (authUserId && !applicantRosterHasOwner(roster)) {
+      rosterForSave = ensureOwnerInApplicantRoster(
+        rosterForSave,
+        authUserId,
+        userMetadata as OwnerApplicantMeta
+      );
+    }
 
     const serialized = serializeApplicantRosterForStorage(rosterForSave.applicants);
     if (serialized.applicants.length === 0) {

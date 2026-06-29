@@ -74,6 +74,39 @@ export function shouldUseStoredPdfPreview(
   return workflowStage === "in_process" || workflowStage === "approved_verified";
 }
 
+/** Architect / L.S. and authority appointment letters: reliable live HTML iframe preview. */
+const LIVE_HTML_IFRAME_PREVIEW_TYPES = new Set<TemplateType>([
+  "Architect",
+  "Licensed Surveyor",
+]);
+
+export function prefersLiveHtmlApplicationPreview(templateType: TemplateType): boolean {
+  return (
+    isCleanAppointmentLetterType(templateType) ||
+    LIVE_HTML_IFRAME_PREVIEW_TYPES.has(templateType)
+  );
+}
+
+/**
+ * When to show the uploaded PDF in preview instead of regenerating HTML.
+ * Unsigned Architect / L.S. at in_process keep live HTML (Chromium save can be blank).
+ * Once signed, use the stored PDF so the real DSC stamp is visible in preview.
+ */
+export function shouldPreviewStoredApplicationPdf(
+  templateType: TemplateType,
+  workflowStage: string,
+  opts?: { ownerSignedAt?: string | null; architectSignedAt?: string | null }
+): boolean {
+  if (!shouldUseStoredPdfPreview(templateType, workflowStage)) return false;
+  if (workflowStage === "approved_verified") return true;
+  const hasSignature = Boolean(
+    opts?.ownerSignedAt?.trim() || opts?.architectSignedAt?.trim()
+  );
+  if (hasSignature) return true;
+  if (prefersLiveHtmlApplicationPreview(templateType)) return false;
+  return true;
+}
+
 /** Old Word-style template (Sub: / Letter of Appointment of…) still in Storage. */
 export function isLegacySubAppointmentHtml(html: string): boolean {
   if (!html.trim()) return false;

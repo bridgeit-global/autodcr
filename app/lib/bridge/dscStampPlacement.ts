@@ -195,6 +195,48 @@ function isThankYouLine(text: string): boolean {
   return normalizeText(text).includes("thanking you");
 }
 
+const SIGNATORY_DESIGNATION_TITLES = [
+  "director",
+  "designated partner",
+  "trustee",
+  "partner",
+  "authorized signatory",
+  "proprietor",
+] as const;
+
+const CONSULTANT_ROLE_LABELS = [
+  "architect",
+  "consultant",
+  "plumber",
+  "licensed surveyor",
+  "structural engineer",
+  "fire safety consultant",
+  "landscape consultant",
+  "geotechnical consultant",
+  "m&e consultant",
+  "town planner",
+  "environmental consultant",
+  "pmc / project manager",
+  "site supervisor",
+  "horticulturist",
+  "parking consultant",
+  "rainwater consultant",
+] as const;
+
+function isSignatoryDesignationTitle(text: string): boolean {
+  const normalized = normalizeText(text);
+  return SIGNATORY_DESIGNATION_TITLES.some(
+    (title) => normalized === title || normalized.startsWith(`${title} `)
+  );
+}
+
+function isConsultantRoleLabel(text: string): boolean {
+  const normalized = normalizeText(text).replace(/\.$/, "");
+  return CONSULTANT_ROLE_LABELS.some(
+    (label) => normalized === label || normalized.startsWith(`${label} `)
+  );
+}
+
 function findColumnForLine(
   lines: TextLine[],
   pageMidX: number,
@@ -212,6 +254,41 @@ function findColumnForLine(
   if (matches.length === 0) return null;
   // Nearest "For {company}," line above the designation — highest y below thank-you.
   return matches.reduce((best, line) => (line.y > best.y ? line : best));
+}
+
+/** Bottom baseline of the "For {company}," block (handles wrapped long company names). */
+function findColumnCompanyBlockBottomLine(
+  lines: TextLine[],
+  pageMidX: number,
+  side: "left" | "right",
+  thankYou: TextLine | null,
+  designationAnchor: TextLine | null
+): TextLine | null {
+  const forTop = findColumnForLine(lines, pageMidX, side, thankYou);
+  if (!forTop) return null;
+
+  const columnLines = lines.filter((line) =>
+    side === "left" ? line.x < pageMidX : line.x >= pageMidX * 0.55
+  );
+  const floorY = designationAnchor?.y ?? 0;
+
+  const blockLines = columnLines.filter((line) => {
+    if (thankYou && line.y > thankYou.y + 10) return false;
+    if (thankYou && line.y >= thankYou.y - 8) return false;
+    if (line.y <= floorY + 2) return false;
+    if (line.y > forTop.y + 2) return false;
+    const text = normalizeText(line.text);
+    if (isThankYouLine(text) || isInformationRecordLine(text)) return false;
+    if (text.includes("yours faithfully") || text.includes("approved and confirmed")) return false;
+    if (isSignatoryDesignationTitle(text) || isConsultantRoleLabel(text)) return false;
+    if (text.startsWith("name:") || text.includes("coa reg") || text.startsWith("valid upto")) {
+      return false;
+    }
+    return true;
+  });
+
+  if (blockLines.length === 0) return forTop;
+  return blockLines.reduce((best, line) => (line.y < best.y ? line : best));
 }
 
 function findColumnSignatureLines(
@@ -233,6 +310,24 @@ function findColumnSignatureLines(
     if (isSignatureIntroLine(text)) return false;
     return true;
   });
+}
+
+/** Prefer Director / Architect role line over the signatory person name below it. */
+function findColumnDesignationAnchor(
+  lines: TextLine[],
+  pageMidX: number,
+  side: "left" | "right",
+  thankYou: TextLine | null
+): TextLine | null {
+  const signatureLines = findColumnSignatureLines(lines, pageMidX, side, thankYou);
+  const designationLines = signatureLines.filter((line) => {
+    const text = normalizeText(line.text);
+    return isSignatoryDesignationTitle(text) || isConsultantRoleLabel(text);
+  });
+  if (designationLines.length > 0) {
+    return designationLines.reduce((best, line) => (line.y > best.y ? line : best));
+  }
+  return findColumnSignatureAnchor(lines, pageMidX, side, thankYou);
 }
 
 function findColumnSignatureAnchor(
@@ -280,9 +375,14 @@ function findDualColumnStampTopLine(
   lines: TextLine[],
   pageMidX: number,
   side: "left" | "right",
-  thankYou: TextLine | null
+  thankYou: TextLine | null,
+  designationAnchor: TextLine | null
 ): TextLine | null {
-  return findColumnForLine(lines, pageMidX, side, thankYou) ?? thankYou;
+  return (
+    findColumnCompanyBlockBottomLine(lines, pageMidX, side, thankYou, designationAnchor) ??
+    findColumnForLine(lines, pageMidX, side, thankYou) ??
+    thankYou
+  );
 }
 
 function findRightColumnSignatureLeftX(
@@ -318,6 +418,7 @@ function findConsultantSignatureAnchor(
   thankYou: TextLine | null
 ): TextLine | null {
   return (
+    findColumnDesignationAnchor(lines, pageMidX, "right", thankYou) ??
     findColumnSignatureAnchor(lines, pageMidX, "right", thankYou) ??
     findColumnSignatureAnchor(lines, pageMidX, "right", null) ??
     findLine(lines, "consultant", (line) => isInRightColumn(line, pageMidX)) ??
@@ -329,10 +430,11 @@ function findConsultantSignatureAnchor(
 function findConsultantStampTopLine(
   lines: TextLine[],
   pageMidX: number,
-  thankYou: TextLine | null
+  thankYou: TextLine | null,
+  designationAnchor: TextLine | null
 ): TextLine | null {
   return (
-    findDualColumnStampTopLine(lines, pageMidX, "right", thankYou) ??
+    findDualColumnStampTopLine(lines, pageMidX, "right", thankYou, designationAnchor) ??
     findLine(lines, "approved and confirmed", (line) => isInRightColumn(line, pageMidX)) ??
     thankYou
   );
@@ -419,12 +521,12 @@ export async function resolveDscStampRectFromPdf(
       anchor = thankYou;
     } else if (layout === "dualColumn" && role === "owner") {
       const thankYou = findLine(lines, "thanking you");
-      signatureAnchor = findColumnSignatureAnchor(lines, pageMidX, "left", thankYou);
-      anchor = findDualColumnStampTopLine(lines, pageMidX, "left", thankYou) ?? thankYou;
+      signatureAnchor = findColumnDesignationAnchor(lines, pageMidX, "left", thankYou);
+      anchor = findDualColumnStampTopLine(lines, pageMidX, "left", thankYou, signatureAnchor) ?? thankYou;
     } else if (layout === "dualColumn" && role === "consultant") {
       const thankYou = findLine(lines, "thanking you");
-      anchor = findConsultantStampTopLine(lines, pageMidX, thankYou);
       signatureAnchor = findConsultantSignatureAnchor(lines, pageMidX, thankYou);
+      anchor = findConsultantStampTopLine(lines, pageMidX, thankYou, signatureAnchor);
     }
 
     if (!anchor) {

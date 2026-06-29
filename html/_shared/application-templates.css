@@ -235,12 +235,13 @@ p.closing-line {
 }
 
 .signature-company {
-  margin: 0;
+  margin: 0 0 4px;
   line-height: 1.15;
+  max-width: 95%;
 }
 
 .signature-line {
-  margin-top: 58px;
+  margin-top: 68px;
   border-top: none;
   width: 85%;
   padding-top: 2px;

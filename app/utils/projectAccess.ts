@@ -10,6 +10,13 @@ export type UserMetadataLike = {
   consultant_type?: string;
 } | null;
 
+function pickText(...values: Array<unknown>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 function normalizeId(id: string | null | undefined): string {
   return typeof id === "string" ? id.trim().toLowerCase() : "";
 }
@@ -69,7 +76,7 @@ export function canCreateProjectAsArchitect(meta: UserMetadataLike): boolean {
   return isArchitectConsultantRole(meta);
 }
 
-type ApplicantLike = {
+export type ApplicantLike = {
   user_id?: string;
   userId?: string;
   applicantType?: string;
@@ -109,7 +116,151 @@ export type SessionUserMeta = UserMetadataLike & {
   registration_date?: string;
   pan_no?: string;
   pan?: string;
+  entity_type?: string;
 };
+
+/** Owner profile fields used when seeding the applicant roster from projects.user_id. */
+export type OwnerApplicantMeta = SessionUserMeta & {
+  entity_type?: string;
+  proprietorship_registration_no?: string;
+  proprietorship_registration_date?: string;
+  cin?: string;
+  roc_registration_date?: string;
+  llpin?: string;
+  llp_incorporation_date?: string;
+  firm_registration_no?: string;
+  partnership_registration_date?: string;
+  trust_registration_no?: string;
+  trust_registration_date?: string;
+  govt_registration_no?: string;
+  govt_registration_date?: string;
+  letterhead_url?: string;
+  letterheadUrl?: string;
+};
+
+export function applicantRosterHasOwner(
+  applicants: ApplicantLike[] | null | undefined
+): boolean {
+  return Boolean(resolveOwnerUserIdFromApplicants(applicants));
+}
+
+function ownerRegistrationFromMeta(meta?: OwnerApplicantMeta | null): {
+  registrationNo: string;
+  licenseIssueDate: string;
+} {
+  const entityType = (meta?.entity_type || "").trim().toLowerCase();
+  let registrationNo = "";
+  let licenseIssueDate = "-";
+  switch (entityType) {
+    case "proprietorship / individual":
+      registrationNo = meta?.proprietorship_registration_no?.trim() || "";
+      licenseIssueDate = meta?.proprietorship_registration_date?.trim() || "-";
+      break;
+    case "pvt. ltd. / ltd. company":
+      registrationNo = meta?.cin?.trim() || "";
+      licenseIssueDate = meta?.roc_registration_date?.trim() || "-";
+      break;
+    case "llp":
+      registrationNo = meta?.llpin?.trim() || "";
+      licenseIssueDate = meta?.llp_incorporation_date?.trim() || "-";
+      break;
+    case "partnership firm":
+      registrationNo = meta?.firm_registration_no?.trim() || "";
+      licenseIssueDate = meta?.partnership_registration_date?.trim() || "-";
+      break;
+    case "trust / society":
+      registrationNo = meta?.trust_registration_no?.trim() || "";
+      licenseIssueDate = meta?.trust_registration_date?.trim() || "-";
+      break;
+    case "govt. / psu / local body":
+      registrationNo = meta?.govt_registration_no?.trim() || "";
+      licenseIssueDate = meta?.govt_registration_date?.trim() || "-";
+      break;
+    default:
+      break;
+  }
+  return { registrationNo, licenseIssueDate };
+}
+
+/** Build one Owner row for applicant_details.applicants[] (matches DB backfill shape). */
+export function buildOwnerApplicantRow(
+  ownerUserId: string,
+  meta?: OwnerApplicantMeta | null
+): ApplicantLike & Record<string, unknown> {
+  const name =
+    [meta?.first_name, meta?.middle_name, meta?.last_name].filter(Boolean).join(" ").trim() ||
+    "-";
+  const { registrationNo, licenseIssueDate } = ownerRegistrationFromMeta(meta);
+  const addressLine1 = meta?.address_line1?.trim() || "";
+  const addressLine2 = meta?.address_line2?.trim() || "";
+  const addressLine3 = meta?.address_line3?.trim() || "";
+  const residentialAddress = meta?.address?.trim() || "-";
+  return {
+    user_id: ownerUserId,
+    applicantType: "Owner",
+    name,
+    contactNumber: meta?.alternate_phone?.trim() || meta?.mobile?.trim() || "-",
+    email: meta?.email?.trim() || "-",
+    registrationNo: registrationNo || "-",
+    licenseIssueDate,
+    panNo: meta?.pan_no?.trim() || meta?.pan?.trim() || "-",
+    residentialAddress,
+    officeAddress: meta?.address?.trim() || "-",
+    address_line1: addressLine1 || undefined,
+    address_line2: addressLine2 || undefined,
+    address_line3: addressLine3 || undefined,
+    entity_type: meta?.entity_type?.trim() || undefined,
+    letterhead_url: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
+    letterheadUrl: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
+  };
+}
+
+/** Prepend the designated project owner when missing; backfill entity_type when absent. */
+export function ensureOwnerInApplicantRoster(
+  roster: { applicants?: unknown[] } | unknown[] | null | undefined,
+  ownerUserId: string,
+  meta?: OwnerApplicantMeta | null
+): { applicants: unknown[] } {
+  const applicants: ApplicantLike[] = Array.isArray(roster)
+    ? (roster as ApplicantLike[])
+    : Array.isArray(roster?.applicants)
+      ? (roster.applicants as ApplicantLike[])
+      : [];
+
+  const ownerId = ownerUserId.trim();
+  if (!ownerId) {
+    return { applicants: [...applicants] };
+  }
+
+  const ownerIndex = applicants.findIndex((a) => {
+    const uid = a.user_id || a.userId;
+    if (!sameUserId(uid, ownerId)) return false;
+    const t = (a.applicantType || a.applicant_type || "").toLowerCase();
+    return t.includes("owner");
+  });
+
+  const entityTypeFromMeta = meta?.entity_type?.trim() || "";
+
+  if (ownerIndex >= 0) {
+    const existing = applicants[ownerIndex] as ApplicantLike & Record<string, unknown>;
+    const existingType = pickText(existing.entity_type, existing.entityType);
+    if (!existingType && entityTypeFromMeta) {
+      const updated = applicants.map((row, idx) =>
+        idx === ownerIndex ? { ...row, entity_type: entityTypeFromMeta } : row
+      );
+      return { applicants: updated };
+    }
+    return { applicants: [...applicants] };
+  }
+
+  if (applicantRosterHasOwner(applicants)) {
+    return { applicants: [...applicants] };
+  }
+
+  return {
+    applicants: [buildOwnerApplicantRow(ownerId, meta), ...applicants],
+  };
+}
 
 function applicantRowHasArchitectUser(
   applicants: ApplicantLike[],

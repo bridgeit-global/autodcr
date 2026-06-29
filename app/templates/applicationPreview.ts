@@ -3,6 +3,7 @@
 import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
 import {
   addressLinesFromApplicantRecord,
+  entityTypeToSignatoryDesignation,
   formatAddressLinesForLetterDisplay,
   stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
@@ -558,17 +559,9 @@ export function mapToPdfFieldValues(
 
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
   const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
-  const normalizedClientEntityType = clientCompanyDesignation.toLowerCase();
-  const displayClientCompanyDesignation =
-    normalizedClientEntityType === "proprietorship / individual"
-      ? "Director"
-      : normalizedClientEntityType === "llp"
-        ? "Designated Partner"
-        : normalizedClientEntityType === "trust / society"
-          ? "Trustee"
-          : normalizedClientEntityType === "partnership firm"
-            ? "Partner"
-            : clientCompanyDesignation;
+  const displayClientCompanyDesignation = clientCompanyDesignation
+    ? entityTypeToSignatoryDesignation(clientCompanyDesignation)
+    : "";
   const isFireConsultantLetter = templateType === "Fire Safety Consultant";
   const buildingProposalAddressRaw = resolveBuildingProposalOffice(
     regionForProjectToken,
@@ -1335,12 +1328,38 @@ const SAVED_PDF_QR_LOCK_FN = `function __lockAppSavedPdfQr(){
   });
 }`;
 
+/** Paged.js auto-runs on `interactive`, before styles/fonts settle in blob iframes — content stays in a hidden <template>. */
+const PAGED_PREVIEW_START_SCRIPT = `<script>
+(function(){
+  async function startPagedPreview(){
+    if (document.querySelector(".pagedjs_page")) return;
+    if (!window.Paged || !window.Paged.Previewer) return;
+    try {
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
+      var previewer = new window.Paged.Previewer();
+      await previewer.preview();
+      if (typeof __lockAppSavedPdfQr === "function") __lockAppSavedPdfQr();
+    } catch (e) {
+      console.warn("[application-preview] Paged.js layout failed", e);
+    }
+  }
+  if (document.readyState === "complete") {
+    void startPagedPreview();
+  } else {
+    window.addEventListener("load", function(){ void startPagedPreview(); }, { once: true });
+  }
+})();
+</script>`;
+
 const SAVED_PDF_QR_LOCK_SCRIPT_PAGED = `<script>
 ${SAVED_PDF_QR_LOCK_FN}
 (function(){
   var prev = window.PagedConfig || {};
   var pa = prev.after;
   window.PagedConfig = Object.assign({}, prev, {
+    auto: false,
     after: async function(done){
       __lockAppSavedPdfQr();
       if (typeof pa === "function") await pa(done);
@@ -1426,6 +1445,7 @@ function letterRootFromParsed(parsed: Document): Element | null {
   return (
     parsed.querySelector("div.WordSection1") ||
     parsed.querySelector("main.page") ||
+    parsed.querySelector("div.page") ||
     null
   );
 }
@@ -1784,7 +1804,8 @@ function injectPaginatedStyles(
   ${authorityAppointmentPagedCss}
 </style>
 ${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
-<script src="${previewOrigin}/pagedjs/paged.polyfill.js"></script>`;
+<script src="${previewOrigin}/pagedjs/paged.polyfill.js"></script>
+${PAGED_PREVIEW_START_SCRIPT}`;
 
   let out = html;
   if (/<\/head>/i.test(out)) {
