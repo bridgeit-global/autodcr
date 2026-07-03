@@ -449,7 +449,11 @@ export const useStepwiseSigning = (): UseStepwiseSigning => {
         const mapped = mapBridgeError(e);
         console.error("Error signing PDF:", e);
         setError(renderError(mapped));
-        if (mapped.code === "PIN_CANCELLED" || mapped.code === "PIN_INCORRECT") {
+        if (
+          mapped.code === "PIN_CANCELLED" ||
+          mapped.code === "PIN_INCORRECT" ||
+          mapped.code === "PIN_LOCKED"
+        ) {
           setPinState("");
         }
         return null;

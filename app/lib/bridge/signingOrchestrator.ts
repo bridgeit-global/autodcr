@@ -10,7 +10,7 @@
  * respected on the wire.
  */
 
-import { sendBridgeCommand } from "./bridgeClient";
+import { BridgeError, sendBridgeCommand } from "./bridgeClient";
 import { chunkBase64 } from "./pdfChunker";
 import {
   CertInfo,
@@ -240,6 +240,9 @@ export const signPdf = async ({
       certSource,
       detail,
     });
+    if (error instanceof BridgeError) {
+      throw error;
+    }
     if (error instanceof Error) {
       throw new Error(`${error.message} (${detail})`);
     }
