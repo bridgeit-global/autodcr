@@ -80,6 +80,7 @@ import {
   preparePdfForNativeSigning,
 } from "@/app/lib/bridge/pdfSigningPrep";
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
+import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 
 type PreviewProjectData = {
   title?: string;
@@ -3153,7 +3154,8 @@ export default function ApplicationDetailsPage() {
       }
       setPreviewOpen(false);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to complete DSC signing.";
+      const mapped = mapBridgeError(err);
+      const message = mapped.hint ? `${mapped.message} ${mapped.hint}` : mapped.message;
       setSavePdfError(message);
       throw err;
     } finally {

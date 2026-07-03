@@ -21,6 +21,7 @@ export type BridgeErrorCode =
   | "CERT_NOT_FOUND"
   | "PIN_CANCELLED"
   | "PIN_INCORRECT"
+  | "PIN_LOCKED"
   | "PDF_INVALID"
   | "CMS_BUILD_FAILED"
   | "NO_TOKEN"
@@ -98,6 +99,11 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
     message: "Incorrect DSC PIN.",
     hint: "Double-check the PIN for this token and try again.",
     retryable: true,
+  },
+  PIN_LOCKED: {
+    message: "DSC token is locked after too many incorrect PIN attempts.",
+    hint: "Wait for the lockout period to expire or contact your token provider.",
+    retryable: false,
   },
   NO_TOKEN: {
     message: "No DSC token detected.",

@@ -279,7 +279,11 @@ export const useSigningStore = (): UseSigningStore => {
         const mapped = mapBridgeError(error);
         console.error("Error signing PDF:", error);
         setDscError(renderError(mapped));
-        if (mapped.code === "PIN_CANCELLED" || mapped.code === "PIN_INCORRECT") {
+        if (
+          mapped.code === "PIN_CANCELLED" ||
+          mapped.code === "PIN_INCORRECT" ||
+          mapped.code === "PIN_LOCKED"
+        ) {
           setDscPin("");
         }
         return null;
