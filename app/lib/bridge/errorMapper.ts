@@ -14,6 +14,7 @@ export type BridgeErrorCode =
   | "NATIVE_TIMEOUT"
   | "NATIVE_DISCONNECTED"
   | "NATIVE_SEND_FAILED"
+  | "EXTENSION_CONTEXT_INVALIDATED"
   | "INVALID_REQUEST"
   | "INVALID_PAYLOAD"
   | "UNKNOWN_JOB"
@@ -62,6 +63,11 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   NATIVE_SEND_FAILED: {
     message: "Failed to send request to the native host.",
     hint: "Check extension/native-host installation and retry signing.",
+    retryable: true,
+  },
+  EXTENSION_CONTEXT_INVALIDATED: {
+    message: "The AutoDCR signer extension was recently updated or reloaded.",
+    hint: "Please refresh this page (Ctrl+R / Cmd+R) and try signing again.",
     retryable: true,
   },
   INVALID_REQUEST: {
