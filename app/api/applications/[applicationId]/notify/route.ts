@@ -37,8 +37,21 @@ type Recipient = {
   userId?: string;
 };
 
+type AdminUserLookupClient = {
+  auth: {
+    admin: {
+      getUserById: (
+        id: string
+      ) => Promise<{
+        data: { user?: { user_metadata?: Record<string, unknown> } | null } | null;
+        error: { message: string } | null;
+      }>;
+    };
+  };
+};
+
 async function getRecipientMetadata(
-  admin: ReturnType<typeof createClient>,
+  admin: AdminUserLookupClient,
   recipient: Recipient
 ): Promise<Record<string, unknown> | null> {
   if (!recipient.userId?.trim()) return null;
