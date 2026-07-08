@@ -30,6 +30,8 @@ function dashboardColumnStatusToWorkflowStage(status: string): ApplicationWorkfl
       return "in_process";
     case "Approved or Verified":
       return "approved_verified";
+    case "Rejected or Cancelled":
+      return "rejected";
     default:
       return null;
   }
@@ -43,6 +45,8 @@ function workflowStageToModalCurrentStage(stage: ApplicationWorkflowStage): numb
       return 1;
     case "approved_verified":
       return 3;
+    case "rejected":
+      return 0;
     default:
       return 0;
   }
@@ -56,6 +60,8 @@ function workflowStageLabel(stage: ApplicationWorkflowStage): string {
       return "In Process";
     case "approved_verified":
       return "Approved or Verified";
+    case "rejected":
+      return "Rejected or Cancelled";
     default:
       return "Draft";
   }
@@ -626,6 +632,7 @@ function UserDashboardContent() {
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
   const [inProcessCounts, setInProcessCounts] = useState<Record<string, number>>({});
   const [approvedCounts, setApprovedCounts] = useState<Record<string, number>>({});
+  const [rejectedCounts, setRejectedCounts] = useState<Record<string, number>>({});
   const [draftApplicationsByType, setDraftApplicationsByType] = useState<Record<string, DraftApplication[]>>({});
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const selectableProjects = projects.filter((project) => project.status !== "draft");
@@ -686,6 +693,7 @@ function UserDashboardContent() {
       setDraftCounts({});
       setInProcessCounts({});
       setApprovedCounts({});
+      setRejectedCounts({});
       setDraftApplicationsByType({});
       return;
     }
@@ -697,6 +705,7 @@ function UserDashboardContent() {
       setDraftCounts({});
       setInProcessCounts({});
       setApprovedCounts({});
+      setRejectedCounts({});
       setDraftApplicationsByType({});
       return;
     }
@@ -759,6 +768,7 @@ function UserDashboardContent() {
         setDraftCounts({});
         setInProcessCounts({});
         setApprovedCounts({});
+        setRejectedCounts({});
         setDraftApplicationsByType({});
         return;
       }
@@ -790,6 +800,7 @@ function UserDashboardContent() {
     const draftMap: Record<string, number> = {};
     const inProcessMap: Record<string, number> = {};
     const approvedMap: Record<string, number> = {};
+    const rejectedMap: Record<string, number> = {};
     const groupedApplications: Record<string, DraftApplication[]> = {};
 
     applicationRows.forEach(
@@ -816,6 +827,7 @@ function UserDashboardContent() {
         if (wfBucket === "draft") draftMap[perm] = (draftMap[perm] ?? 0) + 1;
         else if (wfBucket === "in_process") inProcessMap[perm] = (inProcessMap[perm] ?? 0) + 1;
         else if (wfBucket === "approved_verified") approvedMap[perm] = (approvedMap[perm] ?? 0) + 1;
+        else if (wfBucket === "rejected") rejectedMap[perm] = (rejectedMap[perm] ?? 0) + 1;
 
         const startedOn = row.created_at
           ? new Date(row.created_at).toLocaleDateString("en-GB")
@@ -854,6 +866,7 @@ function UserDashboardContent() {
     setDraftCounts(draftMap);
     setInProcessCounts(inProcessMap);
     setApprovedCounts(approvedMap);
+    setRejectedCounts(rejectedMap);
     setDraftApplicationsByType(groupedApplications);
   }, [
     projects,
@@ -904,6 +917,48 @@ function UserDashboardContent() {
           : "Failed to delete application. Please try again.";
       showAlert({
         title: "Could not delete application",
+        message: msg,
+      });
+      return;
+    }
+
+    await loadDraftCounts();
+    setIsDraftModalOpen(false);
+    setSelectedDraftApp(null);
+  };
+
+  const handleRejectApplication = async (applicationId: string) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const authToken = sessionData.session?.access_token;
+    if (!authToken) {
+      showAlert({
+        title: "Sign in required",
+        message: "You must be signed in to reject an application.",
+      });
+      return;
+    }
+
+    const response = await fetch(
+      `/api/applications/${encodeURIComponent(applicationId)}/reject`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => null)) as {
+        error?: string;
+        details?: string;
+      } | null;
+      const msg =
+        typeof errBody?.error === "string"
+          ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+          : "Failed to reject application. Please try again.";
+      showAlert({
+        title: "Could not reject application",
         message: msg,
       });
       return;
@@ -1056,6 +1111,7 @@ function UserDashboardContent() {
                       const draftCount = draftCounts[app.name] ?? 0;
                       const inProcessCount = inProcessCounts[app.name] ?? 0;
                       const approvedCount = approvedCounts[app.name] ?? 0;
+                      const rejectedCount = rejectedCounts[app.name] ?? 0;
                       return (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="border-b border-gray-200 px-4 py-3 text-left font-medium text-gray-900">
@@ -1090,8 +1146,17 @@ function UserDashboardContent() {
                         <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "Withdrawn")}>
                           0
                         </td>
-                        <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "Rejected or Cancelled")}>
-                          0
+                        <td
+                          className={`border-b border-gray-200 px-4 py-3 text-center ${
+                            rejectedCount > 0
+                              ? "text-emerald-600 font-semibold underline cursor-pointer hover:bg-emerald-50"
+                              : "text-gray-900"
+                          }`}
+                          onClick={() =>
+                            handleCellClick(app.name, rejectedCount, "Rejected or Cancelled")
+                          }
+                        >
+                          {rejectedCount}
                         </td>
                         <td
                           className={`border-b border-gray-200 px-4 py-3 text-center ${
@@ -1190,6 +1255,7 @@ function UserDashboardContent() {
             }
           )}
           onDeleteApplication={canUseOwnerProjectActions ? handleDeleteApplication : undefined}
+          onRejectApplication={handleRejectApplication}
           onOpenApplicationDetails={handleOpenApplicationDetails}
         />
       )}

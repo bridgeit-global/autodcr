@@ -7,6 +7,14 @@ import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { uploadFileIdempotent, cleanupOldFile } from "@/app/utils/fileUtils";
 import CustomSelect from "@/app/components/CustomSelect";
+import {
+  DEFAULT_MAIL_NOTIFICATION_PREFERENCES,
+  getMailNotificationPreferences,
+  MAIL_NOTIFICATION_LABELS,
+  mailNotificationPreferencesToMetadata,
+  type MailNotificationPhase,
+  type MailNotificationPreferences,
+} from "@/app/utils/mailNotificationPreferences";
 
 interface Props {
   open: boolean;
@@ -108,6 +116,11 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   const [originalLetterheadThumbnail, setOriginalLetterheadThumbnail] = useState<string | null>(null);
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
+  const [mailNotificationPrefs, setMailNotificationPrefs] = useState<MailNotificationPreferences>(
+    DEFAULT_MAIL_NOTIFICATION_PREFERENCES
+  );
+  const [originalMailNotificationPrefs, setOriginalMailNotificationPrefs] =
+    useState<MailNotificationPreferences>(DEFAULT_MAIL_NOTIFICATION_PREFERENCES);
   const letterheadInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -254,6 +267,10 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       // Set NMA Reg Number based on role and type
       const registrationInfo = getRegistrationInfo();
       setValue("nmaRegNumber", registrationInfo.value);
+
+      const prefs = getMailNotificationPreferences(userMetadata);
+      setMailNotificationPrefs(prefs);
+      setOriginalMailNotificationPrefs(prefs);
     }
   }, [open, userMetadata, setValue]);
 
@@ -324,6 +341,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       setLetterheadThumbnail(originalLetterheadThumbnail);
       setProfilePhotoFile(null);
       setProfilePhoto(originalPhotoUrl);
+      setMailNotificationPrefs(originalMailNotificationPrefs);
       if (letterheadInputRef.current) {
         letterheadInputRef.current.value = "";
       }
@@ -341,6 +359,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       setLetterheadThumbnail(originalLetterheadThumbnail);
       setProfilePhotoFile(null);
       setProfilePhoto(originalPhotoUrl);
+      setMailNotificationPrefs(originalMailNotificationPrefs);
       if (letterheadInputRef.current) {
         letterheadInputRef.current.value = "";
       }
@@ -423,6 +442,18 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     } finally {
       setTemplateUploadBusy((prev) => ({ ...prev, [templateType]: false }));
     }
+  };
+
+  const mailPrefsDirty =
+    mailNotificationPrefs.draft !== originalMailNotificationPrefs.draft ||
+    mailNotificationPrefs.in_process !== originalMailNotificationPrefs.in_process ||
+    mailNotificationPrefs.approved !== originalMailNotificationPrefs.approved ||
+    mailNotificationPrefs.rejected !== originalMailNotificationPrefs.rejected;
+
+  const hasUnsavedChanges = Boolean(profilePhotoFile || letterheadFile || mailPrefsDirty);
+
+  const toggleMailNotification = (phase: MailNotificationPhase) => {
+    setMailNotificationPrefs((prev) => ({ ...prev, [phase]: !prev[phase] }));
   };
 
   const onSubmit = async (data: FormValues) => {
@@ -561,6 +592,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
         // Update file URLs if new files were uploaded
         authorized_signatory_photo_url: photoUrl || userMetadata.authorized_signatory_photo_url,
         letterhead_url: letterheadUrlResult || userMetadata.letterhead_url,
+        ...mailNotificationPreferencesToMetadata(mailNotificationPrefs),
       };
 
       // Get user role from metadata
@@ -728,8 +760,8 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   };
 
   const handleCloseAttempt = () => {
-    // If there are unsaved file uploads, show confirmation dialog
-    if (profilePhotoFile || letterheadFile) {
+    // If there are unsaved file uploads or preference changes, show confirmation dialog
+    if (hasUnsavedChanges) {
       setShowCloseConfirmation(true);
     } else {
       // No unsaved changes, close directly
@@ -997,6 +1029,38 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                 </div>
               </div>
 
+              {/* Email Notification Preferences */}
+              <div className="space-y-4 pt-4 border-t border-gray-200">
+                <h3 className="text-lg font-bold text-gray-900 mb-1">Email Notifications</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Choose which application phase emails you want to receive. All are enabled by default.
+                </p>
+                <div className="space-y-3">
+                  {(Object.keys(MAIL_NOTIFICATION_LABELS) as MailNotificationPhase[]).map((phase) => {
+                    const { title, description } = MAIL_NOTIFICATION_LABELS[phase];
+                    const enabled = mailNotificationPrefs[phase];
+                    return (
+                      <label
+                        key={phase}
+                        className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={enabled}
+                          onChange={() => toggleMailNotification(phase)}
+                          disabled={isSubmitting}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900">{title}</div>
+                          <div className="text-xs text-gray-500">{description}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Owner: Appointment letter HTML templates */}
               {false && userMetadata?.role === "Owner" && (
                 <div className="space-y-3 pt-2">
@@ -1087,7 +1151,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
               )}
 
               {/* Action Buttons */}
-              {(profilePhotoFile || letterheadFile) && (
+              {hasUnsavedChanges && (
                 <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                   <button
                     type="submit"
