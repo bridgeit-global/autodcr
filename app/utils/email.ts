@@ -15,7 +15,12 @@ const FROM_ADDRESS =
 
 export type NotificationType = "submitted" | "updated";
 
-export type ApplicationStage = "draft" | "saved" | "in_process" | "approved_verified";
+export type ApplicationStage =
+  | "draft"
+  | "saved"
+  | "in_process"
+  | "approved_verified"
+  | "rejected";
 
 type RecipientKind = "owner" | "consultant";
 
@@ -99,6 +104,27 @@ function getApplicationEmailContent(params: {
       helperText: "Please log in, review the document, and sign the application using the link below.",
       ctaText: "Sign Application",
       headerColor: "#d97706",
+    };
+  }
+
+  if (stage === "rejected") {
+    if (isOwner) {
+      return {
+        subject: `Application rejected: ${permissionType} – ${projectTitle}`,
+        heading: "Application Rejected",
+        bodyText: `The <strong>${permissionType}</strong> application for project <strong>${projectTitle}</strong> has been <strong>rejected or cancelled</strong>.`,
+        helperText: "You can view the application details using the link below.",
+        ctaText: "View Application",
+        headerColor: "#dc2626",
+      };
+    }
+    return {
+      subject: `Application rejected: ${permissionType} – ${projectTitle}`,
+      heading: "Application Rejected",
+      bodyText: `The <strong>${permissionType}</strong> application for project <strong>${projectTitle}</strong> has been <strong>rejected or cancelled</strong>.`,
+      helperText: "You can view the application details using the link below.",
+      ctaText: "View Application",
+      headerColor: "#dc2626",
     };
   }
 

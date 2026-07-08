@@ -1628,7 +1628,7 @@ async function persistDualLetterPdfs(
 
 function fireApplicationNotification(
   appId: string,
-  stage: "draft" | "saved" | "in_process" | "approved_verified"
+  stage: "draft" | "saved" | "in_process" | "approved_verified" | "rejected"
 ) {
   supabase.auth.getSession().then(({ data: { session } }) => {
     const token = session?.access_token;

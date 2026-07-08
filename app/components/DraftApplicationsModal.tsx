@@ -2,10 +2,15 @@
 
 import React, { useMemo, useState } from "react";
 
-export type ApplicationWorkflowStage = "draft" | "in_process" | "approved_verified";
+export type ApplicationWorkflowStage = "draft" | "in_process" | "approved_verified" | "rejected";
 
 export function normalizeApplicationWorkflowStage(value: unknown): ApplicationWorkflowStage {
-  if (value === "in_process" || value === "approved_verified" || value === "draft") {
+  if (
+    value === "in_process" ||
+    value === "approved_verified" ||
+    value === "draft" ||
+    value === "rejected"
+  ) {
     return value;
   }
   return "draft";
@@ -31,6 +36,7 @@ interface DraftApplicationsModalProps {
   status: string;
   applications: DraftApplication[];
   onDeleteApplication?: (applicationId: string) => Promise<void>;
+  onRejectApplication?: (applicationId: string) => Promise<void>;
   onOpenApplicationDetails?: (payload: {
     applicationId: string;
     projectId?: string;
@@ -53,11 +59,14 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
   status,
   applications,
   onDeleteApplication,
+  onRejectApplication,
   onOpenApplicationDetails,
 }) => {
   const [fileNumberQuery, setFileNumberQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [pendingRejectId, setPendingRejectId] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -77,6 +86,17 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
       await onDeleteApplication(applicationId);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleReject = async (applicationId: string) => {
+    if (!onRejectApplication) return;
+    setPendingRejectId(null);
+    setRejectingId(applicationId);
+    try {
+      await onRejectApplication(applicationId);
+    } finally {
+      setRejectingId(null);
     }
   };
 
@@ -174,14 +194,38 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                     )}
                   </div>
                   <p className="text-[13px] font-medium text-sky-700 mb-1">{app.status}</p>
-                  <button
-                    type="button"
-                    className="text-[13px] text-rose-600 hover:text-rose-700 hover:underline disabled:text-gray-400 disabled:no-underline"
-                    onClick={() => app.applicationId && setPendingDeleteId(app.applicationId)}
-                    disabled={!app.applicationId || deletingId === app.applicationId}
-                  >
-                    {deletingId === app.applicationId ? "Deleting..." : "Delete"}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {onRejectApplication &&
+                      app.workflowStage !== "rejected" &&
+                      app.workflowStage !== "approved_verified" && (
+                      <button
+                        type="button"
+                        className="text-[13px] text-amber-600 hover:text-amber-700 hover:underline disabled:text-gray-400 disabled:no-underline"
+                        onClick={() => app.applicationId && setPendingRejectId(app.applicationId)}
+                        disabled={
+                          !app.applicationId ||
+                          rejectingId === app.applicationId ||
+                          deletingId === app.applicationId
+                        }
+                      >
+                        {rejectingId === app.applicationId ? "Rejecting..." : "Reject"}
+                      </button>
+                    )}
+                    {onDeleteApplication && (
+                      <button
+                        type="button"
+                        className="text-[13px] text-rose-600 hover:text-rose-700 hover:underline disabled:text-gray-400 disabled:no-underline"
+                        onClick={() => app.applicationId && setPendingDeleteId(app.applicationId)}
+                        disabled={
+                          !app.applicationId ||
+                          deletingId === app.applicationId ||
+                          rejectingId === app.applicationId
+                        }
+                      >
+                        {deletingId === app.applicationId ? "Deleting..." : "Delete"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 relative pt-2">
@@ -235,6 +279,33 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                   onClick={() => handleDelete(pendingDeleteId)}
                 >
                   Yes, Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingRejectId && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-5 w-[360px]">
+              <p className="text-sm text-gray-800">
+                Are you sure you want to reject this application? It will move to Rejected or
+                Cancelled and both owner and consultant will be notified.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                  onClick={() => setPendingRejectId(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 text-sm text-white hover:bg-amber-700"
+                  onClick={() => handleReject(pendingRejectId)}
+                >
+                  Yes, Reject
                 </button>
               </div>
             </div>
