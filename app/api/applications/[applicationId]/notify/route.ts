@@ -201,7 +201,7 @@ export async function POST(
     for (const recipient of recipients) {
       if (adminClient) {
         const metadata = await getRecipientMetadata(adminClient, recipient);
-        if (metadata && !isMailNotificationEnabledForStage(metadata, stage)) {
+        if (metadata && !isMailNotificationEnabledForStage(metadata, stage, recipient.role)) {
           results.push({ email: recipient.email, success: true, skipped: true });
           continue;
         }
