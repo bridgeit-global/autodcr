@@ -10,6 +10,7 @@ import CustomSelect from "@/app/components/CustomSelect";
 import {
   DEFAULT_MAIL_NOTIFICATION_PREFERENCES,
   getMailNotificationPreferences,
+  getVisibleMailNotificationPhases,
   MAIL_NOTIFICATION_LABELS,
   mailNotificationPreferencesToMetadata,
   type MailNotificationPhase,
@@ -448,7 +449,8 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     mailNotificationPrefs.draft !== originalMailNotificationPrefs.draft ||
     mailNotificationPrefs.in_process !== originalMailNotificationPrefs.in_process ||
     mailNotificationPrefs.approved !== originalMailNotificationPrefs.approved ||
-    mailNotificationPrefs.rejected !== originalMailNotificationPrefs.rejected;
+    mailNotificationPrefs.rejected !== originalMailNotificationPrefs.rejected ||
+    mailNotificationPrefs.signing !== originalMailNotificationPrefs.signing;
 
   const hasUnsavedChanges = Boolean(profilePhotoFile || letterheadFile || mailPrefsDirty);
 
@@ -1036,7 +1038,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                   Choose which application phase emails you want to receive. All are enabled by default.
                 </p>
                 <div className="space-y-3">
-                  {(Object.keys(MAIL_NOTIFICATION_LABELS) as MailNotificationPhase[]).map((phase) => {
+                  {getVisibleMailNotificationPhases(userMetadata?.role).map((phase) => {
                     const { title, description } = MAIL_NOTIFICATION_LABELS[phase];
                     const enabled = mailNotificationPrefs[phase];
                     return (
