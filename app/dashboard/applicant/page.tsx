@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSearchParams } from "next/navigation";
@@ -25,6 +25,8 @@ import {
   type OwnerApplicantMeta,
 } from "@/app/utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "@/app/utils/ownerApplicantRoster";
+import ConsultantPartialRegistrationModal from "@/app/components/ConsultantPartialRegistrationModal";
+import { NEW_USER_SENTINEL } from "@/app/utils/consultantRegistrationShared";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -349,6 +351,9 @@ export default function ApplicantDetailsPage() {
     sortApplicantsOwnerFirst(loadDraft<ApplicantRow[]>("draft-applicant-details-applicants", []))
   );
   const [directoryOptions, setDirectoryOptions] = useState<ConsultantDirectoryEntry[]>([]);
+  const [directoryRefreshKey, setDirectoryRefreshKey] = useState(0);
+  const previousApplicantTypeRef = useRef<string | undefined>(undefined);
+  const [showNewUserModal, setShowNewUserModal] = useState(false);
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ open: boolean; applicantId: number | null; applicantName: string; applicantType: string }>({
@@ -383,10 +388,14 @@ export default function ApplicantDetailsPage() {
 
   const selectedApplicantType = watch("applicantType");
   const selectedDirectoryId = watch("plumbingConsultant");
+  const isValidDirectorySelection =
+    Boolean(selectedDirectoryId) && selectedDirectoryId !== NEW_USER_SENTINEL;
   // In this flow, users should not type manually; values come only from directory selection.
   // Show the directory dropdown as soon as applicant type is selected.
   const showDirectoryDropdown = !!selectedApplicantType;
-  const isLocked = showDirectoryDropdown && Boolean(selectedDirectoryId);
+  const canAddNewUser =
+    !!selectedApplicantType && selectedApplicantType !== "Owner";
+  const isLocked = showDirectoryDropdown && isValidDirectorySelection;
 
   // Capture logged-in Supabase auth user id (used to store `user_id` in applicant rows)
   useEffect(() => {
@@ -520,11 +529,27 @@ export default function ApplicantDetailsPage() {
           licenseIssueDate: row.license_issue_date || "",
         })) ?? [];
 
-      setDirectoryOptions(mapped);
+      // Keep any locally added entries (e.g. just-created partial users) until RPC includes them,
+      // but replace entirely when the applicant type changes.
+      const typeChanged = previousApplicantTypeRef.current !== selectedApplicantType;
+      previousApplicantTypeRef.current = selectedApplicantType;
+      if (typeChanged) {
+        setDirectoryOptions(mapped);
+      } else {
+        setDirectoryOptions((prev) => {
+          const byId = new Map(mapped.map((entry) => [entry.id, entry]));
+          for (const entry of prev) {
+            if (entry.id && !byId.has(entry.id)) {
+              byId.set(entry.id, entry);
+            }
+          }
+          return Array.from(byId.values());
+        });
+      }
     };
 
     loadDirectoryOptions();
-  }, [selectedApplicantType]);
+  }, [selectedApplicantType, directoryRefreshKey]);
 
   // Owner-created projects: logged-in owner is always the first applicant row.
   // Consultants: logged-in consultant type is added when missing.
@@ -723,7 +748,7 @@ export default function ApplicantDetailsPage() {
 
   // When a consultant or owner is selected from the dropdown, auto-fill all form fields
   useEffect(() => {
-    if (!selectedDirectoryId || !showDirectoryDropdown) {
+    if (!isValidDirectorySelection || !showDirectoryDropdown) {
       setIsFormAutofilled(false);
       return;
     }
@@ -763,7 +788,106 @@ export default function ApplicantDetailsPage() {
     } else {
       setIsFormAutofilled(false);
     }
-  }, [selectedDirectoryId, directoryOptions, showDirectoryDropdown, setValue, clearErrors]);
+  }, [
+    selectedDirectoryId,
+    isValidDirectorySelection,
+    directoryOptions,
+    showDirectoryDropdown,
+    setValue,
+    clearErrors,
+  ]);
+
+  const handleNewUserSuccess = async (result: {
+    user_id: string;
+    email?: string;
+    metadata?: Record<string, unknown>;
+  }) => {
+    setShowNewUserModal(false);
+
+    const meta = result.metadata || {};
+    const fullName = [meta.first_name, meta.middle_name, meta.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const addressLine1 = String(meta.address_line1 || "");
+    const addressLine2 = String(meta.address_line2 || "");
+    const addressLine3 = String(meta.address_line3 || "");
+
+    let registrationNumber = "";
+    let licenseIssueDate = String(meta.registration_date || "");
+    const consultantType = String(meta.consultant_type || selectedApplicantType || "");
+    switch (consultantType) {
+      case "Architect":
+        registrationNumber = String(meta.coa_reg_no || "");
+        break;
+      case "Structural Engineer":
+        registrationNumber = String(meta.structural_license_no || "");
+        break;
+      case "Licensed Surveyor":
+        registrationNumber = String(meta.lbs_license_no || "");
+        break;
+      case "MEP Consultant":
+        registrationNumber = String(meta.electrical_license_no || "");
+        break;
+      case "Plumber":
+        registrationNumber = String(meta.plumber_license_no || "");
+        break;
+      case "Fire Consultant":
+        registrationNumber = String(meta.fire_license_no || "");
+        break;
+      case "Landscape Consultant":
+        registrationNumber = String(meta.landscape_license_no || "");
+        break;
+      case "PMC / Project Manager":
+        registrationNumber = String(meta.pmc_registration_no || "");
+        break;
+      case "Geotechnical Consultant":
+        registrationNumber = String(meta.nabl_accreditation_no || "");
+        break;
+      case "Environmental Consultant":
+        registrationNumber = String(meta.env_license_no || "");
+        break;
+      case "Town Planner":
+        registrationNumber = String(meta.town_planner_license_no || "");
+        break;
+      default:
+        break;
+    }
+
+    if (Object.keys(meta).length > 0) {
+      const entry: ConsultantDirectoryEntry = {
+        id: result.user_id,
+        fullName: fullName || result.email || "New User",
+        email: String(meta.email || result.email || ""),
+        contactNumber: String(meta.alternate_phone || meta.mobile || ""),
+        pan: String(meta.pan || ""),
+        address_line1: addressLine1,
+        address_line2: addressLine2,
+        address_line3: addressLine3,
+        address: composeAddress(
+          addressLine1,
+          addressLine2,
+          addressLine3,
+          String(meta.address || "")
+        ),
+        registrationNumber,
+        licenseIssueDate,
+      };
+      setDirectoryOptions((prev) => {
+        if (prev.some((e) => e.id === entry.id)) {
+          return prev.map((e) => (e.id === entry.id ? entry : e));
+        }
+        return [entry, ...prev];
+      });
+    }
+
+    setDirectoryRefreshKey((k) => k + 1);
+    setValue("plumbingConsultant", result.user_id, {
+      shouldValidate: true,
+      shouldDirty: true,
+      shouldTouch: true,
+    });
+  };
 
   // Get applicant types that are already added
   const addedApplicantTypes = applicants.map((applicant) => applicant.applicantType);
@@ -876,10 +1000,13 @@ export default function ApplicantDetailsPage() {
     if (isReadOnlyMode) return;
     const nextId = applicants.length ? Math.max(...applicants.map((item) => item.id)) + 1 : 1;
     // All entries come from directory dropdown (consultants or owners), use their auth user id
-    const userId = showDirectoryDropdown && selectedDirectoryId ? selectedDirectoryId : undefined;
+    const userId =
+      showDirectoryDropdown && isValidDirectorySelection
+        ? selectedDirectoryId
+        : undefined;
 
     const selectedDirectoryEntry =
-      showDirectoryDropdown && selectedDirectoryId
+      showDirectoryDropdown && isValidDirectorySelection
         ? directoryOptions.find((entry) => entry.id === selectedDirectoryId)
         : undefined;
     let addressLine1 = pickText(selectedDirectoryEntry?.address_line1);
@@ -1256,18 +1383,38 @@ export default function ApplicantDetailsPage() {
                     })}
                   />
                   <CustomSelect
-                    value={watch("plumbingConsultant") || ""}
-                    onChange={(val) => setValue("plumbingConsultant", val, { shouldValidate: true })}
-                    options={directoryOptions.map((entry) => ({
-                      value: entry.id,
-                      label: entry.fullName,
-                    }))}
+                    value={
+                      watch("plumbingConsultant") === NEW_USER_SENTINEL
+                        ? ""
+                        : watch("plumbingConsultant") || ""
+                    }
+                    onChange={(val) => {
+                      if (val === NEW_USER_SENTINEL) {
+                        setShowNewUserModal(true);
+                        setValue("plumbingConsultant", "", { shouldValidate: false });
+                        resetApplicantFields();
+                        setIsFormAutofilled(false);
+                        return;
+                      }
+                      setValue("plumbingConsultant", val, { shouldValidate: true });
+                    }}
+                    options={[
+                      ...(canAddNewUser
+                        ? [{ value: NEW_USER_SENTINEL, label: "+ New User" }]
+                        : []),
+                      ...directoryOptions.map((entry) => ({
+                        value: entry.id,
+                        label: entry.fullName,
+                      })),
+                    ]}
                     placeholder={
                       directoryOptions.length === 0
-                        ? `No ${selectedApplicantType} found`
+                        ? canAddNewUser
+                          ? `No ${selectedApplicantType} found — add new`
+                          : `No ${selectedApplicantType} found`
                         : `Select ${selectedApplicantType}`
                     }
-                    disabled={directoryOptions.length === 0}
+                    disabled={!selectedApplicantType}
                   />
                   {errors.plumbingConsultant && (
                     <p className="text-red-600 text-sm mt-1">{errors.plumbingConsultant.message}</p>
@@ -1472,6 +1619,13 @@ export default function ApplicantDetailsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ConsultantPartialRegistrationModal
+        open={showNewUserModal && canAddNewUser}
+        consultantType={selectedApplicantType || ""}
+        onClose={() => setShowNewUserModal(false)}
+        onSuccess={handleNewUserSuccess}
+      />
     </>
   );
 }

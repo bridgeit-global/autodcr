@@ -1,0 +1,130 @@
+import { createClient, type User } from "@supabase/supabase-js";
+import {
+  getPhoneFromMetadata,
+  getRegistrationCompleteness,
+  getRegistrationNumberFromMetadata,
+  normalizePhone,
+  normalizeRegNo,
+  REGISTRATION_NUMBER_META_BY_TYPE,
+} from "@/app/utils/consultantRegistrationShared";
+import { getSupabasePublicUrl } from "@/app/utils/supabaseEnv";
+
+export type ConsultantLookupMatch = {
+  user_id: string;
+  email: string;
+  metadata: Record<string, unknown>;
+  status: "incomplete" | "complete";
+};
+
+export function createServiceRoleClient() {
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceRole) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+  }
+  return createClient(getSupabasePublicUrl(), serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+export async function listAllAuthUsers(
+  admin: ReturnType<typeof createServiceRoleClient>
+): Promise<User[]> {
+  const users: User[] = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+    if (error) throw error;
+    const batch = data?.users || [];
+    users.push(...batch);
+    if (batch.length < 200) break;
+  }
+  return users;
+}
+
+function toMatch(user: User): ConsultantLookupMatch {
+  const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+  return {
+    user_id: user.id,
+    email: user.email || String(metadata.email || ""),
+    metadata,
+    status: getRegistrationCompleteness(metadata),
+  };
+}
+
+export async function findConsultantByPhone(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  phone: string
+): Promise<ConsultantLookupMatch | null> {
+  const normalized = normalizePhone(phone);
+  if (normalized.length !== 10) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const role = String(meta.role || "");
+    if (role && role !== "Consultant") continue;
+
+    const metaPhone = getPhoneFromMetadata(meta);
+    const authPhone = normalizePhone(user.phone || "");
+    if (metaPhone === normalized || authPhone === normalized) {
+      return toMatch(user);
+    }
+  }
+  return null;
+}
+
+export async function findConsultantByRegistrationNumber(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  registrationNumber: string,
+  consultantType?: string
+): Promise<ConsultantLookupMatch | null> {
+  const normalized = normalizeRegNo(registrationNumber);
+  if (!normalized) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const role = String(meta.role || "");
+    if (role && role !== "Consultant") continue;
+
+    if (consultantType) {
+      const mapping = REGISTRATION_NUMBER_META_BY_TYPE[consultantType];
+      if (!mapping) continue;
+      const value = normalizeRegNo(String(meta[mapping.metaKey] || ""));
+      if (value && value === normalized) {
+        return toMatch(user);
+      }
+      continue;
+    }
+
+    const anyReg = getRegistrationNumberFromMetadata(meta);
+    if (anyReg && anyReg === normalized) {
+      return toMatch(user);
+    }
+  }
+  return null;
+}
+
+export async function findConsultantByEmail(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  email: string
+): Promise<ConsultantLookupMatch | null> {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const userEmail = (user.email || "").trim().toLowerCase();
+    const metaEmail = String(
+      ((user.user_metadata || {}) as Record<string, unknown>).email || ""
+    )
+      .trim()
+      .toLowerCase();
+    if (userEmail === normalized || metaEmail === normalized) {
+      return toMatch(user);
+    }
+  }
+  return null;
+}
