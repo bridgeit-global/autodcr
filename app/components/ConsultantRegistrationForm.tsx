@@ -9,6 +9,12 @@ import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import CustomSelect from "@/app/components/CustomSelect";
+import {
+  isPartialProfileField,
+  metadataToFormFields,
+  normalizePhone,
+  REGISTRATION_NUMBER_META_BY_TYPE,
+} from "@/app/utils/consultantRegistrationShared";
 
 interface ConsultantRegistrationFormProps {
   title?: string;
@@ -37,6 +43,12 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   const [showEmailOTPModal, setShowEmailOTPModal] = useState(false);
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
+  const [isResumingIncomplete, setIsResumingIncomplete] = useState(false);
+  const [resumePrompt, setResumePrompt] = useState<{
+    user_id: string;
+    email?: string;
+    metadata: Record<string, unknown>;
+  } | null>(null);
   
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
@@ -273,6 +285,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     [line1, line2, line3].map((v) => v.trim()).filter(Boolean).join("\n");
 
   const handleInputChange = (field: string, value: string | boolean) => {
+    if (isResumingIncomplete && isPartialProfileField(field)) {
+      return;
+    }
     const normalizedValue =
       field === "pan" && typeof value === "string" ? value.toUpperCase() : value;
     setFormData(prev => {
@@ -296,6 +311,115 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       }
       return updated;
     });
+  };
+
+  const applyResumeFromMetadata = (
+    userId: string,
+    metadata: Record<string, unknown>,
+    email?: string
+  ) => {
+    const fields = metadataToFormFields(metadata);
+    setFormData((prev) => ({
+      ...prev,
+      ...fields,
+      email: fields.email || email || prev.email,
+      address: composeAddress(
+        fields.addressLine1 || "",
+        fields.addressLine2 || "",
+        fields.addressLine3 || ""
+      ),
+    }));
+    setVerifiedUserId(userId);
+    setIsPhoneVerified(true);
+    setIsEmailVerified(true);
+    setIsResumingIncomplete(true);
+    setResumePrompt(null);
+    setFormError("");
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.alternatePhone;
+      delete next.email;
+      return next;
+    });
+  };
+
+  const lookupPhoneBeforeVerify = async (): Promise<boolean> => {
+    const phone = normalizePhone(formData.alternatePhone);
+    if (phone.length !== 10) {
+      setErrors((prev) => ({
+        ...prev,
+        alternatePhone: "Please enter a valid 10-digit phone number",
+      }));
+      return false;
+    }
+
+    try {
+      const res = await fetch("/api/consultants/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await res.json();
+
+      if (data.status === "complete") {
+        setErrors((prev) => ({
+          ...prev,
+          alternatePhone: "This phone number is already registered",
+        }));
+        setFormError("This phone number is already registered");
+        return false;
+      }
+
+      if (data.status === "incomplete" && data.user_id) {
+        setResumePrompt({
+          user_id: data.user_id,
+          email: data.email,
+          metadata: data.metadata || {},
+        });
+        return false;
+      }
+
+      return true;
+    } catch {
+      setFormError("Failed to verify phone number uniqueness. Please try again.");
+      return false;
+    }
+  };
+
+  const lookupRegistrationUniqueness = async (regField?: string) => {
+    const mapping = REGISTRATION_NUMBER_META_BY_TYPE[formData.consultantType];
+    if (!mapping) return;
+    if (regField && regField !== mapping.formField) return;
+
+    const regNo = String(
+      (formData as Record<string, unknown>)[mapping.formField] || ""
+    ).trim();
+    if (!regNo) return;
+
+    try {
+      const res = await fetch("/api/consultants/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registrationNumber: regNo,
+          consultantType: formData.consultantType,
+        }),
+      });
+      const data = await res.json();
+      if (
+        (data.status === "incomplete" || data.status === "complete") &&
+        data.user_id &&
+        data.user_id !== verifiedUserId
+      ) {
+        setErrors((prev) => ({
+          ...prev,
+          [mapping.formField]: "This registration number is already registered",
+        }));
+        setFormError("This registration number is already registered");
+      }
+    } catch {
+      // non-blocking on blur
+    }
   };
 
   const handleFileChange = (field: string, file: File | null) => {
@@ -1092,6 +1216,57 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setIsSubmitting(true);
 
     try {
+      // Phone + registration uniqueness (skip self when resuming incomplete profile)
+      const phoneLookupRes = await fetch("/api/consultants/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: formData.alternatePhone }),
+      });
+      const phoneLookup = await phoneLookupRes.json();
+      if (
+        phoneLookup.status === "complete" ||
+        (phoneLookup.status === "incomplete" &&
+          phoneLookup.user_id &&
+          phoneLookup.user_id !== verifiedUserId)
+      ) {
+        setFormError(
+          phoneLookup.status === "complete"
+            ? "This phone number is already registered"
+            : "This phone number belongs to another incomplete registration"
+        );
+        setIsSubmitting(false);
+        scrollToSection("section-basic-details");
+        return;
+      }
+
+      const regMapping = REGISTRATION_NUMBER_META_BY_TYPE[formData.consultantType];
+      if (regMapping) {
+        const regNo = String(
+          (formData as Record<string, unknown>)[regMapping.formField] || ""
+        ).trim();
+        if (regNo) {
+          const regLookupRes = await fetch("/api/consultants/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              registrationNumber: regNo,
+              consultantType: formData.consultantType,
+            }),
+          });
+          const regLookup = await regLookupRes.json();
+          if (
+            (regLookup.status === "incomplete" || regLookup.status === "complete") &&
+            regLookup.user_id &&
+            regLookup.user_id !== verifiedUserId
+          ) {
+            setFormError("This registration number is already registered");
+            setIsSubmitting(false);
+            scrollToSection("section-registration");
+            return;
+          }
+        }
+      }
+
        // Step 0: Check if userId already exists
        console.log('=== USER ID UNIQUENESS CHECK START ===');
        console.log('Checking userId uniqueness for:', formData.userId);
@@ -1318,6 +1493,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           letterhead_url: letterheadUrl,
             registration_date: formData.registrationDate,
             declaration_accepted: formData.acceptDeclaration,
+            registration_status: 'complete',
             status: 'pending'
         };
 
@@ -1467,6 +1643,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const expiryStatus = getExpiryStatus();
+  const lockPartialProfileFields = isResumingIncomplete;
 
   return (
     <>
@@ -1588,6 +1765,45 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
         )}
 
+        {resumePrompt && (
+          <div className="mb-6 p-4 border border-amber-200 bg-amber-50 rounded-lg space-y-3">
+            <p className="font-medium text-amber-900">
+              This phone number is already registered with an incomplete profile. Continue with
+              remaining login creation, documents, letterhead, and declaration.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  applyResumeFromMetadata(
+                    resumePrompt.user_id,
+                    resumePrompt.metadata,
+                    resumePrompt.email
+                  )
+                }
+                className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700"
+              >
+                Continue Remaining Steps
+              </button>
+              <button
+                type="button"
+                onClick={() => setResumePrompt(null)}
+                className="bg-white border border-amber-300 text-amber-900 px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isResumingIncomplete && (
+          <div className="mb-6 p-4 border border-emerald-200 bg-emerald-50 rounded-lg text-emerald-900 text-sm">
+            Resuming incomplete registration. Basic details and registration numbers are
+            read-only. Complete documents, letterhead, login setup, and declaration, then
+            submit.
+          </div>
+        )}
+
         <div className="space-y-6">
           {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
@@ -1608,7 +1824,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               Tell us who you are
             </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <fieldset
+                disabled={lockPartialProfileFields}
+                className={`grid grid-cols-1 md:grid-cols-2 gap-4 border-0 p-0 m-0 min-w-0 ${
+                  lockPartialProfileFields ? "cursor-not-allowed [&_*]:cursor-not-allowed" : ""
+                }`}
+              >
                 {/* Row 1 */}
                 <div>
                   <label className="block font-medium text-black mb-1">
@@ -1632,6 +1853,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     ]}
                     placeholder="Select Consultant Type"
                     className="w-full"
+                    disabled={lockPartialProfileFields}
                   />
                   {errors.consultantType && (
                     <p className="text-xs text-red-600 mt-1">{errors.consultantType}</p>
@@ -1699,7 +1921,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       }}
                       className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-emerald-500 outline-none ${isEmailVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="name@example.com"
-                      disabled={isEmailVerified}
+                      disabled={isEmailVerified || lockPartialProfileFields}
                     />
                     {isEmailVerified ? (
                       <div className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
@@ -1712,6 +1934,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       <button
                         type="button"
                         onClick={() => {
+                          if (isResumingIncomplete && verifiedUserId) {
+                            setIsEmailVerified(true);
+                            return;
+                          }
                           if (!formData.email || formData.email.trim() === '') {
                             setErrors(prev => ({ ...prev, email: "Email is required" }));
                             return;
@@ -1759,12 +1985,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                       value={formData.alternatePhone}
                       onChange={(e) => {
                         handleInputChange("alternatePhone", e.target.value);
-                        // Reset verification if phone number changes
                         if (isPhoneVerified) setIsPhoneVerified(false);
                       }}
                       className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-emerald-500 outline-none ${isPhoneVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="Enter 10-digit phone number"
-                      disabled={isPhoneVerified}
+                      disabled={isPhoneVerified || lockPartialProfileFields}
                     />
                     {isPhoneVerified ? (
                       <div className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
@@ -1776,15 +2001,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     ) : (
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (!formData.alternatePhone || formData.alternatePhone.trim() === '') {
                             setErrors(prev => ({ ...prev, alternatePhone: "Phone number is required" }));
                             return;
                           }
-                          if (formData.alternatePhone.length === 10) {
-                            setShowPhoneOTPModal(true);
-                          } else {
+                          if (formData.alternatePhone.length !== 10) {
                             setErrors(prev => ({ ...prev, alternatePhone: "Please enter a valid 10-digit phone number" }));
+                            return;
+                          }
+                          const ok = await lookupPhoneBeforeVerify();
+                          if (ok) {
+                            setShowPhoneOTPModal(true);
                           }
                         }}
                         className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg font-medium hover:bg-emerald-100 transition whitespace-nowrap"
@@ -1868,7 +2096,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     placeholder="Additional details (optional)"
                   />
                 </div>
-            </div>
+            </fieldset>
           </div>
 
         {/* Registration Numbers Section - Dynamic based on Consultant Type */}
@@ -1896,6 +2124,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 </div>
               )}
 
+              <fieldset
+                disabled={lockPartialProfileFields}
+                className={`border-0 p-0 m-0 min-w-0 ${
+                  lockPartialProfileFields ? "cursor-not-allowed [&_*]:cursor-not-allowed" : ""
+                }`}
+              >
+
               {/* Architect */}
               {formData.consultantType === "Architect" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1904,6 +2139,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.coaRegNo}
                       onChange={(e) => handleInputChange("coaRegNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("coaRegNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="e.g., CA/2020/12345"
                     />
@@ -1946,6 +2182,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.structuralLicenseNo}
                       onChange={(e) => handleInputChange("structuralLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("structuralLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
@@ -2003,6 +2240,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.lbsLicenseNo}
                       onChange={(e) => handleInputChange("lbsLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("lbsLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter LBS license number"
                     />
@@ -2061,6 +2299,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.electricalLicenseNo}
                       onChange={(e) => handleInputChange("electricalLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("electricalLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter electrical license number"
                     />
@@ -2112,6 +2351,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.plumberLicenseNo}
                       onChange={(e) => handleInputChange("plumberLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("plumberLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter plumber license number"
                     />
@@ -2154,6 +2394,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.fireLicenseNo}
                       onChange={(e) => handleInputChange("fireLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("fireLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter fire license number"
                     />
@@ -2196,6 +2437,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.landscapeLicenseNo}
                       onChange={(e) => handleInputChange("landscapeLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("landscapeLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
@@ -2238,6 +2480,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.pmcRegistrationNo}
                       onChange={(e) => handleInputChange("pmcRegistrationNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("pmcRegistrationNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter PMC registration number"
                     />
@@ -2280,6 +2523,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.nablAccreditationNo}
                       onChange={(e) => handleInputChange("nablAccreditationNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("nablAccreditationNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter NABL accreditation number"
                     />
@@ -2331,6 +2575,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.envLicenseNo}
                       onChange={(e) => handleInputChange("envLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("envLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
@@ -2373,6 +2618,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     <input
                       value={formData.townPlannerLicenseNo}
                       onChange={(e) => handleInputChange("townPlannerLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("townPlannerLicenseNo")}
                       className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Enter license number"
                     />
@@ -2406,6 +2652,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   </div>
                 </div>
               )}
+
+              </fieldset>
 
             </div>
 
