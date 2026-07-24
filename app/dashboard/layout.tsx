@@ -31,6 +31,7 @@ import {
 } from "../utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "../utils/ownerApplicantRoster";
 import { sanitizeReturnUrl } from "../utils/applicationDeepLink";
+import { combineProjectTitleWithProposalNo } from "../utils/projectTitleProposal";
 
 type RequiredPage = {
   key: string;
@@ -416,15 +417,16 @@ function DashboardLayoutContent({
     const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
     const proposalNo = (projectInfo as any)?.proposalNo?.trim() || "";
+    const previousProposalNo = String(
+      (verifiedProjectData?.project_info as { proposalNo?: string } | undefined)
+        ?.proposalNo || ""
+    ).trim();
 
-    let baseTitle = (projectTitle as string) || "";
-    if (isActuallyEditMode && proposalNo) {
-      if (baseTitle.trim().endsWith(` ${proposalNo}`)) {
-        baseTitle = baseTitle.trim().slice(0, -(proposalNo.length + 1)).trim();
-      }
-    }
-
-    const finalProjectTitle = proposalNo ? `${baseTitle} ${proposalNo}`.trim() : baseTitle;
+    const finalProjectTitle = combineProjectTitleWithProposalNo(
+      (projectTitle as string) || "",
+      proposalNo,
+      [previousProposalNo]
+    );
 
     const deepEqual = (a: any, b: any): boolean => {
       if (a === b) return true;
@@ -895,15 +897,16 @@ function DashboardLayoutContent({
       const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
       const proposalNo = (projectInfo as { proposalNo?: string })?.proposalNo?.trim() || "";
+      const previousProposalNo = String(
+        (existingData?.project_info as { proposalNo?: string } | undefined)?.proposalNo ||
+          ""
+      ).trim();
 
-      let baseTitle = projectTitle as string;
-      if (isActuallyEditMode && proposalNo) {
-        if (baseTitle.trim().endsWith(` ${proposalNo}`)) {
-          baseTitle = baseTitle.trim().slice(0, -(proposalNo.length + 1)).trim();
-        }
-      }
-
-      const finalProjectTitle = proposalNo ? `${baseTitle} ${proposalNo}`.trim() : baseTitle;
+      const finalProjectTitle = combineProjectTitleWithProposalNo(
+        projectTitle as string,
+        proposalNo,
+        [previousProposalNo]
+      );
 
       const payload = buildProjectUpdatePayload({
         userId,

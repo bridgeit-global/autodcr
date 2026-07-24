@@ -9,6 +9,7 @@ import DraftApplicationsModal, { DraftApplication } from "../components/DraftApp
 import CustomSelect from "@/app/components/CustomSelect";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import { supabase } from "@/app/utils/supabase";
+import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import {
@@ -456,11 +457,13 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
     project_info?: { proposalNo?: string } | null;
   }) => {
     const detectedProposalNo = project.title.match(/\s(\d{3,})$/)?.[1];
-    const proposalNo = project.project_info?.proposalNo?.trim() || detectedProposalNo;
-    const cleanTitle =
-      proposalNo && project.title.endsWith(` ${proposalNo}`)
-        ? project.title.slice(0, -(proposalNo.length + 1))
-        : project.title;
+    const proposalNo =
+      project.project_info?.proposalNo?.trim() || detectedProposalNo || "";
+    const cleanTitle = getProjectBaseTitle(
+      project.title,
+      proposalNo,
+      (project.project_info as { title?: string } | null | undefined)?.title
+    );
     const proposalPart = proposalNo ? ` (${proposalNo})` : "";
     const draftPart = project.status === "draft" ? " (Draft)" : "";
     return {
@@ -643,11 +646,13 @@ function UserDashboardContent() {
     project_info?: { proposalNo?: string } | null;
   }) => {
     const detectedProposalNo = project.title.match(/\s(\d{3,})$/)?.[1];
-    const proposalNo = project.project_info?.proposalNo?.trim() || detectedProposalNo;
-    const cleanTitle =
-      proposalNo && project.title.endsWith(` ${proposalNo}`)
-        ? project.title.slice(0, -(proposalNo.length + 1))
-        : project.title;
+    const proposalNo =
+      project.project_info?.proposalNo?.trim() || detectedProposalNo || "";
+    const cleanTitle = getProjectBaseTitle(
+      project.title,
+      proposalNo,
+      (project.project_info as { title?: string } | null | undefined)?.title
+    );
     const proposalPart = proposalNo ? ` (${proposalNo})` : "";
     const draftPart = project.status === "draft" ? " (Draft)" : "";
     return {

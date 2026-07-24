@@ -44,6 +44,9 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
   const [isResumingIncomplete, setIsResumingIncomplete] = useState(false);
+  const [existingLetterheadUrl, setExistingLetterheadUrl] = useState<string | null>(
+    null
+  );
   const [resumePrompt, setResumePrompt] = useState<{
     user_id: string;
     email?: string;
@@ -333,6 +336,16 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setIsPhoneVerified(true);
     setIsEmailVerified(true);
     setIsResumingIncomplete(true);
+    const existingLh = String(metadata.letterhead_url || "").trim();
+    setExistingLetterheadUrl(existingLh || null);
+    if (existingLh) {
+      setHasViewedLetterhead(true);
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.letterheadFile;
+        return next;
+      });
+    }
     setResumePrompt(null);
     setFormError("");
     setErrors((prev) => {
@@ -423,6 +436,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const handleFileChange = (field: string, file: File | null) => {
+    if (isResumingIncomplete && isPartialProfileField(field)) {
+      return;
+    }
     setFormData(prev => {
       const updated = {
         ...prev,
@@ -763,7 +779,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         // Optional PAN card upload
         break;
       case "letterheadFile":
-        if (!value) error = "Upload Letterhead";
+        if (!value && !existingLetterheadUrl) error = "Upload Letterhead";
         break;
       case "coaRegNo":
         if (!value) {
@@ -1143,7 +1159,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "authorizedSignatoryPhotoFile",
         "authorizedSignatorySignatureFile",
         "panCardFile",
-        "letterheadFile",
+        ...(existingLetterheadUrl ? [] : ["letterheadFile"]),
         "registrationDate",
         "userId",
         "password",
@@ -1408,6 +1424,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           }
           letterheadUrl = result.url;
           uploadedFilePaths.push(result.path);
+        } else if (existingLetterheadUrl) {
+          letterheadUrl = existingLetterheadUrl;
         }
 
         // Upload type-specific certificate based on consultant type
@@ -1644,6 +1662,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
   const expiryStatus = getExpiryStatus();
   const lockPartialProfileFields = isResumingIncomplete;
+  const hasExistingLetterhead = Boolean(existingLetterheadUrl);
 
   return (
     <>
@@ -1798,9 +1817,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
         {isResumingIncomplete && (
           <div className="mb-6 p-4 border border-emerald-200 bg-emerald-50 rounded-lg text-emerald-900 text-sm">
-            Resuming incomplete registration. Basic details and registration numbers are
-            read-only. Complete documents, letterhead, login setup, and declaration, then
-            submit.
+            Resuming incomplete registration. Basic details, registration numbers
+            {hasExistingLetterhead ? ", and letterhead" : ""} are read-only.
+            Complete documents, {hasExistingLetterhead ? "" : "letterhead, "}login
+            setup, and declaration, then submit.
           </div>
         )}
 
@@ -2965,9 +2985,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 <h3 className="text-lg font-semibold text-black">Letterhead</h3>
               </div>
               <p className="text-sm text-gray-600 mb-4 ml-11">
-                Upload your letterhead image (JPG/PNG). After successful upload, you will see a preview showing where it will be placed.
+                {hasExistingLetterhead
+                  ? "Letterhead was already uploaded during partial registration and cannot be changed here."
+                  : "Upload your letterhead image (JPG/PNG). After successful upload, you will see a preview showing where it will be placed."}
               </p>
 
+              {hasExistingLetterhead ? (
+                <div
+                  className={`border rounded-lg p-4 bg-gray-50 space-y-3 ${
+                    lockPartialProfileFields
+                      ? "cursor-not-allowed [&_*]:cursor-not-allowed"
+                      : ""
+                  }`}
+                >
+                  <p className="text-sm font-medium text-emerald-800">
+                    Letterhead already on file
+                  </p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={existingLetterheadUrl || ""}
+                    alt="Saved letterhead"
+                    className="max-h-64 mx-auto rounded border border-gray-200 bg-white object-contain"
+                  />
+                </div>
+              ) : (
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block font-medium text-black mb-1">Letterhead Image <span className="text-red-600 font-bold">*</span></label>
@@ -3078,6 +3119,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   </div>
                 )}
               </div>
+              )}
             </div>
 
             {/* Login Setup Section */}
