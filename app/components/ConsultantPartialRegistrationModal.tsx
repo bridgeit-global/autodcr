@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import CustomSelect from "@/app/components/CustomSelect";
 import { supabase } from "@/app/utils/supabase";
 import {
@@ -92,6 +93,12 @@ export default function ConsultantPartialRegistrationModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkingPhone, setCheckingPhone] = useState(false);
   const [resumePrompt, setResumePrompt] = useState<ResumePrompt | null>(null);
+  const [letterheadFile, setLetterheadFile] = useState<File | null>(null);
+  const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState<string | null>(
+    null
+  );
+  const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
+  const [hasViewedLetterhead, setHasViewedLetterhead] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -104,7 +111,23 @@ export default function ConsultantPartialRegistrationModal({
     setFormError("");
     setResumePrompt(null);
     setIsSubmitting(false);
+    setLetterheadFile(null);
+    if (letterheadPreviewUrl) {
+      URL.revokeObjectURL(letterheadPreviewUrl);
+    }
+    setLetterheadPreviewUrl(null);
+    setIsLetterheadModalOpen(false);
+    setHasViewedLetterhead(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when modal opens / type changes
   }, [open, consultantType]);
+
+  useEffect(() => {
+    return () => {
+      if (letterheadPreviewUrl) {
+        URL.revokeObjectURL(letterheadPreviewUrl);
+      }
+    };
+  }, [letterheadPreviewUrl]);
 
   useEffect(() => {
     if (!open) return;
@@ -127,6 +150,88 @@ export default function ConsultantPartialRegistrationModal({
       delete next[field];
       return next;
     });
+  };
+
+  const handleLetterheadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const validImageTypes = ["image/jpeg", "image/jpg", "image/png"];
+    const validExtensions = [".jpg", ".jpeg", ".png"];
+    const isValidImage =
+      validImageTypes.includes(file.type) ||
+      validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext));
+
+    if (!isValidImage) {
+      setErrors((prev) => ({
+        ...prev,
+        letterheadFile: "Please upload a JPG or PNG image file",
+      }));
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setErrors((prev) => ({
+        ...prev,
+        letterheadFile: "Letterhead must be 10MB or smaller",
+      }));
+      e.target.value = "";
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = document.createElement("img");
+    img.onload = () => {
+      const aspectRatio = img.width / img.height;
+      const a4Ratio = 210 / 297;
+      const tolerance = 0.02;
+      if (aspectRatio < a4Ratio - tolerance || aspectRatio > a4Ratio + tolerance) {
+        setErrors((prev) => ({
+          ...prev,
+          letterheadFile:
+            "Letterhead image must be of A4 size (210mm x 297mm aspect ratio)",
+        }));
+        URL.revokeObjectURL(objectUrl);
+        e.target.value = "";
+        return;
+      }
+      if (letterheadPreviewUrl) URL.revokeObjectURL(letterheadPreviewUrl);
+      setLetterheadFile(file);
+      setLetterheadPreviewUrl(objectUrl);
+      setHasViewedLetterhead(false);
+      setIsLetterheadModalOpen(true);
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.letterheadFile;
+        return next;
+      });
+    };
+    img.onerror = () => {
+      setErrors((prev) => ({
+        ...prev,
+        letterheadFile: "Failed to load image",
+      }));
+      URL.revokeObjectURL(objectUrl);
+      e.target.value = "";
+    };
+    img.src = objectUrl;
+  };
+
+  const handleRemoveLetterhead = () => {
+    setLetterheadFile(null);
+    if (letterheadPreviewUrl) {
+      URL.revokeObjectURL(letterheadPreviewUrl);
+      setLetterheadPreviewUrl(null);
+    }
+    setIsLetterheadModalOpen(false);
+    setHasViewedLetterhead(false);
+  };
+
+  const closeLetterheadModal = () => {
+    setIsLetterheadModalOpen(false);
+    if (letterheadPreviewUrl) {
+      setHasViewedLetterhead(true);
+    }
   };
 
   const validate = (): boolean => {
@@ -162,6 +267,10 @@ export default function ConsultantPartialRegistrationModal({
     }
     for (const field of EXTRA_REG_REQUIRED_BY_TYPE[formData.consultantType] || []) {
       require(field, field);
+    }
+
+    if (!letterheadFile) {
+      next.letterheadFile = "Letterhead image is required";
     }
 
     setErrors(next);
@@ -294,13 +403,18 @@ export default function ConsultantPartialRegistrationModal({
         return;
       }
 
+      const formPayload = new FormData();
+      formPayload.append("payload", JSON.stringify(formData));
+      if (letterheadFile) {
+        formPayload.append("letterhead", letterheadFile);
+      }
+
       const res = await fetch("/api/consultants/partial", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify(formData),
+        body: formPayload,
       });
       const data = await res.json();
 
@@ -355,8 +469,8 @@ export default function ConsultantPartialRegistrationModal({
               Consultant Registration
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              Enter basic details and registration numbers. Login and documents
-              can be completed later on the full registration page.
+              Enter basic details, registration numbers, and letterhead. Login and
+              documents can be completed later on the full registration page.
             </p>
           </div>
           <button
@@ -998,6 +1112,203 @@ export default function ConsultantPartialRegistrationModal({
             )}
           </div>
 
+          {/* Letterhead */}
+          <div
+            id="section-letterhead"
+            className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm ring-2 ring-emerald-500 ring-opacity-20"
+          >
+            <h3 className="text-lg font-semibold text-black mb-1">Letterhead</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Upload your letterhead image (JPG/PNG). After successful upload, you
+              will see a preview showing where it will be placed.
+            </p>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block font-medium text-black mb-1">
+                  Letterhead Image <span className="text-red-600 font-bold">*</span>
+                </label>
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                    errors.letterheadFile
+                      ? "border-red-300 bg-red-50"
+                      : letterheadFile
+                        ? hasViewedLetterhead
+                          ? "border-green-300 bg-green-50"
+                          : "border-blue-300 bg-blue-50"
+                        : "border-gray-300 hover:border-blue-400"
+                  }`}
+                >
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                    onChange={handleLetterheadChange}
+                    className="hidden"
+                    id="partial-letterhead-upload"
+                  />
+                  <label
+                    htmlFor="partial-letterhead-upload"
+                    className="cursor-pointer"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <svg
+                        className={`w-10 h-10 ${
+                          errors.letterheadFile
+                            ? "text-red-500"
+                            : letterheadFile
+                              ? "text-green-500"
+                              : "text-gray-400"
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                        />
+                      </svg>
+                      <span className="text-sm text-gray-600">
+                        {letterheadFile ? (
+                          <span className="text-green-600 font-medium">
+                            ✓ {letterheadFile.name}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-emerald-600 font-medium">
+                              Click to upload
+                            </span>{" "}
+                            or drag and drop
+                          </>
+                        )}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        JPG, PNG only (max 10MB)
+                      </span>
+                    </div>
+                  </label>
+                </div>
+                {errors.letterheadFile && (
+                  <p className="text-xs text-red-600 mt-2">{errors.letterheadFile}</p>
+                )}
+              </div>
+
+              {letterheadFile && (
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-medium text-black">
+                      Uploaded Letterhead
+                    </p>
+                    {hasViewedLetterhead && (
+                      <span className="text-xs text-green-600 flex items-center gap-1">
+                        <svg
+                          className="w-4 h-4"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        Preview viewed
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-white border rounded-lg">
+                    <svg
+                      className="w-10 h-10 text-red-500 flex-shrink-0"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 2l5 5h-5V4zm-2.5 9.5L14 10l2 2.5V17H8v-4l2.5 3 1-3.5z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-black truncate">
+                        {letterheadFile.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {(letterheadFile.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsLetterheadModalOpen(true)}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                        />
+                      </svg>
+                      View Preview
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveLetterhead}
+                      className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors flex items-center gap-2"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                      Remove
+                    </button>
+                  </div>
+
+                  {!hasViewedLetterhead && (
+                    <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      Please view the preview to confirm letterhead placement
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="flex justify-end gap-3 pb-2">
             <button
               type="button"
@@ -1017,6 +1328,81 @@ export default function ConsultantPartialRegistrationModal({
           </div>
         </div>
       </div>
+
+      {/* Letterhead placement preview modal (same as full registration) */}
+      {isLetterheadModalOpen &&
+        letterheadPreviewUrl &&
+        createPortal(
+          <AnimatePresence>
+            {isLetterheadModalOpen && (
+              <motion.div
+                className="fixed inset-0 z-[9999] flex justify-center items-start bg-black/50 backdrop-blur-sm p-4 pt-10"
+                onClick={closeLetterheadModal}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <motion.div
+                  id="partial-letterhead-modal"
+                  className="bg-white w-full max-w-5xl rounded-xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                  initial={{ y: -40, opacity: 0, scale: 0.95 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: -40, opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <div className="flex justify-between items-center p-6 border-b">
+                    <div>
+                      <h2 className="text-2xl font-bold text-black">
+                        Letterhead Preview - Assigned Placement Demo
+                      </h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        This is a demo showing where your letterhead will be
+                        placed in the system.
+                      </p>
+                    </div>
+                    <button
+                      onClick={closeLetterheadModal}
+                      className="text-2xl font-bold text-gray-700 hover:text-black transition-colors"
+                      aria-label="Close modal"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-auto p-6 space-y-4">
+                    <div
+                      className="border rounded-lg bg-white flex items-center justify-center"
+                      style={{ minHeight: "600px" }}
+                    >
+                      <div
+                        className="relative w-full max-w-3xl mx-auto rounded-lg border-2 border-gray-300 bg-white shadow-sm overflow-hidden"
+                        style={{ aspectRatio: "210 / 297" }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={letterheadPreviewUrl}
+                          alt="Letterhead Preview"
+                          className="absolute inset-0 w-full h-full object-contain"
+                        />
+                        <div
+                          className="absolute rounded-xl border-2 border-blue-400 bg-blue-50/40"
+                          style={{
+                            top: "14%",
+                            bottom: "14%",
+                            left: "8%",
+                            right: "8%",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
     </div>
   );
 

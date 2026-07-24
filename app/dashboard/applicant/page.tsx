@@ -439,7 +439,7 @@ export default function ApplicantDetailsPage() {
         saveDraft("draft-applicant-details-applicants", orderedApplicants);
         markPageSaved("saved-applicant-details");
         setIsSaved(true);
-        const savedHasOwner = applicantRosterHasOwner(applicantsList);
+        const savedHasOwner = applicantRosterHasOwner(orderedApplicants);
         setOwnerAwaitingReplacement(!savedHasOwner);
         setChangingOwner(false);
       } else {
@@ -462,7 +462,9 @@ export default function ApplicantDetailsPage() {
       ? projectData.applicant_details.applicants
       : [];
     const savedHasRows = savedApplicants.length > 0;
-    const savedHasOwner = applicantRosterHasOwner(savedApplicants);
+    const savedHasOwner = applicantRosterHasOwner(
+      mapStoredApplicantsToRows(savedApplicants)
+    );
     if (isEditMode && savedHasRows && !savedHasOwner) {
       setOwnerAwaitingReplacement(true);
       return;

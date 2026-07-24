@@ -191,6 +191,7 @@ export type PartialConsultantPayload = {
   envExpiryDate?: string;
   townPlannerLicenseNo?: string;
   townPlannerExpiryDate?: string;
+  letterheadUrl?: string;
 };
 
 export function buildPartialConsultantMetadata(
@@ -219,6 +220,7 @@ export function buildPartialConsultantMetadata(
     registration_date: data.registrationDate,
     registration_status: "incomplete",
     status: "pending",
+    ...(data.letterheadUrl ? { letterhead_url: data.letterheadUrl } : {}),
   };
 
   switch (data.consultantType) {
@@ -373,6 +375,7 @@ export const PARTIAL_PROFILE_LOCKED_FIELDS = new Set([
   "envExpiryDate",
   "townPlannerLicenseNo",
   "townPlannerExpiryDate",
+  "letterheadFile",
 ]);
 
 export function isPartialProfileField(field: string): boolean {

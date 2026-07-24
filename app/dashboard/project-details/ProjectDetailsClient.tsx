@@ -17,7 +17,10 @@ import { useUserMetadata } from "@/app/contexts/UserContext";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
-
+import {
+  combineProjectTitleWithProposalNo,
+  stripTrailingProposalNo,
+} from "@/app/utils/projectTitleProposal";
 
 type ProjectFormData = {
   proposalAsPer: "DCPR 2034";
@@ -253,18 +256,26 @@ export default function ProjectDetailsClient() {
     setValue: setProjectValue,
     setError: setProjectError,
   } = useForm<ProjectFormData>({
-    defaultValues: loadDraft<ProjectFormData>("draft-project-details-project", {
-      proposalAsPer: "DCPR 2034",
-      title: "",
-      proposalNo: "",
-      propertyAddress: "",
-      landmark: "",
-      earlierBuildingProposalFileNo: "",
-      pincode: "",
-      fullNameOfApplicant: "",
-      addressOfApplicant: "",
-      hasPaidLatestPropertyTax: "",
-    }),
+    defaultValues: (() => {
+      const draft = loadDraft<ProjectFormData>("draft-project-details-project", {
+        proposalAsPer: "DCPR 2034",
+        title: "",
+        proposalNo: "",
+        propertyAddress: "",
+        landmark: "",
+        earlierBuildingProposalFileNo: "",
+        pincode: "",
+        fullNameOfApplicant: "",
+        addressOfApplicant: "",
+        hasPaidLatestPropertyTax: "",
+      });
+      const proposalNo = String(draft.proposalNo || "").trim();
+      return {
+        ...draft,
+        title: stripTrailingProposalNo(String(draft.title || ""), proposalNo),
+        proposalNo,
+      };
+    })(),
   });
 
   // Default for new projects only (edit mode loads proposalAsPer from the database)
@@ -417,10 +428,26 @@ export default function ProjectDetailsClient() {
 
         // Map backend data to ProjectFormData structure
         const projectInfo = (data.project_info as Record<string, unknown>) || {};
+        const storedProposalNo = String(projectInfo.proposalNo || "").trim();
+        const infoTitle = stripTrailingProposalNo(
+          String(projectInfo.title || ""),
+          storedProposalNo
+        );
+        const fromStoredTitle = stripTrailingProposalNo(
+          String(data.title || ""),
+          storedProposalNo
+        );
+        // Prefer project_info title when it is the clean base (avoids duplicated proposal nos)
+        const baseTitle =
+          infoTitle &&
+          fromStoredTitle &&
+          (fromStoredTitle === infoTitle || fromStoredTitle.startsWith(`${infoTitle} `))
+            ? infoTitle
+            : fromStoredTitle || infoTitle;
         const projectFormData: ProjectFormData = {
           proposalAsPer: "DCPR 2034",
-          title: String(data.title || ""),
-          proposalNo: String(projectInfo.proposalNo || ""),
+          title: baseTitle,
+          proposalNo: storedProposalNo,
           propertyAddress: String(projectInfo.propertyAddress || ""),
           landmark: String(projectInfo.landmark || ""),
           earlierBuildingProposalFileNo: String(projectInfo.earlierBuildingProposalFileNo || ""),
@@ -885,7 +912,13 @@ export default function ProjectDetailsClient() {
       }
 
       const proposalNo = data.proposalNo?.trim() || "";
-      const combinedTitle = proposalNo ? `${title} ${proposalNo}` : title;
+      const previousProposalNo = String(
+        ((projectData?.project_info as Record<string, unknown> | undefined)
+          ?.proposalNo as string) || ""
+      ).trim();
+      const combinedTitle = combineProjectTitleWithProposalNo(title, proposalNo, [
+        previousProposalNo,
+      ]);
 
       const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
 

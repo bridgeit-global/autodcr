@@ -20,6 +20,7 @@ import {
   type OwnerProjectSelectRow,
 } from "@/app/utils/ownerProjects";
 import { canCreateProjectAsArchitect } from "@/app/utils/projectAccess";
+import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
 
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 
@@ -724,14 +725,16 @@ export default function CreateApplicationPage() {
   const selectedAuthorityLabel = authorityLabelMap[selectedAuthority];
   const getProjectDisplayData = (project: {
     title: string;
-    project_info?: { proposalNo?: string } | null;
+    project_info?: { proposalNo?: string; title?: string } | null;
   }) => {
     const detectedProposalNo = project.title.match(/\s(\d{3,})$/)?.[1];
-    const proposalNo = project.project_info?.proposalNo?.trim() || detectedProposalNo;
-    const cleanTitle =
-      proposalNo && project.title.endsWith(` ${proposalNo}`)
-        ? project.title.slice(0, -(proposalNo.length + 1))
-        : project.title;
+    const proposalNo =
+      project.project_info?.proposalNo?.trim() || detectedProposalNo || "";
+    const cleanTitle = getProjectBaseTitle(
+      project.title,
+      proposalNo,
+      project.project_info?.title
+    );
     const highlightedPart = proposalNo ? `(${proposalNo})` : undefined;
     return {
       label: proposalNo ? `${cleanTitle} ${highlightedPart}` : cleanTitle,
