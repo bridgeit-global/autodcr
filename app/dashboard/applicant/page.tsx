@@ -21,7 +21,9 @@ import {
   ensureArchitectInApplicantRoster,
   ensureOwnerInApplicantRoster,
   readSessionUserMetaFromStorage,
+  resolveOwnerUserIdFromApplicants,
   sameUserId,
+  validateOwnerForArchitectProject,
   type OwnerApplicantMeta,
 } from "@/app/utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "@/app/utils/ownerApplicantRoster";
@@ -362,6 +364,12 @@ export default function ApplicantDetailsPage() {
     applicantName: "",
     applicantType: "",
   });
+  /** After Owner is removed from roster, skip re-seeding from projects.user_id until a new Owner is saved. */
+  const [ownerAwaitingReplacement, setOwnerAwaitingReplacement] = useState(false);
+  /** Architect is picking a replacement Owner while the current Owner row still shows. */
+  const [changingOwner, setChangingOwner] = useState(false);
+  /** Local mirror of projects.user_id so Change Owner can update without a full project reload. */
+  const [projectOwnerUserId, setProjectOwnerUserId] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -416,6 +424,9 @@ export default function ApplicantDetailsPage() {
       console.log("[Applicant Details] Loading project data:", projectData);
       const applicantDetails = projectData.applicant_details || {};
       const applicantsList = applicantDetails.applicants || [];
+      setProjectOwnerUserId(
+        typeof projectData.user_id === "string" ? projectData.user_id.trim() || null : null
+      );
       
       console.log("[Applicant Details] Applicants list from backend:", applicantsList);
       
@@ -428,19 +439,34 @@ export default function ApplicantDetailsPage() {
         saveDraft("draft-applicant-details-applicants", orderedApplicants);
         markPageSaved("saved-applicant-details");
         setIsSaved(true);
+        const savedHasOwner = applicantRosterHasOwner(applicantsList);
+        setOwnerAwaitingReplacement(!savedHasOwner);
+        setChangingOwner(false);
       } else {
         console.log("[Applicant Details] No applicants found in project data");
+        setOwnerAwaitingReplacement(false);
       }
     }
   }, [isEditMode, projectData, isLoading]);
 
-  // Architect-created projects: seed projects.user_id as Owner when roster is missing them.
-  // Owner-created projects use the auto-add effect below (logged-in owner is default row).
+  // Architect-created projects: seed projects.user_id as Owner when the saved roster is empty.
+  // Do not re-add after the architect removed/replaced the Owner on the roster.
   useEffect(() => {
     if (userMetadata?.role !== "Consultant") return;
-    const ownerUserId = projectData?.user_id?.trim();
+    const ownerUserId = (projectOwnerUserId || projectData?.user_id || "").trim();
     if (!ownerUserId || isLoading) return;
     if (applicantRosterHasOwner(applicants)) return;
+    if (ownerAwaitingReplacement || changingOwner) return;
+
+    const savedApplicants = Array.isArray(projectData?.applicant_details?.applicants)
+      ? projectData.applicant_details.applicants
+      : [];
+    const savedHasRows = savedApplicants.length > 0;
+    const savedHasOwner = applicantRosterHasOwner(savedApplicants);
+    if (isEditMode && savedHasRows && !savedHasOwner) {
+      setOwnerAwaitingReplacement(true);
+      return;
+    }
 
     let cancelled = false;
     const syncOwner = async () => {
@@ -459,10 +485,15 @@ export default function ApplicantDetailsPage() {
     };
   }, [
     userMetadata?.role,
+    projectOwnerUserId,
     projectData?.user_id,
+    projectData?.applicant_details,
     isLoading,
+    isEditMode,
     applicants,
     authUserId,
+    ownerAwaitingReplacement,
+    changingOwner,
   ]);
 
   // If the form was previously saved (green button) and the user starts editing/adding
@@ -919,11 +950,23 @@ export default function ApplicantDetailsPage() {
 
   // If logged-in user is a consultant, add "Owner" option (unless already added)
   const isConsultant = userMetadata?.role === "Consultant";
-  if (isConsultant && !addedApplicantTypes.includes("Owner")) {
-    availableApplicantTypes = ["Owner", ...availableApplicantTypes];
+  const canManageProjectOwner = canCreateProjectAsArchitect(userMetadata);
+  if (
+    isConsultant &&
+    (!addedApplicantTypes.includes("Owner") || changingOwner || ownerAwaitingReplacement)
+  ) {
+    availableApplicantTypes = ["Owner", ...availableApplicantTypes.filter((t) => t !== "Owner")];
   }
 
-  const persistApplicantsToProject = async (roster: ApplicantRow[]): Promise<boolean> => {
+  const isLoggedInApplicantRow = (applicant: ApplicantRow): boolean =>
+    authUserId != null &&
+    Boolean(applicant.user_id) &&
+    String(applicant.user_id) === String(authUserId);
+
+  const persistApplicantsToProject = async (
+    roster: ApplicantRow[],
+    options?: { syncProjectOwner?: boolean }
+  ): Promise<boolean> => {
     if (!projectId) return true;
 
     const userId =
@@ -952,12 +995,7 @@ export default function ApplicantDetailsPage() {
         authUserId ?? userId,
         meta
       );
-      const ownerUserId = projectData?.user_id?.trim();
-      if (ownerUserId) {
-        rosterForSave = await ensureProjectOwnerOnRoster(rosterForSave, ownerUserId, {
-          sessionUserId: authUserId ?? userId,
-        });
-      }
+      // Do not force projects.user_id back onto the roster — architect may be changing Owner.
     } else if (authUserId && !applicantRosterHasOwner(roster)) {
       rosterForSave = ensureOwnerInApplicantRoster(
         rosterForSave,
@@ -976,13 +1014,46 @@ export default function ApplicantDetailsPage() {
       return false;
     }
 
+    const rosterOwnerId = resolveOwnerUserIdFromApplicants(
+      rosterForSave.applicants as ApplicantRow[]
+    );
+    const shouldSyncOwner =
+      Boolean(options?.syncProjectOwner) &&
+      canCreateProjectAsArchitect(meta) &&
+      Boolean(rosterOwnerId);
+
+    if (shouldSyncOwner && rosterOwnerId) {
+      const ownerCheck = validateOwnerForArchitectProject(
+        rosterForSave.applicants as ApplicantRow[],
+        authUserId ?? userId
+      );
+      if (!ownerCheck.ok) {
+        showAlert({ title: "Invalid Owner", message: ownerCheck.message });
+        return false;
+      }
+    }
+
+    const ownerRow = (rosterForSave.applicants as ApplicantRow[]).find((row) =>
+      isOwnerApplicantType(String(row.applicantType || ""))
+    );
+    const payload: Record<string, unknown> = {
+      user_id: userId,
+      applicant_details: serialized,
+    };
+    if (shouldSyncOwner && rosterOwnerId) {
+      payload.project_owner_user_id = rosterOwnerId;
+      if (projectData?.project_info && typeof projectData.project_info === "object") {
+        payload.project_info = {
+          ...(projectData.project_info as Record<string, unknown>),
+          fullNameOfApplicant: ownerRow?.name && ownerRow.name !== "-" ? ownerRow.name : "",
+        };
+      }
+    }
+
     const response = await fetch(`/api/projects/${projectId}`, {
       method: "PUT",
       headers,
-      body: JSON.stringify({
-        user_id: userId,
-        applicant_details: serialized,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -992,6 +1063,12 @@ export default function ApplicantDetailsPage() {
         message: (error as { error?: string }).error || "Failed to save applicant roster.",
       });
       return false;
+    }
+
+    if (shouldSyncOwner && rosterOwnerId) {
+      setProjectOwnerUserId(rosterOwnerId);
+      setOwnerAwaitingReplacement(false);
+      setChangingOwner(false);
     }
     return true;
   };
@@ -1018,7 +1095,7 @@ export default function ApplicantDetailsPage() {
       addressLine2 = split.line2;
       addressLine3 = split.line3;
     }
-    const newApplicant = {
+    const newApplicant: ApplicantRow = {
       id: nextId,
       user_id: userId,
       applicantType: data.applicantType,
@@ -1035,13 +1112,44 @@ export default function ApplicantDetailsPage() {
       address_line2: addressLine2 || undefined,
       address_line3: addressLine3 || undefined,
     };
-    const nextApplicants = sortApplicantsOwnerFirst([...applicants, newApplicant]);
 
-    if (!(await persistApplicantsToProject(nextApplicants))) {
+    const isAddingOwner = isOwnerApplicantType(data.applicantType);
+    if (isAddingOwner && canManageProjectOwner) {
+      if (!userId) {
+        showAlert({
+          title: "Owner required",
+          message: "Select an Owner from the directory so they are linked to an account.",
+        });
+        return;
+      }
+      if (authUserId && sameUserId(userId, authUserId)) {
+        showAlert({
+          title: "Invalid Owner",
+          message: "The project Owner must be a different account than the architect.",
+        });
+        return;
+      }
+    }
+
+    const baseRoster =
+      isAddingOwner && (changingOwner || ownerAwaitingReplacement || applicantRosterHasOwner(applicants))
+        ? applicants.filter((row) => !isOwnerApplicantType(row.applicantType))
+        : applicants;
+    const nextApplicants = sortApplicantsOwnerFirst([...baseRoster, newApplicant]);
+
+    if (
+      !(await persistApplicantsToProject(nextApplicants, {
+        syncProjectOwner: isAddingOwner && canManageProjectOwner,
+      }))
+    ) {
       return;
     }
 
     setApplicants(nextApplicants);
+    if (isAddingOwner && canManageProjectOwner) {
+      setOwnerAwaitingReplacement(false);
+      setChangingOwner(false);
+    }
 
     reset();
     setIsFormAutofilled(false);
@@ -1064,7 +1172,9 @@ export default function ApplicantDetailsPage() {
     setIsSaved(true);
     showAlert({
       title: "Applicant details",
-      message: "Applicant details saved successfully!",
+      message: isAddingOwner && canManageProjectOwner
+        ? "Owner updated and saved to the project."
+        : "Applicant details saved successfully!",
     });
   };
 
@@ -1085,23 +1195,14 @@ export default function ApplicantDetailsPage() {
     if (isReadOnlyMode) return;
     const applicantToRemove = applicants.find((applicant) => applicant.id === id);
     if (!applicantToRemove) return;
-    
-    // Check if this is the logged-in user's entry
-    const isLoggedInUserEntry = 
-      authUserId !== null && 
-      authUserId !== undefined &&
-      (String(applicantToRemove.user_id) === String(authUserId) || 
-       (applicantToRemove.id === 1 && userMetadata !== null));
-    
-    // Don't show confirmation for logged-in user's entry or Licensed Site Supervisor
+
     if (
       applicantToRemove.applicantType === "Licensed Site Supervisor" ||
-      isLoggedInUserEntry
+      isLoggedInApplicantRow(applicantToRemove)
     ) {
       return;
     }
-    
-    // Show confirmation modal
+
     setDeleteConfirmation({
       open: true,
       applicantId: id,
@@ -1112,7 +1213,7 @@ export default function ApplicantDetailsPage() {
 
   const handleConfirmDelete = () => {
     if (deleteConfirmation.applicantId !== null) {
-      handleRemoveApplicant(deleteConfirmation.applicantId);
+      void handleRemoveApplicant(deleteConfirmation.applicantId);
       setDeleteConfirmation({ open: false, applicantId: null, applicantName: "", applicantType: "" });
     }
   };
@@ -1121,81 +1222,61 @@ export default function ApplicantDetailsPage() {
     setDeleteConfirmation({ open: false, applicantId: null, applicantName: "", applicantType: "" });
   };
 
+  const handleChangeOwnerClick = (applicant: ApplicantRow) => {
+    if (isReadOnlyMode || !canManageProjectOwner) return;
+    if (!isOwnerApplicantType(applicant.applicantType)) return;
+    setChangingOwner(true);
+    setOwnerAwaitingReplacement(false);
+    setValue("applicantType", "Owner");
+    setValue("plumbingConsultant", "");
+    setIsSaved(false);
+  };
+
   const handleRemoveApplicant = async (id: number) => {
     if (isReadOnlyMode) return;
     const applicantToRemove = applicants.find((applicant) => applicant.id === id);
-    // Prevent deletion if applicant belongs to logged-in user or is Licensed Site Supervisor
     if (!applicantToRemove) return;
-    
-    // Check if this is the logged-in user's entry
-    // Compare by user_id (exact match) or by id === 1 (logged-in user is always first)
-    const isLoggedInUserEntry = 
-      authUserId !== null && 
-      authUserId !== undefined &&
-      (String(applicantToRemove.user_id) === String(authUserId) || 
-       (applicantToRemove.id === 1 && userMetadata !== null));
-    
+
     if (
       applicantToRemove.applicantType === "Licensed Site Supervisor" ||
-      isLoggedInUserEntry
+      isLoggedInApplicantRow(applicantToRemove)
     ) {
       return;
     }
 
-    // Update local state
+    const removingOwner = isOwnerApplicantType(applicantToRemove.applicantType);
+    if (removingOwner && canManageProjectOwner) {
+      setOwnerAwaitingReplacement(true);
+      setChangingOwner(false);
+    }
+
     const updatedApplicants = sortApplicantsOwnerFirst(
       applicants.filter((applicant) => applicant.id !== id)
     );
     setApplicants(updatedApplicants);
     saveDraft("draft-applicant-details-applicants", updatedApplicants);
 
-    if (projectId) {
-      try {
-        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
-        if (!userId) {
-          console.error("User not found in session");
-          return;
-        }
+    if (!projectId) return;
 
-        const { data: { session } } = await supabase.auth.getSession();
-        const authToken = session?.access_token;
-        
-        const headers: HeadersInit = { "Content-Type": "application/json" };
-        if (authToken) {
-          headers["Authorization"] = `Bearer ${authToken}`;
-        }
-
-        const response = await fetch(`/api/projects/${projectId}`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify({
-            user_id: userId,
-            applicant_details: serializeApplicantRosterForStorage(updatedApplicants),
-          }),
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          console.error("Error updating applicants after deletion:", error);
-          showAlert({
-            title: "Could not delete applicant",
-            message: `Failed to delete applicant: ${error.error || "Unknown error"}`,
-          });
-          setApplicants(applicants);
-          saveDraft("draft-applicant-details-applicants", applicants);
-          return;
-        }
-
-        console.log("Applicant deleted successfully from Supabase");
-      } catch (error: any) {
-        console.error("Error deleting applicant:", error);
-        showAlert({
-          title: "Could not delete applicant",
-          message: `Failed to delete applicant: ${error.message || "Unknown error"}`,
-        });
-        setApplicants(applicants);
-        saveDraft("draft-applicant-details-applicants", applicants);
+    // Persist roster without Owner; keep projects.user_id until a new Owner is saved.
+    const ok = await persistApplicantsToProject(updatedApplicants, { syncProjectOwner: false });
+    if (!ok) {
+      setApplicants(applicants);
+      saveDraft("draft-applicant-details-applicants", applicants);
+      if (removingOwner && canManageProjectOwner) {
+        setOwnerAwaitingReplacement(false);
       }
+      return;
+    }
+
+    if (removingOwner && canManageProjectOwner) {
+      setValue("applicantType", "Owner");
+      setIsSaved(false);
+      showAlert({
+        title: "Owner removed",
+        message:
+          "Select a new Owner from the directory and Save to update the project. Update Project stays blocked until an Owner is saved.",
+      });
     }
   };
 
@@ -1226,6 +1307,13 @@ export default function ApplicantDetailsPage() {
               <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
                 Add a project Owner from the directory before submitting the project. The owner
                 will sign applications in In Process; you can manage everything else.
+              </p>
+            )}
+            {canManageProjectOwner && (ownerAwaitingReplacement || changingOwner) && (
+              <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                {changingOwner
+                  ? "Select a new Owner from the directory below and Save. That updates the applicants roster and projects.user_id together."
+                  : "Owner removed from the roster. Select a new Owner from the directory and Save to set the project owner. Update Project stays blocked until then."}
               </p>
             )}
             </div>
@@ -1259,40 +1347,51 @@ export default function ApplicantDetailsPage() {
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.residentialAddress}</td>
                       <td className={`${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>
                         {(() => {
-                          // Check if this is the logged-in user's entry
-                          // Compare by user_id (exact match) or by id === 1 (logged-in user is always first)
-                          const isLoggedInUserEntry = 
-                            authUserId !== null && 
-                            authUserId !== undefined &&
-                            (String(applicant.user_id) === String(authUserId) || 
-                             (applicant.id === 1 && userMetadata !== null));
-                          
-                          const isDisabled =
+                          const isOwnerRow = isOwnerApplicantType(applicant.applicantType);
+                          const isLoggedInUserEntry = isLoggedInApplicantRow(applicant);
+                          const deleteDisabled =
                             isReadOnlyMode ||
                             applicant.applicantType === "Licensed Site Supervisor" ||
                             isLoggedInUserEntry;
-                          
+                          const showChangeOwner =
+                            canManageProjectOwner && isOwnerRow && !isReadOnlyMode && !changingOwner;
+
                           return (
-                            <button
-                              type="button"
-                              className={`text-sm ${
-                                isDisabled
-                                  ? "text-gray-400 cursor-not-allowed pointer-events-none"
-                                  : "text-red-600 hover:underline"
-                              }`}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (isDisabled) {
-                                  return;
-                                }
-                                handleDeleteClick(applicant.id, applicant.name, applicant.applicantType);
-                              }}
-                              disabled={isDisabled}
-                              aria-disabled={isDisabled}
-                            >
-                              Delete
-                            </button>
+                            <div className="flex flex-col items-start gap-1">
+                              {showChangeOwner && (
+                                <button
+                                  type="button"
+                                  className="text-sm text-emerald-700 hover:underline"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleChangeOwnerClick(applicant);
+                                  }}
+                                >
+                                  Change
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className={`text-sm ${
+                                  deleteDisabled
+                                    ? "text-gray-400 cursor-not-allowed pointer-events-none"
+                                    : "text-red-600 hover:underline"
+                                }`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (deleteDisabled) {
+                                    return;
+                                  }
+                                  handleDeleteClick(applicant.id, applicant.name, applicant.applicantType);
+                                }}
+                                disabled={deleteDisabled}
+                                aria-disabled={deleteDisabled}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           );
                         })()}
                       </td>
@@ -1597,7 +1696,19 @@ export default function ApplicantDetailsPage() {
 
               {/* Message */}
               <p className="text-gray-700 text-center mb-6">
-                Are you sure you want to delete <span className="font-semibold text-gray-900">{deleteConfirmation.applicantName}</span> ({deleteConfirmation.applicantType})? This action cannot be undone.
+                {isOwnerApplicantType(deleteConfirmation.applicantType) && canManageProjectOwner ? (
+                  <>
+                    Remove <span className="font-semibold text-gray-900">{deleteConfirmation.applicantName}</span> from
+                    the applicants roster? You must select a new Owner and Save before Update Project. The project
+                    owner id stays unchanged until you save the replacement.
+                  </>
+                ) : (
+                  <>
+                    Are you sure you want to delete{" "}
+                    <span className="font-semibold text-gray-900">{deleteConfirmation.applicantName}</span> (
+                    {deleteConfirmation.applicantType})? This action cannot be undone.
+                  </>
+                )}
               </p>
 
               {/* Buttons */}

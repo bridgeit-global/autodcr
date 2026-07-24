@@ -601,6 +601,22 @@ function DashboardLayoutContent({
           return;
         }
         ownerUserIdForCreate = ownerCheck.ownerUserId;
+      } else if (canCreateProjectAsArchitect(meta) && isActuallyEditMode) {
+        const applicantsList = loadDraft("draft-applicant-details-applicants", []);
+        const ownerCheck = validateOwnerForArchitectProject(
+          applicantsList as Array<{
+            user_id?: string;
+            userId?: string;
+            applicantType?: string;
+            applicant_type?: string;
+          }>,
+          sessionUserId
+        );
+        if (!ownerCheck.ok) {
+          setSubmitError(ownerCheck.message);
+          showAlert({ title: "Owner required", message: ownerCheck.message });
+          return;
+        }
       }
 
       let finalProjectId: string | null = null;
@@ -931,6 +947,22 @@ function DashboardLayoutContent({
           return;
         }
         ownerUserIdForCreate = ownerCheck.ownerUserId;
+      } else if (canCreateProjectAsArchitect(meta) && isActuallyEditMode) {
+        const ownerCheck = validateOwnerForArchitectProject(
+          applicantsList as Array<{
+            user_id?: string;
+            userId?: string;
+            applicantType?: string;
+            applicant_type?: string;
+          }>,
+          userId
+        );
+        if (!ownerCheck.ok) {
+          setSubmitError(ownerCheck.message);
+          showAlert({ title: "Owner required", message: ownerCheck.message });
+          return;
+        }
+        ownerUserIdForCreate = ownerCheck.ownerUserId;
       }
 
       let finalProjectId: string | null = null;
@@ -965,7 +997,12 @@ function DashboardLayoutContent({
         const response = await fetch(`/api/projects/${currentProjectId}`, {
           method: "PUT",
           headers,
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            ...payload,
+            ...(ownerUserIdForCreate
+              ? { project_owner_user_id: ownerUserIdForCreate }
+              : {}),
+          }),
         });
 
         if (!response.ok) {
