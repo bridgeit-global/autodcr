@@ -7,6 +7,10 @@ import {
   normalizeRegNo,
   REGISTRATION_NUMBER_META_BY_TYPE,
 } from "@/app/utils/consultantRegistrationShared";
+import {
+  getOwnerRegistrationNumberFromMetadata,
+  OWNER_REGISTRATION_META_BY_TYPE,
+} from "@/app/utils/ownerRegistrationShared";
 import { getSupabasePublicUrl } from "@/app/utils/supabaseEnv";
 
 export type ConsultantLookupMatch = {
@@ -120,6 +124,84 @@ export async function findConsultantByEmail(
     const metaEmail = String(
       ((user.user_metadata || {}) as Record<string, unknown>).email || ""
     )
+      .trim()
+      .toLowerCase();
+    if (userEmail === normalized || metaEmail === normalized) {
+      return toMatch(user);
+    }
+  }
+  return null;
+}
+
+export async function findOwnerByPhone(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  phone: string
+): Promise<ConsultantLookupMatch | null> {
+  const normalized = normalizePhone(phone);
+  if (normalized.length !== 10) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const role = String(meta.role || "");
+    if (role && role !== "Owner") continue;
+
+    const metaPhone = getPhoneFromMetadata(meta);
+    const authPhone = normalizePhone(user.phone || "");
+    if (metaPhone === normalized || authPhone === normalized) {
+      return toMatch(user);
+    }
+  }
+  return null;
+}
+
+export async function findOwnerByRegistrationNumber(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  registrationNumber: string,
+  entityType?: string
+): Promise<ConsultantLookupMatch | null> {
+  const normalized = normalizeRegNo(registrationNumber);
+  if (!normalized) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const role = String(meta.role || "");
+    if (role && role !== "Owner") continue;
+
+    if (entityType) {
+      const mapping = OWNER_REGISTRATION_META_BY_TYPE[entityType];
+      if (!mapping) continue;
+      const value = normalizeRegNo(String(meta[mapping.metaKey] || ""));
+      if (value && value === normalized) {
+        return toMatch(user);
+      }
+      continue;
+    }
+
+    const anyReg = getOwnerRegistrationNumberFromMetadata(meta);
+    if (anyReg && anyReg === normalized) {
+      return toMatch(user);
+    }
+  }
+  return null;
+}
+
+export async function findOwnerByEmail(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  email: string
+): Promise<ConsultantLookupMatch | null> {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const role = String(meta.role || "");
+    if (role && role !== "Owner") continue;
+
+    const userEmail = (user.email || "").trim().toLowerCase();
+    const metaEmail = String(meta.email || "")
       .trim()
       .toLowerCase();
     if (userEmail === normalized || metaEmail === normalized) {

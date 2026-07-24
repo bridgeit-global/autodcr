@@ -8,6 +8,12 @@ import { createPortal } from "react-dom";
 import OTPVerificationModal from "./OTPVerificationModal";
 import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 import CustomSelect from "@/app/components/CustomSelect";
+import {
+  isPartialOwnerField,
+  normalizePhone,
+  OWNER_REGISTRATION_META_BY_TYPE,
+  ownerMetadataToFormFields,
+} from "@/app/utils/ownerRegistrationShared";
 
 interface RegistrationFormProps {
   title?: string;
@@ -79,6 +85,15 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const [showEmailOTPModal, setShowEmailOTPModal] = useState(false);
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
+  const [isResumingIncomplete, setIsResumingIncomplete] = useState(false);
+  const [existingLetterheadUrl, setExistingLetterheadUrl] = useState<string | null>(
+    null
+  );
+  const [resumePrompt, setResumePrompt] = useState<{
+    user_id: string;
+    email?: string;
+    metadata: Record<string, unknown>;
+  } | null>(null);
   
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
@@ -295,6 +310,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     [line1, line2, line3].map((v) => v.trim()).filter(Boolean).join("\n");
 
   const handleInputChange = (field: string, value: string | boolean) => {
+    if (isResumingIncomplete && isPartialOwnerField(field)) {
+      return;
+    }
     const normalizedValue =
       field === "pan" && typeof value === "string" ? value.toUpperCase() : value;
     setFormData(prev => {
@@ -321,6 +339,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const handleFileChange = (field: string, file: File | null) => {
+    if (isResumingIncomplete && isPartialOwnerField(field)) {
+      return;
+    }
     setFormData(prev => {
       const updated = {
         ...prev,
@@ -329,6 +350,125 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       validateField(field, file, updated);
       return updated;
     });
+  };
+
+  const applyResumeFromMetadata = (
+    userId: string,
+    metadata: Record<string, unknown>,
+    email?: string
+  ) => {
+    const fields = ownerMetadataToFormFields(metadata);
+    setFormData((prev) => ({
+      ...prev,
+      ...fields,
+      email: fields.email || email || prev.email,
+      address: composeAddress(
+        fields.addressLine1 || "",
+        fields.addressLine2 || "",
+        fields.addressLine3 || ""
+      ),
+    }));
+    setVerifiedUserId(userId);
+    setIsPhoneVerified(true);
+    setIsEmailVerified(true);
+    setIsResumingIncomplete(true);
+    const existingLh = String(metadata.letterhead_url || "").trim();
+    setExistingLetterheadUrl(existingLh || null);
+    if (existingLh) {
+      setHasViewedLetterhead(true);
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.letterheadFile;
+        return next;
+      });
+    }
+    setResumePrompt(null);
+    setFormError("");
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.alternatePhone;
+      delete next.email;
+      return next;
+    });
+  };
+
+  const lookupPhoneBeforeVerify = async (): Promise<boolean> => {
+    const phone = normalizePhone(formData.alternatePhone);
+    if (phone.length !== 10) {
+      setErrors((prev) => ({
+        ...prev,
+        alternatePhone: "Please enter a valid 10-digit phone number",
+      }));
+      return false;
+    }
+
+    try {
+      const res = await fetch("/api/owners/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await res.json();
+
+      if (data.status === "complete") {
+        setErrors((prev) => ({
+          ...prev,
+          alternatePhone: "This phone number is already registered",
+        }));
+        setFormError("This phone number is already registered");
+        return false;
+      }
+
+      if (data.status === "incomplete" && data.user_id) {
+        setResumePrompt({
+          user_id: data.user_id,
+          email: data.email,
+          metadata: data.metadata || {},
+        });
+        return false;
+      }
+
+      return true;
+    } catch {
+      setFormError("Failed to verify phone number uniqueness. Please try again.");
+      return false;
+    }
+  };
+
+  const lookupRegistrationUniqueness = async (regField?: string) => {
+    const mapping = OWNER_REGISTRATION_META_BY_TYPE[formData.entityType];
+    if (!mapping) return;
+    if (regField && regField !== mapping.formField) return;
+
+    const regNo = String(
+      (formData as Record<string, unknown>)[mapping.formField] || ""
+    ).trim();
+    if (!regNo) return;
+
+    try {
+      const res = await fetch("/api/owners/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registrationNumber: regNo,
+          entityType: formData.entityType,
+        }),
+      });
+      const data = await res.json();
+      if (
+        (data.status === "incomplete" || data.status === "complete") &&
+        data.user_id &&
+        data.user_id !== verifiedUserId
+      ) {
+        setErrors((prev) => ({
+          ...prev,
+          [mapping.formField]: "This registration number is already registered",
+        }));
+        setFormError("This registration number is already registered");
+      }
+    } catch {
+      // non-blocking on blur
+    }
   };
 
   const handleEntityDocumentChange = (docId: string, file: File | null) => {
@@ -642,7 +782,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         if (!value) error = "Upload PAN Card";
         break;
       case "letterheadFile":
-        if (!value) error = "Upload Letterhead";
+        if (!value && !existingLetterheadUrl) error = "Upload Letterhead";
         break;
       case "coaRegNo":
         if (!value) {
@@ -1203,7 +1343,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "authorizedSignatoryPhotoFile",
         "authorizedSignatorySignatureFile",
         "panCardFile",
-        "letterheadFile",
+        ...(existingLetterheadUrl ? [] : ["letterheadFile"]),
         "userId",
         "password",
         "confirmPassword",
@@ -1306,6 +1446,56 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setIsSubmitting(true);
 
     try {
+      const phoneLookupRes = await fetch("/api/owners/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: formData.alternatePhone }),
+      });
+      const phoneLookup = await phoneLookupRes.json();
+      if (
+        phoneLookup.status === "complete" ||
+        (phoneLookup.status === "incomplete" &&
+          phoneLookup.user_id &&
+          phoneLookup.user_id !== verifiedUserId)
+      ) {
+        setFormError(
+          phoneLookup.status === "complete"
+            ? "This phone number is already registered"
+            : "This phone number belongs to another incomplete registration"
+        );
+        setIsSubmitting(false);
+        scrollToSection("section-basic-details");
+        return;
+      }
+
+      const regMapping = OWNER_REGISTRATION_META_BY_TYPE[formData.entityType];
+      if (regMapping) {
+        const regNo = String(
+          (formData as Record<string, unknown>)[regMapping.formField] || ""
+        ).trim();
+        if (regNo) {
+          const regLookupRes = await fetch("/api/owners/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              registrationNumber: regNo,
+              entityType: formData.entityType,
+            }),
+          });
+          const regLookup = await regLookupRes.json();
+          if (
+            (regLookup.status === "incomplete" || regLookup.status === "complete") &&
+            regLookup.user_id &&
+            regLookup.user_id !== verifiedUserId
+          ) {
+            setFormError("This registration number is already registered");
+            setIsSubmitting(false);
+            scrollToSection("section-registration");
+            return;
+          }
+        }
+      }
+
       // Check if userId already exists before proceeding
       if (!formData.userId || formData.userId.trim() === "") {
         console.error('ERROR: userId is empty!');
@@ -1444,6 +1634,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           }
           letterheadUrl = result.url;
           uploadedFilePaths.push(result.path);
+        } else if (existingLetterheadUrl) {
+          letterheadUrl = existingLetterheadUrl;
         }
 
         // Upload entity-specific documents based on entity type
@@ -1576,6 +1768,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           pan_card_url: panCardUrl,
           letterhead_url: letterheadUrl,
             declaration_accepted: formData.acceptDeclaration,
+            registration_status: 'complete',
             status: 'pending'
         };
 
@@ -2235,6 +2428,46 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
         )}
 
+        {resumePrompt && (
+          <div className="mb-6 p-4 border border-amber-200 bg-amber-50 rounded-lg space-y-3">
+            <p className="font-medium text-amber-900">
+              This phone number is already registered with an incomplete profile. Continue with
+              remaining login creation, documents, and declaration.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  applyResumeFromMetadata(
+                    resumePrompt.user_id,
+                    resumePrompt.metadata,
+                    resumePrompt.email
+                  )
+                }
+                className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700"
+              >
+                Continue Remaining Steps
+              </button>
+              <button
+                type="button"
+                onClick={() => setResumePrompt(null)}
+                className="bg-white border border-amber-300 text-amber-900 px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isResumingIncomplete && (
+          <div className="mb-6 p-4 border border-emerald-200 bg-emerald-50 rounded-lg text-emerald-900 text-sm">
+            Resuming incomplete registration. Basic details, registration numbers
+            {existingLetterheadUrl ? ", and letterhead" : ""} are read-only. Complete
+            documents{existingLetterheadUrl ? "" : ", letterhead"}, login setup, and
+            declaration, then submit.
+          </div>
+        )}
+
         <div className="space-y-6">
             {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
@@ -2255,7 +2488,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               Tell us who you are
             </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <fieldset
+            disabled={isResumingIncomplete}
+            className={`grid grid-cols-1 md:grid-cols-2 gap-4 border-0 p-0 m-0 min-w-0 ${
+              isResumingIncomplete ? "cursor-not-allowed [&_*]:cursor-not-allowed" : ""
+            }`}
+          >
                 {/* Row 1 */}
             <div>
               <label className="block font-medium text-black mb-1">
@@ -2267,6 +2505,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 options={ENTITY_TYPES.map((type) => ({ value: type, label: type }))}
                 placeholder="Select Entity Type"
                 className="w-full"
+                disabled={isResumingIncomplete}
               />
                   {errors.entityType && (
                     <p className="text-xs text-red-600 mt-1">{errors.entityType}</p>
@@ -2430,15 +2669,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     ) : (
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (!formData.alternatePhone || formData.alternatePhone.trim() === '') {
                             setErrors(prev => ({ ...prev, alternatePhone: "Phone number is required" }));
                             return;
                           }
-                          if (formData.alternatePhone.length === 10) {
-                            setShowPhoneOTPModal(true);
-                          } else {
+                          if (formData.alternatePhone.length !== 10) {
                             setErrors(prev => ({ ...prev, alternatePhone: "Please enter a valid 10-digit phone number" }));
+                            return;
+                          }
+                          const ok = await lookupPhoneBeforeVerify();
+                          if (ok) {
+                            setShowPhoneOTPModal(true);
                           }
                         }}
                         className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg font-medium hover:bg-emerald-100 transition whitespace-nowrap"
@@ -2522,7 +2764,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     placeholder="Additional details (optional)"
                   />
                 </div>
-      </div>
+      </fieldset>
     </div>
 
         {/* Registration Numbers Section - Dynamic based on Entity Type */}
@@ -2544,6 +2786,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 {formData.entityType ? `Enter credentials for ${formData.entityType}` : "Select a consultant type first"}
               </p>
 
+              <fieldset
+                disabled={isResumingIncomplete}
+                className={`border-0 p-0 m-0 min-w-0 ${
+                  isResumingIncomplete ? "cursor-not-allowed [&_*]:cursor-not-allowed" : ""
+                }`}
+              >
               {!formData.entityType && (
                 <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-sm">
                   ⚠️ Please select an Entity Type in Basic Details to see the required registration fields.
@@ -2551,6 +2799,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               )}
 
               {formData.entityType && renderEntitySpecificFields()}
+              </fieldset>
             </div>
 
         {/* Documents Upload Section - Dynamic based on Entity Type */}
@@ -2680,9 +2929,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             <h3 className="text-lg font-semibold text-black">Letterhead</h3>
           </div>
           <p className="text-sm text-gray-600 mb-4 ml-11">
-            Upload your letterhead PDF file. After successful upload, you will see a preview showing where it will be placed.
+            {existingLetterheadUrl
+              ? "Letterhead was already uploaded during partial registration and cannot be changed here."
+              : "Upload your letterhead PDF file. After successful upload, you will see a preview showing where it will be placed."}
           </p>
 
+          {existingLetterheadUrl ? (
+            <div
+              className={`border rounded-lg p-4 bg-gray-50 space-y-3 ${
+                isResumingIncomplete
+                  ? "cursor-not-allowed [&_*]:cursor-not-allowed"
+                  : ""
+              }`}
+            >
+              <p className="text-sm font-medium text-emerald-800">
+                Letterhead already on file
+              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={existingLetterheadUrl}
+                alt="Saved letterhead"
+                className="max-h-64 mx-auto rounded border border-gray-200 bg-white object-contain"
+              />
+            </div>
+          ) : (
           <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block font-medium text-black mb-1">Letterhead PDF <span className="text-red-600 font-bold">*</span></label>
@@ -2793,6 +3063,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               </div>
             )}
           </div>
+          )}
         </div>
 
             {/* Login Setup Section */}
