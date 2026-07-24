@@ -164,6 +164,32 @@ export async function PUT(
       updateData.status = body.status;
     }
 
+    // Appointed architect may replace the project owner of record (projects.user_id).
+    // body.user_id remains the caller id for auth — never treat it as the new owner id.
+    if (body.project_owner_user_id !== undefined) {
+      const isAppointedArchitect = projectArchitectId === requestUserId;
+      if (!isAppointedArchitect) {
+        return NextResponse.json(
+          { error: "Only the appointed architect can change the project owner." },
+          { status: 403 }
+        );
+      }
+      const nextOwnerId = String(body.project_owner_user_id || "").trim();
+      if (!nextOwnerId) {
+        return NextResponse.json(
+          { error: "project_owner_user_id is required to change the project owner." },
+          { status: 400 }
+        );
+      }
+      if (nextOwnerId === requestUserId || nextOwnerId === projectArchitectId) {
+        return NextResponse.json(
+          { error: "The project Owner must be a different account than the architect." },
+          { status: 400 }
+        );
+      }
+      updateData.user_id = nextOwnerId;
+    }
+
     if (body.application_urls !== undefined && body.application_urls !== null) {
       if (typeof body.application_urls !== "object" || Array.isArray(body.application_urls)) {
         return NextResponse.json(
