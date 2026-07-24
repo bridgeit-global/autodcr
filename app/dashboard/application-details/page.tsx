@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import DscPanVerifyModal from "@/app/components/DscPanVerifyModal";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import {
@@ -11,6 +12,12 @@ import {
 } from "@/app/components/DraftApplicationsModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
+import {
+  extractPanHashFromCertDer,
+  isValidPanFormat,
+  pickPanFromUserMetadata,
+} from "@/app/utils/dscPanFromCert";
+import type { CertInfo } from "@/app/lib/bridge/protocol";
 import {
   collectOwnerSignerUserIds,
   isAnySameUserId,
@@ -166,14 +173,13 @@ function pickSignerLabel(cert: { subject?: string; label?: string; id: string })
   );
 }
 
-async function signPdfBlobWithDsc(
-  blob: Blob,
-  fileName: string,
-  pinHint: string | undefined,
-  templateType: TemplateType,
-  signingAcceptance: boolean,
-  stampOptions?: { role?: DscStampRole; layout?: DscStampLayout }
-): Promise<Blob> {
+type ResolvedSigningCert = {
+  slotId: number;
+  cert: CertInfo;
+};
+
+/** Prefer token-present slot, then first usable; first cert on that slot. */
+async function resolveSigningCert(): Promise<ResolvedSigningCert> {
   await pingHost();
   const slots = await listSlots();
   const usableSlots = slots
@@ -191,6 +197,20 @@ async function signPdfBlobWithDsc(
   if (!cert) {
     throw new Error("No DSC certificate found on the selected token.");
   }
+  return { slotId: preferred.slotId, cert };
+}
+
+async function signPdfBlobWithDsc(
+  blob: Blob,
+  fileName: string,
+  pinHint: string | undefined,
+  templateType: TemplateType,
+  signingAcceptance: boolean,
+  stampOptions?: { role?: DscStampRole; layout?: DscStampLayout },
+  preResolved?: ResolvedSigningCert
+): Promise<Blob> {
+  const resolved = preResolved ?? (await resolveSigningCert());
+  const { slotId, cert } = resolved;
 
   const sourceBuffer = await blob.arrayBuffer();
   const sourceBytes = new Uint8Array(sourceBuffer);
@@ -213,7 +233,7 @@ async function signPdfBlobWithDsc(
   });
   const signed = await signPdf({
     pdfBase64: await blobToBase64(preparedBlob),
-    slotId: preferred.slotId,
+    slotId,
     certId: cert.id,
     fileName,
     contentType: preparedBlob.type,
@@ -1692,6 +1712,12 @@ export default function ApplicationDetailsPage() {
     useState(false);
   const [signedDocSuccessDialogOpen, setSignedDocSuccessDialogOpen] = useState(false);
   const [pendingDashboardUrl, setPendingDashboardUrl] = useState<string | null>(null);
+  const [dscPanVerify, setDscPanVerify] = useState<{
+    isMatch: boolean;
+    pan: string;
+    signerLabel: string;
+  } | null>(null);
+  const dscPanVerifyResolveRef = useRef<((proceed: boolean) => void) | null>(null);
   const { setSlot } = useApplicationPdfSaveSlot();
   const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
   const [autoMockSignAfterPreviewOpen, setAutoMockSignAfterPreviewOpen] = useState(false);
@@ -1706,6 +1732,23 @@ export default function ApplicationDetailsPage() {
   const signInFlightRef = useRef(false);
   const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const signDirectlyRef = useRef<() => Promise<void>>(async () => Promise.resolve());
+
+  const promptDscPanVerify = (args: {
+    isMatch: boolean;
+    pan: string;
+    signerLabel: string;
+  }): Promise<boolean> =>
+    new Promise((resolve) => {
+      dscPanVerifyResolveRef.current = resolve;
+      setDscPanVerify(args);
+    });
+
+  const handleDscPanVerifyDecision = (proceed: boolean) => {
+    setDscPanVerify(null);
+    const resolve = dscPanVerifyResolveRef.current;
+    dscPanVerifyResolveRef.current = null;
+    resolve?.(proceed);
+  };
   const buildApplicationPreviewPdfBlob = async (
     urlsRaw?: unknown,
     accessToken?: string
@@ -2934,6 +2977,53 @@ export default function ApplicationDetailsPage() {
         return;
       }
 
+      setSidebarPdfStatus("Checking DSC against your PAN…");
+      setSavePdfError(null);
+
+      const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, [authUser.id]);
+      const userPan =
+        pickPanFromUserMetadata(serverMeta) ||
+        pickPanFromUserMetadata(userMetadata) ||
+        pickPanFromUserMetadata(authUser.user_metadata) ||
+        pickPanFromUserMetadata(readLocalStoredUserMetadata());
+      if (!isValidPanFormat(userPan)) {
+        throw new Error(
+          "Your PAN is missing or invalid in your profile. Update Profile with a valid PAN before signing."
+        );
+      }
+
+      const resolvedCert = await resolveSigningCert();
+      if (!resolvedCert.cert.derBase64?.trim()) {
+        throw new Error(
+          "DSC certificate details were incomplete. Reconnect the token and retry."
+        );
+      }
+      const { panHash, commonName } = extractPanHashFromCertDer(resolvedCert.cert.derBase64);
+      const verifyRes = await fetch("/api/verify-pan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pan: userPan, certSerialNumber: panHash }),
+      });
+      const verifyData = (await verifyRes.json()) as { isMatch?: boolean; error?: string };
+      if (!verifyRes.ok) {
+        throw new Error(verifyData.error || "Failed to verify PAN against DSC.");
+      }
+      const isMatch = Boolean(verifyData.isMatch);
+      const signerLabel = commonName || pickSignerLabel(resolvedCert.cert);
+
+      setSidebarPdfStatus(null);
+      const proceed = await promptDscPanVerify({
+        isMatch,
+        pan: userPan,
+        signerLabel,
+      });
+      if (!proceed) {
+        signInFlightRef.current = false;
+        setIsSigningPdf(false);
+        setSidebarPdfStatus(null);
+        return;
+      }
+
       const isDual = isDualLetterType(ctx.templateType);
       const ownerAlreadySigned = Boolean(ownerSignedAtRow);
       const signingAcceptance = isDual && ownerAlreadySigned;
@@ -2988,7 +3078,8 @@ export default function ApplicationDetailsPage() {
         undefined,
         ctx.templateType,
         signingAcceptance,
-        signingAcceptance ? { role: "consultant", layout: "dualColumn" } : undefined
+        signingAcceptance ? { role: "consultant", layout: "dualColumn" } : undefined,
+        resolvedCert
       );
 
       let acceptanceUpload: { acceptanceBlob?: Blob; acceptanceUrlsKey?: string } = {};
@@ -3016,7 +3107,8 @@ export default function ApplicationDetailsPage() {
           undefined,
           ctx.templateType,
           false,
-          { role: "consultant", layout: "dualColumn" }
+          { role: "consultant", layout: "dualColumn" },
+          resolvedCert
         );
         appointmentUpload = {
           appointmentBlob: signedAppointment,
@@ -3058,7 +3150,8 @@ export default function ApplicationDetailsPage() {
           undefined,
           ctx.templateType,
           false,
-          { role: "owner", layout: "dualColumn" }
+          { role: "owner", layout: "dualColumn" },
+          resolvedCert
         );
         acceptanceUpload = {
           acceptanceBlob: signedAcceptance,
@@ -3723,6 +3816,15 @@ export default function ApplicationDetailsPage() {
           </div>
         </div>
       )}
+
+      <DscPanVerifyModal
+        open={Boolean(dscPanVerify)}
+        isMatch={dscPanVerify?.isMatch ?? false}
+        pan={dscPanVerify?.pan ?? ""}
+        signerLabel={dscPanVerify?.signerLabel}
+        onContinue={() => handleDscPanVerifyDecision(true)}
+        onCancel={() => handleDscPanVerifyDecision(false)}
+      />
 
       {saveSuccessDialogOpen && (
         <div
