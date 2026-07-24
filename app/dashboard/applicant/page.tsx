@@ -28,7 +28,9 @@ import {
 } from "@/app/utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "@/app/utils/ownerApplicantRoster";
 import ConsultantPartialRegistrationModal from "@/app/components/ConsultantPartialRegistrationModal";
+import OwnerPartialRegistrationModal from "@/app/components/OwnerPartialRegistrationModal";
 import { NEW_USER_SENTINEL } from "@/app/utils/consultantRegistrationShared";
+import { getOwnerRegistrationNumberFromMetadata } from "@/app/utils/ownerRegistrationShared";
 
 type ApplicantFormData = {
   applicantType: string;
@@ -401,8 +403,12 @@ export default function ApplicantDetailsPage() {
   // In this flow, users should not type manually; values come only from directory selection.
   // Show the directory dropdown as soon as applicant type is selected.
   const showDirectoryDropdown = !!selectedApplicantType;
-  const canAddNewUser =
+  const canManageProjectOwner = canCreateProjectAsArchitect(userMetadata);
+  const canAddNewConsultant =
     !!selectedApplicantType && selectedApplicantType !== "Owner";
+  const canAddNewOwner =
+    selectedApplicantType === "Owner" && canManageProjectOwner;
+  const canAddNewUser = canAddNewConsultant || canAddNewOwner;
   const isLocked = showDirectoryDropdown && isValidDirectorySelection;
 
   // Capture logged-in Supabase auth user id (used to store `user_id` in applicant rows)
@@ -848,49 +854,82 @@ export default function ApplicantDetailsPage() {
 
     let registrationNumber = "";
     let licenseIssueDate = String(meta.registration_date || "");
-    const consultantType = String(meta.consultant_type || selectedApplicantType || "");
-    switch (consultantType) {
-      case "Architect":
-        registrationNumber = String(meta.coa_reg_no || "");
-        break;
-      case "Structural Engineer":
-        registrationNumber = String(meta.structural_license_no || "");
-        break;
-      case "Licensed Surveyor":
-        registrationNumber = String(meta.lbs_license_no || "");
-        break;
-      case "MEP Consultant":
-        registrationNumber = String(meta.electrical_license_no || "");
-        break;
-      case "Plumber":
-        registrationNumber = String(meta.plumber_license_no || "");
-        break;
-      case "Fire Consultant":
-        registrationNumber = String(meta.fire_license_no || "");
-        break;
-      case "Landscape Consultant":
-        registrationNumber = String(meta.landscape_license_no || "");
-        break;
-      case "PMC / Project Manager":
-        registrationNumber = String(meta.pmc_registration_no || "");
-        break;
-      case "Geotechnical Consultant":
-        registrationNumber = String(meta.nabl_accreditation_no || "");
-        break;
-      case "Environmental Consultant":
-        registrationNumber = String(meta.env_license_no || "");
-        break;
-      case "Town Planner":
-        registrationNumber = String(meta.town_planner_license_no || "");
-        break;
-      default:
-        break;
+    const consultantType = String(meta.consultant_type || "");
+    const entityType = String(meta.entity_type || "");
+
+    if (selectedApplicantType === "Owner" || entityType) {
+      registrationNumber = getOwnerRegistrationNumberFromMetadata(meta, entityType);
+      switch (entityType) {
+        case "Proprietorship / Individual":
+          licenseIssueDate = String(meta.proprietorship_registration_date || licenseIssueDate);
+          break;
+        case "Partnership Firm":
+          licenseIssueDate = String(meta.partnership_registration_date || licenseIssueDate);
+          break;
+        case "Pvt. Ltd. / Ltd. Company":
+          licenseIssueDate = String(meta.roc_registration_date || licenseIssueDate);
+          break;
+        case "LLP":
+          licenseIssueDate = String(meta.llp_incorporation_date || licenseIssueDate);
+          break;
+        case "Trust / Society":
+          licenseIssueDate = String(meta.trust_registration_date || licenseIssueDate);
+          break;
+        case "Govt. / PSU / Local Body":
+          licenseIssueDate = String(meta.govt_registration_date || licenseIssueDate);
+          break;
+        default:
+          break;
+      }
+    } else {
+      switch (consultantType || selectedApplicantType || "") {
+        case "Architect":
+          registrationNumber = String(meta.coa_reg_no || "");
+          break;
+        case "Structural Engineer":
+          registrationNumber = String(meta.structural_license_no || "");
+          break;
+        case "Licensed Surveyor":
+          registrationNumber = String(meta.lbs_license_no || "");
+          break;
+        case "MEP Consultant":
+          registrationNumber = String(meta.electrical_license_no || "");
+          break;
+        case "Plumber":
+          registrationNumber = String(meta.plumber_license_no || "");
+          break;
+        case "Fire Consultant":
+          registrationNumber = String(meta.fire_license_no || "");
+          break;
+        case "Landscape Consultant":
+          registrationNumber = String(meta.landscape_license_no || "");
+          break;
+        case "PMC / Project Manager":
+          registrationNumber = String(meta.pmc_registration_no || "");
+          break;
+        case "Geotechnical Consultant":
+          registrationNumber = String(meta.nabl_accreditation_no || "");
+          break;
+        case "Environmental Consultant":
+          registrationNumber = String(meta.env_license_no || "");
+          break;
+        case "Town Planner":
+          registrationNumber = String(meta.town_planner_license_no || "");
+          break;
+        default:
+          break;
+      }
     }
+
+    const displayName =
+      selectedApplicantType === "Owner" && String(meta.entity_name || "").trim()
+        ? String(meta.entity_name).trim()
+        : fullName || result.email || "New User";
 
     if (Object.keys(meta).length > 0) {
       const entry: ConsultantDirectoryEntry = {
         id: result.user_id,
-        fullName: fullName || result.email || "New User",
+        fullName: displayName,
         email: String(meta.email || result.email || ""),
         contactNumber: String(meta.alternate_phone || meta.mobile || ""),
         pan: String(meta.pan || ""),
@@ -952,7 +991,6 @@ export default function ApplicantDetailsPage() {
 
   // If logged-in user is a consultant, add "Owner" option (unless already added)
   const isConsultant = userMetadata?.role === "Consultant";
-  const canManageProjectOwner = canCreateProjectAsArchitect(userMetadata);
   if (
     isConsultant &&
     (!addedApplicantTypes.includes("Owner") || changingOwner || ownerAwaitingReplacement)
@@ -1734,8 +1772,13 @@ export default function ApplicantDetailsPage() {
       </AnimatePresence>
 
       <ConsultantPartialRegistrationModal
-        open={showNewUserModal && canAddNewUser}
+        open={showNewUserModal && canAddNewConsultant}
         consultantType={selectedApplicantType || ""}
+        onClose={() => setShowNewUserModal(false)}
+        onSuccess={handleNewUserSuccess}
+      />
+      <OwnerPartialRegistrationModal
+        open={showNewUserModal && canAddNewOwner}
         onClose={() => setShowNewUserModal(false)}
         onSuccess={handleNewUserSuccess}
       />
