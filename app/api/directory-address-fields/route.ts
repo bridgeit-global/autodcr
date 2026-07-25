@@ -36,11 +36,10 @@ function addressFieldsFromMeta(meta: Record<string, unknown>): AddressFields {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const userIds = Array.isArray(body?.user_ids)
-      ? body.user_ids
-          .filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0)
-          .map((id: string) => id.trim())
-      : [];
+    const rawIds: unknown[] = Array.isArray(body?.user_ids) ? body.user_ids : [];
+    const userIds: string[] = rawIds
+      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      .map((id) => id.trim());
 
     if (userIds.length === 0) {
       return NextResponse.json({ profiles: {} });
@@ -58,7 +57,7 @@ export async function POST(request: NextRequest) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const uniqueIds = [...new Set(userIds)].slice(0, 100);
+    const uniqueIds: string[] = Array.from(new Set(userIds)).slice(0, 100);
     const profiles: Record<string, AddressFields> = {};
 
     await Promise.all(
