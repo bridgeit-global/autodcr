@@ -92,6 +92,7 @@ export function entityTypeToSignatoryDesignation(entityType: string): string {
   const normalized = entityType.trim().toLowerCase();
   switch (normalized) {
     case "proprietorship / individual":
+      return "Proprietor";
     case "pvt. ltd. / ltd. company":
       return "Director";
     case "llp":
@@ -101,7 +102,7 @@ export function entityTypeToSignatoryDesignation(entityType: string): string {
     case "partnership firm":
       return "Partner";
     case "govt. / psu / local body":
-      return "Authorized Signatory";
+      return "Department";
     default:
       return "";
   }
@@ -128,8 +129,13 @@ export function serializeApplicantRowForStorage(
     line3 = split.line3;
   }
 
+  const city = pickText(row.city);
+  const pincode = pickText(row.pincode, row.pin_code, row.zip);
+  const resolved = resolveAddressLinesWithCityPincode(line1, line2, line3, city, pincode);
   const residentialAddress =
-    residentialRaw || [line1, line2, line3].filter(Boolean).join(", ") || "-";
+    residentialRaw ||
+    [resolved.line1, resolved.line2, resolved.line3].filter(Boolean).join(", ") ||
+    "-";
 
   const out: Record<string, unknown> = {
     applicantType,
@@ -148,6 +154,8 @@ export function serializeApplicantRowForStorage(
   if (line1) out.address_line1 = line1;
   if (line2) out.address_line2 = line2;
   if (line3) out.address_line3 = line3;
+  if (city) out.city = city;
+  if (pincode) out.pincode = pincode;
   const entityType = pickText(row.entity_type, row.entityType);
   if (entityType) out.entity_type = entityType;
 
@@ -209,20 +217,71 @@ export function formatAddressLineWithComma(value: string): string {
   return `${s},`;
 }
 
+/** `"Mumbai-400053"` when either part exists; empty when both missing. */
+export function formatCityPincode(
+  city?: string | null,
+  pincode?: string | null
+): string {
+  const c = typeof city === "string" ? city.trim() : "";
+  const p = typeof pincode === "string" ? pincode.trim() : "";
+  if (!c && !p) return "";
+  return `${c}-${p}`;
+}
+
+/**
+ * Place city-pincode relative to the three address lines:
+ * - If line3 exists → append `, city-pincode` onto line3
+ * - If line3 is empty → city-pincode alone becomes line3 (its own line)
+ */
+export function resolveAddressLinesWithCityPincode(
+  line1: string,
+  line2: string,
+  line3: string,
+  city?: string | null,
+  pincode?: string | null
+): { line1: string; line2: string; line3: string } {
+  const l1 = stripTrailingAddressPunctuation(line1);
+  const l2 = stripTrailingAddressPunctuation(line2);
+  const l3 = stripTrailingAddressPunctuation(line3);
+  const cityPincode = formatCityPincode(city, pincode);
+  if (!cityPincode) {
+    return { line1: l1, line2: l2, line3: l3 };
+  }
+  if (l3) {
+    return { line1: l1, line2: l2, line3: `${l3}, ${cityPincode}` };
+  }
+  // No address_line3 — keep city-pincode on its own line (line3 slot).
+  return { line1: l1, line2: l2, line3: cityPincode };
+}
+
+/** Append `, city-pincode` after an address line (typically line3 when it exists). */
+export function appendCityPincodeToAddressLine3(
+  line3: string,
+  city?: string | null,
+  pincode?: string | null
+): string {
+  const base = stripTrailingAddressPunctuation(line3);
+  const suffix = formatCityPincode(city, pincode);
+  if (!suffix) return base;
+  if (!base) return suffix;
+  return `${base}, ${suffix}`;
+}
+
 /**
  * Formats up to three address lines for appointment/acceptance HTML letters:
  * non-final non-empty lines end with ",", the last non-empty line ends with ".".
+ * City/pincode: appended to line3 when present; otherwise shown alone on line3
+ * (never merged onto line2).
  */
 export function formatAddressLinesForLetterDisplay(
   line1: string,
   line2: string,
-  line3: string
+  line3: string,
+  city?: string | null,
+  pincode?: string | null
 ): { line1: string; line2: string; line3: string } {
-  const sanitized = [
-    stripTrailingAddressPunctuation(line1),
-    stripTrailingAddressPunctuation(line2),
-    stripTrailingAddressPunctuation(line3),
-  ];
+  const resolved = resolveAddressLinesWithCityPincode(line1, line2, line3, city, pincode);
+  const sanitized = [resolved.line1, resolved.line2, resolved.line3];
   const nonEmpty = sanitized
     .map((line, index) => ({ line, index }))
     .filter((entry) => entry.line.length > 0);
@@ -234,4 +293,15 @@ export function formatAddressLinesForLetterDisplay(
       : formatAddressLineWithComma(entry.line);
   });
   return { line1: result[0], line2: result[1], line3: result[2] };
+}
+
+/** Pick city/pincode from an applicant row or user_metadata object. */
+export function pickCityPincodeFromRecord(
+  rec: Record<string, unknown> | null | undefined
+): { city: string; pincode: string } {
+  if (!rec) return { city: "", pincode: "" };
+  return {
+    city: pickText(rec.city),
+    pincode: pickText(rec.pincode, rec.pin_code, rec.zip),
+  };
 }

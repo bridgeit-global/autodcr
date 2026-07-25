@@ -7,6 +7,7 @@ export const CORRESPONDENCE_TYPE_FIRE_CONSULTANT = "fire_consultant";
 type OfficeRow = {
   id: string;
   officer_name: string;
+  organisation: string | null;
   line1: string;
   line2: string;
   line3: string;
@@ -20,7 +21,7 @@ export async function fetchCorrespondenceOffices(
   try {
     const { data, error } = await supabase
       .from("building_proposal_offices")
-      .select("id, officer_name, line1, line2, line3")
+      .select("id, officer_name, organisation, line1, line2, line3")
       .eq("correspondence_type", correspondenceType);
 
     if (error || !data?.length) return null;
@@ -31,6 +32,7 @@ export async function fetchCorrespondenceOffices(
       if (!id) continue;
       map[id] = {
         officerName: row.officer_name?.trim() ?? "",
+        organisation: row.organisation?.trim() ?? "",
         line1: row.line1?.trim() ?? "",
         line2: row.line2?.trim() ?? "",
         line3: row.line3?.trim() ?? "",

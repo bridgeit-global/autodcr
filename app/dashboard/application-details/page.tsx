@@ -130,6 +130,10 @@ type PreviewProjectData = {
       addressLine1?: string;
       addressLine2?: string;
       addressLine3?: string;
+      city?: string;
+      pincode?: string;
+      pin_code?: string;
+      zip?: string;
       residentialAddress?: string;
     }>;
   } | null;
@@ -475,6 +479,24 @@ function pickAddressLineFromMeta(meta: unknown, index: 1 | 2 | 3): string | unde
   return undefined;
 }
 
+function pickCityFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  const v = m.city;
+  if (typeof v === "string" && v.trim()) return v.trim();
+  return undefined;
+}
+
+function pickPincodeFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["pincode", "pin_code", "zip"]) {
+    const v = m[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
 function pickConsultantCompanyFromMeta(meta: unknown): string | undefined {
   if (!meta || typeof meta !== "object") return undefined;
   const m = meta as Record<string, unknown>;
@@ -691,6 +713,10 @@ async function buildApplicationPreviewContext(
   let consultantAddressLine3 =
     pickAddressLineFromMeta(userMetadata, 3) ||
     pickAddressLineFromMeta(localMeta, 3);
+  let consultantCity =
+    pickCityFromMeta(userMetadata) || pickCityFromMeta(localMeta) || "";
+  let consultantPincode =
+    pickPincodeFromMeta(userMetadata) || pickPincodeFromMeta(localMeta) || "";
   let consultantCompanyName =
     pickConsultantCompanyFromMeta(userMetadata) ||
     pickConsultantCompanyFromMeta(localMeta);
@@ -703,6 +729,9 @@ async function buildApplicationPreviewContext(
   let consultantEmail =
     pickConsultantEmailFromMeta(userMetadata) ||
     pickConsultantEmailFromMeta(localMeta);
+  // Acceptance letters print on the appointed consultant's letterhead, so this is
+  // only filled from the server-resolved consultant profile (never the viewer's own).
+  let consultantLetterheadUrl = "";
   const ownerApplicants = (projectData?.applicant_details?.applicants || []).filter((a) =>
     (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
   );
@@ -735,8 +764,18 @@ async function buildApplicationPreviewContext(
     ownerApplicant?.address_line3?.trim() ||
     (ownerApplicant as { addressLine3?: string } | undefined)?.addressLine3?.trim() ||
     "";
+  let clientCity = ownerApplicant?.city?.trim() || "";
+  let clientPincode =
+    ownerApplicant?.pincode?.trim() ||
+    ownerApplicant?.pin_code?.trim() ||
+    ownerApplicant?.zip?.trim() ||
+    "";
 
-  const mergeConsultantMeta = (meta: unknown, prefer = false) => {
+  const mergeConsultantMeta = (
+    meta: unknown,
+    prefer = false,
+    isAppointedConsultantProfile = prefer
+  ) => {
     const nextCoaRegNo = pickCoaRegNoFromMeta(meta);
     const nextCoaExpiryDate = pickCoaExpiryFromMeta(meta);
     const nextLbsLicenseNo = pickLbsLicenseFromMeta(meta);
@@ -744,11 +783,17 @@ async function buildApplicationPreviewContext(
     const nextAddressLine1 = pickAddressLineFromMeta(meta, 1);
     const nextAddressLine2 = pickAddressLineFromMeta(meta, 2);
     const nextAddressLine3 = pickAddressLineFromMeta(meta, 3);
+    const nextCity = pickCityFromMeta(meta);
+    const nextPincode = pickPincodeFromMeta(meta);
     const nextCompanyName = pickConsultantCompanyFromMeta(meta);
     const nextConsultantName = pickConsultantNameFromMeta(meta);
     const nextConsultantMobile = pickConsultantMobileFromMeta(meta);
     const nextConsultantEmail = pickConsultantEmailFromMeta(meta);
+    const nextLetterheadUrl = pickLetterheadUrlFromMeta(meta);
 
+    if (isAppointedConsultantProfile && nextLetterheadUrl) {
+      consultantLetterheadUrl = nextLetterheadUrl;
+    }
     if ((prefer || !coaRegNo) && nextCoaRegNo) coaRegNo = nextCoaRegNo;
     if ((prefer || !coaExpiryDate) && nextCoaExpiryDate) coaExpiryDate = nextCoaExpiryDate;
     if ((prefer || !lbsLicenseNo) && nextLbsLicenseNo) lbsLicenseNo = nextLbsLicenseNo;
@@ -756,6 +801,8 @@ async function buildApplicationPreviewContext(
     if ((prefer || !consultantAddressLine1) && nextAddressLine1) consultantAddressLine1 = nextAddressLine1;
     if ((prefer || !consultantAddressLine2) && nextAddressLine2) consultantAddressLine2 = nextAddressLine2;
     if ((prefer || !consultantAddressLine3) && nextAddressLine3) consultantAddressLine3 = nextAddressLine3;
+    if ((prefer || !consultantCity) && nextCity) consultantCity = nextCity;
+    if ((prefer || !consultantPincode) && nextPincode) consultantPincode = nextPincode;
     if ((prefer || !consultantCompanyName) && nextCompanyName) consultantCompanyName = nextCompanyName;
     if ((prefer || !consultantName) && nextConsultantName) consultantName = nextConsultantName;
     if ((prefer || !consultantMobile) && nextConsultantMobile) consultantMobile = nextConsultantMobile;
@@ -799,7 +846,11 @@ async function buildApplicationPreviewContext(
         ) {
           console.log("[fire-preview-metadata-api]", payload.metadata ?? null);
         }
-        if (payload.metadata) mergeConsultantMeta(payload.metadata, true);
+        // Without lookup ids the endpoint returns the caller's own profile, which
+        // must not be mistaken for the appointed consultant's letterhead.
+        if (payload.metadata) {
+          mergeConsultantMeta(payload.metadata, true, consultantLookupUserIds.length > 0);
+        }
       }
     }
   } catch {
@@ -886,6 +937,14 @@ async function buildApplicationPreviewContext(
       const resolved = pickAddressLineFromMeta(ownerMeta, 3);
       if (resolved) clientAddressLine3 = resolved;
     }
+    if (!clientCity) {
+      const resolved = pickCityFromMeta(ownerMeta);
+      if (resolved) clientCity = resolved;
+    }
+    if (!clientPincode) {
+      const resolved = pickPincodeFromMeta(ownerMeta);
+      if (resolved) clientPincode = resolved;
+    }
     const resolvedCompany = pickEntityNameFromMeta(ownerMeta);
     if (resolvedCompany) {
       clientCompanyName = resolvedCompany;
@@ -940,6 +999,8 @@ async function buildApplicationPreviewContext(
       consultantAddressLine1,
       consultantAddressLine2,
       consultantAddressLine3,
+      consultantCity,
+      consultantPincode,
       consultantName,
       consultantCompanyName,
       consultantMobile,
@@ -950,6 +1011,8 @@ async function buildApplicationPreviewContext(
       clientAddressLine1,
       clientAddressLine2,
       clientAddressLine3,
+      clientCity,
+      clientPincode,
       projectData,
       ...(fireConsultantOfficesByKey ? { fireConsultantOfficesByKey } : {}),
     },
@@ -967,6 +1030,8 @@ async function buildApplicationPreviewContext(
     consultantAddressLine1,
     consultantAddressLine2,
     consultantAddressLine3,
+    consultantCity,
+    consultantPincode,
     consultantName,
     consultantCompanyName,
     consultantMobile,
@@ -977,7 +1042,10 @@ async function buildApplicationPreviewContext(
     clientAddressLine1,
     clientAddressLine2,
     clientAddressLine3,
+    clientCity,
+    clientPincode,
     ownerLetterheadUrl,
+    consultantLetterheadUrl,
     ownerDebug: {
       ownerApplicants,
       ownerLookupUserIds,

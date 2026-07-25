@@ -1,5 +1,10 @@
 /** Project-level access: owner vs appointed architect delegate. */
 
+import {
+  formatCityPincode,
+  resolveAddressLinesWithCityPincode,
+} from "@/app/utils/applicantRecordFields";
+
 export type ProjectAccessRow = {
   user_id?: string | null;
   architect_user_id?: string | null;
@@ -112,6 +117,8 @@ export type SessionUserMeta = UserMetadataLike & {
   address_line1?: string;
   address_line2?: string;
   address_line3?: string;
+  city?: string;
+  pincode?: string;
   coa_reg_no?: string;
   registration_date?: string;
   pan_no?: string;
@@ -194,7 +201,25 @@ export function buildOwnerApplicantRow(
   const addressLine1 = meta?.address_line1?.trim() || "";
   const addressLine2 = meta?.address_line2?.trim() || "";
   const addressLine3 = meta?.address_line3?.trim() || "";
-  const residentialAddress = meta?.address?.trim() || "-";
+  const city = meta?.city?.trim() || "";
+  const pincode = meta?.pincode?.trim() || "";
+  const resolved = resolveAddressLinesWithCityPincode(
+    addressLine1,
+    addressLine2,
+    addressLine3,
+    city,
+    pincode
+  );
+  const residentialFromLines = [resolved.line1, resolved.line2, resolved.line3]
+    .filter(Boolean)
+    .join(", ");
+  const addressFallback = meta?.address?.trim() || "";
+  const cityPincode = formatCityPincode(city, pincode);
+  const residentialWithCity =
+    addressFallback && cityPincode && !addressFallback.includes(cityPincode)
+      ? `${addressFallback.replace(/[,.\s]+$/, "")}, ${cityPincode}`
+      : addressFallback;
+  const residentialAddress = residentialFromLines || residentialWithCity || "-";
   return {
     user_id: ownerUserId,
     applicantType: "Owner",
@@ -209,6 +234,8 @@ export function buildOwnerApplicantRow(
     address_line1: addressLine1 || undefined,
     address_line2: addressLine2 || undefined,
     address_line3: addressLine3 || undefined,
+    city: city || undefined,
+    pincode: pincode || undefined,
     entity_type: meta?.entity_type?.trim() || undefined,
     letterhead_url: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
     letterheadUrl: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
@@ -295,6 +322,28 @@ export function ensureArchitectInApplicantRoster(
     [meta?.first_name, meta?.middle_name, meta?.last_name].filter(Boolean).join(" ").trim() ||
     "-";
 
+  const addressLine1 = meta?.address_line1?.trim() || "";
+  const addressLine2 = meta?.address_line2?.trim() || "";
+  const addressLine3 = meta?.address_line3?.trim() || "";
+  const city = meta?.city?.trim() || "";
+  const pincode = meta?.pincode?.trim() || "";
+  const resolved = resolveAddressLinesWithCityPincode(
+    addressLine1,
+    addressLine2,
+    addressLine3,
+    city,
+    pincode
+  );
+  const residentialFromLines = [resolved.line1, resolved.line2, resolved.line3]
+    .filter(Boolean)
+    .join(", ");
+  const addressFallback = meta?.address?.trim() || "";
+  const cityPincode = formatCityPincode(city, pincode);
+  const residentialWithCity =
+    addressFallback && cityPincode && !addressFallback.includes(cityPincode)
+      ? `${addressFallback.replace(/[,.\s]+$/, "")}, ${cityPincode}`
+      : addressFallback;
+
   return {
     applicants: [
       ...applicants,
@@ -307,11 +356,13 @@ export function ensureArchitectInApplicantRoster(
         registrationNo: meta?.coa_reg_no || "",
         licenseIssueDate: meta?.registration_date || "-",
         panNo: meta?.pan_no || meta?.pan || "-",
-        residentialAddress: meta?.address || "-",
+        residentialAddress: residentialFromLines || residentialWithCity || "-",
         officeAddress: meta?.address || "-",
         address_line1: meta?.address_line1,
         address_line2: meta?.address_line2,
         address_line3: meta?.address_line3,
+        city: city || undefined,
+        pincode: pincode || undefined,
       },
     ],
   };
