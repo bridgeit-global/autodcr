@@ -2,6 +2,7 @@ import type { TemplateType } from "@/app/templates/templateGenerators";
 import {
   addressLinesFromApplicantRecord,
   formatAddressLinesForLetterDisplay,
+  pickCityPincodeFromRecord,
   pickEntityNameFromUserMeta,
   stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
@@ -26,11 +27,12 @@ function pickUserId(rec: Record<string, unknown> | undefined): string {
   return typeof uid === "string" ? uid.trim() : "";
 }
 
-/** Address lines only — company name comes from owner auth metadata, not applicants. */
+/** Address lines from applicant/meta; city/pincode only from applicant_details when provided. */
 function applyAddressFields(
   out: Record<string, string | undefined>,
   keys: ReturnType<typeof getConsultantAppointmentFieldKeys>,
-  rec: Record<string, unknown>
+  rec: Record<string, unknown>,
+  cityPincodeFromApplicant?: { city: string; pincode: string }
 ) {
   const parsed = addressLinesFromApplicantRecord(rec);
   const raw1 =
@@ -39,7 +41,10 @@ function applyAddressFields(
     stripTrailingAddressPunctuation(out[keys.addr2] ?? "") || parsed.line2;
   const raw3 =
     stripTrailingAddressPunctuation(out[keys.addr3] ?? "") || parsed.line3;
-  const formatted = formatAddressLinesForLetterDisplay(raw1, raw2, raw3);
+  // Applications: city/pincode only from applicants table — never from auth metadata.
+  const city = cityPincodeFromApplicant?.city ?? "";
+  const pincode = cityPincodeFromApplicant?.pincode ?? "";
+  const formatted = formatAddressLinesForLetterDisplay(raw1, raw2, raw3, city, pincode);
   if (formatted.line1) out[keys.addr1] = formatted.line1;
   if (formatted.line2) out[keys.addr2] = formatted.line2;
   if (formatted.line3) out[keys.addr3] = formatted.line3;
@@ -56,8 +61,8 @@ function applyCompanyField(
 }
 
 /**
- * Client company + architect appointment "To," company come from the project owner's
- * auth.users metadata (`entity_name`), not from public.applicants rows.
+ * Client company comes from the project owner's auth.users metadata (`entity_name`),
+ * not from public.applicants rows.
  */
 async function applyOwnerCompanyFields(
   out: Record<string, string | undefined>,
@@ -74,7 +79,6 @@ async function applyOwnerCompanyFields(
   if (!company) return;
 
   applyCompanyField(out, "project_Client_Company_Name", company, false);
-  applyCompanyField(out, "project_Company_Name_Architect", company, true);
 }
 
 function primaryAddressComplete(
@@ -87,7 +91,7 @@ function primaryAddressComplete(
 /**
  * Fill consultant appointment tokens from merged applicant_details + auth profile
  * when the client preview context missed address (e.g. consultant signing).
- * Company names for owner/client and architect "To," use owner auth metadata only.
+ * The owner/client company name uses owner auth metadata only.
  */
 export async function enrichConsultantAppointmentFields(
   fields: Record<string, string | undefined>,
@@ -130,17 +134,19 @@ export async function enrichConsultantAppointmentFields(
 
   const primaryApplicant = findConsultantApplicantInList(applicants, opts.templateType);
   const architectApplicant = findArchitectApplicantInList(applicants);
+  const primaryCityPincode = pickCityPincodeFromRecord(primaryApplicant);
+  const architectCityPincode = pickCityPincodeFromRecord(architectApplicant);
 
   const enrichPrimaryAddress = !primaryAddressComplete(out, primaryKeys);
   const enrichArchitectCc =
     opts.templateType !== "Architect" && !out[architectKeys.addr1]?.trim();
 
   if (enrichPrimaryAddress && primaryApplicant) {
-    applyAddressFields(out, primaryKeys, primaryApplicant);
+    applyAddressFields(out, primaryKeys, primaryApplicant, primaryCityPincode);
   }
 
   if (enrichArchitectCc && architectApplicant) {
-    applyAddressFields(out, architectKeys, architectApplicant);
+    applyAddressFields(out, architectKeys, architectApplicant, architectCityPincode);
   }
 
   const primaryUserId = pickUserId(primaryApplicant);
@@ -149,7 +155,13 @@ export async function enrichConsultantAppointmentFields(
       lookupUserIds: [primaryUserId],
     });
     if (meta) {
-      applyAddressFields(out, primaryKeys, meta as Record<string, unknown>);
+      // Address lines may come from meta; city/pincode stay from applicant row only.
+      applyAddressFields(
+        out,
+        primaryKeys,
+        meta as Record<string, unknown>,
+        primaryCityPincode
+      );
       // Licensed Surveyor "To," firm name: consultant profile, not owner.
       if (opts.templateType === "Licensed Surveyor") {
         const company = pickEntityNameFromUserMeta(meta as Record<string, unknown>);
@@ -161,12 +173,30 @@ export async function enrichConsultantAppointmentFields(
   if (!architectUserId && architectApplicant) {
     architectUserId = pickUserId(architectApplicant);
   }
-  if (enrichArchitectCc && architectUserId) {
+  // Architect appointment "To," firm name: architect profile, not owner.
+  const enrichArchitectCompany =
+    opts.templateType === "Architect" && !out[architectKeys.company]?.trim();
+  if ((enrichArchitectCc || enrichArchitectCompany) && architectUserId) {
     const meta = await resolveConsultantMetadata(opts.token, {
       lookupUserIds: [architectUserId],
     });
     if (meta) {
-      applyAddressFields(out, architectKeys, meta as Record<string, unknown>);
+      if (enrichArchitectCc) {
+        applyAddressFields(
+          out,
+          architectKeys,
+          meta as Record<string, unknown>,
+          architectCityPincode
+        );
+      }
+      if (enrichArchitectCompany) {
+        applyCompanyField(
+          out,
+          architectKeys.company,
+          pickEntityNameFromUserMeta(meta as Record<string, unknown>),
+          true
+        );
+      }
     }
   }
 

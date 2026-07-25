@@ -34,6 +34,8 @@ function mapOwnerDirectoryRow(row: Record<string, unknown>): OwnerApplicantMeta 
     address_line1: pickText(row.address_line1, row.addressLine1, userMeta.address_line1),
     address_line2: pickText(row.address_line2, row.addressLine2, userMeta.address_line2),
     address_line3: pickText(row.address_line3, row.addressLine3, userMeta.address_line3),
+    city: pickText(row.city, userMeta.city),
+    pincode: pickText(row.pincode, row.pin_code, userMeta.pincode, userMeta.pin_code),
     pan_no: pickText(row.pan, userMeta.pan_no, userMeta.pan),
     pan: pickText(row.pan, userMeta.pan),
     entity_type: pickText(row.entity_type, userMeta.entity_type),
@@ -69,7 +71,35 @@ export async function fetchOwnerApplicantMeta(
   const row = (data as Record<string, unknown>[]).find(
     (entry) => pickText(entry.user_id) === id
   );
-  return row ? mapOwnerDirectoryRow(row) : null;
+  if (!row) return null;
+
+  let meta = mapOwnerDirectoryRow(row);
+
+  // Directory RPC may omit city/pincode/address lines — fill from auth metadata.
+  if (!meta.city || !meta.pincode || !meta.address_line1) {
+    try {
+      const res = await fetch("/api/get-user-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: id,
+          email: meta.email || pickText(row.email),
+        }),
+      });
+      if (res.ok) {
+        const payload = (await res.json()) as { metadata?: Record<string, unknown> };
+        const userMeta = payload.metadata || {};
+        meta = {
+          ...meta,
+          ...mapOwnerDirectoryRow({ ...row, user_metadata: userMeta }),
+        };
+      }
+    } catch {
+      /* keep RPC-only meta */
+    }
+  }
+
+  return meta;
 }
 
 /** Add projects.user_id as Owner on the roster when absent (fetches profile if needed). */

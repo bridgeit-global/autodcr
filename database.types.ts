@@ -102,6 +102,7 @@ export type Database = {
           line2: string
           line3: string
           officer_name: string
+          organisation: string
           updated_at: string
         }
         Insert: {
@@ -111,6 +112,7 @@ export type Database = {
           line2: string
           line3: string
           officer_name: string
+          organisation?: string
           updated_at?: string
         }
         Update: {
@@ -120,6 +122,7 @@ export type Database = {
           line2?: string
           line3?: string
           officer_name?: string
+          organisation?: string
           updated_at?: string
         }
         Relationships: []
@@ -292,6 +295,10 @@ export type Database = {
         Args: { p_type: string }
         Returns: {
           address: string
+          address_line1: string
+          address_line2: string
+          address_line3: string
+          city: string
           contact_number: string
           email: string
           first_name: string
@@ -299,6 +306,7 @@ export type Database = {
           license_issue_date: string
           middle_name: string
           pan: string
+          pincode: string
           registration_number: string
           user_id: string
         }[]
@@ -307,6 +315,10 @@ export type Database = {
         Args: never
         Returns: {
           address: string
+          address_line1: string
+          address_line2: string
+          address_line3: string
+          city: string
           contact_number: string
           email: string
           first_name: string
@@ -314,6 +326,7 @@ export type Database = {
           license_issue_date: string
           middle_name: string
           pan: string
+          pincode: string
           registration_number: string
           user_id: string
         }[]

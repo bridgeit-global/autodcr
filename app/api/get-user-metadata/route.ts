@@ -19,6 +19,27 @@ export async function POST(request: NextRequest) {
       console.log("[get-user-metadata] lookup request", { lookup_user_id: user_id });
     }
 
+    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    if (serviceRole) {
+      const admin = createClient(getSupabasePublicUrl(), serviceRole, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: adminData, error: adminErr } = await admin.auth.admin.getUserById(
+        String(user_id).trim()
+      );
+      if (
+        !adminErr &&
+        adminData?.user?.user_metadata &&
+        typeof adminData.user.user_metadata === "object"
+      ) {
+        return NextResponse.json({
+          metadata: adminData.user.user_metadata,
+          user_id: adminData.user.id,
+          email: adminData.user.email,
+        });
+      }
+    }
+
     // Call database function - uses SECURITY DEFINER so it can access auth.users
     // Use the same function as get-user-email since it likely returns full user data
     const { data, error } = await supabase.rpc('get_user_email_by_user_id', {
@@ -34,7 +55,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (!data || data.length === 0) {
-      const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
       if (email && serviceRole) {
         const admin = createClient(getSupabasePublicUrl(), serviceRole, {
           auth: { persistSession: false, autoRefreshToken: false },
@@ -107,4 +127,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

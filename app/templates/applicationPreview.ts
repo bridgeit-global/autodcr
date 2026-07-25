@@ -5,6 +5,7 @@ import {
   addressLinesFromApplicantRecord,
   entityTypeToSignatoryDesignation,
   formatAddressLinesForLetterDisplay,
+  pickCityPincodeFromRecord,
   stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
 import { buildBuildingProposalToHeaderLines } from "@/app/utils/cleanAppointmentLetterTypes";
@@ -45,11 +46,17 @@ export type ApplicationPreviewSource = {
   clientAddressLine1?: string | null;
   clientAddressLine2?: string | null;
   clientAddressLine3?: string | null;
+  clientCity?: string | null;
+  clientPincode?: string | null;
   ownerLetterheadUrl?: string | null;
+  /** Appointed consultant's letterhead — used instead of the owner's on acceptance letters. */
+  consultantLetterheadUrl?: string | null;
   ownerDebug?: unknown;
   consultantAddressLine1?: string | null;
   consultantAddressLine2?: string | null;
   consultantAddressLine3?: string | null;
+  consultantCity?: string | null;
+  consultantPincode?: string | null;
   consultantMobile?: string | null;
   consultantEmail?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
@@ -106,6 +113,10 @@ export type ApplicationPreviewSource = {
         addressLine1?: string;
         addressLine2?: string;
         addressLine3?: string;
+        city?: string;
+        pincode?: string;
+        pin_code?: string;
+        zip?: string;
         registrationNumber?: string;
         registrationNo?: string;
         residentialAddress?: string;
@@ -113,6 +124,18 @@ export type ApplicationPreviewSource = {
     } | null;
   } | null;
 };
+
+/**
+ * Appointment letters go out on the owner's letterhead; acceptance letters are written
+ * by the consultant, so they use the appointed consultant's letterhead instead.
+ */
+function resolveLetterheadUrlForVariant(source?: ApplicationPreviewSource): string {
+  const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
+  const isAcceptanceLetter =
+    (source?.letterVariant ?? source?.architectHtmlVariant) === "acceptance";
+  if (!isAcceptanceLetter) return ownerLetterheadUrl;
+  return source?.consultantLetterheadUrl?.trim() || ownerLetterheadUrl;
+}
 
 /** Pincode for EEBP acceptance “Mumbai - …” line (project info or BP address line 3). */
 function resolveAcceptanceEebpPincode(
@@ -398,10 +421,15 @@ export function mapToPdfFieldValues(
       source?.consultantAddressLine3
     )
   );
+  const consultantCityPincode = pickCityPincodeFromRecord(
+    primaryConsultantApplicant as Record<string, unknown> | undefined
+  );
   const consultantAddressFormatted = formatAddressLinesForLetterDisplay(
     consultantRawAddressLine1,
     consultantRawAddressLine2,
-    consultantRawAddressLine3
+    consultantRawAddressLine3,
+    consultantCityPincode.city,
+    consultantCityPincode.pincode
   );
   const consultantAddressLine1 = consultantAddressFormatted.line1;
   const consultantAddressLine2 = consultantAddressFormatted.line2;
@@ -502,6 +530,12 @@ export function mapToPdfFieldValues(
         ownerApplicant?.addressLine3,
         source?.clientAddressLine3
       )
+    ),
+    pickText(ownerApplicant?.city, (ownerApplicant as { City?: string } | undefined)?.City),
+    pickText(
+      ownerApplicant?.pincode,
+      ownerApplicant?.pin_code,
+      (ownerApplicant as { zip?: string } | undefined)?.zip
     )
   );
   const clientAddressLine1 = clientAddressFormatted.line1;
@@ -511,6 +545,9 @@ export function mapToPdfFieldValues(
   const clientCompanyName = source?.clientCompanyName?.trim() || "";
 
   const architectFromApplicant = addressLinesFromApplicantRecord(
+    architectApplicant as Record<string, unknown> | undefined
+  );
+  const architectCityPincode = pickCityPincodeFromRecord(
     architectApplicant as Record<string, unknown> | undefined
   );
   const architectAddressFormatted = formatAddressLinesForLetterDisplay(
@@ -543,22 +580,22 @@ export function mapToPdfFieldValues(
         isArchitectAppointmentLetter ? consultantRawAddressLine3 : "",
         isArchitectAppointmentLetter ? source?.consultantAddressLine3 : ""
       )
-    )
+    ),
+    architectCityPincode.city,
+    architectCityPincode.pincode
   );
   const architectAddressLine1 = architectAddressFormatted.line1;
   const architectAddressLine2 = architectAddressFormatted.line2;
   const architectAddressLine3 = architectAddressFormatted.line3;
-  // Architect appointment "To," company = owner's entity_name from auth metadata (same as client company).
-  let architectCompanyForLetter = isArchitectAppointmentLetter
-    ? pickText(source?.clientCompanyName)
-    : pickText(
-        architectApplicant?.entity_name,
-        architectApplicant?.entityName,
-        architectFromApplicant.company
-      );
+  // Architect "To," company = the architect's own firm, never the owner's entity.
+  const architectCompanyForLetter = pickText(
+    architectApplicant?.entity_name,
+    architectApplicant?.entityName,
+    architectFromApplicant.company
+  );
 
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
-  const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
+  const letterheadImageUrl = resolveLetterheadUrlForVariant(source);
   const displayClientCompanyDesignation = clientCompanyDesignation
     ? entityTypeToSignatoryDesignation(clientCompanyDesignation)
     : "";
@@ -578,6 +615,7 @@ export function mapToPdfFieldValues(
   let buildingProposalAddress = buildingProposalAddressFormatted
     ? {
         officerName: buildingProposalAddressRaw!.officerName,
+        organisation: buildingProposalAddressRaw!.organisation,
         line1: buildingProposalAddressFormatted.line1,
         line2: buildingProposalAddressFormatted.line2,
         line3: buildingProposalAddressFormatted.line3,
@@ -615,6 +653,7 @@ export function mapToPdfFieldValues(
       );
       buildingProposalAddress = {
         officerName: fireBrigadeAddressRaw.officerName,
+        organisation: fireBrigadeAddressRaw.organisation,
         line1: fireAddressFormatted.line1,
         line2: fireAddressFormatted.line2,
         line3: fireAddressFormatted.line3,
@@ -693,7 +732,7 @@ export function mapToPdfFieldValues(
     project_addressline1_Client: clientAddressLine1,
     project_addressline2_Client: clientAddressLine2,
     project_addressline3_Client: clientAddressLine3,
-    project_Letterhead_Image_Url: ownerLetterheadUrl || undefined,
+    project_Letterhead_Image_Url: letterheadImageUrl || undefined,
 
     // Building proposal CC block (common)
     project_BuildingProposal_BaseDesignation: buildingProposalBaseDesignation,
@@ -709,6 +748,8 @@ export function mapToPdfFieldValues(
       .filter(Boolean)
       .join(", ")
       .concat(","),
+    project_Organisation_BuildingProposal:
+      buildingProposalAddress?.organisation || "",
     project_addressline1_BuildingProposal: buildingProposalAddress?.line1 || "",
     project_addressline2_BuildingProposal: buildingProposalAddress?.line2 || "",
     project_addressline3_BuildingProposal: buildingProposalAddress?.line3 || "",
@@ -795,6 +836,8 @@ const PDF_FIELD_LABELS: Record<string, string> = {
     "Building proposal — To header line 2 (O/o Dy. Ch. Eng.)",
   project_BuildingProposal_ToHeaderLine:
     "Building proposal — To header (combined, legacy)",
+  project_Organisation_BuildingProposal:
+    "Building proposal — organisation (e.g. Brihanmumbai Municipal Corporation)",
   project_addressline1_BuildingProposal: "Building proposal — address line 1",
   project_addressline2_BuildingProposal: "Building proposal — address line 2",
   project_addressline3_BuildingProposal: "Building proposal — address line 3",
@@ -2002,15 +2045,16 @@ export async function generateApplicationPreviewHtml(
     accessToken,
     skipSessionRefresh: Boolean(accessToken),
   });
+  const letterheadUrl = resolveLetterheadUrlForVariant(source);
   // Legacy Word-export plumber layout (cc-start); clean templates use letter-header + injectPaginatedStyles.
   if (
     templateType === "Plumber" &&
     !rawHtml.includes("eeb-tab-line") &&
     !rawHtml.includes("letter-header")
   ) {
-    return injectPlumberPreviewPages(rawHtml, source?.ownerLetterheadUrl);
+    return injectPlumberPreviewPages(rawHtml, letterheadUrl);
   }
-  return injectPaginatedStyles(rawHtml, templateType, source?.ownerLetterheadUrl);
+  return injectPaginatedStyles(rawHtml, templateType, letterheadUrl);
 }
 
 export async function fetchApplicationPreviewHtmlRaw(
@@ -2174,19 +2218,24 @@ export function injectMockOwnerSignatureIntoPreviewHtml(
     return parsed.documentElement.outerHTML;
   }
 
-  const firstCell = parsed.querySelector(".signature-table tr td");
-  const signatureLine = firstCell?.querySelector(".signature-line");
-  if (!firstCell || !signatureLine) return html;
-  if (firstCell.querySelector("#preview-dummy-owner-sign")) return html;
+  // Anchored on the owner stamp slot, not the first cell: acceptance letters carry
+  // only the consultant's column, so a positional lookup would sign the wrong party.
+  const ownerCell = parsed
+    .querySelector(".signature-table .dsc-stamp-slot--owner")
+    ?.closest("td");
+  const signatureLine = ownerCell?.querySelector(".signature-line");
+  if (!ownerCell || !signatureLine) return html;
+  if (ownerCell.querySelector("#preview-dummy-owner-sign")) return html;
 
   const wrap = buildMockSignatureWrap(parsed, "preview-dummy-owner-sign", "Owner", "-2deg");
-  firstCell.insertBefore(wrap, signatureLine);
+  ownerCell.insertBefore(wrap, signatureLine);
   (signatureLine as HTMLElement).style.marginTop = "4px";
   return parsed.documentElement.outerHTML;
 }
 
 /**
- * Mock “Architect” signature in the **second** column of `.signature-table` (Architect appointment HTML).
+ * Mock “Architect” signature in the consultant column of `.signature-table`
+ * (Architect appointment HTML and every acceptance letter).
  * Call after {@link injectMockOwnerSignatureIntoPreviewHtml} when persisting the architect signing step.
  */
 export function injectMockConsultantSignatureIntoPreviewHtml(
@@ -2197,30 +2246,30 @@ export function injectMockConsultantSignatureIntoPreviewHtml(
     return html;
   }
   const parsed = new DOMParser().parseFromString(html, "text/html");
-  const cells = parsed.querySelectorAll(".signature-table tr td");
-  if (cells.length >= 2) {
-    const consultantCell = cells[1];
-    const signatureLine = consultantCell?.querySelector(".signature-line");
-    if (consultantCell && signatureLine) {
-      if (
-        consultantCell.querySelector("#preview-dummy-consultant-sign") ||
-        consultantCell.querySelector("#preview-dummy-architect-sign")
-      ) {
-        return html;
-      }
-
-      ensurePreviewSignatureFont(parsed);
-      const label = mockSecondSignerLabel(templateType);
-      const wrap = buildMockSignatureWrap(
-        parsed,
-        "preview-dummy-consultant-sign",
-        label,
-        "1.5deg"
-      );
-      consultantCell.insertBefore(wrap, signatureLine);
-      (signatureLine as HTMLElement).style.marginTop = "4px";
-      return parsed.documentElement.outerHTML;
+  // Located via the consultant stamp slot so the column order can change freely.
+  const consultantCell = parsed
+    .querySelector(".signature-table .dsc-stamp-slot--consultant")
+    ?.closest("td");
+  const signatureLine = consultantCell?.querySelector(".signature-line");
+  if (consultantCell && signatureLine) {
+    if (
+      consultantCell.querySelector("#preview-dummy-consultant-sign") ||
+      consultantCell.querySelector("#preview-dummy-architect-sign")
+    ) {
+      return html;
     }
+
+    ensurePreviewSignatureFont(parsed);
+    const label = mockSecondSignerLabel(templateType);
+    const wrap = buildMockSignatureWrap(
+      parsed,
+      "preview-dummy-consultant-sign",
+      label,
+      "1.5deg"
+    );
+    consultantCell.insertBefore(wrap, signatureLine);
+    (signatureLine as HTMLElement).style.marginTop = "4px";
+    return parsed.documentElement.outerHTML;
   }
 
   const consultantSlot = parsed.querySelector(".dsc-stamp-slot--consultant");

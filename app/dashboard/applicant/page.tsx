@@ -13,6 +13,8 @@ import CustomSelect from "@/app/components/CustomSelect";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
   addressLinesFromResidential,
+  formatCityPincode,
+  resolveAddressLinesWithCityPincode,
   serializeApplicantRosterForStorage,
 } from "@/app/utils/applicantRecordFields";
 import {
@@ -59,6 +61,8 @@ type ApplicantRow = {
   address_line1?: string;
   address_line2?: string;
   address_line3?: string;
+  city?: string;
+  pincode?: string;
   entity_type?: string;
 };
 
@@ -72,6 +76,8 @@ type ConsultantDirectoryEntry = {
   address_line1?: string;
   address_line2?: string;
   address_line3?: string;
+  city?: string;
+  pincode?: string;
   registrationNumber: string;
   licenseIssueDate: string;
 };
@@ -239,13 +245,28 @@ const composeAddress = (
   line1?: string,
   line2?: string,
   line3?: string,
-  fallback?: string
+  fallback?: string,
+  city?: string,
+  pincode?: string
 ): string => {
-  const joined = [line1, line2, line3]
-    .map((v) => (typeof v === "string" ? v.trim() : ""))
-    .filter(Boolean)
-    .join(", ");
-  const raw = joined || (typeof fallback === "string" ? fallback.trim() : "");
+  const l1 = typeof line1 === "string" ? line1.trim() : "";
+  const l2 = typeof line2 === "string" ? line2.trim() : "";
+  const l3 = typeof line3 === "string" ? line3.trim() : "";
+  const suffix = formatCityPincode(city, pincode);
+  let raw: string;
+  if (l1 || l2 || l3) {
+    const resolved = resolveAddressLinesWithCityPincode(l1, l2, l3, city, pincode);
+    raw = [resolved.line1, resolved.line2, resolved.line3].filter(Boolean).join(", ");
+  } else {
+    const fb = typeof fallback === "string" ? fallback.trim() : "";
+    if (suffix && fb && !fb.includes(suffix)) {
+      raw = `${fb.replace(/[,.\s]+$/, "")}, ${suffix}`;
+    } else if (suffix && !fb) {
+      raw = suffix;
+    } else {
+      raw = fb;
+    }
+  }
   return normalizeAddressSingleLine(raw);
 };
 
@@ -282,12 +303,16 @@ const mapStoredApplicantsToRows = (applicantsList: unknown[]): ApplicantRow[] =>
       pickText(app.address_line1, app.addressLine1),
       pickText(app.address_line2, app.addressLine2),
       pickText(app.address_line3, app.addressLine3),
-      pickText(app.residentialAddress, app.residential_address)
+      pickText(app.residentialAddress, app.residential_address),
+      pickText(app.city),
+      pickText(app.pincode, app.pin_code, app.zip)
     ),
     officeAddress: app.officeAddress || app.office_address || "",
     address_line1: pickText(app.address_line1, app.addressLine1),
     address_line2: pickText(app.address_line2, app.addressLine2),
     address_line3: pickText(app.address_line3, app.addressLine3),
+    city: pickText(app.city) || undefined,
+    pincode: pickText(app.pincode, app.pin_code, app.zip) || undefined,
     entity_type: pickText(app.entity_type, app.entityType),
   }));
 
@@ -307,11 +332,20 @@ const mapRosterJsonToApplicantRows = (rows: unknown[]): ApplicantRow[] =>
         panNo: pickText(row.panNo, row.pan_no, row.pan) || "-",
         licenseIssueDate: pickText(row.licenseIssueDate, row.license_issue_date) || "-",
         residentialAddress:
-          pickText(row.residentialAddress, row.residential_address, row.address) || "-",
+          composeAddress(
+            pickText(row.address_line1, row.addressLine1),
+            pickText(row.address_line2, row.addressLine2),
+            pickText(row.address_line3, row.addressLine3),
+            pickText(row.residentialAddress, row.residential_address, row.address),
+            pickText(row.city),
+            pickText(row.pincode, row.pin_code, row.zip)
+          ) || "-",
         officeAddress: pickText(row.officeAddress, row.office_address, row.address) || "-",
         address_line1: pickText(row.address_line1, row.addressLine1) || undefined,
         address_line2: pickText(row.address_line2, row.addressLine2) || undefined,
         address_line3: pickText(row.address_line3, row.addressLine3) || undefined,
+        city: pickText(row.city) || undefined,
+        pincode: pickText(row.pincode, row.pin_code, row.zip) || undefined,
         entity_type: pickText(row.entity_type, row.entityType) || undefined,
       };
     })
@@ -549,7 +583,15 @@ export default function ApplicantDetailsPage() {
       }
 
       const mapped: ConsultantDirectoryEntry[] =
-        data?.map((row: any) => ({
+        data?.map((row: any) => {
+          const city = pickText(row.city, row.user_metadata?.city);
+          const pincode = pickText(
+            row.pincode,
+            row.pin_code,
+            row.user_metadata?.pincode,
+            row.user_metadata?.pin_code
+          );
+          return {
           id: row.user_id,
           fullName: [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(" "),
           email: row.email || "",
@@ -558,15 +600,78 @@ export default function ApplicantDetailsPage() {
           address_line1: pickText(row.address_line1, row.addressLine1, row.user_metadata?.address_line1),
           address_line2: pickText(row.address_line2, row.addressLine2, row.user_metadata?.address_line2),
           address_line3: pickText(row.address_line3, row.addressLine3, row.user_metadata?.address_line3),
+          city: city || undefined,
+          pincode: pincode || undefined,
           address: composeAddress(
             pickText(row.address_line1, row.addressLine1, row.user_metadata?.address_line1),
             pickText(row.address_line2, row.addressLine2, row.user_metadata?.address_line2),
             pickText(row.address_line3, row.addressLine3, row.user_metadata?.address_line3),
-            pickText(row.address, row.user_metadata?.address)
+            pickText(row.address, row.user_metadata?.address),
+            city,
+            pincode
           ),
           registrationNumber: row.registration_number || "",
           licenseIssueDate: row.license_issue_date || "",
-        })) ?? [];
+        };
+        }) ?? [];
+
+      // get_owners / get_consultants_by_type omit city/pincode/address_line*; enrich from auth metadata.
+      const needsEnrichment = mapped.filter(
+        (entry) =>
+          entry.id &&
+          (!entry.city || !entry.pincode || !entry.address_line1)
+      );
+      if (needsEnrichment.length > 0) {
+        try {
+          const res = await fetch("/api/directory-address-fields", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_ids: needsEnrichment.map((entry) => entry.id),
+            }),
+          });
+          if (res.ok) {
+            const payload = (await res.json()) as {
+              profiles?: Record<
+                string,
+                {
+                  address_line1?: string;
+                  address_line2?: string;
+                  address_line3?: string;
+                  city?: string;
+                  pincode?: string;
+                  address?: string;
+                }
+              >;
+            };
+            const profiles = payload.profiles || {};
+            for (const entry of mapped) {
+              const profile = profiles[entry.id];
+              if (!profile) continue;
+              const line1 = pickText(entry.address_line1, profile.address_line1);
+              const line2 = pickText(entry.address_line2, profile.address_line2);
+              const line3 = pickText(entry.address_line3, profile.address_line3);
+              const city = pickText(entry.city, profile.city);
+              const pincode = pickText(entry.pincode, profile.pincode);
+              entry.address_line1 = line1 || undefined;
+              entry.address_line2 = line2 || undefined;
+              entry.address_line3 = line3 || undefined;
+              entry.city = city || undefined;
+              entry.pincode = pincode || undefined;
+              entry.address = composeAddress(
+                line1,
+                line2,
+                line3,
+                pickText(entry.address, profile.address),
+                city,
+                pincode
+              );
+            }
+          }
+        } catch (enrichErr) {
+          console.error("Error enriching directory address fields:", enrichErr);
+        }
+      }
 
       // Keep any locally added entries (e.g. just-created partial users) until RPC includes them,
       // but replace entirely when the applicant type changes.
@@ -646,6 +751,8 @@ export default function ApplicantDetailsPage() {
       const userAddressLine1 = pickText(userMetadata.address_line1, userMetadata.addressLine1);
       const userAddressLine2 = pickText(userMetadata.address_line2, userMetadata.addressLine2);
       const userAddressLine3 = pickText(userMetadata.address_line3, userMetadata.addressLine3);
+      const userCity = pickText(userMetadata.city);
+      const userPincode = pickText(userMetadata.pincode, userMetadata.pin_code, userMetadata.zip);
       const userPanNo = userMetadata.pan_no || userMetadata.pan || "-";
 
       let registrationNo = "";
@@ -738,11 +845,20 @@ export default function ApplicantDetailsPage() {
         panNo: userPanNo,
         licenseIssueDate: licenseIssueDate || "-",
         residentialAddress:
-          composeAddress(userAddressLine1, userAddressLine2, userAddressLine3, userAddress) || "-",
+          composeAddress(
+            userAddressLine1,
+            userAddressLine2,
+            userAddressLine3,
+            userAddress,
+            userCity,
+            userPincode
+          ) || "-",
         officeAddress: userAddress,
         address_line1: userAddressLine1 || undefined,
         address_line2: userAddressLine2 || undefined,
         address_line3: userAddressLine3 || undefined,
+        city: userCity || undefined,
+        pincode: userPincode || undefined,
         ...(!isConsultant && userMetadata.entity_type?.trim()
           ? { entity_type: userMetadata.entity_type.trim() }
           : {}),
@@ -798,6 +914,8 @@ export default function ApplicantDetailsPage() {
       const selectedAddressLine1 = pickText(selectedEntry.address_line1);
       const selectedAddressLine2 = pickText(selectedEntry.address_line2);
       const selectedAddressLine3 = pickText(selectedEntry.address_line3);
+      const selectedCity = pickText(selectedEntry.city);
+      const selectedPincode = pickText(selectedEntry.pincode);
       setValue("name", selectedEntry.fullName, opts);
       setValue("contactNumber", selectedEntry.contactNumber, opts);
       setValue("emailAddress", selectedEntry.email, opts);
@@ -807,7 +925,9 @@ export default function ApplicantDetailsPage() {
           selectedAddressLine1,
           selectedAddressLine2,
           selectedAddressLine3,
-          selectedEntry.address
+          selectedEntry.address,
+          selectedCity,
+          selectedPincode
         ),
         opts
       );
@@ -851,6 +971,8 @@ export default function ApplicantDetailsPage() {
     const addressLine1 = String(meta.address_line1 || "");
     const addressLine2 = String(meta.address_line2 || "");
     const addressLine3 = String(meta.address_line3 || "");
+    const city = String(meta.city || "").trim();
+    const pincode = String(meta.pincode || meta.pin_code || "").trim();
 
     let registrationNumber = "";
     let licenseIssueDate = String(meta.registration_date || "");
@@ -936,11 +1058,15 @@ export default function ApplicantDetailsPage() {
         address_line1: addressLine1,
         address_line2: addressLine2,
         address_line3: addressLine3,
+        city: city || undefined,
+        pincode: pincode || undefined,
         address: composeAddress(
           addressLine1,
           addressLine2,
           addressLine3,
-          String(meta.address || "")
+          String(meta.address || ""),
+          city,
+          pincode
         ),
         registrationNumber,
         licenseIssueDate,
@@ -1129,6 +1255,8 @@ export default function ApplicantDetailsPage() {
     let addressLine1 = pickText(selectedDirectoryEntry?.address_line1);
     let addressLine2 = pickText(selectedDirectoryEntry?.address_line2);
     let addressLine3 = pickText(selectedDirectoryEntry?.address_line3);
+    const city = pickText(selectedDirectoryEntry?.city);
+    const pincode = pickText(selectedDirectoryEntry?.pincode);
     if (!addressLine1 && !addressLine2 && !addressLine3 && data.residentialAddress?.trim()) {
       const split = addressLinesFromResidential(data.residentialAddress);
       addressLine1 = split.line1;
@@ -1146,11 +1274,20 @@ export default function ApplicantDetailsPage() {
       panNo: data.panNo || "-",
       licenseIssueDate: data.licenseIssueDate || "-",
       residentialAddress:
-        composeAddress(addressLine1, addressLine2, addressLine3, data.residentialAddress) || "-",
+        composeAddress(
+          addressLine1,
+          addressLine2,
+          addressLine3,
+          data.residentialAddress,
+          city,
+          pincode
+        ) || "-",
       officeAddress: "-",
       address_line1: addressLine1 || undefined,
       address_line2: addressLine2 || undefined,
       address_line3: addressLine3 || undefined,
+      city: city || undefined,
+      pincode: pincode || undefined,
     };
 
     const isAddingOwner = isOwnerApplicantType(data.applicantType);

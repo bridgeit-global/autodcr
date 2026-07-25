@@ -16,6 +16,9 @@ import {
   type MailNotificationPhase,
   type MailNotificationPreferences,
 } from "@/app/utils/mailNotificationPreferences";
+import {
+  resolveAddressLinesWithCityPincode,
+} from "@/app/utils/applicantRecordFields";
 
 interface Props {
   open: boolean;
@@ -154,11 +157,11 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   // Populate form with user metadata when modal opens or metadata loads
   useEffect(() => {
     if (open && userMetadata) {
-      // Format name: last_name first_name middle_name
+      // Format name: first_name middle_name last_name
       const lastName = userMetadata.last_name || "";
       const firstName = userMetadata.first_name || "";
       const middleName = userMetadata.middle_name || "";
-      const fullName = [lastName, firstName, middleName].filter(Boolean).join(" ");
+      const fullName = [firstName, middleName, lastName].filter(Boolean).join(" ");
 
       setValue("name", fullName || "");
       setValue("console",  userMetadata.role == "Owner" ? userMetadata.entity_type : userMetadata.consultant_type );
@@ -561,21 +564,21 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
         }
       }
 
-      // Parse name into first_name, middle_name, last_name
+      // Parse name into first_name, middle_name, last_name (first middle last)
       const nameParts = data.name.trim().split(/\s+/);
       let firstName = "";
       let middleName = "";
       let lastName = "";
 
       if (nameParts.length === 1) {
-        lastName = nameParts[0];
+        firstName = nameParts[0];
       } else if (nameParts.length === 2) {
-        lastName = nameParts[0];
-        firstName = nameParts[1];
+        firstName = nameParts[0];
+        lastName = nameParts[1];
       } else if (nameParts.length >= 3) {
-        lastName = nameParts[0];
-        firstName = nameParts[1];
-        middleName = nameParts.slice(2).join(" ");
+        firstName = nameParts[0];
+        middleName = nameParts.slice(1, -1).join(" ");
+        lastName = nameParts[nameParts.length - 1];
       }
 
       // Build updated metadata - merge with existing metadata
@@ -1024,8 +1027,49 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
 
                   <div>
                     <label className="block text-sm text-gray-500 mb-1">Address</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("address") || userMetadata?.address || "-"}
+                    <div className="text-base font-semibold text-gray-900 whitespace-pre-line">
+                      {(() => {
+                        const line1 = String(
+                          userMetadata?.address_line1 || userMetadata?.addressLine1 || ""
+                        ).trim();
+                        const line2 = String(
+                          userMetadata?.address_line2 || userMetadata?.addressLine2 || ""
+                        ).trim();
+                        const line3 = String(
+                          userMetadata?.address_line3 || userMetadata?.addressLine3 || ""
+                        ).trim();
+                        const city =
+                          watch("city") ||
+                          String(userMetadata?.city || "").trim();
+                        const pincode =
+                          watch("zip") ||
+                          String(userMetadata?.pincode || "").trim();
+                        if (line1 || line2 || line3) {
+                          const resolved = resolveAddressLinesWithCityPincode(
+                            line1,
+                            line2,
+                            line3,
+                            city,
+                            pincode
+                          );
+                          return [resolved.line1, resolved.line2, resolved.line3]
+                            .filter(Boolean)
+                            .join("\n");
+                        }
+                        const combined =
+                          watch("address") || userMetadata?.address || "";
+                        const suffix = resolveAddressLinesWithCityPincode(
+                          "",
+                          "",
+                          "",
+                          city,
+                          pincode
+                        ).line3;
+                        if (combined && suffix && !String(combined).includes(suffix)) {
+                          return `${String(combined).replace(/[,.\s]+$/, "")}\n${suffix}`;
+                        }
+                        return combined || suffix || "-";
+                      })()}
                     </div>
                   </div>
                 </div>
