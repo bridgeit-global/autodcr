@@ -49,7 +49,8 @@ export function pickEntityTypeFromUserMeta(
 
 /** Registration entity types (must match RegistrationForm ENTITY_TYPES). */
 export const KNOWN_ENTITY_TYPES = [
-  "Proprietorship / Individual",
+  "Proprietorship",
+  "Individual",
   "Partnership Firm",
   "Pvt. Ltd. / Ltd. Company",
   "LLP",
@@ -91,8 +92,10 @@ export function entityTypeToSignatoryDesignation(entityType: string): string {
   if (!isKnownEntityType(entityType)) return "";
   const normalized = entityType.trim().toLowerCase();
   switch (normalized) {
-    case "proprietorship / individual":
+    case "proprietorship":
       return "Proprietor";
+    case "individual":
+      return "Individual Owner";
     case "pvt. ltd. / ltd. company":
       return "Director";
     case "llp":
@@ -158,6 +161,14 @@ export function serializeApplicantRowForStorage(
   if (pincode) out.pincode = pincode;
   const entityType = pickText(row.entity_type, row.entityType);
   if (entityType) out.entity_type = entityType;
+  const entityName = pickText(
+    row.entity_name,
+    row.entityName,
+    row.firm_name,
+    row.company_name,
+    row.companyName
+  );
+  if (entityName) out.entity_name = entityName;
 
   return out;
 }

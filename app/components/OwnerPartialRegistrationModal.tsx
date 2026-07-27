@@ -247,7 +247,9 @@ export default function OwnerPartialRegistrationModal({
       if (!String(formData[field] || "").trim()) next[field] = `${label} is required`;
     };
     require("entityType", "Entity type");
-    require("entityName", "Entity name");
+    if (formData.entityType !== "Individual") {
+      require("entityName", "Entity name");
+    }
     require("firstName", "First name");
     require("lastName", "Last name");
     require("email", "Email");
@@ -273,6 +275,12 @@ export default function OwnerPartialRegistrationModal({
     if (mapping) {
       require(mapping.formField, mapping.label);
       require(mapping.dateField, "Registration date");
+    }
+    if (
+      formData.entityType === "Proprietorship" ||
+      formData.entityType === "Individual"
+    ) {
+      require("gstNo", "GSTIN No.");
     }
     for (const field of OWNER_EXTRA_REG_REQUIRED_BY_TYPE[formData.entityType] || []) {
       require(field, EXTRA_REG_LABELS[field] || field);
@@ -557,6 +565,7 @@ export default function OwnerPartialRegistrationModal({
                 )}
               </div>
 
+              {formData.entityType !== "Individual" && (
               <div>
                 <label className="block font-medium text-black mb-1">
                   Entity Name <span className="text-red-600 font-bold">*</span>
@@ -571,6 +580,7 @@ export default function OwnerPartialRegistrationModal({
                   <p className="text-xs text-red-600 mt-1">{errors.entityName}</p>
                 )}
               </div>
+              )}
 
               <div>
                 <label className="block font-medium text-black mb-1">
@@ -692,6 +702,7 @@ export default function OwnerPartialRegistrationModal({
                 )}
               </div>
 
+              {type !== "Proprietorship" && type !== "Individual" && (
               <div>
                 <label className="block font-medium text-black mb-1">
                   GSTIN No. <span className="text-gray-400 font-normal">(optional)</span>
@@ -704,6 +715,7 @@ export default function OwnerPartialRegistrationModal({
                   maxLength={15}
                 />
               </div>
+              )}
 
               <div className="md:col-span-2">
                 <label className="block font-medium text-black mb-1">
@@ -763,8 +775,18 @@ export default function OwnerPartialRegistrationModal({
               </div>
             )}
 
-            {type === "Proprietorship / Individual" && (
+            {(type === "Proprietorship" || type === "Individual") && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <RegField
+                  label="GSTIN No."
+                  value={formData.gstNo}
+                  error={errors.gstNo}
+                  onChange={(v) => setField("gstNo", v)}
+                  inputClass={inputClass}
+                  placeholder="15-character GSTIN"
+                  maxLength={15}
+                />
+                {type === "Proprietorship" && (
                 <RegField
                   label="Full Name of Proprietor"
                   value={formData.fullNameProprietor}
@@ -773,8 +795,9 @@ export default function OwnerPartialRegistrationModal({
                   inputClass={inputClass}
                   placeholder="Name as per PAN / Aadhaar"
                 />
+                )}
                 <RegField
-                  label="Proprietorship Registration No."
+                  label={type === "Individual" ? "Registration No." : "Proprietorship Registration No."}
                   value={formData.proprietorshipRegistrationNo}
                   error={errors.proprietorshipRegistrationNo}
                   onChange={(v) => setField("proprietorshipRegistrationNo", v)}

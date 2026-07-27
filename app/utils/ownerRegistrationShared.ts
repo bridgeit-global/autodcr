@@ -6,8 +6,15 @@ import {
   normalizeRegNo,
 } from "@/app/utils/consultantRegistrationShared";
 
+export const INDIVIDUAL_ENTITY_TYPE = "Individual";
+
+export function isIndividualType(t: string): boolean {
+  return t === INDIVIDUAL_ENTITY_TYPE;
+}
+
 export const OWNER_ENTITY_TYPE_OPTIONS = [
-  "Proprietorship / Individual",
+  "Proprietorship",
+  "Individual",
   "Partnership Firm",
   "Pvt. Ltd. / Ltd. Company",
   "LLP",
@@ -22,12 +29,19 @@ export const OWNER_REGISTRATION_META_BY_TYPE: Record<
   string,
   { formField: string; metaKey: string; dateField: string; dateMetaKey: string; label: string }
 > = {
-  "Proprietorship / Individual": {
+  Proprietorship: {
     formField: "proprietorshipRegistrationNo",
     metaKey: "proprietorship_registration_no",
     dateField: "proprietorshipRegistrationDate",
     dateMetaKey: "proprietorship_registration_date",
     label: "Proprietorship Registration No.",
+  },
+  Individual: {
+    formField: "proprietorshipRegistrationNo",
+    metaKey: "proprietorship_registration_no",
+    dateField: "proprietorshipRegistrationDate",
+    dateMetaKey: "proprietorship_registration_date",
+    label: "Registration No.",
   },
   "Partnership Firm": {
     formField: "firmRegistrationNo",
@@ -68,7 +82,8 @@ export const OWNER_REGISTRATION_META_BY_TYPE: Record<
 
 /** Extra required registration text fields (beyond primary reg + date). */
 export const OWNER_EXTRA_REG_REQUIRED_BY_TYPE: Record<string, string[]> = {
-  "Proprietorship / Individual": ["fullNameProprietor"],
+  Proprietorship: ["fullNameProprietor"],
+  Individual: [],
   "Partnership Firm": ["numberOfPartners"],
   "Pvt. Ltd. / Ltd. Company": ["numberOfDirectors"],
   LLP: ["numberOfDesignatedPartners"],
@@ -78,7 +93,7 @@ export const OWNER_EXTRA_REG_REQUIRED_BY_TYPE: Record<string, string[]> = {
 
 export type PartialOwnerPayload = {
   entityType: string;
-  entityName: string;
+  entityName?: string;
   firstName: string;
   middleName?: string;
   lastName: string;
@@ -146,7 +161,7 @@ export function buildPartialOwnerMetadata(
   );
   const base: Record<string, unknown> = {
     entity_type: data.entityType,
-    entity_name: data.entityName,
+    entity_name: data.entityName || null,
     first_name: data.firstName,
     middle_name: data.middleName || null,
     last_name: data.lastName,
@@ -167,8 +182,12 @@ export function buildPartialOwnerMetadata(
   };
 
   switch (data.entityType) {
-    case "Proprietorship / Individual":
+    case "Proprietorship":
       base.full_name_proprietor = data.fullNameProprietor || null;
+      base.proprietorship_registration_no = data.proprietorshipRegistrationNo;
+      base.proprietorship_registration_date = data.proprietorshipRegistrationDate;
+      break;
+    case "Individual":
       base.proprietorship_registration_no = data.proprietorshipRegistrationNo;
       base.proprietorship_registration_date = data.proprietorshipRegistrationDate;
       break;

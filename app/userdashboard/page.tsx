@@ -391,6 +391,7 @@ type MenuItem = {
   action: string;
   route?: string;
   showProjectDropdown?: boolean;
+  showExistingApplicationPicker?: boolean;
 };
 
 const APPLICATION_MENU_ITEMS: MenuItem[] = [
@@ -434,7 +435,7 @@ const PROJECT_MENU_ITEMS: MenuItem[] = [
   {
     header: "Existing Application (Old Application)",
     action: "Add Existing Application",
-    route: "/dashboard/project-details",
+    showExistingApplicationPicker: true,
   },
 ];
 
@@ -444,12 +445,21 @@ interface ApplicationModalProps {
   items: MenuItem[];
   title: string;
   projects?: { id: string; title: string; status?: string; project_info?: { proposalNo?: string } | null }[];
+  onSelectExistingApplicationProject?: (projectId: string) => void;
 }
 
-const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, items, title, projects = [] }) => {
+const ApplicationModal: React.FC<ApplicationModalProps> = ({
+  open,
+  onClose,
+  items,
+  title,
+  projects = [],
+  onSelectExistingApplicationProject,
+}) => {
   const router = useRouter();
   const [showProjectDropdownIndex, setShowProjectDropdownIndex] = useState<number | null>(null);
   const [selectedProjectForEdit, setSelectedProjectForEdit] = useState<string>("");
+  const [selectedProjectForExistingApp, setSelectedProjectForExistingApp] = useState<string>("");
 
   const getProjectOptionLabel = (project: {
     title: string;
@@ -483,12 +493,15 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
       document.body.style.overflow = "auto";
       setShowProjectDropdownIndex(null);
       setSelectedProjectForEdit("");
+      setSelectedProjectForExistingApp("");
     };
   }, [open]);
 
   const handleItemClick = (item: MenuItem, index: number) => {
-    if (item.showProjectDropdown) {
+    if (item.showProjectDropdown || item.showExistingApplicationPicker) {
       setShowProjectDropdownIndex(index);
+      setSelectedProjectForEdit("");
+      setSelectedProjectForExistingApp("");
     } else if (item.route) {
       router.push(item.route);
       onClose();
@@ -498,6 +511,13 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
   const handleProjectSelect = (projectId: string) => {
     if (projectId) {
       router.push(`/dashboard/project-details?projectId=${projectId}`);
+      onClose();
+    }
+  };
+
+  const handleExistingApplicationProjectSelect = (projectId: string) => {
+    if (projectId && onSelectExistingApplicationProject) {
+      onSelectExistingApplicationProject(projectId);
       onClose();
     }
   };
@@ -560,6 +580,31 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({ open, onClose, item
                             placeholder="-- Select Project --"
                           />
                           {projects.length === 0 && (
+                            <p className="text-xs text-gray-500 mt-1">No projects available</p>
+                          )}
+                        </div>
+                      ) : item.showExistingApplicationPicker && showProjectDropdownIndex === index ? (
+                        <div className="space-y-2">
+                          <label className="text-sm text-gray-700 font-medium block">
+                            Select a project:
+                          </label>
+                          <CustomSelect
+                            value={selectedProjectForExistingApp}
+                            onChange={(val) => {
+                              setSelectedProjectForExistingApp(val);
+                              if (val) {
+                                handleExistingApplicationProjectSelect(val);
+                              }
+                            }}
+                            options={projects
+                              .filter((project) => project.status !== "draft")
+                              .map((project) => ({
+                                value: project.id,
+                                ...getProjectOptionLabel(project),
+                              }))}
+                            placeholder="-- Select Project --"
+                          />
+                          {projects.filter((project) => project.status !== "draft").length === 0 && (
                             <p className="text-xs text-gray-500 mt-1">No projects available</p>
                           )}
                         </div>
@@ -637,8 +682,47 @@ function UserDashboardContent() {
   const [approvedCounts, setApprovedCounts] = useState<Record<string, number>>({});
   const [rejectedCounts, setRejectedCounts] = useState<Record<string, number>>({});
   const [draftApplicationsByType, setDraftApplicationsByType] = useState<Record<string, DraftApplication[]>>({});
+  const [existingApplicationMode, setExistingApplicationMode] = useState(false);
+  const [uploadedPdfsByType, setUploadedPdfsByType] = useState<
+    Record<string, { name: string; file: File }>
+  >({});
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const selectableProjects = projects.filter((project) => project.status !== "draft");
+  const showExistingApplicationActions =
+    existingApplicationMode && selectedProject !== "ALL";
+
+  const handleProjectFilterChange = (val: string) => {
+    setSelectedProject(val);
+    if (val === "ALL") {
+      setExistingApplicationMode(false);
+      setUploadedPdfsByType({});
+    }
+  };
+
+  const handleSelectExistingApplicationProject = (projectId: string) => {
+    setSelectedProject(projectId);
+    setExistingApplicationMode(true);
+    setUploadedPdfsByType({});
+    setIsProjectModalOpen(false);
+  };
+
+  const handleExitExistingApplicationMode = () => {
+    setSelectedProject("ALL");
+    setExistingApplicationMode(false);
+    setUploadedPdfsByType({});
+  };
+
+  const handleExistingApplicationPdfUpload = (appType: string, file: File | undefined) => {
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      showAlert({ title: "Invalid file", message: "Please upload a PDF file." });
+      return;
+    }
+    setUploadedPdfsByType((prev) => ({
+      ...prev,
+      [appType]: { name: file.name, file },
+    }));
+  };
 
   const getProjectOptionLabel = (project: {
     title: string;
@@ -660,6 +744,13 @@ function UserDashboardContent() {
       highlightedPart: proposalNo ? `(${proposalNo})` : undefined,
     };
   };
+
+  const existingApplicationProjectLabel = (() => {
+    if (!showExistingApplicationActions) return "";
+    const project = selectableProjects.find((p) => p.id === selectedProject);
+    if (!project) return "selected project";
+    return getProjectOptionLabel(project).label;
+  })();
 
   // Read department from URL query parameter
   useEffect(() => {
@@ -1047,7 +1138,7 @@ function UserDashboardContent() {
               <div className="flex items-center gap-2 min-w-0 w-full">
                 <CustomSelect
                   value={selectedProject}
-                  onChange={(val) => setSelectedProject(val)}
+                  onChange={handleProjectFilterChange}
                   options={[
                     { value: "ALL", label: "All Projects" },
                     ...selectableProjects.map((p) => ({
@@ -1075,6 +1166,21 @@ function UserDashboardContent() {
             {!projectsLoading && projects.length === 0 && (
               <span className="text-xs text-gray-600 mt-1 inline-block">No projects found</span>
             )}
+            {showExistingApplicationActions && (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
+                <p className="text-sm text-emerald-900 min-w-0">
+                  Adding existing applications for{" "}
+                  <span className="font-semibold">{existingApplicationProjectLabel}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={handleExitExistingApplicationMode}
+                  className="shrink-0 text-sm font-semibold text-emerald-800 hover:text-emerald-950 underline"
+                >
+                  Exit
+                </button>
+              </div>
+            )}
 
             {/* Main Data Table */}
             <div className="rounded-2xl border border-gray-200 shadow-sm bg-white overflow-hidden flex-1 min-h-0">
@@ -1085,30 +1191,43 @@ function UserDashboardContent() {
                       <th className="bg-emerald-800 border-b border-emerald-700 px-4 py-3 text-left text-sm font-semibold text-white">
                         Application Type
                       </th>
-                      <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
-                        Draft
-                      </th>
-                      <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
-                        Due Payment
-                      </th>
-                      <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
-                        In Process
-                      </th>
-                      <th className="bg-emerald-400 border-b border-emerald-300 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
-                        Need Clarification
-                      </th>
-                      <th className="bg-emerald-300 border-b border-emerald-200 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
-                        Withdrawn
-                      </th>
-                      <th className="bg-emerald-200 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-900">
-                        Rejected or Cancelled
-                      </th>
-                      <th className="bg-emerald-100 border-b border-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
-                        Approved or Verified
-                      </th>
-                      <th className="bg-emerald-50 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
-                        System Approved
-                      </th>
+                      {showExistingApplicationActions ? (
+                        <>
+                          <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
+                            Upload
+                          </th>
+                          <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
+                            Validate with Bot
+                          </th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
+                            Draft
+                          </th>
+                          <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
+                            Due Payment
+                          </th>
+                          <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
+                            In Process
+                          </th>
+                          <th className="bg-emerald-400 border-b border-emerald-300 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
+                            Need Clarification
+                          </th>
+                          <th className="bg-emerald-300 border-b border-emerald-200 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
+                            Withdrawn
+                          </th>
+                          <th className="bg-emerald-200 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-900">
+                            Rejected or Cancelled
+                          </th>
+                          <th className="bg-emerald-100 border-b border-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
+                            Approved or Verified
+                          </th>
+                          <th className="bg-emerald-50 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
+                            System Approved
+                          </th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -1117,11 +1236,66 @@ function UserDashboardContent() {
                       const inProcessCount = inProcessCounts[app.name] ?? 0;
                       const approvedCount = approvedCounts[app.name] ?? 0;
                       const rejectedCount = rejectedCounts[app.name] ?? 0;
+                      const uploadedPdf = uploadedPdfsByType[app.name];
+                      const uploadInputId = `existing-app-upload-${index}`;
                       return (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="border-b border-gray-200 px-4 py-3 text-left font-medium text-gray-900">
                           {app.name}
                         </td>
+                        {showExistingApplicationActions ? (
+                          <>
+                            <td className="border-b border-gray-200 px-4 py-3 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                <input
+                                  id={uploadInputId}
+                                  type="file"
+                                  accept="application/pdf"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    handleExistingApplicationPdfUpload(
+                                      app.name,
+                                      e.target.files?.[0]
+                                    );
+                                    e.target.value = "";
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    document.getElementById(uploadInputId)?.click()
+                                  }
+                                  className="inline-flex items-center justify-center rounded-lg border border-emerald-600 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                                >
+                                  {uploadedPdf ? "Replace PDF" : "Upload"}
+                                </button>
+                                {uploadedPdf && (
+                                  <span
+                                    className="max-w-[180px] truncate text-xs text-gray-600"
+                                    title={uploadedPdf.name}
+                                  >
+                                    {uploadedPdf.name}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="border-b border-gray-200 px-4 py-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  showAlert({
+                                    title: "Coming soon",
+                                    message: "Validate with Bot will be available soon.",
+                                  })
+                                }
+                                className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors"
+                              >
+                                Validate with Bot
+                              </button>
+                            </td>
+                          </>
+                        ) : (
+                          <>
                         <td
                           className={`border-b border-gray-200 px-4 py-3 text-center ${
                             draftCount > 0
@@ -1176,6 +1350,8 @@ function UserDashboardContent() {
                         <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
                           0
                         </td>
+                          </>
+                        )}
                       </tr>
                     )})}
                   </tbody>
@@ -1240,6 +1416,7 @@ function UserDashboardContent() {
         items={PROJECT_MENU_ITEMS}
         title="Projects"
         projects={projects}
+        onSelectExistingApplicationProject={handleSelectExistingApplicationProject}
       />
 
       {/* Draft Applications Modal */}

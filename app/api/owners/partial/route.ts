@@ -9,6 +9,7 @@ import {
 import {
   buildPartialOwnerMetadata,
   getPrimaryOwnerRegNoFromPayload,
+  isIndividualType,
   normalizePhone,
   OWNER_EXTRA_REG_REQUIRED_BY_TYPE,
   OWNER_REGISTRATION_META_BY_TYPE,
@@ -107,7 +108,9 @@ export async function POST(request: NextRequest) {
     }
 
     const entityType = requiredString(body.entityType, "Entity type");
-    const entityName = requiredString(body.entityName, "Entity name");
+    const entityName = isIndividualType(entityType)
+      ? ""
+      : requiredString(body.entityName, "Entity name");
     const firstName = requiredString(body.firstName, "First name");
     const lastName = requiredString(body.lastName, "Last name");
     const email = requiredString(body.email, "Email").toLowerCase();
@@ -142,6 +145,9 @@ export async function POST(request: NextRequest) {
 
     const primaryReg = requiredString(body[mapping.formField], mapping.label);
     requiredString(body[mapping.dateField], "Registration date");
+    if (entityType === "Proprietorship" || isIndividualType(entityType)) {
+      requiredString(body.gstNo, "GSTIN No.");
+    }
     for (const field of OWNER_EXTRA_REG_REQUIRED_BY_TYPE[entityType] || []) {
       requiredString(body[field], field);
     }

@@ -64,6 +64,7 @@ type ApplicantRow = {
   city?: string;
   pincode?: string;
   entity_type?: string;
+  entity_name?: string;
 };
 
 type ConsultantDirectoryEntry = {
@@ -80,6 +81,7 @@ type ConsultantDirectoryEntry = {
   pincode?: string;
   registrationNumber: string;
   licenseIssueDate: string;
+  entity_name?: string;
 };
 
 const APPLICANT_TYPE_OPTIONS = [
@@ -97,7 +99,8 @@ const APPLICANT_TYPE_OPTIONS = [
 ];
 
 const ENTITY_TYPES = [
-  "Proprietorship / Individual",
+  "Proprietorship",
+  "Individual",
   "Partnership Firm",
   "Pvt. Ltd. / Ltd. Company",
   "LLP",
@@ -314,6 +317,13 @@ const mapStoredApplicantsToRows = (applicantsList: unknown[]): ApplicantRow[] =>
     city: pickText(app.city) || undefined,
     pincode: pickText(app.pincode, app.pin_code, app.zip) || undefined,
     entity_type: pickText(app.entity_type, app.entityType),
+    entity_name: pickText(
+      app.entity_name,
+      app.entityName,
+      app.firm_name,
+      app.company_name,
+      app.companyName
+    ) || undefined,
   }));
 
 const mapRosterJsonToApplicantRows = (rows: unknown[]): ApplicantRow[] =>
@@ -347,6 +357,14 @@ const mapRosterJsonToApplicantRows = (rows: unknown[]): ApplicantRow[] =>
         city: pickText(row.city) || undefined,
         pincode: pickText(row.pincode, row.pin_code, row.zip) || undefined,
         entity_type: pickText(row.entity_type, row.entityType) || undefined,
+        entity_name:
+          pickText(
+            row.entity_name,
+            row.entityName,
+            row.firm_name,
+            row.company_name,
+            row.companyName
+          ) || undefined,
       };
     })
   );
@@ -612,14 +630,31 @@ export default function ApplicantDetailsPage() {
           ),
           registrationNumber: row.registration_number || "",
           licenseIssueDate: row.license_issue_date || "",
+          entity_name:
+            pickText(
+              row.entity_name,
+              row.entityName,
+              row.firm_name,
+              row.company_name,
+              row.user_metadata?.entity_name,
+              row.user_metadata?.entityName,
+              row.user_metadata?.firm_name,
+              row.user_metadata?.company_name
+            ) || undefined,
         };
         }) ?? [];
 
-      // get_owners / get_consultants_by_type omit city/pincode/address_line*; enrich from auth metadata.
+      // get_owners / get_consultants_by_type may omit city/pincode/address_line*/entity_name
+      // and (until SQL migration) registration fields for split entity types.
       const needsEnrichment = mapped.filter(
         (entry) =>
           entry.id &&
-          (!entry.city || !entry.pincode || !entry.address_line1)
+          (!entry.city ||
+            !entry.pincode ||
+            !entry.address_line1 ||
+            !entry.entity_name ||
+            !entry.registrationNumber ||
+            !entry.licenseIssueDate)
       );
       if (needsEnrichment.length > 0) {
         try {
@@ -641,6 +676,9 @@ export default function ApplicantDetailsPage() {
                   city?: string;
                   pincode?: string;
                   address?: string;
+                  entity_name?: string;
+                  registration_number?: string;
+                  license_issue_date?: string;
                 }
               >;
             };
@@ -658,6 +696,14 @@ export default function ApplicantDetailsPage() {
               entry.address_line3 = line3 || undefined;
               entry.city = city || undefined;
               entry.pincode = pincode || undefined;
+              entry.entity_name =
+                pickText(entry.entity_name, profile.entity_name) || undefined;
+              entry.registrationNumber =
+                pickText(entry.registrationNumber, profile.registration_number) ||
+                entry.registrationNumber;
+              entry.licenseIssueDate =
+                pickText(entry.licenseIssueDate, profile.license_issue_date) ||
+                entry.licenseIssueDate;
               entry.address = composeAddress(
                 line1,
                 line2,
@@ -675,13 +721,44 @@ export default function ApplicantDetailsPage() {
 
       // Keep any locally added entries (e.g. just-created partial users) until RPC includes them,
       // but replace entirely when the applicant type changes.
+      // Prefer non-empty registration/license values from the previous local entry when RPC is blank.
       const typeChanged = previousApplicantTypeRef.current !== selectedApplicantType;
       previousApplicantTypeRef.current = selectedApplicantType;
       if (typeChanged) {
         setDirectoryOptions(mapped);
       } else {
         setDirectoryOptions((prev) => {
-          const byId = new Map(mapped.map((entry) => [entry.id, entry]));
+          const prevById = new Map(prev.map((entry) => [entry.id, entry]));
+          const byId = new Map(
+            mapped.map((entry) => {
+              const previous = prevById.get(entry.id);
+              if (!previous) return [entry.id, entry] as const;
+              return [
+                entry.id,
+                {
+                  ...entry,
+                  registrationNumber:
+                    pickText(entry.registrationNumber, previous.registrationNumber) ||
+                    entry.registrationNumber,
+                  licenseIssueDate:
+                    pickText(entry.licenseIssueDate, previous.licenseIssueDate) ||
+                    entry.licenseIssueDate,
+                  entity_name:
+                    pickText(entry.entity_name, previous.entity_name) || undefined,
+                  address_line1:
+                    pickText(entry.address_line1, previous.address_line1) || undefined,
+                  address_line2:
+                    pickText(entry.address_line2, previous.address_line2) || undefined,
+                  address_line3:
+                    pickText(entry.address_line3, previous.address_line3) || undefined,
+                  city: pickText(entry.city, previous.city) || undefined,
+                  pincode: pickText(entry.pincode, previous.pincode) || undefined,
+                  address:
+                    pickText(entry.address, previous.address) || entry.address,
+                },
+              ] as const;
+            })
+          );
           for (const entry of prev) {
             if (entry.id && !byId.has(entry.id)) {
               byId.set(entry.id, entry);
@@ -813,7 +890,10 @@ export default function ApplicantDetailsPage() {
       } else {
         // Derive registration number and date based on entity_type (same logic as ProfileModal / RegistrationForm)
         const entityType = userMetadata.entity_type;
-        if (entityType === "Proprietorship / Individual") {
+        if (entityType === "Proprietorship") {
+          registrationNo = userMetadata.proprietorship_registration_no || "";
+          licenseIssueDate = userMetadata.proprietorship_registration_date || "";
+        } else if (entityType === "Individual") {
           registrationNo = userMetadata.proprietorship_registration_no || "";
           licenseIssueDate = userMetadata.proprietorship_registration_date || "";
         } else if (entityType === "Pvt. Ltd. / Ltd. Company") {
@@ -861,6 +941,23 @@ export default function ApplicantDetailsPage() {
         pincode: userPincode || undefined,
         ...(!isConsultant && userMetadata.entity_type?.trim()
           ? { entity_type: userMetadata.entity_type.trim() }
+          : {}),
+        ...(pickText(
+          userMetadata.entity_name,
+          userMetadata.entityName,
+          userMetadata.firm_name,
+          userMetadata.company_name,
+          userMetadata.companyName
+        )
+          ? {
+              entity_name: pickText(
+                userMetadata.entity_name,
+                userMetadata.entityName,
+                userMetadata.firm_name,
+                userMetadata.company_name,
+                userMetadata.companyName
+              ),
+            }
           : {}),
       };
 
@@ -982,7 +1079,10 @@ export default function ApplicantDetailsPage() {
     if (selectedApplicantType === "Owner" || entityType) {
       registrationNumber = getOwnerRegistrationNumberFromMetadata(meta, entityType);
       switch (entityType) {
-        case "Proprietorship / Individual":
+        case "Proprietorship":
+          licenseIssueDate = String(meta.proprietorship_registration_date || licenseIssueDate);
+          break;
+        case "Individual":
           licenseIssueDate = String(meta.proprietorship_registration_date || licenseIssueDate);
           break;
         case "Partnership Firm":
@@ -1070,6 +1170,14 @@ export default function ApplicantDetailsPage() {
         ),
         registrationNumber,
         licenseIssueDate,
+        entity_name:
+          pickText(
+            meta.entity_name,
+            meta.entityName,
+            meta.firm_name,
+            meta.company_name,
+            meta.companyName
+          ) || undefined,
       };
       setDirectoryOptions((prev) => {
         if (prev.some((e) => e.id === entry.id)) {
@@ -1288,6 +1396,9 @@ export default function ApplicantDetailsPage() {
       address_line3: addressLine3 || undefined,
       city: city || undefined,
       pincode: pincode || undefined,
+      ...(selectedDirectoryEntry?.entity_name?.trim()
+        ? { entity_name: selectedDirectoryEntry.entity_name.trim() }
+        : {}),
     };
 
     const isAddingOwner = isOwnerApplicantType(data.applicantType);
@@ -1328,23 +1439,14 @@ export default function ApplicantDetailsPage() {
       setChangingOwner(false);
     }
 
-    reset();
+    reset(APPLICANT_FORM_DEFAULTS);
     setIsFormAutofilled(false);
+    saveDraft("draft-applicant-details-form", APPLICANT_FORM_DEFAULTS);
     markPageSaved("saved-applicant-details");
     saveDraft("dirty-applicant-details", false);
     saveDraft("saved-applicant-details-snapshot", {
       applicants: nextApplicants,
-      form: {
-        applicantType: "",
-        plumbingConsultant: "",
-        name: "",
-        residentialAddress: "",
-        contactNumber: "",
-        emailAddress: "",
-        registrationNumber: "",
-        panNo: "",
-        licenseIssueDate: "",
-      },
+      form: APPLICANT_FORM_DEFAULTS,
     });
     setIsSaved(true);
     showAlert({

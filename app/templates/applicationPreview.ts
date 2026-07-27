@@ -541,7 +541,7 @@ export function mapToPdfFieldValues(
   const clientAddressLine1 = clientAddressFormatted.line1;
   const clientAddressLine2 = clientAddressFormatted.line2;
   const clientAddressLine3 = clientAddressFormatted.line3;
-  // Owner LLP / company name: auth.users raw_user_meta_data.entity_name (via previewSource), not applicants.
+  // Owner LLP / company name: applicant_details.entity_name via previewSource, else auth metadata.
   const clientCompanyName = source?.clientCompanyName?.trim() || "";
 
   const architectFromApplicant = addressLinesFromApplicantRecord(
@@ -587,11 +587,13 @@ export function mapToPdfFieldValues(
   const architectAddressLine1 = architectAddressFormatted.line1;
   const architectAddressLine2 = architectAddressFormatted.line2;
   const architectAddressLine3 = architectAddressFormatted.line3;
-  // Architect "To," company = the architect's own firm, never the owner's entity.
+  // Architect "To," company = architect firm first; fallback to consultant/owner firm.
   const architectCompanyForLetter = pickText(
     architectApplicant?.entity_name,
     architectApplicant?.entityName,
-    architectFromApplicant.company
+    architectFromApplicant.company,
+    source?.consultantCompanyName,
+    clientCompanyName
   );
 
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
@@ -727,6 +729,9 @@ export function mapToPdfFieldValues(
 
     // Client signature block (common)
     project_Client_Company_Name: clientCompanyName,
+    project_Owner_Approved_For: clientCompanyName
+      ? `For ${clientCompanyName},`
+      : "",
     project_Client_Company_Designation: displayClientCompanyDesignation,
     project_Client_Name: clientName,
     project_addressline1_Client: clientAddressLine1,
@@ -777,6 +782,9 @@ export function mapToPdfFieldValues(
     project_Company_Name_Architect: architectCompanyForLetter
       ? `${architectCompanyForLetter},`
       : undefined,
+    project_Architect_Approved_For: architectCompanyForLetter
+      ? `For ${architectCompanyForLetter},`
+      : "",
     project_RegNo_Architect: consultantRegNo,
     /** Label for value from `coa_reg_no` (Council of Architecture registration). */
     project_Architect_COA_Reg_No_Label: "COA Reg. No.:",
@@ -820,6 +828,8 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_Proposal_Number: "Proposal number",
   project_Acceptance_EEBP_Pincode: "Pincode (project info — EEBP acceptance)",
   project_Client_Company_Name: "Client company name",
+  project_Owner_Approved_For:
+    "Owner approved-for line (For entity_name,) — empty when no firm",
   project_Client_Company_Designation: "Client designation",
   project_Client_Name: "Client name",
   project_addressline1_Client: "Client — address line 1",
@@ -846,6 +856,8 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_Name_Architect: "Name of architect (comma form)",
   "project_Name_Architect.": "Name of architect",
   project_Company_Name_Architect: "Architect firm name",
+  project_Architect_Approved_For:
+    "Architect approved-for line (For entity_name,) — empty when no firm",
   project_RegNo_Architect: "Architect registration number",
   "project_RegNo_Architect.": "Architect registration number",
   project_Validity_Architect: "Architect registration validity",
