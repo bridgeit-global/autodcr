@@ -2,6 +2,7 @@
 
 import {
   formatCityPincode,
+  pickEntityNameFromUserMeta,
   resolveAddressLinesWithCityPincode,
 } from "@/app/utils/applicantRecordFields";
 
@@ -124,11 +125,17 @@ export type SessionUserMeta = UserMetadataLike & {
   pan_no?: string;
   pan?: string;
   entity_type?: string;
+  entity_name?: string;
+  entityName?: string;
+  firm_name?: string;
+  company_name?: string;
+  companyName?: string;
 };
 
 /** Owner profile fields used when seeding the applicant roster from projects.user_id. */
 export type OwnerApplicantMeta = SessionUserMeta & {
   entity_type?: string;
+  entity_name?: string;
   proprietorship_registration_no?: string;
   proprietorship_registration_date?: string;
   cin?: string;
@@ -220,6 +227,9 @@ export function buildOwnerApplicantRow(
       ? `${addressFallback.replace(/[,.\s]+$/, "")}, ${cityPincode}`
       : addressFallback;
   const residentialAddress = residentialFromLines || residentialWithCity || "-";
+  const entityName = pickEntityNameFromUserMeta(
+    meta as Record<string, unknown> | null | undefined
+  );
   return {
     user_id: ownerUserId,
     applicantType: "Owner",
@@ -237,6 +247,7 @@ export function buildOwnerApplicantRow(
     city: city || undefined,
     pincode: pincode || undefined,
     entity_type: meta?.entity_type?.trim() || undefined,
+    ...(entityName ? { entity_name: entityName } : {}),
     letterhead_url: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
     letterheadUrl: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
   };
@@ -267,14 +278,25 @@ export function ensureOwnerInApplicantRoster(
   });
 
   const entityTypeFromMeta = meta?.entity_type?.trim() || "";
+  const entityNameFromMeta = pickEntityNameFromUserMeta(
+    meta as Record<string, unknown> | null | undefined
+  );
 
   if (ownerIndex >= 0) {
     const existing = applicants[ownerIndex] as ApplicantLike & Record<string, unknown>;
     const existingType = pickText(existing.entity_type, existing.entityType);
-    if (!existingType && entityTypeFromMeta) {
-      const updated = applicants.map((row, idx) =>
-        idx === ownerIndex ? { ...row, entity_type: entityTypeFromMeta } : row
-      );
+    const existingName = pickText(existing.entity_name, existing.entityName);
+    const needsType = !existingType && entityTypeFromMeta;
+    const needsName = !existingName && entityNameFromMeta;
+    if (needsType || needsName) {
+      const updated = applicants.map((row, idx) => {
+        if (idx !== ownerIndex) return row;
+        return {
+          ...row,
+          ...(needsType ? { entity_type: entityTypeFromMeta } : {}),
+          ...(needsName ? { entity_name: entityNameFromMeta } : {}),
+        };
+      });
       return { applicants: updated };
     }
     return { applicants: [...applicants] };
@@ -344,6 +366,10 @@ export function ensureArchitectInApplicantRoster(
       ? `${addressFallback.replace(/[,.\s]+$/, "")}, ${cityPincode}`
       : addressFallback;
 
+  const entityName = pickEntityNameFromUserMeta(
+    meta as Record<string, unknown> | null | undefined
+  );
+
   return {
     applicants: [
       ...applicants,
@@ -363,6 +389,7 @@ export function ensureArchitectInApplicantRoster(
         address_line3: meta?.address_line3,
         city: city || undefined,
         pincode: pincode || undefined,
+        ...(entityName ? { entity_name: entityName } : {}),
       },
     ],
   };

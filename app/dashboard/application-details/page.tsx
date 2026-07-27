@@ -736,8 +736,15 @@ async function buildApplicationPreviewContext(
     (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
   );
   const ownerApplicant = ownerApplicants[0];
-  // Owner company: auth.users raw_user_meta_data.entity_name (loaded below), not applicants.entity_name.
-  let clientCompanyName = "";
+  // Prefer firm name from applicant_details; fall back to auth.users metadata below.
+  let clientCompanyName =
+    pickEntityNameFromMeta(ownerApplicant) ||
+    (typeof ownerApplicant?.entity_name === "string"
+      ? ownerApplicant.entity_name.trim()
+      : "") ||
+    (typeof ownerApplicant?.entityName === "string"
+      ? ownerApplicant.entityName.trim()
+      : "");
   let clientName =
     (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
     pickPersonFullNameFromMeta(ownerApplicant);
@@ -946,7 +953,7 @@ async function buildApplicationPreviewContext(
       if (resolved) clientPincode = resolved;
     }
     const resolvedCompany = pickEntityNameFromMeta(ownerMeta);
-    if (resolvedCompany) {
+    if (resolvedCompany && !clientCompanyName) {
       clientCompanyName = resolvedCompany;
     }
     if (

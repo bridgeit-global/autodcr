@@ -61,15 +61,23 @@ function applyCompanyField(
 }
 
 /**
- * Client company comes from the project owner's auth.users metadata (`entity_name`),
- * not from public.applicants rows.
+ * Client company: prefer owner row in applicant_details (`entity_name`), then owner auth metadata.
  */
 async function applyOwnerCompanyFields(
   out: Record<string, string | undefined>,
   token: string,
-  ownerUserId: string
+  ownerUserId: string,
+  ownerApplicant?: Record<string, unknown>
 ) {
+  const fromApplicant = pickEntityNameFromUserMeta(ownerApplicant);
+  if (fromApplicant) {
+    applyCompanyField(out, "project_Client_Company_Name", fromApplicant, false);
+    if (!out.project_Owner_Approved_For?.trim()) {
+      out.project_Owner_Approved_For = `For ${fromApplicant},`;
+    }
+  }
   if (!ownerUserId.trim()) return;
+  if (out.project_Client_Company_Name?.trim()) return;
   const meta = await resolveConsultantMetadata(token, {
     lookupUserIds: [ownerUserId.trim()],
   });
@@ -79,6 +87,9 @@ async function applyOwnerCompanyFields(
   if (!company) return;
 
   applyCompanyField(out, "project_Client_Company_Name", company, false);
+  if (!out.project_Owner_Approved_For?.trim()) {
+    out.project_Owner_Approved_For = `For ${company},`;
+  }
 }
 
 function primaryAddressComplete(
@@ -134,6 +145,15 @@ export async function enrichConsultantAppointmentFields(
 
   const primaryApplicant = findConsultantApplicantInList(applicants, opts.templateType);
   const architectApplicant = findArchitectApplicantInList(applicants);
+  const ownerApplicant = applicants.find((a) => {
+    if (!a || typeof a !== "object") return false;
+    const type = String(
+      (a as { applicantType?: string; applicant_type?: string }).applicantType ||
+        (a as { applicant_type?: string }).applicant_type ||
+        ""
+    ).toLowerCase();
+    return type.includes("owner");
+  }) as Record<string, unknown> | undefined;
   const primaryCityPincode = pickCityPincodeFromRecord(primaryApplicant);
   const architectCityPincode = pickCityPincodeFromRecord(architectApplicant);
 
@@ -190,17 +210,16 @@ export async function enrichConsultantAppointmentFields(
         );
       }
       if (enrichArchitectCompany) {
-        applyCompanyField(
-          out,
-          architectKeys.company,
-          pickEntityNameFromUserMeta(meta as Record<string, unknown>),
-          true
-        );
+        const company = pickEntityNameFromUserMeta(meta as Record<string, unknown>);
+        applyCompanyField(out, architectKeys.company, company, true);
+        if (company.trim() && !out.project_Architect_Approved_For?.trim()) {
+          out.project_Architect_Approved_For = `For ${company.trim()},`;
+        }
       }
     }
   }
 
-  await applyOwnerCompanyFields(out, opts.token, ownerUserId);
+  await applyOwnerCompanyFields(out, opts.token, ownerUserId, ownerApplicant);
 
   return out;
 }

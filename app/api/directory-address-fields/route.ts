@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  getOwnerRegistrationNumberFromMetadata,
+  OWNER_REGISTRATION_META_BY_TYPE,
+} from "@/app/utils/ownerRegistrationShared";
 import { getSupabasePublicUrl } from "@/app/utils/supabaseEnv";
 
 type AddressFields = {
@@ -9,6 +13,10 @@ type AddressFields = {
   city: string;
   pincode: string;
   address: string;
+  entity_name: string;
+  entity_type: string;
+  registration_number: string;
+  license_issue_date: string;
 };
 
 function pickText(...values: Array<unknown>): string {
@@ -18,6 +26,23 @@ function pickText(...values: Array<unknown>): string {
   return "";
 }
 
+function licenseIssueDateFromMeta(meta: Record<string, unknown>): string {
+  const entityType = pickText(meta.entity_type, meta.entityType);
+  const mapping = OWNER_REGISTRATION_META_BY_TYPE[entityType];
+  if (mapping) {
+    return pickText(meta[mapping.dateMetaKey]);
+  }
+  return pickText(
+    meta.proprietorship_registration_date,
+    meta.partnership_registration_date,
+    meta.roc_registration_date,
+    meta.llp_incorporation_date,
+    meta.trust_registration_date,
+    meta.govt_registration_date,
+    meta.registration_date
+  );
+}
+
 function addressFieldsFromMeta(meta: Record<string, unknown>): AddressFields {
   const address_line1 = pickText(meta.address_line1, meta.addressLine1);
   const address_line2 = pickText(meta.address_line2, meta.addressLine2);
@@ -25,7 +50,26 @@ function addressFieldsFromMeta(meta: Record<string, unknown>): AddressFields {
   const city = pickText(meta.city);
   const pincode = pickText(meta.pincode, meta.pin_code, meta.zip);
   const address = pickText(meta.address);
-  return { address_line1, address_line2, address_line3, city, pincode, address };
+  const entity_name = pickText(
+    meta.entity_name,
+    meta.entityName,
+    meta.firm_name,
+    meta.company_name,
+    meta.companyName
+  );
+  const entity_type = pickText(meta.entity_type, meta.entityType);
+  return {
+    address_line1,
+    address_line2,
+    address_line3,
+    city,
+    pincode,
+    address,
+    entity_name,
+    entity_type,
+    registration_number: getOwnerRegistrationNumberFromMetadata(meta, entity_type),
+    license_issue_date: licenseIssueDateFromMeta(meta),
+  };
 }
 
 /**

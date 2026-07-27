@@ -20,7 +20,8 @@ interface RegistrationFormProps {
 }
 
 const ENTITY_TYPES = [
-  "Proprietorship / Individual",
+  "Proprietorship",
+  "Individual",
   "Partnership Firm",
   "Pvt. Ltd. / Ltd. Company",
   "LLP",
@@ -36,7 +37,10 @@ type EntityDocumentRequirement = {
 };
 
 const DOC_CHECKLIST: Record<string, EntityDocumentRequirement[]> = {
-  "Proprietorship / Individual": [
+  Proprietorship: [
+    { id: "individualUtility", label: "Recent Utility Bill / Address Proof", accept: ".pdf" },
+  ],
+  Individual: [
     { id: "individualUtility", label: "Recent Utility Bill / Address Proof", accept: ".pdf" },
   ],
   "Partnership Firm": [
@@ -245,7 +249,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     addressLine2: "",
     addressLine3: "",
     
-    // Proprietorship / Individual
+    // Proprietorship
     fullNameProprietor: "",
     aadhaarNo: "",
     residentialAddress: "",
@@ -722,7 +726,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         if (!value) error = "Select an entity type";
         break;
       case "entityName":
-        if (!value) error = "Entity name is required";
+        if (data.entityType !== "Individual" && !value) error = "Entity name is required";
         break;
       case "firstName":
         if (!value) error = "First name is required";
@@ -1330,7 +1334,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     const getDynamicRequiredFields = (): string[] => {
       const baseFields = [
         "entityType",
-        "entityName",
+        ...(formData.entityType !== "Individual" ? ["entityName"] : []),
         "firstName",
         "lastName",
         "email",
@@ -1351,8 +1355,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       ];
 
       const typeSpecificFields: Record<string, string[]> = {
-        "Proprietorship / Individual": [
+        Proprietorship: [
           "fullNameProprietor",
+          "proprietorshipRegistrationNo",
+          "proprietorshipRegistrationDate",
+          "entityDocuments.individualUtility",
+        ],
+        Individual: [
           "proprietorshipRegistrationNo",
           "proprietorshipRegistrationDate",
           "entityDocuments.individualUtility",
@@ -1655,7 +1664,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         };
 
         switch (formData.entityType) {
-          case "Proprietorship / Individual":
+          case "Proprietorship":
+            await uploadEntityDocument(
+              formData.entityDocuments.individualUtility,
+              'individualUtility',
+              'Recent Utility Bill / Address Proof'
+            );
+            break;
+          case "Individual":
             await uploadEntityDocument(
               formData.entityDocuments.individualUtility,
               'individualUtility',
@@ -1747,7 +1763,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         );
         const baseData: any = {
             entity_type: formData.entityType,
-            entity_name: formData.entityName,
+            entity_name: formData.entityType !== "Individual" ? formData.entityName : null,
             first_name: formData.firstName,
             middle_name: formData.middleName || null,
             last_name: formData.lastName,
@@ -1774,8 +1790,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
         // Add entity-specific fields and document URLs
         switch (formData.entityType) {
-          case "Proprietorship / Individual":
+          case "Proprietorship":
             baseData.full_name_proprietor = formData.fullNameProprietor;
+            baseData.residential_address = formData.residentialAddress;
+            baseData.proprietorship_registration_no = formData.proprietorshipRegistrationNo;
+            baseData.proprietorship_registration_date = formData.proprietorshipRegistrationDate;
+            baseData.individual_utility_url = entityDocumentUrls.individualUtility || null;
+            break;
+          case "Individual":
             baseData.residential_address = formData.residentialAddress;
             baseData.proprietorship_registration_no = formData.proprietorshipRegistrationNo;
             baseData.proprietorship_registration_date = formData.proprietorshipRegistrationDate;
@@ -1866,7 +1888,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
   const renderEntitySpecificFields = () => {
     switch (formData.entityType) {
-      case "Proprietorship / Individual":
+      case "Proprietorship":
+      case "Individual":
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1881,6 +1904,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 />
               {errors.gstNo && <p className="text-red-600 text-sm mt-1">{errors.gstNo}</p>}
               </div>
+              {formData.entityType === "Proprietorship" && (
               <div>
                 <label className="block font-medium text-black mb-1">
                   Full Name of Proprietor <span className="text-red-500">*</span>
@@ -1895,6 +1919,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 <p className="text-red-600 text-sm mt-1">{errors.fullNameProprietor}</p>
               )}
             </div>
+              )}
               <div>
                 <label className="block font-medium text-black mb-1">
                   Registration Number <span className="text-red-600 font-bold">*</span>
@@ -2512,6 +2537,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   )}
         </div>
 
+                {formData.entityType !== "Individual" && (
                 <div>
                   <label className="block font-medium text-black mb-1">
                     Entity Name <span className="text-red-600 font-bold">*</span>
@@ -2526,7 +2552,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {errors.entityName && (
                     <p className="text-xs text-red-600 mt-1">{errors.entityName}</p>
                   )}
-      </div>
+                </div>
+                )}
 
                 {/* Row 2 - Name Fields */}
             <div>
