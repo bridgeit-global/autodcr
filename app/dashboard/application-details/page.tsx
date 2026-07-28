@@ -3256,8 +3256,12 @@ export default function ApplicationDetailsPage() {
         throw new Error(verifyData.error || "Failed to verify PAN against DSC.");
       }
       const isMatch = Boolean(verifyData.isMatch);
+      const allowOnBehalfPanMismatch =
+        process.env.NEXT_PUBLIC_ALLOW_ON_BEHALF_PAN_MISMATCH === "true";
       const enforceStrictOwnerPanMatch =
-        onBehalfOfOwner && process.env.NODE_ENV === "production";
+        onBehalfOfOwner &&
+        process.env.NODE_ENV === "production" &&
+        !allowOnBehalfPanMismatch;
       const signerLabel = commonName || pickSignerLabel(resolvedCert.cert);
 
       setSidebarPdfStatus(null);
