@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import DscPanVerifyModal from "@/app/components/DscPanVerifyModal";
+import SignOnBehalfOwnerModal from "@/app/components/SignOnBehalfOwnerModal";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import {
@@ -135,6 +136,9 @@ type PreviewProjectData = {
       pin_code?: string;
       zip?: string;
       residentialAddress?: string;
+      pan?: string;
+      pan_no?: string;
+      panNo?: string;
     }>;
   } | null;
 };
@@ -143,7 +147,45 @@ type MockSignAvailability = {
   actionAvailable: boolean;
   idleReason?: string;
   subtitle: string;
+  /** Appointed architect completing the owner step with the owner's DSC. */
+  onBehalfOfOwner?: boolean;
 };
+
+/** Architect dual-letter only: appointed architect may run owner signing with the owner's DSC. */
+function canArchitectSignOnBehalfOfOwner(args: {
+  templateType: TemplateType;
+  authUserId: string;
+  ownerSigned: boolean;
+  projectData: PreviewProjectData | null;
+  projectRowUserId: string | null | undefined;
+  appointedSecondId?: string | null;
+}): boolean {
+  const { templateType, authUserId, ownerSigned, projectData, projectRowUserId } = args;
+  if (templateType !== "Architect" || !isDualLetterType(templateType) || ownerSigned) {
+    return false;
+  }
+  const uid = authUserId.trim();
+  if (!uid) return false;
+  const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
+  if (isAnySameUserId(uid, ownerSignerIds)) return false;
+  const appointedSecondId =
+    args.appointedSecondId ?? resolveAppointedSecondSignerUserId(projectData, templateType);
+  return sameUserId(uid, appointedSecondId);
+}
+
+function pickOwnerPanFromApplicants(projectData: PreviewProjectData | null): string {
+  const applicants = projectData?.applicant_details?.applicants ?? [];
+  for (const a of applicants) {
+    const type = String(a.applicantType || a.applicant_type || "").toLowerCase();
+    if (!type.includes("owner")) continue;
+    const pan = pickPanFromUserMetadata({
+      pan: a.pan,
+      pan_no: a.pan_no || a.panNo,
+    });
+    if (isValidPanFormat(pan)) return pan.trim().toUpperCase();
+  }
+  return "";
+}
 
 function resolveDscStampRole(templateType: TemplateType, signingAcceptance: boolean): DscStampRole {
   if (signingAcceptance && isDualLetterType(templateType)) {
@@ -314,6 +356,22 @@ function computeMockSignAvailability(args: {
           subtitle: "Opens preview, applies mock owner signature, then saves.",
         };
       }
+      if (
+        canArchitectSignOnBehalfOfOwner({
+          templateType,
+          authUserId: uid,
+          ownerSigned,
+          projectData,
+          projectRowUserId,
+          appointedSecondId,
+        })
+      ) {
+        return {
+          actionAvailable: true,
+          onBehalfOfOwner: true,
+          subtitle: "Use the owner's DSC to sign on their behalf.",
+        };
+      }
       return {
         actionAvailable: false,
         idleReason: "Waiting for the project owner to sign first.",
@@ -365,6 +423,8 @@ function checkDirectSignPermissions(args: {
   projectData: PreviewProjectData | null;
   projectRowUserId: string | null | undefined;
   appointedSecondId: string | null | undefined;
+  /** Architect confirmed on-behalf owner DSC flow. */
+  onBehalfOfOwner?: boolean;
 }): DirectSignPermissionOutcome {
   const {
     templateType,
@@ -374,6 +434,7 @@ function checkDirectSignPermissions(args: {
     projectData,
     projectRowUserId,
     appointedSecondId,
+    onBehalfOfOwner = false,
   } = args;
   const hasDualLetters = isDualLetterType(templateType);
   const uid = authUserId.trim();
@@ -388,10 +449,21 @@ function checkDirectSignPermissions(args: {
   }
 
   if (hasDualLetters && !ownerSigned) {
-    if (sameUserId(uid, appointedSecondId) && !isAnySameUserId(uid, ownerSignerIds)) {
+    const onBehalfAllowed =
+      onBehalfOfOwner &&
+      canArchitectSignOnBehalfOfOwner({
+        templateType,
+        authUserId: uid,
+        ownerSigned,
+        projectData,
+        projectRowUserId,
+        appointedSecondId,
+      });
+    if (onBehalfAllowed) {
+      // Appointed architect may complete the owner step with the owner's DSC.
+    } else if (sameUserId(uid, appointedSecondId) && !isAnySameUserId(uid, ownerSignerIds)) {
       throw new Error("The owner has not signed yet.");
-    }
-    if (!isAnySameUserId(uid, ownerSignerIds)) {
+    } else if (!isAnySameUserId(uid, ownerSignerIds)) {
       throw new Error("Only the project owner can sign at this step.");
     }
   } else if (hasDualLetters && ownerSigned && !architectSigned) {
@@ -1791,8 +1863,11 @@ export default function ApplicationDetailsPage() {
     isMatch: boolean;
     pan: string;
     signerLabel: string;
+    requireMatch?: boolean;
+    panPossessive?: string;
   } | null>(null);
   const dscPanVerifyResolveRef = useRef<((proceed: boolean) => void) | null>(null);
+  const [onBehalfConfirmOpen, setOnBehalfConfirmOpen] = useState(false);
   const { setSlot } = useApplicationPdfSaveSlot();
   const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
   const [autoMockSignAfterPreviewOpen, setAutoMockSignAfterPreviewOpen] = useState(false);
@@ -1806,12 +1881,16 @@ export default function ApplicationDetailsPage() {
   const saveInFlightRef = useRef(false);
   const signInFlightRef = useRef(false);
   const openPreviewForSignRef = useRef<() => Promise<void>>(async () => Promise.resolve());
-  const signDirectlyRef = useRef<() => Promise<void>>(async () => Promise.resolve());
+  const signDirectlyRef = useRef<(opts?: { onBehalfOfOwner?: boolean }) => Promise<void>>(
+    async () => Promise.resolve()
+  );
 
   const promptDscPanVerify = (args: {
     isMatch: boolean;
     pan: string;
     signerLabel: string;
+    requireMatch?: boolean;
+    panPossessive?: string;
   }): Promise<boolean> =>
     new Promise((resolve) => {
       dscPanVerifyResolveRef.current = resolve;
@@ -2574,10 +2653,19 @@ export default function ApplicationDetailsPage() {
       }
 
       if (hasDualLetters && !ownerSigned) {
-        if (sameUserId(uid, appointedSecondId) && !isAnySameUserId(uid, ownerSignerIds)) {
+        const onBehalfAllowed = canArchitectSignOnBehalfOfOwner({
+          templateType: ctx.templateType,
+          authUserId: uid,
+          ownerSigned,
+          projectData,
+          projectRowUserId,
+          appointedSecondId,
+        });
+        if (onBehalfAllowed) {
+          // Appointed architect may complete the owner step (mock / on-behalf).
+        } else if (sameUserId(uid, appointedSecondId) && !isAnySameUserId(uid, ownerSignerIds)) {
           throw new Error("The owner has not signed yet.");
-        }
-        if (!isAnySameUserId(uid, ownerSignerIds)) {
+        } else if (!isAnySameUserId(uid, ownerSignerIds)) {
           throw new Error("Only the project owner can sign at this step.");
         }
       } else if (hasDualLetters && ownerSigned && !architectSigned) {
@@ -2685,6 +2773,18 @@ export default function ApplicationDetailsPage() {
         const nowIso = new Date().toISOString();
 
         if (!ownerSigned) {
+          const onBehalfOwner =
+            canArchitectSignOnBehalfOfOwner({
+              templateType: ctx.templateType,
+              authUserId: uid,
+              ownerSigned,
+              projectData,
+              projectRowUserId,
+              appointedSecondId,
+            }) && !isAnySameUserId(uid, ownerSignerIds);
+          const ownerSignedById = onBehalfOwner
+            ? ownerSignerIds.find((id) => id.trim()) || projectRowUserId || uid
+            : uid;
           const signingPatch = canSignBoth
             ? {
                 owner_signed_at: nowIso,
@@ -2695,17 +2795,57 @@ export default function ApplicationDetailsPage() {
               }
             : {
                 owner_signed_at: nowIso,
-                owner_signed_by: uid,
+                owner_signed_by: ownerSignedById,
                 workflow_stage: "in_process",
               };
 
-          const { ok, error: updErr } = await updateApplicationForSigning(
-            resolvedApplicationId,
-            uid,
-            signingPatch
-          );
-          if (updErr || !ok) {
-            console.error("Failed to record signature:", updErr);
+          let recordOk = false;
+          let recordErr: Error | null = null;
+          if (onBehalfOwner && !canSignBoth && signingPatch.owner_signed_at) {
+            const onBehalfRes = await fetch(
+              `/api/applications/${encodeURIComponent(resolvedApplicationId)}/sign-on-behalf-owner`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({
+                  owner_signed_at: signingPatch.owner_signed_at,
+                  owner_signed_by: signingPatch.owner_signed_by,
+                  workflow_stage: signingPatch.workflow_stage,
+                }),
+              }
+            );
+            const onBehalfData = (await onBehalfRes.json().catch(() => ({}))) as {
+              ok?: boolean;
+              error?: string;
+            };
+            if (onBehalfRes.ok && onBehalfData.ok !== false) {
+              recordOk = true;
+            } else {
+              const { ok, error: updErr } = await updateApplicationForSigning(
+                resolvedApplicationId,
+                uid,
+                signingPatch
+              );
+              recordOk = ok;
+              recordErr = ok
+                ? null
+                : updErr ||
+                  new Error(onBehalfData.error || "On-behalf owner signature could not be recorded.");
+            }
+          } else {
+            const { ok, error: updErr } = await updateApplicationForSigning(
+              resolvedApplicationId,
+              uid,
+              signingPatch
+            );
+            recordOk = ok;
+            recordErr = updErr;
+          }
+          if (recordErr || !recordOk) {
+            console.error("Failed to record signature:", recordErr);
             throw new Error("PDF saved but signature could not be recorded (check permissions).");
           }
 
@@ -2909,7 +3049,7 @@ export default function ApplicationDetailsPage() {
   };
 
   /** Sign silently (no preview modal): build context then run the signing pipeline. */
-  const handleSignDirectly = async () => {
+  const handleSignDirectly = async (opts?: { onBehalfOfOwner?: boolean }) => {
     if (!projectId) {
       setSavePdfError("Missing project. Open Application Details from your dashboard with a project selected.");
       return;
@@ -2917,6 +3057,7 @@ export default function ApplicationDetailsPage() {
     if (signInFlightRef.current || isSigningPdf) {
       return;
     }
+    const onBehalfOfOwner = Boolean(opts?.onBehalfOfOwner);
     signInFlightRef.current = true;
     setIsSigningPdf(true);
     setSavePdfError(null);
@@ -3043,6 +3184,7 @@ export default function ApplicationDetailsPage() {
         projectData: projectForSign,
         projectRowUserId: projectForSign.user_id,
         appointedSecondId,
+        onBehalfOfOwner,
       });
       if (!permission.allowed) {
         setSavePdfMessage(permission.softMessage);
@@ -3052,19 +3194,49 @@ export default function ApplicationDetailsPage() {
         return;
       }
 
-      setSidebarPdfStatus("Checking DSC against your PAN…");
+      const ownerSignerIdsForPan = collectOwnerSignerUserIds(
+        projectForSign,
+        projectForSign.user_id
+      );
+      const primaryOwnerUserId =
+        ownerSignerIdsForPan.find((id) => id.trim()) ||
+        (typeof projectForSign.user_id === "string" ? projectForSign.user_id.trim() : "") ||
+        "";
+
+      setSidebarPdfStatus(
+        onBehalfOfOwner
+          ? "Checking DSC against the owner's PAN…"
+          : "Checking DSC against your PAN…"
+      );
       setSavePdfError(null);
 
-      const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, [authUser.id]);
-      const userPan =
-        pickPanFromUserMetadata(serverMeta) ||
-        pickPanFromUserMetadata(userMetadata) ||
-        pickPanFromUserMetadata(authUser.user_metadata) ||
-        pickPanFromUserMetadata(readLocalStoredUserMetadata());
-      if (!isValidPanFormat(userPan)) {
-        throw new Error(
-          "Your PAN is missing or invalid in your profile. Update Profile with a valid PAN before signing."
-        );
+      let userPan = "";
+      if (onBehalfOfOwner) {
+        if (!primaryOwnerUserId) {
+          throw new Error(
+            "Could not resolve the project owner. Add the owner on Applicant Details before signing on their behalf."
+          );
+        }
+        const ownerMeta = await fetchRawUserMetadataFromApi(null, [primaryOwnerUserId]);
+        userPan =
+          pickPanFromUserMetadata(ownerMeta) || pickOwnerPanFromApplicants(projectForSign);
+        if (!isValidPanFormat(userPan)) {
+          throw new Error(
+            "The project owner's PAN is missing or invalid. The owner must update their profile with a valid PAN before you can sign on their behalf."
+          );
+        }
+      } else {
+        const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, [authUser.id]);
+        userPan =
+          pickPanFromUserMetadata(serverMeta) ||
+          pickPanFromUserMetadata(userMetadata) ||
+          pickPanFromUserMetadata(authUser.user_metadata) ||
+          pickPanFromUserMetadata(readLocalStoredUserMetadata());
+        if (!isValidPanFormat(userPan)) {
+          throw new Error(
+            "Your PAN is missing or invalid in your profile. Update Profile with a valid PAN before signing."
+          );
+        }
       }
 
       const resolvedCert = await resolveSigningCert();
@@ -3084,6 +3256,8 @@ export default function ApplicationDetailsPage() {
         throw new Error(verifyData.error || "Failed to verify PAN against DSC.");
       }
       const isMatch = Boolean(verifyData.isMatch);
+      const enforceStrictOwnerPanMatch =
+        onBehalfOfOwner && process.env.NODE_ENV === "production";
       const signerLabel = commonName || pickSignerLabel(resolvedCert.cert);
 
       setSidebarPdfStatus(null);
@@ -3091,8 +3265,16 @@ export default function ApplicationDetailsPage() {
         isMatch,
         pan: userPan,
         signerLabel,
+        requireMatch: enforceStrictOwnerPanMatch,
+        panPossessive: onBehalfOfOwner ? "the owner's" : "your",
       });
       if (!proceed) {
+        signInFlightRef.current = false;
+        setIsSigningPdf(false);
+        setSidebarPdfStatus(null);
+        return;
+      }
+      if (enforceStrictOwnerPanMatch && !isMatch) {
         signInFlightRef.current = false;
         setIsSigningPdf(false);
         setSidebarPdfStatus(null);
@@ -3249,6 +3431,10 @@ export default function ApplicationDetailsPage() {
       });
 
       const nowIso = new Date().toISOString();
+      const ownerSignedById =
+        onBehalfOfOwner && primaryOwnerUserId.trim()
+          ? primaryOwnerUserId.trim()
+          : authUser.id;
       const patch = signingAcceptance
         ? {
             architect_signed_at: nowIso,
@@ -3258,19 +3444,70 @@ export default function ApplicationDetailsPage() {
         : isDual
           ? {
               owner_signed_at: nowIso,
-              owner_signed_by: authUser.id,
+              owner_signed_by: ownerSignedById,
               workflow_stage: "in_process" as const,
             }
           : {
               owner_signed_at: nowIso,
-              owner_signed_by: authUser.id,
+              owner_signed_by: ownerSignedById,
               workflow_stage: "approved_verified" as const,
             };
 
-      const { ok, error } = await updateApplicationForSigning(resolvedApplicationId, authUser.id, patch);
-      if (!ok || error) {
+      let stageOk = false;
+      let stageError: Error | null = null;
+
+      if (onBehalfOfOwner && !signingAcceptance && patch.owner_signed_at) {
+        const onBehalfRes = await fetch(
+          `/api/applications/${encodeURIComponent(resolvedApplicationId)}/sign-on-behalf-owner`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({
+              owner_signed_at: patch.owner_signed_at,
+              owner_signed_by: patch.owner_signed_by,
+              workflow_stage: patch.workflow_stage,
+            }),
+          }
+        );
+        const onBehalfData = (await onBehalfRes.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (onBehalfRes.ok && onBehalfData.ok !== false) {
+          stageOk = true;
+        } else {
+          stageError = new Error(
+            onBehalfData.error || "On-behalf owner signature could not be recorded."
+          );
+          // Fall back to RPC in case migration already allows architects.
+          const { ok, error } = await updateApplicationForSigning(
+            resolvedApplicationId,
+            authUser.id,
+            patch
+          );
+          stageOk = ok;
+          stageError = ok ? null : error || stageError;
+        }
+      } else {
+        const { ok, error } = await updateApplicationForSigning(
+          resolvedApplicationId,
+          authUser.id,
+          patch
+        );
+        stageOk = ok;
+        stageError = error;
+      }
+
+      if (!stageOk || stageError) {
+        const detail = stageError?.message?.trim();
+        console.error("updateApplicationForSigning failed after PDF save:", detail || "not allowed");
         throw new Error(
-          "Signed PDF was saved, but application stage update failed. Please retry once."
+          detail
+            ? `Signed PDF was saved, but application stage update failed: ${detail}`
+            : "Signed PDF was saved, but application stage update failed. Please retry once."
         );
       }
 
@@ -3686,6 +3923,10 @@ export default function ApplicationDetailsPage() {
     setSignApplicationSlot({
       onSign: async () => {
         if (!avail.actionAvailable) return;
+        if (avail.onBehalfOfOwner) {
+          setOnBehalfConfirmOpen(true);
+          return;
+        }
         await signDirectlyRef.current();
       },
       disabled: isSavingPdf || isSigningPdf,
@@ -3897,8 +4138,19 @@ export default function ApplicationDetailsPage() {
         isMatch={dscPanVerify?.isMatch ?? false}
         pan={dscPanVerify?.pan ?? ""}
         signerLabel={dscPanVerify?.signerLabel}
+        requireMatch={dscPanVerify?.requireMatch}
+        panPossessive={dscPanVerify?.panPossessive}
         onContinue={() => handleDscPanVerifyDecision(true)}
         onCancel={() => handleDscPanVerifyDecision(false)}
+      />
+
+      <SignOnBehalfOwnerModal
+        open={onBehalfConfirmOpen}
+        onCancel={() => setOnBehalfConfirmOpen(false)}
+        onContinue={() => {
+          setOnBehalfConfirmOpen(false);
+          void signDirectlyRef.current({ onBehalfOfOwner: true });
+        }}
       />
 
       {saveSuccessDialogOpen && (

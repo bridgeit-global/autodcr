@@ -5,6 +5,10 @@ type DscPanVerifyModalProps = {
   isMatch: boolean;
   pan: string;
   signerLabel?: string;
+  /** When true, mismatch cannot continue (owner on-behalf DSC flow). */
+  requireMatch?: boolean;
+  /** Possessive phrase before “PAN”, e.g. "your" or "the owner's". */
+  panPossessive?: string;
   onContinue: () => void;
   onCancel: () => void;
 };
@@ -14,6 +18,8 @@ export default function DscPanVerifyModal({
   isMatch,
   pan,
   signerLabel,
+  requireMatch = false,
+  panPossessive = "your",
   onContinue,
   onCancel,
 }: DscPanVerifyModalProps) {
@@ -41,7 +47,7 @@ export default function DscPanVerifyModal({
                   Valid DSC
                 </h2>
                 <p className="text-sm text-gray-600 mt-2">
-                  This certificate matches your PAN{" "}
+                  This certificate matches {panPossessive} PAN{" "}
                   <span className="font-mono font-medium text-gray-800">{pan}</span>.
                   You can continue signing the application.
                 </p>
@@ -76,9 +82,19 @@ export default function DscPanVerifyModal({
                   PAN does not match
                 </h2>
                 <p className="text-sm text-gray-600 mt-2">
-                  This DSC was not issued for your PAN{" "}
-                  <span className="font-mono font-medium text-gray-800">{pan}</span>.
-                  You can cancel and try with your own token, or continue anyway.
+                  {requireMatch ? (
+                    <>
+                      This DSC was not issued for {panPossessive} PAN{" "}
+                      <span className="font-mono font-medium text-gray-800">{pan}</span>.
+                      Plug in the owner&apos;s DSC token and try again.
+                    </>
+                  ) : (
+                    <>
+                      This DSC was not issued for {panPossessive} PAN{" "}
+                      <span className="font-mono font-medium text-gray-800">{pan}</span>.
+                      You can cancel and try with your own token, or continue anyway.
+                    </>
+                  )}
                 </p>
                 {signerLabel ? (
                   <p className="text-xs text-gray-500 mt-2 truncate" title={signerLabel}>
@@ -95,13 +111,15 @@ export default function DscPanVerifyModal({
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={onContinue}
-                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
-              >
-                Continue anyway
-              </button>
+              {!requireMatch ? (
+                <button
+                  type="button"
+                  onClick={onContinue}
+                  className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
+                >
+                  Continue anyway
+                </button>
+              ) : null}
             </div>
           </>
         )}
