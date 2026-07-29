@@ -3350,7 +3350,6 @@ export default function ApplicationDetailsPage() {
         ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`)
         : ctx.templateType;
 
-      const architectAlreadySigned = Boolean(architectSignedAtRow);
       const { blob: unsignedBlob, builtFresh: primaryBuiltFresh } =
         await loadUnsignedLetterPdfForSigning({
           urlsRaw,
@@ -3409,34 +3408,33 @@ export default function ApplicationDetailsPage() {
           acceptanceBlob: signedBlob,
           acceptanceUrlsKey: acceptanceKey,
         };
-        // If appointment already has owner (+ optional consultant) stamps, leave it alone on
-        // architect re-sign — only refresh the acceptance letter PDF.
-        if (!ownerAlreadySigned) {
-          const { blob: appointmentUnsigned } = await loadUnsignedLetterPdfForSigning({
-            urlsRaw,
-            urlsKey: ctx.templateType,
-            letterVariant: "appointment",
-            previewBase,
-            projectId,
-            requireOwnerSignedPdf: false,
-            forceFresh: architectAlreadySigned,
-            ownerSignedAt: ownerSignedAtRow,
-            architectSignedAt: architectSignedAtRow,
-          });
-          const signedAppointment = await signPdfBlobWithDsc(
-            appointmentUnsigned,
-            `${ctx.templateType.replace(/[/\\]/g, "-")}-appointment-consultant.pdf`,
-            undefined,
-            ctx.templateType,
-            false,
-            { role: "consultant", layout: "dualColumn" },
-            resolvedCert
-          );
-          appointmentUpload = {
-            appointmentBlob: signedAppointment,
-            applicationUrlsKey: ctx.templateType,
-          };
-        }
+        // Always add the consultant DSC to the appointment letter too.
+        // If owner signed first, load that stored PDF and stamp consultant on it
+        // (do not forceFresh — that would wipe the owner signature).
+        const { blob: appointmentUnsigned } = await loadUnsignedLetterPdfForSigning({
+          urlsRaw,
+          urlsKey: ctx.templateType,
+          letterVariant: "appointment",
+          previewBase,
+          projectId,
+          requireOwnerSignedPdf: ownerAlreadySigned,
+          forceFresh: false,
+          ownerSignedAt: ownerSignedAtRow,
+          architectSignedAt: architectSignedAtRow,
+        });
+        const signedAppointment = await signPdfBlobWithDsc(
+          appointmentUnsigned,
+          `${ctx.templateType.replace(/[/\\]/g, "-")}-appointment-consultant.pdf`,
+          undefined,
+          ctx.templateType,
+          false,
+          { role: "consultant", layout: "dualColumn" },
+          resolvedCert
+        );
+        appointmentUpload = {
+          appointmentBlob: signedAppointment,
+          applicationUrlsKey: ctx.templateType,
+        };
       }
       // Owner dual-letter path: DSC appointment only. Acceptance is consultant-signed later.
 
