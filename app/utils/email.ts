@@ -12,6 +12,14 @@ const transporter = nodemailer.createTransport({
 
 const FROM_ADDRESS =
   process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER || "";
+const FROM_NAME = (process.env.EMAIL_FROM_NAME || "Draft Desk").trim() || "Draft Desk";
+
+/** Nodemailer From: display name + mailbox (SMTP auth address unchanged). */
+function formatFromHeader(): string {
+  if (!FROM_ADDRESS) return FROM_NAME;
+  const safeName = FROM_NAME.replace(/"/g, '\\"');
+  return `"${safeName}" <${FROM_ADDRESS}>`;
+}
 
 export type NotificationType = "submitted" | "updated";
 
@@ -219,7 +227,7 @@ export async function sendApplicantNotificationEmail(params: {
 
   try {
     await transporter.sendMail({
-      from: FROM_ADDRESS,
+      from: formatFromHeader(),
       to,
       subject,
       html,
@@ -319,7 +327,7 @@ export async function sendApplicationStatusEmail(params: {
 
   try {
     await transporter.sendMail({
-      from: FROM_ADDRESS,
+      from: formatFromHeader(),
       to,
       subject,
       html,

@@ -112,19 +112,31 @@ export function isAnySameUserId(uid: string, candidates: string[]): boolean {
   return candidates.some((c) => normalizeId(c) === u);
 }
 
-export type DualLetterSignStep = "owner" | "consultant" | "complete" | "none";
+export type DualLetterSignStep =
+  | "owner"
+  | "consultant"
+  | "complete"
+  | "none"
+  | "partial_owner"
+  | "partial_consultant";
 
 /** @deprecated Use {@link getDualLetterSignStep} */
 export type ArchitectSignStep = DualLetterSignStep | "architect";
 
+/**
+ * Signature status helper for dual-letter apps (not an ordering gate).
+ * Owner and consultant may sign independently.
+ */
 export function getDualLetterSignStep(
   application: SigningApplicationRow | null | undefined
 ): DualLetterSignStep {
   const ownerSigned = Boolean(application?.owner_signed_at?.trim());
   const secondSigned = Boolean(application?.architect_signed_at?.trim());
   if (ownerSigned && secondSigned) return "complete";
-  if (!ownerSigned) return "owner";
-  return "consultant";
+  if (ownerSigned && !secondSigned) return "partial_owner";
+  if (!ownerSigned && secondSigned) return "partial_consultant";
+  if (!ownerSigned && !secondSigned) return "none";
+  return "none";
 }
 
 /** @deprecated Use {@link getDualLetterSignStep} */
@@ -132,7 +144,20 @@ export function getArchitectSignStep(
   application: SigningApplicationRow | null | undefined
 ): ArchitectSignStep {
   const step = getDualLetterSignStep(application);
-  return step === "consultant" ? "architect" : step;
+  if (step === "partial_owner") return "architect";
+  if (step === "partial_consultant") return "owner";
+  if (step === "none") return "owner";
+  return step === "complete" ? "complete" : step;
+}
+
+/** Dual letters ready for manual Approved (both signatures present). */
+export function dualLetterSignaturesComplete(
+  application: SigningApplicationRow | null | undefined
+): boolean {
+  return (
+    Boolean(application?.owner_signed_at?.trim()) &&
+    Boolean(application?.architect_signed_at?.trim())
+  );
 }
 
 /** Whether user may save PDFs / update application_urls for this project. */

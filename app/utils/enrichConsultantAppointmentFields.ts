@@ -165,27 +165,43 @@ export async function enrichConsultantAppointmentFields(
     applyAddressFields(out, primaryKeys, primaryApplicant, primaryCityPincode);
   }
 
+  // Prefer entity_name already on the primary applicant row for Approved-for / To firm.
+  if (primaryApplicant) {
+    const fromApplicant = pickEntityNameFromUserMeta(primaryApplicant);
+    applyCompanyField(out, primaryKeys.company, fromApplicant, false);
+    const approvedKey = `project_${suffix}_Approved_For`;
+    if (fromApplicant.trim() && !out[approvedKey]?.trim()) {
+      out[approvedKey] = `For ${fromApplicant.trim()},`;
+    }
+  }
+
   if (enrichArchitectCc && architectApplicant) {
     applyAddressFields(out, architectKeys, architectApplicant, architectCityPincode);
   }
 
   const primaryUserId = pickUserId(primaryApplicant);
-  if (enrichPrimaryAddress && primaryUserId) {
+  const approvedKey = `project_${suffix}_Approved_For`;
+  const needsPrimaryCompany =
+    !out[primaryKeys.company]?.trim() || !out[approvedKey]?.trim();
+  if ((enrichPrimaryAddress || needsPrimaryCompany) && primaryUserId) {
     const meta = await resolveConsultantMetadata(opts.token, {
       lookupUserIds: [primaryUserId],
     });
     if (meta) {
-      // Address lines may come from meta; city/pincode stay from applicant row only.
-      applyAddressFields(
-        out,
-        primaryKeys,
-        meta as Record<string, unknown>,
-        primaryCityPincode
-      );
-      // Licensed Surveyor "To," firm name: consultant profile, not owner.
-      if (opts.templateType === "Licensed Surveyor") {
-        const company = pickEntityNameFromUserMeta(meta as Record<string, unknown>);
-        applyCompanyField(out, primaryKeys.company, company, false);
+      if (enrichPrimaryAddress) {
+        // Address lines may come from meta; city/pincode stay from applicant row only.
+        applyAddressFields(
+          out,
+          primaryKeys,
+          meta as Record<string, unknown>,
+          primaryCityPincode
+        );
+      }
+      // Consultant firm name (entity_name) for To / Approved-for — not owner.
+      const company = pickEntityNameFromUserMeta(meta as Record<string, unknown>);
+      applyCompanyField(out, primaryKeys.company, company, false);
+      if (company.trim() && !out[approvedKey]?.trim()) {
+        out[approvedKey] = `For ${company.trim()},`;
       }
     }
   }
@@ -211,7 +227,7 @@ export async function enrichConsultantAppointmentFields(
       }
       if (enrichArchitectCompany) {
         const company = pickEntityNameFromUserMeta(meta as Record<string, unknown>);
-        applyCompanyField(out, architectKeys.company, company, true);
+        applyCompanyField(out, architectKeys.company, company, false);
         if (company.trim() && !out.project_Architect_Approved_For?.trim()) {
           out.project_Architect_Approved_For = `For ${company.trim()},`;
         }

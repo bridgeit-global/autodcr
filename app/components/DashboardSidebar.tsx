@@ -668,6 +668,9 @@ const DashboardSidebar = ({
           const signAllowed = applicationSignSlot.actionAvailable !== false;
           const signBusy = applicationSignSlot.disabled || applicationSignSlot.busy;
           const signDisabled = !signAllowed || signBusy;
+          const actionLabel = applicationSignSlot.actionLabel || "Approved";
+          const busyLabel = applicationSignSlot.busyLabel || "Approving…";
+          const compactLabel = actionLabel === "Approved" ? "OK" : actionLabel.slice(0, 3);
           return (
           <div className="mb-4 shrink-0 w-full min-w-0">
             {!collapsed && applicationSignSlot.subtitle && (
@@ -697,7 +700,11 @@ const DashboardSidebar = ({
                   ? "w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50 disabled:pointer-events-none disabled:hover:bg-transparent"
                   : "w-full border border-gray-200 bg-gray-50 text-gray-400 font-medium py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shrink-0 cursor-not-allowed shadow-none"
               }
-              aria-label={signAllowed ? "Sign application" : "Sign application — not available for your role or step"}
+              aria-label={
+                signAllowed
+                  ? actionLabel
+                  : `${actionLabel} — waiting for signatures or not available`
+              }
             >
               {applicationSignSlot.busy ? (
                 <span className="inline-flex items-center justify-center gap-2">
@@ -705,12 +712,12 @@ const DashboardSidebar = ({
                     className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
                     aria-hidden
                   />
-                  {!collapsed && <span>Signing…</span>}
+                  {!collapsed && <span>{busyLabel}</span>}
                 </span>
               ) : collapsed ? (
-                signAllowed ? "Sign" : "—"
+                signAllowed ? compactLabel : "—"
               ) : (
-                "Sign application"
+                actionLabel
               )}
             </button>
           </div>

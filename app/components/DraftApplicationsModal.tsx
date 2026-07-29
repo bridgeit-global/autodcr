@@ -211,7 +211,7 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                         {rejectingId === app.applicationId ? "Rejecting..." : "Reject"}
                       </button>
                     )}
-                    {onDeleteApplication && (
+                    {onDeleteApplication && app.workflowStage === "draft" && (
                       <button
                         type="button"
                         className="text-[13px] text-rose-600 hover:text-rose-700 hover:underline disabled:text-gray-400 disabled:no-underline"

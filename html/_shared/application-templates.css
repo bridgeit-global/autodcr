@@ -4,468 +4,494 @@
  * Edit here once; keep per-template <style> blocks for overrides only.
  */
 
-@page {
-  size: A4;
-  margin-top: 2.5cm;
-  margin-right: 2cm;
-  margin-bottom: 2cm;
-  margin-left: 2cm;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 14px;
-  line-height: 1.35;
-  color: #000;
-  background: #fff url('$project_Letterhead_Image_Url') top center / 210mm 297mm no-repeat;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-  word-wrap: break-word;
-}
-
-.page {
-  width: 100%;
-  margin: 0 auto;
-  background: transparent;
-  padding-top: 90px;
-}
-
-.page,
-.page p,
-.page li,
-.page td,
-.page .eeb-tab-line {
-  font-size: 14px;
-}
-
-.top-row,
-.subject-table,
-.signature-table,
-.cc-table,
-.opening,
-.acceptance-body,
-.closing-line,
-.eeb-tab-line,
-.signature-intro,
-.signature-company,
-.signature-line,
-.meta-line,
-.cc-note {
-  font-size: 14px;
-}
-
-.top-row,
-.subject-table,
-.signature-table,
-.cc-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.top-row {
-  margin-bottom: 10px;
-}
-
-.top-row td {
-  vertical-align: top;
-  padding: 0;
-}
-
-/* Date row + “To” / address (left) and saved-PDF QR (right, under Date). */
-.letter-header {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  margin-bottom: 10px;
-  page-break-inside: avoid;
-}
-
-.letter-header td {
-  vertical-align: top;
-  padding: 0;
-}
-
-.letter-header .date-row td {
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-
-.letter-header .address-qr-row .to-block {
-  width: 100%;
-  padding-right: 12px;
-}
-
-.letter-header .qr-cell {
-  width: 132px;
-  max-width: 132px;
-  text-align: right;
-  white-space: nowrap;
-  padding-top: 4px;
-}
-
-.saved-pdf-qr-stack {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  box-sizing: border-box;
-}
-
-.right {
-  text-align: right;
-}
-
-.bold {
-  font-weight: bold;
-}
-
-.value-bold {
-  font-weight: bold;
-}
-
-.to-row {
-  margin-bottom: 0;
-}
-
-.to-label {
-  width: 7%;
-  vertical-align: top;
-  padding-right: 4px;
-  padding-bottom: 16px;
-}
-
-.to-content {
-  width: 93%;
-  vertical-align: top;
-  overflow-wrap: normal;
-  word-break: normal;
-  line-height: 1.35;
-}
-
-.to-content p {
-  margin: 0;
-}
-
-/* To, block: each line (header + address 1/2/3) stays on one row without breaking mid-line. */
-.to-content p.bp-recipient-line {
-  white-space: nowrap;
-}
-
-.to-content p:empty {
-  display: none;
-}
-
-.subject-box {
-  margin: 8px 0;
-}
-
-.subject-table td {
-  vertical-align: top;
-  padding: 0;
-}
-
-.subject-table tr + tr td {
-  padding-top: 4px;
-}
-
-.re-row td {
-  padding-top: 8px !important;
-}
-
-.label {
-  width: 7%;
-  font-weight: normal;
-  white-space: nowrap;
-  padding-right: 6px;
-}
-
-.subject-text {
-  text-align: justify;
-}
-
-p {
-  margin: 0;
-}
-
-/* Appointment letter body only (avoid styling acceptance div.eeb-tab-line.opening). */
-p.opening {
-  text-align: justify;
-  text-indent: 0.5in;
-}
-
-ol {
-  margin: 0 0 0 18px;
-  padding: 0;
-}
-
-li {
-  margin-bottom: 2px;
-  text-align: justify;
-}
-
-/* Appointment closing lines only */
-p.closing-line {
-  margin-left: 0.25in;
-}
-
-.signature-table {
-  margin-top: 8px;
-  page-break-inside: avoid;
-}
-
-.signature-table td {
-  width: 50%;
-  vertical-align: top;
-  padding-top: 0;
-}
-
-.signature-intro {
-  margin: 0;
-  line-height: 1.15;
-}
-
-.signature-company {
-  margin: 0 0 4px;
-  line-height: 1.15;
-  max-width: 95%;
-}
-
-.signature-line {
-  margin-top: 68px;
-  border-top: none;
-  width: 85%;
-  padding-top: 2px;
-  font-weight: bold;
-  line-height: 1.2;
-}
-
-.architect-block {
-  margin-top: 0;
-  margin-left: 0;
-  width: 100%;
-  page-break-inside: avoid;
-}
-
-.meta-line {
-  margin: 0;
-  line-height: 1.2;
-}
-
-.meta-label {
-  font-weight: normal;
-}
-
-.cc-box {
-  margin-top: 20px;
-  page-break-inside: avoid;
-}
-
-.cc-label {
-  width: 8%;
-  font-weight: normal;
-  vertical-align: top;
-  padding-right: 6px;
-  white-space: nowrap;
-}
-
-.cc-content {
-  width: 92%;
-  vertical-align: top;
-}
-
-.cc-content p {
-  margin: 0;
-  line-height: 1.2;
-  font-weight: bold;
-}
-
-/* “To,” address block — full address bold (matches CC / authority letter style). */
-.to-content p {
-  margin: 0;
-  line-height: 1.2;
-  font-weight: bold;
-}
-
-.to-content p .value-bold {
-  display: inline;
-  font-weight: bold;
-}
-
-.cc-note {
-  margin-top: 4px;
-  text-indent: 0.5in;
-  font-style: italic;
-  line-height: 1.2;
-}
-
-/* Demo-style label : value rows (appointment letters to authority). */
-.label-value-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  margin: 8px 0;
-}
-
-.label-value-table td {
-  vertical-align: top;
-  padding: 2px 0;
-}
-
-.field-label {
-  width: 90px;
-  font-weight: normal;
-  white-space: nowrap;
-}
-
-.field-colon {
-  width: 10px;
-  font-weight: normal;
-}
-
-.field-value {
-  font-weight: normal;
-  text-align: justify;
-  overflow-wrap: break-word;
-}
-
-/* Subject / Project / Ref. — two columns; only .value-bold tokens are bold. */
-.subject-reference-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  margin: 8px 0 10px;
-}
-
-.subject-reference-table td {
-  vertical-align: top;
-  padding: 2px 0;
-}
-
-.subject-reference-table .sr-label {
-  width: 72px;
-  padding-right: 6px;
-  font-weight: normal;
-  white-space: nowrap;
-}
-
-.subject-reference-table .sr-value {
-  font-weight: normal;
-  text-align: left;
-  overflow-wrap: break-word;
-}
-
-.subject-reference-table .sr-value .value-bold {
-  font-weight: bold;
-}
-
-.project-details {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  margin: 10px 0 12px;
-}
-
-.project-details td {
-  vertical-align: top;
-  padding: 2px 0;
-}
-
-.section-label {
-  width: 250px;
-  font-weight: bold;
-  padding-right: 8px;
-}
-
-.section-value {
-  text-align: justify;
-  overflow-wrap: break-word;
-}
-
-.consultant-details {
-  margin: 8px 0 12px;
-}
-
-.consultant-details .field-value p {
-  margin: 0;
-}
-
-/* Consultant details: static labels normal; only .value-bold tokens bold. */
-.consultant-details .field-value p.bold {
-  font-weight: normal;
-}
-
-.consultant-details .field-value p.bold .value-bold {
-  font-weight: bold;
-}
-
-.owner-signature {
-  margin-top: 12px;
-  margin-left: auto;
-  margin-right: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  text-align: right;
-  line-height: 1.35;
-  width: auto;
-  max-width: 100%;
-}
-
-.owner-signature #preview-dummy-owner-sign {
-  display: block;
-  margin: 0 0 6px;
-  text-align: right;
-  align-self: flex-end;
-}
-
-.owner-signature .owner-signature-details.signature-line {
-  margin-top: 0;
-  margin-left: 0;
-  width: auto !important;
-  max-width: 100%;
-  padding-top: 0;
-  font-weight: bold;
-  line-height: 1.25;
-  text-align: right;
-  align-self: flex-end;
-}
-
-.dsc-stamp-slot {
-  width: 180px;
-  height: 60px;
-}
-
-.owner-signature .dsc-stamp-slot--owner {
-  align-self: flex-end;
-  margin-bottom: 6px;
-}
-
-.signature-table .dsc-stamp-slot {
-  margin-bottom: 6px;
-}
-
-.cc-box.cc-architect {
-  page-break-before: auto;
-}
-
-p + .project-details,
-p + .label-value-table {
-  margin-top: 8px;
-}
-
-p,
-table,
-tr,
-td {
-  break-inside: avoid-page;
-}
+ @page {
+    size: A4;
+    margin-top: 2.5cm;
+    margin-right: 2cm;
+    margin-bottom: 2cm;
+    margin-left: 2cm;
+  }
+  
+  * {
+    box-sizing: border-box;
+  }
+  
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.35;
+    color: #000;
+    background: #fff url('$project_Letterhead_Image_Url') top center / 210mm 297mm no-repeat;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    word-wrap: break-word;
+  }
+  
+  .page {
+    width: 100%;
+    margin: 0 auto;
+    background: transparent;
+    padding-top: 90px;
+  }
+
+  /* Acceptance letters use WordSection1; bottom air comes from .acceptance-closing. */
+  .WordSection1.page {
+    padding-bottom: 0;
+    box-sizing: border-box;
+  }
+
+  .acceptance-closing {
+    padding-bottom: 40pt;
+    page-break-inside: avoid;
+  }
+  
+  .page,
+  .page p,
+  .page li,
+  .page td,
+  .page .eeb-tab-line {
+    font-size: 14px;
+  }
+  
+  .top-row,
+  .subject-table,
+  .signature-table,
+  .cc-table,
+  .opening,
+  .acceptance-body,
+  .closing-line,
+  .eeb-tab-line,
+  .signature-intro,
+  .signature-company,
+  .signature-line,
+  .meta-line,
+  .cc-note {
+    font-size: 14px;
+  }
+  
+  .top-row,
+  .subject-table,
+  .signature-table,
+  .cc-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  
+  .top-row {
+    margin-bottom: 10px;
+  }
+  
+  .top-row td {
+    vertical-align: top;
+    padding: 0;
+  }
+  
+  /* Date row + “To” / address (left) and saved-PDF QR (right, under Date). */
+  .letter-header {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+  }
+  
+  .letter-header td {
+    vertical-align: top;
+    padding: 0;
+  }
+  
+  .letter-header .date-row td {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  
+  .letter-header .address-qr-row .to-block {
+    width: 100%;
+    padding-right: 12px;
+  }
+  
+  .letter-header .qr-cell {
+    width: 132px;
+    max-width: 132px;
+    text-align: right;
+    white-space: nowrap;
+    padding-top: 4px;
+  }
+  
+  .saved-pdf-qr-stack {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    box-sizing: border-box;
+  }
+  
+  .right {
+    text-align: right;
+  }
+  
+  .bold {
+    font-weight: bold;
+  }
+  
+  .value-bold {
+    font-weight: bold;
+  }
+  
+  .to-row {
+    margin-bottom: 0;
+  }
+  
+  .to-label {
+    width: 7%;
+    vertical-align: top;
+    padding-right: 4px;
+    padding-bottom: 16px;
+  }
+  
+  .to-content {
+    width: 93%;
+    vertical-align: top;
+    overflow-wrap: normal;
+    word-break: normal;
+    line-height: 1.35;
+  }
+  
+  .to-content p {
+    margin: 0;
+  }
+  
+  /* To, block: each line (header + address 1/2/3) stays on one row without breaking mid-line. */
+  .to-content p.bp-recipient-line {
+    white-space: nowrap;
+  }
+  
+  .to-content p:empty {
+    display: none;
+  }
+  
+  .subject-box {
+    margin: 8px 0;
+  }
+  
+  .subject-table td {
+    vertical-align: top;
+    padding: 0;
+  }
+  
+  .subject-table tr + tr td {
+    padding-top: 4px;
+  }
+  
+  .re-row td {
+    padding-top: 8px !important;
+  }
+  
+  .label {
+    width: 7%;
+    font-weight: normal;
+    white-space: nowrap;
+    padding-right: 6px;
+  }
+  
+  .subject-text {
+    text-align: justify;
+  }
+  
+  p {
+    margin: 0;
+  }
+  
+  /* Appointment letter body — keep flush with Sub / Dear Sir / signature left edge. */
+  p.opening {
+    text-align: justify;
+    text-indent: 0;
+  }
+  
+  ol {
+    margin: 0 0 0 18px;
+    padding: 0;
+  }
+  
+  li {
+    margin-bottom: 2px;
+    text-align: justify;
+  }
+  
+  /* Appointment closing lines — same left edge as signature block. */
+  p.closing-line {
+    margin-left: 0;
+  }
+
+  /* Acceptance body lines — flush with Dear Sir / Sub (override any inherited indent). */
+  .WordSection1 .eeb-tab-line,
+  .acceptance-letter-body .eeb-tab-line,
+  .eeb-tab-line.opening,
+  .eeb-tab-line.acceptance-body,
+  .eeb-tab-line.closing-line {
+    text-indent: 0 !important;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+  }
+  
+  .signature-table {
+    margin-top: 8px;
+    page-break-inside: avoid;
+  }
+  
+  .signature-table td {
+    width: 50%;
+    vertical-align: top;
+    padding-top: 0;
+  }
+  
+  .signature-intro {
+    margin: 0;
+    line-height: 1.15;
+  }
+  
+  .signature-company {
+    margin: 0 0 4px;
+    line-height: 1.15;
+    max-width: 95%;
+  }
+  
+  .signature-line {
+    /* Slot already reserves ~60px for the DSC stamp; keep a small equal gap matching the top. */
+    margin-top: 8px;
+    border-top: none;
+    width: 100%;
+    max-width: 100%;
+    padding-top: 2px;
+    font-weight: bold;
+    line-height: 1.2;
+  }
+  
+  .architect-block {
+    margin-top: 0;
+    margin-left: 0;
+    width: 100%;
+    page-break-inside: avoid;
+  }
+  
+  .meta-line {
+    margin: 0;
+    line-height: 1.2;
+  }
+  
+  .meta-label {
+    font-weight: normal;
+  }
+  
+  .cc-box {
+    margin-top: 20px;
+    page-break-inside: avoid;
+  }
+  
+  .cc-label {
+    width: 8%;
+    font-weight: normal;
+    vertical-align: top;
+    padding-right: 6px;
+    white-space: nowrap;
+  }
+  
+  .cc-content {
+    width: 92%;
+    vertical-align: top;
+  }
+  
+  .cc-content p {
+    margin: 0;
+    line-height: 1.2;
+    font-weight: bold;
+  }
+  
+  /* “To,” address block — full address bold (matches CC / authority letter style). */
+  .to-content p {
+    margin: 0;
+    line-height: 1.2;
+    font-weight: bold;
+  }
+  
+  .to-content p .value-bold {
+    display: inline;
+    font-weight: bold;
+  }
+  
+  .cc-note {
+    margin-top: 4px;
+    text-indent: 0;
+    font-style: italic;
+    line-height: 1.2;
+  }
+  
+  /* Demo-style label : value rows (appointment letters to authority). */
+  .label-value-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin: 8px 0;
+  }
+  
+  .label-value-table td {
+    vertical-align: top;
+    padding: 2px 0;
+  }
+  
+  .field-label {
+    width: 90px;
+    font-weight: normal;
+    white-space: nowrap;
+  }
+  
+  .field-colon {
+    width: 10px;
+    font-weight: normal;
+  }
+  
+  .field-value {
+    font-weight: normal;
+    text-align: justify;
+    overflow-wrap: break-word;
+  }
+  
+  /* Subject / Project / Ref. — two columns; only .value-bold tokens are bold. */
+  .subject-reference-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin: 8px 0 10px;
+  }
+  
+  .subject-reference-table td {
+    vertical-align: top;
+    padding: 2px 0;
+  }
+  
+  .subject-reference-table .sr-label {
+    width: 72px;
+    padding-right: 6px;
+    font-weight: normal;
+    white-space: nowrap;
+  }
+  
+  .subject-reference-table .sr-value {
+    font-weight: normal;
+    text-align: left;
+    overflow-wrap: break-word;
+  }
+  
+  .subject-reference-table .sr-value .value-bold {
+    font-weight: bold;
+  }
+  
+  .project-details {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin: 10px 0 12px;
+  }
+  
+  .project-details td {
+    vertical-align: top;
+    padding: 2px 0;
+  }
+  
+  .section-label {
+    width: 250px;
+    font-weight: bold;
+    padding-right: 8px;
+  }
+  
+  .section-value {
+    text-align: justify;
+    overflow-wrap: break-word;
+  }
+  
+  .consultant-details {
+    margin: 8px 0 12px;
+  }
+  
+  .consultant-details .field-value p {
+    margin: 0;
+  }
+  
+  /* Consultant details: static labels normal; only .value-bold tokens bold. */
+  .consultant-details .field-value p.bold {
+    font-weight: normal;
+  }
+  
+  .consultant-details .field-value p.bold .value-bold {
+    font-weight: bold;
+  }
+  
+  .owner-signature {
+    margin-top: 12px;
+    margin-left: auto;
+    margin-right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+    line-height: 1.35;
+    width: auto;
+    max-width: 100%;
+  }
+  
+  .owner-signature #preview-dummy-owner-sign {
+    display: block;
+    margin: 0 0 6px;
+    text-align: right;
+    align-self: flex-end;
+  }
+  
+  .owner-signature .owner-signature-details.signature-line {
+    margin-top: 0;
+    margin-left: 0;
+    width: auto !important;
+    max-width: 100%;
+    padding-top: 0;
+    font-weight: bold;
+    line-height: 1.25;
+    text-align: right;
+    align-self: flex-end;
+  }
+  
+  .dsc-stamp-slot {
+    width: 180px;
+    height: 60px;
+  }
+  
+  .owner-signature .dsc-stamp-slot--owner {
+    align-self: flex-end;
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+  
+  .signature-table .dsc-stamp-slot {
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+  
+  .cc-box.cc-architect {
+    page-break-before: auto;
+  }
+  
+  p + .project-details,
+  p + .label-value-table {
+    margin-top: 8px;
+  }
+  
+  p,
+  table,
+  tr,
+  td {
+    break-inside: avoid-page;
+  }

@@ -587,13 +587,12 @@ export function mapToPdfFieldValues(
   const architectAddressLine1 = architectAddressFormatted.line1;
   const architectAddressLine2 = architectAddressFormatted.line2;
   const architectAddressLine3 = architectAddressFormatted.line3;
-  // Architect "To," company = architect firm first; fallback to consultant/owner firm.
+  // Architect "To," company = architect firm (entity_name); do not fall back to owner firm.
   const architectCompanyForLetter = pickText(
     architectApplicant?.entity_name,
     architectApplicant?.entityName,
     architectFromApplicant.company,
-    source?.consultantCompanyName,
-    clientCompanyName
+    source?.consultantCompanyName
   );
 
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
@@ -680,6 +679,9 @@ export function mapToPdfFieldValues(
     [`project_Name_${suffix}.`]: consultantName,
     [`project_Company_Name_${suffix}`]: consultantCompanyName,
     [`project_Company_Name_${suffix}.`]: consultantCompanyName,
+    [`project_${suffix}_Approved_For`]: consultantCompanyName
+      ? `For ${consultantCompanyName},`
+      : "",
     [`project_Address_line1_${suffix}`]: consultantAddressLine1,
     [`project_Address_line2_${suffix}`]: consultantAddressLine2,
     [`project_Address_line3_${suffix}`]: consultantAddressLine3,
@@ -779,9 +781,13 @@ export function mapToPdfFieldValues(
       ? `${architectName.trim()},`
       : undefined,
     "project_Name_Architect.": architectName || undefined,
+    // Firm lines stay empty when architect has no entity_name (no "For ," leftover).
     project_Company_Name_Architect: architectCompanyForLetter
       ? `${architectCompanyForLetter},`
-      : undefined,
+      : "",
+    project_Architect_Firm_Name: architectCompanyForLetter || "",
+    project_Architect_For_Label: architectCompanyForLetter ? "For " : "",
+    project_Architect_For_Comma: architectCompanyForLetter ? "," : "",
     project_Architect_Approved_For: architectCompanyForLetter
       ? `For ${architectCompanyForLetter},`
       : "",
@@ -855,9 +861,32 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_Consultant_Architect: "Consultant (architect letter)",
   project_Name_Architect: "Name of architect (comma form)",
   "project_Name_Architect.": "Name of architect",
-  project_Company_Name_Architect: "Architect firm name",
+  project_Company_Name_Architect: "Architect firm name (with trailing comma; empty when none)",
+  project_Architect_Firm_Name: "Architect firm name (plain; empty when none)",
+  project_Architect_For_Label: "Static 'For ' before firm — empty when no firm",
+  project_Architect_For_Comma: "Trailing comma after firm — empty when no firm",
   project_Architect_Approved_For:
     "Architect approved-for line (For entity_name,) — empty when no firm",
+  project_LS_Approved_For:
+    "Licensed surveyor approved-for line (For entity_name,) — empty when no firm",
+  project_Structural_Engineer_Approved_For:
+    "Structural engineer approved-for line (For entity_name,) — empty when no firm",
+  project_Fire_Safety_Approved_For:
+    "Fire safety consultant approved-for line (For entity_name,) — empty when no firm",
+  project_ME_Consultant_Approved_For:
+    "M&E consultant approved-for line (For entity_name,) — empty when no firm",
+  project_Plumber_Approved_For:
+    "Plumber approved-for line (For entity_name,) — empty when no firm",
+  project_Landscape_Consultant_Approved_For:
+    "Landscape consultant approved-for line (For entity_name,) — empty when no firm",
+  project_Geotechnical_Consultant_Approved_For:
+    "Geotechnical consultant approved-for line (For entity_name,) — empty when no firm",
+  project_Environmental_Consultant_Approved_For:
+    "Environmental consultant approved-for line (For entity_name,) — empty when no firm",
+  project_Town_Planner_Approved_For:
+    "Town planner approved-for line (For entity_name,) — empty when no firm",
+  project_PMC_Project_Manager_Approved_For:
+    "PMC / project manager approved-for line (For entity_name,) — empty when no firm",
   project_RegNo_Architect: "Architect registration number",
   "project_RegNo_Architect.": "Architect registration number",
   project_Validity_Architect: "Architect registration validity",
@@ -1626,11 +1655,27 @@ function injectPaginatedStyles(
     !isAcceptanceLetter;
   const useArchitectLayout =
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
-  const pageMarginTop = useArchitectLayout ? "72pt" : "95pt";
-  const pageMarginBottom = useArchitectLayout ? "72pt" : "135pt";
-  const contentPaddingTop = useArchitectLayout ? "22pt" : "40pt";
-  /* No extra inner gap under body copy; @page margin-bottom still clears letterhead/footer. */
-  const contentPaddingBottom = "0";
+  const pageMarginTop = isAcceptanceLetter
+    ? "56pt"
+    : useArchitectLayout
+      ? "72pt"
+      : "95pt";
+  const pageMarginBottom = isAcceptanceLetter
+    ? "64pt"
+    : useArchitectLayout
+      ? "72pt"
+      : "135pt";
+  const contentPaddingTop = isAcceptanceLetter
+    ? "10pt"
+    : useArchitectLayout
+      ? "22pt"
+      : "40pt";
+  /* Clear white band under last CC line — balance with slightly tighter acceptance top. */
+  const contentPaddingBottom = isAcceptanceLetter
+    ? "20pt"
+    : useArchitectLayout
+      ? "24pt"
+      : "40pt";
   const pageMarginLeft = useArchitectLayout ? "36pt" : "56pt";
   const pageMarginRight = useArchitectLayout ? "30pt" : "42pt";
   const contentPaddingLeft = useArchitectLayout ? "36pt" : "56pt";
@@ -1639,23 +1684,85 @@ function injectPaginatedStyles(
   const acceptanceLetterBodyPagedCss =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body")
       ? `
-  /* EEBP acceptance: first-line tab only (text-indent). padding-left would inset
-     every wrapped line; continuation lines should align with the salutation. */
+  /* EEBP acceptance: flush left with Dear Sir / Sub / signature (no first-line tab). */
   .pagedjs_page_content .eeb-tab-line {
     display: block !important;
     padding-left: 0 !important;
-    text-indent: 0.5in !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
+    text-indent: 0 !important;
+    margin: 0 0 4pt 0 !important;
     box-sizing: border-box !important;
     width: 100% !important;
     max-width: 100% !important;
     text-align: justify !important;
-    line-height: 1.35 !important;
+    line-height: 1.3 !important;
   }
   .pagedjs_page_content .acceptance-letter-body {
     padding-left: 0 !important;
     box-sizing: border-box !important;
+  }
+  .pagedjs_page_content .acceptance-sign-block,
+  .pagedjs_page_content .acceptance-cc-box,
+  .pagedjs_page_content .acceptance-sign-block .signature-intro,
+  .pagedjs_page_content .acceptance-sign-block .signature-company,
+  .pagedjs_page_content .acceptance-sign-block .signature-line,
+  .pagedjs_page_content .acceptance-sign-block .architect-block,
+  .pagedjs_page_content .acceptance-sign-block .dsc-stamp-slot,
+  .pagedjs_page_content .acceptance-cc-box p {
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+    text-indent: 0 !important;
+    text-align: left !important;
+  }
+  .pagedjs_page_content .acceptance-closing {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    padding-bottom: 40pt !important;
+    margin-bottom: 0 !important;
+  }
+  .pagedjs_page_content .acceptance-sign-block {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-top: 6pt !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  .pagedjs_page_content .acceptance-sign-block .signature-intro,
+  .pagedjs_page_content .acceptance-sign-block .signature-company {
+    margin: 0 !important;
+    line-height: 1.2 !important;
+  }
+  /* Pocket = 60px stamp + equal air above/below (For … and Architect both clear). */
+  .pagedjs_page_content .acceptance-sign-block .dsc-stamp-slot {
+    height: 60px !important;
+    margin-top: 14px !important;
+    margin-bottom: 14px !important;
+  }
+  .pagedjs_page_content .acceptance-sign-block .signature-line {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    line-height: 1.2 !important;
+  }
+  .pagedjs_page_content .acceptance-sign-block .architect-block .meta-line {
+    margin: 0 !important;
+    line-height: 1.15 !important;
+  }
+  .pagedjs_page_content .acceptance-cc-box {
+    margin-top: 8pt !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  .pagedjs_page_content .acceptance-cc-box .cc-note {
+    margin-top: 4pt !important;
+    margin-bottom: 0 !important;
+  }
+  /* Shorter page-number inset so the last content line is not eaten by the footer band. */
+  .pagedjs_margin-bottom-center {
+    padding-bottom: 18pt !important;
+  }
+  .pagedjs_page_content .acceptance-bottom-space {
+    display: none !important;
   }`
       : "";
 

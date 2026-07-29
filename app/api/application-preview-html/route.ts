@@ -275,11 +275,16 @@ function paragraphVisibleText(innerHtml: string): string {
 /** Removes empty address-line paragraphs after token substitution (e.g. unused line 3). */
 function removeEmptyAddressParagraphs(html: string): string {
   return html.replace(/<p(\s[^>]*)?>([\s\S]*?)<\/p>/gi, (full, attrs, inner) => {
-    if (paragraphVisibleText(inner)) return full;
+    const visible = paragraphVisibleText(inner);
+    if (visible) {
+      // Drop leftover "For ," when firm name token was empty.
+      if (/^for\s*,?$/i.test(visible)) return "";
+      return full;
+    }
     const attrStr = attrs ?? "";
     const isAddressLike =
-      /\bbold\b|MsoNormal|value-bold|to-content/i.test(attrStr) ||
-      /value-bold|class=['"]?bold/i.test(inner);
+      /\bbold\b|MsoNormal|value-bold|to-content|signature-company/i.test(attrStr) ||
+      /value-bold|class=['"]?bold|signature-company/i.test(inner);
     return isAddressLike ? "" : full;
   });
 }

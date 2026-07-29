@@ -34,6 +34,7 @@ const emptyForm = (consultantType: string): FormState => ({
   firstName: "",
   middleName: "",
   lastName: "",
+  entityName: "",
   email: "",
   city: "",
   pincode: "",
@@ -585,6 +586,16 @@ export default function ConsultantPartialRegistrationModal({
                 {errors.lastName && (
                   <p className="text-xs text-red-600 mt-1">{errors.lastName}</p>
                 )}
+              </div>
+
+              <div>
+                <label className="block font-medium text-black mb-1">Entity Name</label>
+                <input
+                  value={formData.entityName}
+                  onChange={(e) => setField("entityName", e.target.value)}
+                  className={inputClass}
+                  placeholder="Enter Entity Name"
+                />
               </div>
 
               <div>
