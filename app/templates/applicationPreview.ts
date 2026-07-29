@@ -1655,22 +1655,20 @@ function injectPaginatedStyles(
     !isAcceptanceLetter;
   const useArchitectLayout =
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
-  const pageMarginTop = isAcceptanceLetter
-    ? "56pt"
-    : useArchitectLayout
-      ? "72pt"
-      : "95pt";
+  const pageMarginTop = useArchitectLayout
+    ? "72pt"
+    : "95pt";
   const pageMarginBottom = isAcceptanceLetter
     ? "64pt"
     : useArchitectLayout
       ? "72pt"
       : "135pt";
-  const contentPaddingTop = isAcceptanceLetter
-    ? "10pt"
-    : useArchitectLayout
-      ? "22pt"
-      : "40pt";
-  /* Clear white band under last CC line — balance with slightly tighter acceptance top. */
+  // Clear letterhead branding without stacking a full second band under @page margin.
+  // (22pt sat on logos; 90px left a large empty gap.)
+  const contentPaddingTop = useArchitectLayout
+    ? "28pt"
+    : "40pt";
+  /* Clear white band under last CC line — keep bottom air without starving the top. */
   const contentPaddingBottom = isAcceptanceLetter
     ? "20pt"
     : useArchitectLayout
