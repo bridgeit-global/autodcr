@@ -160,6 +160,7 @@ export async function POST(request: NextRequest) {
       firstName,
       middleName: String(body.middleName || "").trim(),
       lastName,
+      entityName: String(body.entityName || "").trim(),
       email,
       city,
       pincode,

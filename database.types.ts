@@ -301,6 +301,7 @@ export type Database = {
           city: string
           contact_number: string
           email: string
+          entity_name: string
           first_name: string
           last_name: string
           license_issue_date: string
@@ -321,6 +322,7 @@ export type Database = {
           city: string
           contact_number: string
           email: string
+          entity_name: string
           first_name: string
           last_name: string
           license_issue_date: string

@@ -3,7 +3,8 @@ import * as pdfjs from "pdfjs-dist";
 const PDF_WORKER_URL = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 
 export type DscStampRole = "owner" | "consultant";
-export type DscStampLayout = "cleanRight" | "dualColumn";
+/** acceptanceLeft: consultant-only stamp in the left column (acceptance letters). */
+export type DscStampLayout = "cleanRight" | "dualColumn" | "acceptanceLeft";
 
 export type DscStampRect = {
   pageIndex: number;
@@ -33,7 +34,9 @@ const STAMP_WIDTH = 180;
 const STAMP_HEIGHT = 60;
 const STAMP_GAP = 10;
 /** Equal outer margin above/below the stamp box relative to neighbouring text. */
-const STAMP_OUTER_MARGIN = 12;
+const STAMP_OUTER_MARGIN = 8;
+/** Approx. descent below a 12pt baseline — keeps stamp clear of commas / glyph bottoms. */
+const TOP_LINE_DESCENT = 3;
 /** Approximate cap height above a 12pt signature baseline. */
 const SIGNATURE_LINE_ASCENT = 12;
 const LEFT_MARGIN = 56;
@@ -43,6 +46,16 @@ function consultantFallbackRect(pageIndex: number, pageWidth = 595.28): DscStamp
   return {
     pageIndex,
     pdfX: Math.round(pageWidth / 2 + 20),
+    pdfY: 160,
+    pdfWidth: STAMP_WIDTH,
+    pdfHeight: STAMP_HEIGHT,
+  };
+}
+
+function acceptanceLeftFallbackRect(pageIndex: number): DscStampRect {
+  return {
+    pageIndex,
+    pdfX: LEFT_MARGIN,
     pdfY: 160,
     pdfWidth: STAMP_WIDTH,
     pdfHeight: STAMP_HEIGHT,
@@ -358,17 +371,37 @@ function findRightSignatureAnchor(
 }
 
 function computeBalancedStampY(topLine: TextLine, signatureAnchor: TextLine): number {
-  const gapTopY = topLine.y;
+  // Usable gap starts just below the top line's baseline (glyphs sit on/above it).
+  const gapTopY = topLine.y - TOP_LINE_DESCENT;
   const gapBottomY = signatureAnchor.y + SIGNATURE_LINE_ASCENT;
   const totalSpace = gapTopY - gapBottomY;
   const remaining = totalSpace - STAMP_HEIGHT - 2 * STAMP_OUTER_MARGIN;
 
   if (remaining >= 0) {
+    // Equal top/bottom margins when there is room.
     return gapBottomY + STAMP_OUTER_MARGIN + remaining / 2;
   }
 
-  const overlap = STAMP_HEIGHT + 2 * STAMP_OUTER_MARGIN - totalSpace;
-  return gapBottomY + STAMP_OUTER_MARGIN - overlap / 2;
+  // Cramped: center in the available gap so top and bottom share the shortfall equally
+  // (never pin to one side — that eats the other margin and overlaps "For …" or "Architect").
+  return gapBottomY + (totalSpace - STAMP_HEIGHT) / 2;
+}
+
+function findColumnSignatureIntro(
+  lines: TextLine[],
+  pageMidX: number,
+  side: "left" | "right"
+): TextLine | null {
+  const inColumn = (line: TextLine) =>
+    side === "left" ? line.x < pageMidX : isInRightColumn(line, pageMidX);
+  if (side === "left") {
+    // Appointment: "Yours faithfully,"; acceptance: "Approved and confirmed," on the left.
+    return (
+      findLine(lines, "yours faithfully", inColumn) ??
+      findLine(lines, "approved and confirmed", inColumn)
+    );
+  }
+  return findLine(lines, "approved and confirmed", inColumn);
 }
 
 function findDualColumnStampTopLine(
@@ -381,6 +414,8 @@ function findDualColumnStampTopLine(
   return (
     findColumnCompanyBlockBottomLine(lines, pageMidX, side, thankYou, designationAnchor) ??
     findColumnForLine(lines, pageMidX, side, thankYou) ??
+    // Prefer signature intro over "Thanking you" so top/bottom gaps around the stamp match.
+    findColumnSignatureIntro(lines, pageMidX, side) ??
     thankYou
   );
 }
@@ -453,6 +488,9 @@ function computeStampRect(args: {
   let pdfX: number;
   if (layout === "cleanRight" && role === "owner") {
     pdfX = pageWidth - RIGHT_MARGIN - STAMP_WIDTH;
+  } else if (layout === "acceptanceLeft") {
+    // Align stamp with the acceptance “Approved / For …” text, not a fixed left margin.
+    pdfX = Math.round(Math.max(24, Math.min(anchor.x, pageWidth - RIGHT_MARGIN - STAMP_WIDTH)));
   } else if (layout === "dualColumn" && role === "owner") {
     pdfX = LEFT_MARGIN;
   } else if (layout === "dualColumn" && role === "consultant") {
@@ -469,6 +507,7 @@ function computeStampRect(args: {
   if (signatureAnchor && anchor) {
     if (
       (layout === "cleanRight" && role === "owner") ||
+      layout === "acceptanceLeft" ||
       (layout === "dualColumn" && (role === "owner" || role === "consultant"))
     ) {
       pdfY = computeBalancedStampY(anchor, signatureAnchor);
@@ -489,8 +528,9 @@ function computeStampRect(args: {
 }
 
 /**
- * Locate a DSC stamp rectangle on the last page of a letter PDF by searching
- * for known anchor phrases ("Thanking you", "Yours faithfully", etc.).
+ * Locate a DSC stamp rectangle by searching for known anchor phrases.
+ * Prefers the page that actually contains the signature block (not merely the
+ * last PDF page — oversized bottom padding can leave a mostly-blank last page).
  */
 export async function resolveDscStampRectFromPdf(
   pdfBytes: ArrayBuffer,
@@ -504,49 +544,83 @@ export async function resolveDscStampRectFromPdf(
     const pdf = await pdfjs.getDocument({ data: pdfBytes.slice(0) }).promise;
     if (pdf.numPages === 0) return { ...fallback, pageIndex: 0 };
 
-    const pageIndex = pdf.numPages - 1;
-    const page = await pdf.getPage(pageIndex + 1);
-    const viewport = page.getViewport({ scale: 1 });
-    const pageWidth = viewport.width;
-    const pageMidX = pageWidth / 2;
+    const resolveOnLines = (
+      lines: TextLine[],
+      pageMidX: number
+    ): { anchor: TextLine | null; signatureAnchor: TextLine | null } => {
+      let anchor: TextLine | null = null;
+      let signatureAnchor: TextLine | null = null;
+      if (layout === "cleanRight" && role === "owner") {
+        const thankYou = findLine(lines, "thanking you");
+        signatureAnchor = findRightSignatureAnchor(lines, pageMidX, thankYou);
+        anchor = thankYou;
+      } else if (layout === "acceptanceLeft") {
+        const thankYou = findLine(lines, "thanking you");
+        signatureAnchor = findColumnDesignationAnchor(lines, pageMidX, "left", thankYou);
+        anchor =
+          findDualColumnStampTopLine(lines, pageMidX, "left", thankYou, signatureAnchor) ??
+          findLine(lines, "approved and confirmed", (line) => line.x < pageMidX) ??
+          thankYou;
+      } else if (layout === "dualColumn" && role === "owner") {
+        const thankYou = findLine(lines, "thanking you");
+        signatureAnchor = findColumnDesignationAnchor(lines, pageMidX, "left", thankYou);
+        anchor =
+          findDualColumnStampTopLine(lines, pageMidX, "left", thankYou, signatureAnchor) ??
+          thankYou;
+      } else if (layout === "dualColumn" && role === "consultant") {
+        const thankYou = findLine(lines, "thanking you");
+        signatureAnchor = findConsultantSignatureAnchor(lines, pageMidX, thankYou);
+        anchor = findConsultantStampTopLine(lines, pageMidX, thankYou, signatureAnchor);
+      }
+      return { anchor, signatureAnchor };
+    };
 
-    const textContent = await page.getTextContent();
-    const lines = groupTextLines(extractTextItems(textContent));
+    // Search last→first so normal one-page letters still use the last page,
+    // but acceptance overflow onto a blank last page still finds page-1 anchors.
+    for (let pageIndex = pdf.numPages - 1; pageIndex >= 0; pageIndex--) {
+      const page = await pdf.getPage(pageIndex + 1);
+      const viewport = page.getViewport({ scale: 1 });
+      const pageWidth = viewport.width;
+      const pageMidX = pageWidth / 2;
+      const textContent = await page.getTextContent();
+      const lines = groupTextLines(extractTextItems(textContent));
+      const { anchor, signatureAnchor } = resolveOnLines(lines, pageMidX);
 
-    let anchor: TextLine | null = null;
-    let signatureAnchor: TextLine | null = null;
-    if (layout === "cleanRight" && role === "owner") {
-      const thankYou = findLine(lines, "thanking you");
-      signatureAnchor = findRightSignatureAnchor(lines, pageMidX, thankYou);
-      anchor = thankYou;
-    } else if (layout === "dualColumn" && role === "owner") {
-      const thankYou = findLine(lines, "thanking you");
-      signatureAnchor = findColumnDesignationAnchor(lines, pageMidX, "left", thankYou);
-      anchor = findDualColumnStampTopLine(lines, pageMidX, "left", thankYou, signatureAnchor) ?? thankYou;
-    } else if (layout === "dualColumn" && role === "consultant") {
-      const thankYou = findLine(lines, "thanking you");
-      signatureAnchor = findConsultantSignatureAnchor(lines, pageMidX, thankYou);
-      anchor = findConsultantStampTopLine(lines, pageMidX, thankYou, signatureAnchor);
-    }
+      if (!anchor) continue;
 
-    if (!anchor) {
-      return consultantFallbackRect(pageIndex, pageWidth);
-    }
+      const needsSignatureAnchor =
+        layout === "acceptanceLeft" ||
+        (layout === "dualColumn" && (role === "owner" || role === "consultant")) ||
+        (layout === "cleanRight" && role === "owner");
 
-    if (
-      (layout === "dualColumn" && (role === "owner" || role === "consultant")) ||
-      (layout === "cleanRight" && role === "owner")
-    ) {
-      if (!signatureAnchor) {
+      if (needsSignatureAnchor && !signatureAnchor) {
+        if (pageIndex > 0) continue;
+        if (layout === "acceptanceLeft") {
+          return acceptanceLeftFallbackRect(pageIndex);
+        }
         return role === "consultant"
           ? consultantFallbackRect(pageIndex, pageWidth)
           : { ...fallback, pageIndex };
       }
+
+      const rect = computeStampRect({
+        anchor,
+        pageWidth,
+        role,
+        layout,
+        lines,
+        signatureAnchor,
+      });
+      return { ...rect, pageIndex };
     }
 
-    const rect = computeStampRect({ anchor, pageWidth, role, layout, lines, signatureAnchor });
-    return { ...rect, pageIndex };
+    return layout === "acceptanceLeft"
+      ? acceptanceLeftFallbackRect(Math.max(0, pdf.numPages - 1))
+      : consultantFallbackRect(Math.max(0, pdf.numPages - 1));
   } catch {
+    if (layout === "acceptanceLeft") {
+      return acceptanceLeftFallbackRect(0);
+    }
     return role === "consultant"
       ? consultantFallbackRect(0)
       : { ...fallback, pageIndex: 0 };

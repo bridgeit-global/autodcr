@@ -14,6 +14,7 @@ import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
   addressLinesFromResidential,
   formatCityPincode,
+  pickEntityNameFromUserMeta,
   resolveAddressLinesWithCityPincode,
   serializeApplicantRosterForStorage,
 } from "@/app/utils/applicantRecordFields";
@@ -813,7 +814,18 @@ export default function ApplicantDetailsPage() {
           return prev;
         }
       } else if (prev.some((a) => a.applicantType === applicantType)) {
-        return prev;
+        const entityNameFromMeta = pickEntityNameFromUserMeta(
+          userMetadata as Record<string, unknown>
+        );
+        if (!entityNameFromMeta) return prev;
+        let changed = false;
+        const updated = prev.map((row) => {
+          if (row.applicantType !== applicantType) return row;
+          if (pickText(row.entity_name)) return row;
+          changed = true;
+          return { ...row, entity_name: entityNameFromMeta };
+        });
+        return changed ? sortApplicantsOwnerFirst(updated) : prev;
       }
 
       const userName =
@@ -942,20 +954,10 @@ export default function ApplicantDetailsPage() {
         ...(!isConsultant && userMetadata.entity_type?.trim()
           ? { entity_type: userMetadata.entity_type.trim() }
           : {}),
-        ...(pickText(
-          userMetadata.entity_name,
-          userMetadata.entityName,
-          userMetadata.firm_name,
-          userMetadata.company_name,
-          userMetadata.companyName
-        )
+        ...(pickEntityNameFromUserMeta(userMetadata as Record<string, unknown>)
           ? {
-              entity_name: pickText(
-                userMetadata.entity_name,
-                userMetadata.entityName,
-                userMetadata.firm_name,
-                userMetadata.company_name,
-                userMetadata.companyName
+              entity_name: pickEntityNameFromUserMeta(
+                userMetadata as Record<string, unknown>
               ),
             }
           : {}),
@@ -1278,6 +1280,38 @@ export default function ApplicantDetailsPage() {
       );
     }
 
+    // Backfill entity_name from auth profile for any applicant row that is missing it
+    // (owners already get this via ensureOwner; consultants rely on directory/profile meta).
+    const rowsNeedingEntityName = (rosterForSave.applicants as ApplicantRow[]).filter(
+      (row) => row.user_id?.trim() && !pickText(row.entity_name)
+    );
+    if (rowsNeedingEntityName.length > 0) {
+      try {
+        const res = await fetch("/api/directory-address-fields", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_ids: rowsNeedingEntityName.map((row) => row.user_id),
+          }),
+        });
+        if (res.ok) {
+          const payload = (await res.json()) as {
+            profiles?: Record<string, { entity_name?: string }>;
+          };
+          const profiles = payload.profiles || {};
+          rosterForSave = {
+            applicants: (rosterForSave.applicants as ApplicantRow[]).map((row) => {
+              if (pickText(row.entity_name) || !row.user_id) return row;
+              const entityName = pickText(profiles[row.user_id]?.entity_name);
+              return entityName ? { ...row, entity_name: entityName } : row;
+            }),
+          };
+        }
+      } catch (enrichErr) {
+        console.error("Error enriching applicant entity_name before save:", enrichErr);
+      }
+    }
+
     const serialized = serializeApplicantRosterForStorage(rosterForSave.applicants);
     if (serialized.applicants.length === 0) {
       showAlert({
@@ -1371,6 +1405,7 @@ export default function ApplicantDetailsPage() {
       addressLine2 = split.line2;
       addressLine3 = split.line3;
     }
+    const entityNameFromDirectory = pickText(selectedDirectoryEntry?.entity_name);
     const newApplicant: ApplicantRow = {
       id: nextId,
       user_id: userId,
@@ -1396,9 +1431,7 @@ export default function ApplicantDetailsPage() {
       address_line3: addressLine3 || undefined,
       city: city || undefined,
       pincode: pincode || undefined,
-      ...(selectedDirectoryEntry?.entity_name?.trim()
-        ? { entity_name: selectedDirectoryEntry.entity_name.trim() }
-        : {}),
+      ...(entityNameFromDirectory ? { entity_name: entityNameFromDirectory } : {}),
     };
 
     const isAddingOwner = isOwnerApplicantType(data.applicantType);

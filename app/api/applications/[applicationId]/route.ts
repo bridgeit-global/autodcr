@@ -82,7 +82,7 @@ export async function DELETE(
 
     const { data: appRow, error: appErr } = await admin
       .from("applications")
-      .select("id, project_id, permission_type")
+      .select("id, project_id, permission_type, workflow_stage")
       .eq("id", applicationId.trim())
       .maybeSingle();
 
@@ -117,6 +117,13 @@ export async function DELETE(
       String(projectRow.architect_user_id || "") === uid;
     if (!canManage) {
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
+    }
+
+    if (String(appRow.workflow_stage || "") !== "draft") {
+      return NextResponse.json(
+        { error: "Only draft applications can be deleted." },
+        { status: 409 }
+      );
     }
 
     const { count: siblingCount, error: sibErr } = await admin

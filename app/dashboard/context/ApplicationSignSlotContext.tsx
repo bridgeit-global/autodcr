@@ -10,21 +10,31 @@ import {
   type SetStateAction,
 } from "react";
 
-/** In-process application-details: open preview to sign from sidebar (same pattern as save slot). */
+/**
+ * In-process application-details sidebar slot.
+ * `mode: "approve"` — Approved button (manual stage transition after signatures).
+ * Legacy / omitted mode behaves like approve for the sidebar label after this change.
+ */
 export type ApplicationSignSlot = {
+  /** Sidebar shows Approved (default). Reserved if a future sign mode is needed. */
+  mode?: "approve" | "sign";
   onSign: () => Promise<void>;
   disabled: boolean;
   busy: boolean;
   subtitle?: string;
   /**
-   * When `false`, the current user cannot sign in this workflow step — sidebar shows a muted disabled control.
-   * Omit or `true` when signing is allowed (or legacy callers).
+   * When `false`, the current user cannot act — sidebar shows a muted disabled control.
+   * Omit or `true` when the action is allowed.
    */
   actionAvailable?: boolean;
-  /** Short hint shown when `actionAvailable === false` (e.g. “Waiting for architect…”). */
+  /** Short hint shown when `actionAvailable === false` (e.g. “Waiting for both signatures…”). */
   unavailableHint?: string;
-  /** Progress line while signing (e.g. generating PDFs). */
+  /** Progress line while signing/approving. */
   statusText?: string;
+  /** Button label when not busy (default: Approved). */
+  actionLabel?: string;
+  /** Busy label (default: Approving…). */
+  busyLabel?: string;
 } | null;
 
 type ApplicationSignSlotContextValue = {

@@ -156,6 +156,7 @@ export type PartialConsultantPayload = {
   firstName: string;
   middleName?: string;
   lastName: string;
+  entityName?: string;
   email: string;
   city: string;
   pincode: string;
@@ -207,6 +208,7 @@ export function buildPartialConsultantMetadata(
     first_name: data.firstName,
     middle_name: data.middleName || null,
     last_name: data.lastName,
+    entity_name: data.entityName || null,
     role: "Consultant",
     email: data.email,
     city: data.city,
@@ -286,6 +288,7 @@ export function metadataToFormFields(
     firstName: String(meta.first_name || ""),
     middleName: String(meta.middle_name || ""),
     lastName: String(meta.last_name || ""),
+    entityName: String(meta.entity_name || ""),
     email: String(meta.email || ""),
     city: String(meta.city || ""),
     pincode: String(meta.pincode || ""),

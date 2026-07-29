@@ -187,6 +187,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     firstName: "",
     middleName: "",
     lastName: "",
+    entityName: "",
     city: "",
     pincode: "",
     email: "",
@@ -1327,6 +1328,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             first_name: formData.firstName,
             middle_name: formData.middleName || null,
             last_name: formData.lastName,
+            entity_name: formData.entityName || null,
             user_id: formData.userId,
             status: 'pending'
           }
@@ -1493,6 +1495,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             first_name: formData.firstName,
             middle_name: formData.middleName || null,
             last_name: formData.lastName,
+            entity_name: formData.entityName || null,
           user_id: formData.userId,
           role: 'Consultant',
             email: formData.email,
@@ -1924,6 +1927,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   {errors.lastName && (
                     <p className="text-xs text-red-600 mt-1">{errors.lastName}</p>
                   )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Entity Name
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.entityName}
+                    onChange={(e) => handleInputChange("entityName", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="Enter Entity Name"
+                  />
                 </div>
 
                 <div>

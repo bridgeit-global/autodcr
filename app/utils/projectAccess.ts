@@ -335,8 +335,32 @@ export function ensureArchitectInApplicantRoster(
       ? (roster.applicants as ApplicantLike[])
       : [];
 
-  if (!architectUserId.trim() || applicantRowHasArchitectUser(applicants, architectUserId)) {
+  const architectId = architectUserId.trim();
+  if (!architectId) {
     return { applicants: [...applicants] };
+  }
+
+  const entityName = pickEntityNameFromUserMeta(
+    meta as Record<string, unknown> | null | undefined
+  );
+
+  if (applicantRowHasArchitectUser(applicants, architectId)) {
+    if (!entityName) {
+      return { applicants: [...applicants] };
+    }
+    const updated = applicants.map((row) => {
+      const uid = row.user_id || row.userId;
+      if (!sameUserId(uid, architectId)) return row;
+      const t = (row.applicantType || row.applicant_type || "").toLowerCase();
+      if (!t.includes("architect")) return row;
+      const existingName = pickText(
+        (row as ApplicantLike & Record<string, unknown>).entity_name,
+        (row as ApplicantLike & Record<string, unknown>).entityName
+      );
+      if (existingName) return row;
+      return { ...row, entity_name: entityName };
+    });
+    return { applicants: updated };
   }
 
   const consultantType = (meta?.consultant_type || "Architect").trim() || "Architect";
@@ -366,15 +390,11 @@ export function ensureArchitectInApplicantRoster(
       ? `${addressFallback.replace(/[,.\s]+$/, "")}, ${cityPincode}`
       : addressFallback;
 
-  const entityName = pickEntityNameFromUserMeta(
-    meta as Record<string, unknown> | null | undefined
-  );
-
   return {
     applicants: [
       ...applicants,
       {
-        user_id: architectUserId,
+        user_id: architectId,
         applicantType: consultantType,
         name,
         contactNumber: meta?.alternate_phone || meta?.mobile || "-",

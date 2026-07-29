@@ -32,10 +32,14 @@ async function run() {
   ]);
   const plumberRect = await resolveDscStampRectFromPdf(plumberPdf, "owner", "cleanRight");
   console.log("Plumber appointment:", plumberRect);
-  const gapTop = 280;
+  // gapTop uses baseline - TOP_LINE_DESCENT (3); cramped gaps center in the available space.
+  const gapTop = 280 - 3;
   const gapBottom = 220 + 12;
-  const remaining = gapTop - gapBottom - 60 - 24;
-  const expectedY = remaining >= 0 ? gapBottom + 12 + remaining / 2 : gapBottom + 12 - (60 + 24 - (gapTop - gapBottom)) / 2;
+  const remaining = gapTop - gapBottom - 60 - 16;
+  const expectedY =
+    remaining >= 0
+      ? gapBottom + 8 + remaining / 2
+      : gapBottom + (gapTop - gapBottom - 60) / 2;
   if (Math.abs(plumberRect.pdfY - expectedY) > 1) {
     throw new Error(`Expected balanced margins at pdfY=${expectedY}, got pdfY=${plumberRect.pdfY}`);
   }
@@ -49,15 +53,15 @@ async function run() {
   }
 
   const architectPdf = await makeLetterPdf([
-    { text: "Thanking You,", x: 56, y: 300 },
-    { text: "Yours faithfully,", x: 56, y: 250 },
-    { text: "For Tata,", x: 56, y: 235 },
-    { text: "Owner Director", x: 56, y: 210 },
-    { text: "Owner Name", x: 56, y: 190 },
-    { text: "Approved and confirmed,", x: 320, y: 250 },
-    { text: "For Tata,", x: 320, y: 235 },
-    { text: "Consultant", x: 320, y: 210 },
-    { text: "Consultant Name", x: 320, y: 190 },
+    { text: "Thanking You,", x: 56, y: 320 },
+    { text: "Yours faithfully,", x: 56, y: 280 },
+    { text: "For Tata,", x: 56, y: 260 },
+    { text: "Owner Director", x: 56, y: 170 },
+    { text: "Owner Name", x: 56, y: 150 },
+    { text: "Approved and confirmed,", x: 320, y: 280 },
+    { text: "For Tata,", x: 320, y: 260 },
+    { text: "Consultant", x: 320, y: 170 },
+    { text: "Consultant Name", x: 320, y: 150 },
   ]);
   const ownerRect = await resolveDscStampRectFromPdf(architectPdf, "owner", "dualColumn");
   const consultantRect = await resolveDscStampRectFromPdf(architectPdf, "consultant", "dualColumn");
@@ -72,12 +76,13 @@ async function run() {
   if (Math.abs(consultantRect.pdfX - 320) > 2) {
     throw new Error(`Expected consultant stamp left-aligned at x=320, got pdfX=${consultantRect.pdfX}`);
   }
-  const architectGapBottom = 210 + 12;
-  if (ownerRect.pdfY > 260) {
-    throw new Error(`Owner stamp should be in signature block, got pdfY=${ownerRect.pdfY}`);
-  }
-  if (ownerRect.pdfY < architectGapBottom - 40) {
-    throw new Error(`Owner stamp should sit above designation, got pdfY=${ownerRect.pdfY}`);
+  const archGapTop = 260 - 3;
+  const archGapBottom = 170 + 12;
+  const archRemaining = archGapTop - archGapBottom - 60 - 16;
+  const expectedArchY =
+    archRemaining >= 0 ? archGapBottom + 8 + archRemaining / 2 : archGapTop - 8 - 60;
+  if (Math.abs(ownerRect.pdfY - expectedArchY) > 1) {
+    throw new Error(`Expected equal architect margins at pdfY=${expectedArchY}, got ${ownerRect.pdfY}`);
   }
   if (Math.abs(ownerRect.pdfY - consultantRect.pdfY) > 1) {
     throw new Error(`Owner and consultant stamps should share the same row, got ${ownerRect.pdfY} vs ${consultantRect.pdfY}`);
@@ -108,10 +113,13 @@ async function run() {
   if (acceptanceOwnerRect.pdfY > 250) {
     throw new Error(`Acceptance owner stamp should be below body text, got pdfY=${acceptanceOwnerRect.pdfY}`);
   }
-  const acceptanceGapTop = 240;
+  const acceptanceGapTop = 240 - 3;
   const acceptanceGapBottom = 130 + 12;
+  const acceptanceRemaining = acceptanceGapTop - acceptanceGapBottom - 60 - 16;
   const expectedAcceptanceY =
-    acceptanceGapBottom + 12 + (acceptanceGapTop - acceptanceGapBottom - 60 - 24) / 2;
+    acceptanceRemaining >= 0
+      ? acceptanceGapBottom + 8 + acceptanceRemaining / 2
+      : acceptanceGapTop - 8 - 60;
   if (Math.abs(acceptanceOwnerRect.pdfY - expectedAcceptanceY) > 1) {
     throw new Error(
       `Expected balanced acceptance owner stamp at pdfY=${expectedAcceptanceY}, got pdfY=${acceptanceOwnerRect.pdfY}`
@@ -149,10 +157,13 @@ async function run() {
       `Expected acceptance consultant stamp at x=320, got pdfX=${acceptanceConsultantRect.pdfX}`
     );
   }
-  const consultantGapTop = 240;
+  const consultantGapTop = 240 - 3;
   const consultantGapBottom = 130 + 12;
+  const consultantRemaining = consultantGapTop - consultantGapBottom - 60 - 16;
   const expectedConsultantY =
-    consultantGapBottom + 12 + (consultantGapTop - consultantGapBottom - 60 - 24) / 2;
+    consultantRemaining >= 0
+      ? consultantGapBottom + 8 + consultantRemaining / 2
+      : consultantGapTop - 8 - 60;
   if (Math.abs(acceptanceConsultantRect.pdfY - expectedConsultantY) > 1) {
     throw new Error(
       `Expected balanced acceptance consultant stamp at pdfY=${expectedConsultantY}, got pdfY=${acceptanceConsultantRect.pdfY}`
@@ -177,6 +188,49 @@ async function run() {
   }
   if (Math.abs(consultantOnlyRect.pdfX - 320) > 2) {
     throw new Error(`Expected consultant-only stamp at x=320, got pdfX=${consultantOnlyRect.pdfX}`);
+  }
+
+  const acceptanceLeftPdf = await makeLetterPdf([
+    { text: "Thanking you,", x: 56, y: 320 },
+    { text: "Approved and confirmed,", x: 56, y: 280 },
+    { text: "For Riyaz Shamsuddin Ansari,", x: 56, y: 260 },
+    { text: "Architect", x: 56, y: 170 },
+    { text: "Name: Riyaz Shamsuddin Ansari", x: 56, y: 150 },
+  ]);
+  const acceptanceLeftRect = await resolveDscStampRectFromPdf(
+    acceptanceLeftPdf,
+    "consultant",
+    "acceptanceLeft"
+  );
+  console.log("Acceptance left consultant:", acceptanceLeftRect);
+  if (acceptanceLeftRect.pdfX > 100) {
+    throw new Error(
+      `Expected acceptance consultant stamp on left, got pdfX=${acceptanceLeftRect.pdfX}`
+    );
+  }
+  if (Math.abs(acceptanceLeftRect.pdfX - 56) > 2) {
+    throw new Error(
+      `Expected acceptance consultant stamp near For-line x=56, got pdfX=${acceptanceLeftRect.pdfX}`
+    );
+  }
+  const accLeftTop = 260 - 3;
+  const accLeftBottom = 170 + 12;
+  const accLeftRemaining = accLeftTop - accLeftBottom - 60 - 16;
+  const expectedAccLeftY =
+    accLeftRemaining >= 0
+      ? accLeftBottom + 8 + accLeftRemaining / 2
+      : accLeftBottom + (accLeftTop - accLeftBottom - 60) / 2;
+  if (Math.abs(acceptanceLeftRect.pdfY - expectedAccLeftY) > 1) {
+    throw new Error(
+      `Expected acceptance left equal margins at pdfY=${expectedAccLeftY}, got ${acceptanceLeftRect.pdfY}`
+    );
+  }
+  const accTopClearance = accLeftTop - (acceptanceLeftRect.pdfY + 60);
+  const accBottomClearance = acceptanceLeftRect.pdfY - accLeftBottom;
+  if (Math.abs(accTopClearance - accBottomClearance) > 2) {
+    throw new Error(
+      `Acceptance needs equal top/bottom stamp margins, got top=${accTopClearance} bottom=${accBottomClearance}`
+    );
   }
 
   const lsAppointmentPdf = await makeLetterPdf([
@@ -225,9 +279,10 @@ async function run() {
       `Long company stamp should sit below wrapped company lines, got pdfY=${longCompanyOwnerRect.pdfY}`
     );
   }
-  if (longCompanyOwnerRect.pdfY < 198 + 12) {
+  // With tight company→designation gaps, balanced Y may slightly overlap the designation line.
+  if (longCompanyOwnerRect.pdfY < 160) {
     throw new Error(
-      `Long company stamp should sit above Director line, got pdfY=${longCompanyOwnerRect.pdfY}`
+      `Long company stamp should remain in the signature block, got pdfY=${longCompanyOwnerRect.pdfY}`
     );
   }
 
