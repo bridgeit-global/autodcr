@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import DscExpiryModal from "@/app/components/DscExpiryModal";
 import DscPanVerifyModal from "@/app/components/DscPanVerifyModal";
 import SignOnBehalfOwnerModal from "@/app/components/SignOnBehalfOwnerModal";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
@@ -18,6 +19,7 @@ import {
   isValidPanFormat,
   pickPanFromUserMetadata,
 } from "@/app/utils/dscPanFromCert";
+import { assertDscValidForSigning, getDscValidityIssue } from "@/app/utils/dscValidity";
 import type { CertInfo } from "@/app/lib/bridge/protocol";
 import {
   collectOwnerSignerUserIds,
@@ -266,6 +268,7 @@ async function signPdfBlobWithDsc(
 ): Promise<Blob> {
   const resolved = preResolved ?? (await resolveSigningCert());
   const { slotId, cert } = resolved;
+  assertDscValidForSigning(cert);
 
   const sourceBuffer = await blob.arrayBuffer();
   const sourceBytes = new Uint8Array(sourceBuffer);
@@ -1900,6 +1903,12 @@ export default function ApplicationDetailsPage() {
     panPossessive?: string;
   } | null>(null);
   const dscPanVerifyResolveRef = useRef<((proceed: boolean) => void) | null>(null);
+  const [dscExpiryPrompt, setDscExpiryPrompt] = useState<{
+    title: string;
+    message: string;
+    allowContinue: boolean;
+  } | null>(null);
+  const dscExpiryResolveRef = useRef<((proceed: boolean) => void) | null>(null);
   const [onBehalfConfirmOpen, setOnBehalfConfirmOpen] = useState(false);
   const { setSlot } = useApplicationPdfSaveSlot();
   const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
@@ -1930,6 +1939,23 @@ export default function ApplicationDetailsPage() {
       dscPanVerifyResolveRef.current = resolve;
       setDscPanVerify(args);
     });
+
+  const promptDscExpiry = (args: {
+    title: string;
+    message: string;
+    allowContinue: boolean;
+  }): Promise<boolean> =>
+    new Promise((resolve) => {
+      dscExpiryResolveRef.current = resolve;
+      setDscExpiryPrompt(args);
+    });
+
+  const handleDscExpiryDecision = (proceed: boolean) => {
+    setDscExpiryPrompt(null);
+    const resolve = dscExpiryResolveRef.current;
+    dscExpiryResolveRef.current = null;
+    resolve?.(proceed);
+  };
 
   const handleDscPanVerifyDecision = (proceed: boolean) => {
     setDscPanVerify(null);
@@ -3333,6 +3359,25 @@ export default function ApplicationDetailsPage() {
         return;
       }
 
+      const validityIssue = getDscValidityIssue(resolvedCert.cert);
+      if (validityIssue) {
+        const allowContinue = process.env.NODE_ENV !== "production";
+        const proceedExpired = await promptDscExpiry({
+          title:
+            validityIssue.kind === "notYetValid"
+              ? "DSC not yet valid"
+              : "DSC validity expired",
+          message: validityIssue.message,
+          allowContinue,
+        });
+        if (!proceedExpired) {
+          signInFlightRef.current = false;
+          setIsSigningPdf(false);
+          setSidebarPdfStatus(null);
+          return;
+        }
+      }
+
       const isDual = isDualLetterType(ctx.templateType);
       const ownerAlreadySigned = Boolean(ownerSignedAtRow);
       const signingAcceptance = isDual && signRole === "consultant";
@@ -4276,6 +4321,15 @@ export default function ApplicationDetailsPage() {
         panPossessive={dscPanVerify?.panPossessive}
         onContinue={() => handleDscPanVerifyDecision(true)}
         onCancel={() => handleDscPanVerifyDecision(false)}
+      />
+
+      <DscExpiryModal
+        open={Boolean(dscExpiryPrompt)}
+        title={dscExpiryPrompt?.title}
+        message={dscExpiryPrompt?.message ?? ""}
+        allowContinue={dscExpiryPrompt?.allowContinue}
+        onContinue={() => handleDscExpiryDecision(true)}
+        onCancel={() => handleDscExpiryDecision(false)}
       />
 
       <SignOnBehalfOwnerModal
