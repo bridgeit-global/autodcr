@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import ChangePasswordModal from "./ChangePasswordModal";
 import ProfileModal from "./ProfileModal";
+import DscSignerInstallModal from "./DscSignerInstallModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { TEXT_BRAND, TEXT_CAPTION, TEXT_NAV } from "@/app/utils/typography";
 
@@ -18,6 +19,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isDscSignerInstallOpen, setIsDscSignerInstallOpen] = useState(false);
   const [showBackWarning, setShowBackWarning] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
@@ -253,7 +255,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
             </button>
 
             {userMenuOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
                 <button
                   onClick={() => {
                     setIsProfileOpen(true);
@@ -271,6 +273,15 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
                   className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Change Password
+                </button>
+                <button
+                  onClick={() => {
+                    setIsDscSignerInstallOpen(true);
+                    setUserMenuOpen(false);
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Install DSC Signer
                 </button>
                 <button
                   onClick={handleLogout}
@@ -350,6 +361,11 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
       <ProfileModal
         open={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
+      />
+
+      <DscSignerInstallModal
+        open={isDscSignerInstallOpen}
+        onClose={() => setIsDscSignerInstallOpen(false)}
       />
     </header>
   );
