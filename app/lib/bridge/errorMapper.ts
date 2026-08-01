@@ -124,7 +124,7 @@ const TABLE: Record<string, Omit<MappedError, "code">> = {
   CMS_BUILD_FAILED: {
     message: "Could not build CMS signature payload.",
     hint:
-      "Likely certificate/private-key CKA_ID mismatch or stale cert selection. Refresh slot certificates, reselect certId from current slot snapshot, then retry.",
+      "Likely certificate/private-key CKA_ID mismatch or stale cert selection after swapping the DSC. Unplug/replug the token (or fully quit Chrome), then retry signing.",
     retryable: true,
   },
   NO_CERT_SELECTED: {
