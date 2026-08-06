@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
 	// Add more entries if your machine gets a different IP on another network.
 	allowedDevOrigins: ["192.168.1.*"],
 	// Keep Chromium out of the webpack bundle so `bin/*.br` resolve from node_modules on Vercel.
-	serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
+	serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core", "pdf-parse"],
 	// @sparticuz/chromium binary must be explicitly included so Vercel's file-tracing
 	// bundles it into the serverless function — otherwise the binary is missing and
 	// puppeteer.launch() throws "spawn ETXTBSY".

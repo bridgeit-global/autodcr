@@ -21,6 +21,10 @@ import {
   normalizeApplicationWorkflowStage,
   type ApplicationWorkflowStage,
 } from "@/app/components/DraftApplicationsModal";
+import DocumentValidationResultModal, {
+  type DocumentValidationResult,
+} from "@/app/components/DocumentValidationResultModal";
+import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 
 /** Maps dashboard column header (when opening the list modal) to DB `workflow_stage`. */
 function dashboardColumnStatusToWorkflowStage(status: string): ApplicationWorkflowStage | null {
@@ -686,30 +690,48 @@ function UserDashboardContent() {
   const [uploadedPdfsByType, setUploadedPdfsByType] = useState<
     Record<string, { name: string; file: File }>
   >({});
+  const [validationResultsByType, setValidationResultsByType] = useState<
+    Record<string, DocumentValidationResult>
+  >({});
+  const [validatingAppType, setValidatingAppType] = useState<string | null>(null);
+  const [validationModalOpen, setValidationModalOpen] = useState(false);
+  const [validationAppType, setValidationAppType] = useState<string | null>(null);
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [pdfPreviewAppType, setPdfPreviewAppType] = useState<string | null>(null);
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const selectableProjects = projects.filter((project) => project.status !== "draft");
   const showExistingApplicationActions =
     existingApplicationMode && selectedProject !== "ALL";
 
+  const clearExistingApplicationState = () => {
+    setUploadedPdfsByType({});
+    setValidationResultsByType({});
+    setValidationModalOpen(false);
+    setValidationAppType(null);
+    setPdfPreviewOpen(false);
+    setPdfPreviewAppType(null);
+  };
+
   const handleProjectFilterChange = (val: string) => {
     setSelectedProject(val);
     if (val === "ALL") {
       setExistingApplicationMode(false);
-      setUploadedPdfsByType({});
+      clearExistingApplicationState();
     }
   };
 
   const handleSelectExistingApplicationProject = (projectId: string) => {
     setSelectedProject(projectId);
     setExistingApplicationMode(true);
-    setUploadedPdfsByType({});
+    clearExistingApplicationState();
     setIsProjectModalOpen(false);
   };
 
   const handleExitExistingApplicationMode = () => {
     setSelectedProject("ALL");
     setExistingApplicationMode(false);
-    setUploadedPdfsByType({});
+    clearExistingApplicationState();
   };
 
   const handleExistingApplicationPdfUpload = (appType: string, file: File | undefined) => {
@@ -722,7 +744,112 @@ function UserDashboardContent() {
       ...prev,
       [appType]: { name: file.name, file },
     }));
+    // New upload invalidates previous bot result for this type.
+    setValidationResultsByType((prev) => {
+      if (!(appType in prev)) return prev;
+      const next = { ...prev };
+      delete next[appType];
+      return next;
+    });
   };
+
+  const openPdfPreview = (appType: string) => {
+    const uploaded = uploadedPdfsByType[appType];
+    if (!uploaded) {
+      showAlert({
+        title: "Upload required",
+        message: "Please upload a PDF before previewing.",
+      });
+      return;
+    }
+    setPdfPreviewAppType(appType);
+    setPdfPreviewOpen(true);
+  };
+
+  const handleValidateWithBot = async (appType: string) => {
+    const uploaded = uploadedPdfsByType[appType];
+    if (!uploaded) {
+      showAlert({
+        title: "Upload required",
+        message: "Please upload a PDF before validating with the bot.",
+      });
+      return;
+    }
+
+    setValidatingAppType(appType);
+    try {
+      const formData = new FormData();
+      formData.append("file", uploaded.file);
+      formData.append("applicationType", appType);
+
+      const response = await fetch("/api/validate-document", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        showAlert({
+          title: "Validation failed",
+          message:
+            typeof data?.error === "string"
+              ? data.error
+              : "Could not validate this document. Please try again.",
+        });
+        return;
+      }
+
+      const result = data as DocumentValidationResult;
+      setValidationResultsByType((prev) => ({
+        ...prev,
+        [appType]: result,
+      }));
+      setValidationAppType(appType);
+      setValidationModalOpen(true);
+    } catch {
+      showAlert({
+        title: "Validation failed",
+        message: "Could not reach the validation service. Please try again.",
+      });
+    } finally {
+      setValidatingAppType(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!pdfPreviewOpen || !pdfPreviewAppType) {
+      setPreviewPdfUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      return;
+    }
+
+    const uploaded = uploadedPdfsByType[pdfPreviewAppType];
+    if (!uploaded) {
+      setPreviewPdfUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(uploaded.file);
+    setPreviewPdfUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [pdfPreviewOpen, pdfPreviewAppType, uploadedPdfsByType]);
+
+  const activeValidationResult =
+    validationAppType != null
+      ? validationResultsByType[validationAppType] ?? null
+      : null;
+  const activeValidationFileName =
+    validationAppType != null
+      ? uploadedPdfsByType[validationAppType]?.name ?? ""
+      : "";
+  const activePdfPreviewFileName =
+    pdfPreviewAppType != null
+      ? uploadedPdfsByType[pdfPreviewAppType]?.name ?? ""
+      : "";
 
   const getProjectOptionLabel = (project: {
     title: string;
@@ -1199,6 +1326,9 @@ function UserDashboardContent() {
                           <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
                             Validate with Bot
                           </th>
+                          <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
+                            Preview
+                          </th>
                         </>
                       ) : (
                         <>
@@ -1282,15 +1412,23 @@ function UserDashboardContent() {
                             <td className="border-b border-gray-200 px-4 py-3 text-center">
                               <button
                                 type="button"
-                                onClick={() =>
-                                  showAlert({
-                                    title: "Coming soon",
-                                    message: "Validate with Bot will be available soon.",
-                                  })
-                                }
-                                className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors"
+                                disabled={validatingAppType === app.name}
+                                onClick={() => handleValidateWithBot(app.name)}
+                                className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                               >
-                                Validate with Bot
+                                {validatingAppType === app.name
+                                  ? "Validating…"
+                                  : "Validate with Bot"}
+                              </button>
+                            </td>
+                            <td className="border-b border-gray-200 px-4 py-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => openPdfPreview(app.name)}
+                                disabled={!uploadedPdf}
+                                className="inline-flex items-center justify-center rounded-lg border border-emerald-600 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+                              >
+                                Preview
                               </button>
                             </td>
                           </>
@@ -1441,6 +1579,33 @@ function UserDashboardContent() {
           onOpenApplicationDetails={handleOpenApplicationDetails}
         />
       )}
+
+      <DocumentValidationResultModal
+        open={validationModalOpen}
+        result={activeValidationResult}
+        fileName={activeValidationFileName}
+        onClose={() => {
+          setValidationModalOpen(false);
+          setValidationAppType(null);
+        }}
+      />
+
+      <DocumentPreviewModal
+        open={pdfPreviewOpen}
+        fileUrl={previewPdfUrl}
+        title={
+          pdfPreviewAppType
+            ? `${pdfPreviewAppType} Preview`
+            : activePdfPreviewFileName
+              ? `PDF Preview · ${activePdfPreviewFileName}`
+              : "PDF Preview"
+        }
+        hideSaveButton
+        onClose={() => {
+          setPdfPreviewOpen(false);
+          setPdfPreviewAppType(null);
+        }}
+      />
     </div>
   );
 }
