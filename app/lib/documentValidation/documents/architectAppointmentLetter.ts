@@ -1,15 +1,6 @@
-/**
- * Document schemas and extraction prompts.
- * Ported from AI_SDK — adding a document type only needs schema + prompt + registry entry.
- */
 import { z } from "zod";
-
-export type DocumentDefinition<T extends z.ZodTypeAny> = {
-  id: string;
-  label: string;
-  schema: T;
-  buildPrompt: (documentText: string) => string;
-};
+import { wrapDocumentPrompt } from "../promptBase";
+import type { DocumentDefinition } from "../types";
 
 export const architectAppointmentLetterSchema = z.object({
   date: z.string().nullable(),
@@ -30,30 +21,7 @@ export type ArchitectAppointmentLetter = z.infer<
   typeof architectAppointmentLetterSchema
 >;
 
-function buildArchitectAppointmentLetterPrompt(documentText: string): string {
-  return `
-You are an expert AI document extraction engine.
-
-Your task is to extract structured information from an Architect Appointment Letter.
-
-IMPORTANT RULES
-
-- Return ONLY the structured object defined by the schema.
-- Never hallucinate.
-- Never guess.
-- Never infer missing values.
-- If a value cannot be confidently identified, return null.
-- Preserve values exactly as written.
-- Preserve original capitalization.
-- Preserve original formatting.
-- Do not rewrite names.
-- Do not normalize dates.
-- Do not merge multiple fields.
-- Do not split values unless instructed.
-- Extract only values explicitly present in the document.
-
-FIELD EXTRACTION RULES
-
+const FIELD_RULES = `
 1. date
 - Extract the appointment letter date.
 - Usually appears near the top of the document.
@@ -215,13 +183,14 @@ propertyIdentifier = "d3f44"
 ward = "P/N Ward"
 
 If any field is absent, return null.
-
-Document Text:
-
-"""
-${documentText}
-"""
 `;
+
+function buildArchitectAppointmentLetterPrompt(documentText: string): string {
+  return wrapDocumentPrompt({
+    task: "an Architect Appointment Letter",
+    fieldRules: FIELD_RULES,
+    documentText,
+  });
 }
 
 export const architectAppointmentLetter: DocumentDefinition<
@@ -232,20 +201,3 @@ export const architectAppointmentLetter: DocumentDefinition<
   schema: architectAppointmentLetterSchema,
   buildPrompt: buildArchitectAppointmentLetterPrompt,
 };
-
-export const documents = {
-  [architectAppointmentLetter.id]: architectAppointmentLetter,
-} as const;
-
-export type DocumentType = keyof typeof documents;
-
-/** Maps dashboard application type names to AI document types. */
-export const APPLICATION_TYPE_TO_DOCUMENT_TYPE: Record<string, DocumentType> = {
-  "Appointment Letter for Architect": "architect-appointment-letter",
-};
-
-export function resolveDocumentType(
-  applicationTypeName: string
-): DocumentType | null {
-  return APPLICATION_TYPE_TO_DOCUMENT_TYPE[applicationTypeName] ?? null;
-}

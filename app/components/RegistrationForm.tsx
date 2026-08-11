@@ -8,12 +8,19 @@ import { createPortal } from "react-dom";
 import OTPVerificationModal from "./OTPVerificationModal";
 import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 import CustomSelect from "@/app/components/CustomSelect";
+import RegistrationDocumentAutofillStep from "./RegistrationDocumentAutofillStep";
+import {
+  mergeAutofill,
+  type AutofillFiles,
+  type AutofillPatch,
+} from "@/app/lib/documentValidation/registrationAutofill";
 import {
   isPartialOwnerField,
   normalizePhone,
   OWNER_REGISTRATION_META_BY_TYPE,
   ownerMetadataToFormFields,
 } from "@/app/utils/ownerRegistrationShared";
+import { isValidIndianPincode } from "@/app/utils/pincode";
 
 interface RegistrationFormProps {
   title?: string;
@@ -74,7 +81,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [hasScrolledDeclaration, setHasScrolledDeclaration] = useState(false);
-  const [activeSection, setActiveSection] = useState<string>("section-basic-details");
+  const [activeSection, setActiveSection] = useState<string>("section-identity-documents");
   
   // Letterhead modal state
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState<string | null>(null);
@@ -135,6 +142,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   // Track active section using Intersection Observer
   useEffect(() => {
     const sections = [
+      "section-identity-documents",
       "section-basic-details",
       "section-registration",
       "section-documents",
@@ -295,6 +303,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     // Common documents
     authorizedSignatoryPhotoFile: null as File | null,
     authorizedSignatorySignatureFile: null as File | null,
+    aadhaarCardFile: null as File | null,
     panCardFile: null as File | null,
     letterheadFile: null as File | null,
     
@@ -353,6 +362,32 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       };
       validateField(field, file, updated);
       return updated;
+    });
+  };
+
+  const applyRegistrationAutofill = (
+    patch: AutofillPatch,
+    files: AutofillFiles,
+    _extractions?: unknown,
+    options?: { overwriteKeys?: readonly string[] }
+  ) => {
+    setFormData((prev) => {
+      const merged = mergeAutofill(prev, patch, options);
+      if (patch.addressLine1 || patch.addressLine2 || patch.addressLine3) {
+        merged.address = composeAddress(
+          String(merged.addressLine1 || ""),
+          String(merged.addressLine2 || ""),
+          String(merged.addressLine3 || "")
+        );
+      }
+      if (files.aadhaarCardFile) merged.aadhaarCardFile = files.aadhaarCardFile;
+      if (files.panCardFile) merged.panCardFile = files.panCardFile;
+      return merged;
+    });
+    Object.entries(patch).forEach(([field, value]) => {
+      if (typeof value === "string" && value.trim()) {
+        validateField(field, value);
+      }
     });
   };
 
@@ -655,6 +690,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const sections = [
+    { id: "section-identity-documents", label: "Identity Documents" },
     { id: "section-basic-details", label: "Basic Details" },
     { id: "section-registration", label: "Registration Numbers" },
     { id: "section-documents", label: "Documents Upload" },
@@ -694,7 +730,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const pincodeRegex = /^\d{6}$/;
   const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
   const setFieldError = (field: string, error: string) => {
@@ -753,7 +788,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         break;
       case "pincode":
         if (!value) error = "Pincode is required";
-        else if (!pincodeRegex.test(value as string)) error = "Enter a 6-digit pincode";
+        else if (!isValidIndianPincode(value as string))
+          error = "Enter a 6-digit pincode";
         break;
       case "addressLine1":
         if (!value) error = "Address line 1 is required";
@@ -1779,6 +1815,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           gst_no: formData.gstNo || null,
             alternate_phone: formData.alternatePhone || null,
             pan: formData.pan || null,
+            aadhaar_no: formData.aadhaarNo || null,
             authorized_signatory_photo_url: authorizedSignatoryPhotoUrl,
             authorized_signatory_signature_url: authorizedSignatorySignatureUrl,
           pan_card_url: panCardUrl,
@@ -2378,6 +2415,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           {sections.map((section) => {
             const isActive = activeSection === section.id;
               const sectionIcons: Record<string, React.ReactNode> = {
+                "section-identity-documents": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                  </svg>
+                ),
                 "section-basic-details": (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -2494,6 +2536,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         )}
 
         <div className="space-y-6">
+            {/* Identity Documents */}
+          <div id="section-identity-documents" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-identity-documents" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
+            <div
+              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+              onClick={() => scrollToSection("section-identity-documents")}
+            >
+              <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-black">Identity Documents</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-4 ml-11">
+              Upload Aadhaar and PAN to auto-fill your details
+            </p>
+            <RegistrationDocumentAutofillStep
+              registrationKind="owner"
+              entityType={formData.entityType}
+              onAutofill={applyRegistrationAutofill}
+              onContinue={() => scrollToSection("section-basic-details")}
+            />
+          </div>
+
             {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
             <div 
@@ -2749,6 +2815,21 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               />
                   {errors.pan && (
                     <p className="text-xs text-red-600 mt-1">{errors.pan}</p>
+                  )}
+        </div>
+
+            <div>
+              <label className="block font-medium text-black mb-1">
+                Aadhaar Number
+              </label>
+              <input
+                value={formData.aadhaarNo}
+                onChange={(e) => handleInputChange("aadhaarNo", e.target.value)}
+                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                placeholder="XXXX XXXX XXXX"
+              />
+                  {errors.aadhaarNo && (
+                    <p className="text-xs text-red-600 mt-1">{errors.aadhaarNo}</p>
                   )}
         </div>
 

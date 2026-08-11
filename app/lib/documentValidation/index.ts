@@ -1,7 +1,9 @@
-import { extractDocument } from "./ai";
+import { extractDocument, extractDocumentFromMedia } from "./ai";
 import { extractTextFromPdfBuffer } from "./extractText";
-import { documents, type DocumentType } from "./schema";
+import { documents, type DocumentType } from "./registry";
+import type { DocumentDefinition } from "./types";
 import { validateExtractedFields, type ValidationResult } from "./validate";
+import type { z } from "zod";
 
 export type DocumentValidationResponse = ValidationResult<
   Record<string, string | null>
@@ -10,6 +12,40 @@ export type DocumentValidationResponse = ValidationResult<
   documentLabel: string;
 };
 
+const IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+]);
+
+export function isSupportedDocumentMediaType(mediaType: string): boolean {
+  return mediaType === "application/pdf" || IMAGE_TYPES.has(mediaType);
+}
+
+async function runValidation(
+  documentType: DocumentType,
+  extracted: Record<string, string | null>
+): Promise<DocumentValidationResponse> {
+  const definition = documents[documentType];
+  const validation = validateExtractedFields(
+    extracted,
+    definition.validation
+  );
+
+  return {
+    valid: validation.valid,
+    missingFields: validation.missingFields,
+    extracted: validation.extracted,
+    documentType,
+    documentLabel: definition.label,
+  };
+}
+
+/**
+ * Text-based PDF validation (Architect Appointment Letter path).
+ * Unchanged behavior: requires extractable PDF text.
+ */
 export async function validateDocumentPdf(
   buffer: Buffer,
   documentType: DocumentType
@@ -24,25 +60,93 @@ export async function validateDocumentPdf(
   }
 
   const documentText = await extractTextFromPdfBuffer(buffer);
-  const extracted = await extractDocument(definition, documentText);
-  const validation = validateExtractedFields(
-    extracted as Record<string, string | null>
+  const extracted = await extractDocument(
+    definition as DocumentDefinition<z.ZodTypeAny>,
+    documentText
   );
 
-  return {
-    valid: validation.valid,
-    missingFields: validation.missingFields,
-    extracted: validation.extracted,
+  return runValidation(
     documentType,
-    documentLabel: definition.label,
-  };
+    extracted as Record<string, string | null>
+  );
 }
 
+/**
+ * PDF or image validation. Uses text extraction when available;
+ * falls back to multimodal Gemini for images / scanned PDFs.
+ */
+export async function validateDocumentFile(
+  buffer: Buffer,
+  documentType: DocumentType,
+  mediaType: string
+): Promise<DocumentValidationResponse> {
+  const definition = documents[documentType];
+
+  if (!definition) {
+    const availableTypes = Object.keys(documents).join(", ");
+    throw new Error(
+      `Unknown document type "${documentType}". Available types: ${availableTypes}`
+    );
+  }
+
+  if (!isSupportedDocumentMediaType(mediaType)) {
+    throw new Error(
+      `Unsupported file type "${mediaType}". Upload a PDF or image (JPEG/PNG/WebP).`
+    );
+  }
+
+  if (mediaType === "application/pdf") {
+    try {
+      const documentText = await extractTextFromPdfBuffer(buffer);
+      const extracted = await extractDocument(
+        definition as DocumentDefinition<z.ZodTypeAny>,
+        documentText
+      );
+      return runValidation(
+        documentType,
+        extracted as Record<string, string | null>
+      );
+    } catch {
+      // Scanned / image-only PDF — use multimodal extraction.
+      const extracted = await extractDocumentFromMedia(
+        definition as DocumentDefinition<z.ZodTypeAny>,
+        {
+          data: buffer,
+          mediaType,
+        }
+      );
+      return runValidation(
+        documentType,
+        extracted as Record<string, string | null>
+      );
+    }
+  }
+
+  const extracted = await extractDocumentFromMedia(
+    definition as DocumentDefinition<z.ZodTypeAny>,
+    {
+      data: buffer,
+      mediaType,
+    }
+  );
+
+  return runValidation(
+    documentType,
+    extracted as Record<string, string | null>
+  );
+}
+
+export type { DocumentDefinition } from "./types";
 export {
   documents,
   resolveDocumentType,
-  APPLICATION_TYPE_TO_DOCUMENT_TYPE,
+  resolveDocumentTypeFromApplication,
+  isDocumentType,
+  listDocumentTypes,
+  getDocumentDefinition,
+  getDocumentsForApplication,
   type DocumentType,
-} from "./schema";
+} from "./registry";
+export { APPLICATION_DOCUMENTS } from "./applications";
 export { getFieldLabel, FIELD_LABELS } from "./fieldLabels";
 export type { ValidationResult } from "./validate";
