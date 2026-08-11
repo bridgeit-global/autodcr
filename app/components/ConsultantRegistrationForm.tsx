@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import PDFModal from "./PDFModal";
@@ -9,12 +9,21 @@ import EmailOTPVerificationModal from "./EmailOTPVerificationModal";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import CustomSelect from "@/app/components/CustomSelect";
+import RegistrationDocumentAutofillStep from "./RegistrationDocumentAutofillStep";
+import {
+  buildLicenseAutofillPatch,
+  getConsultantCertificateFileField,
+  mergeAutofill,
+  type AutofillFiles,
+  type AutofillPatch,
+} from "@/app/lib/documentValidation/registrationAutofill";
 import {
   isPartialProfileField,
   metadataToFormFields,
   normalizePhone,
   REGISTRATION_NUMBER_META_BY_TYPE,
 } from "@/app/utils/consultantRegistrationShared";
+import { isValidIndianPincode } from "@/app/utils/pincode";
 
 interface ConsultantRegistrationFormProps {
   title?: string;
@@ -28,7 +37,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [hasScrolledDeclaration, setHasScrolledDeclaration] = useState(false);
-  const [activeSection, setActiveSection] = useState<string>("section-basic-details");
+  const [activeSection, setActiveSection] = useState<string>("section-identity-documents");
   
   // Letterhead modal state
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState<string | null>(null);
@@ -89,6 +98,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   // Track active section using Intersection Observer
   useEffect(() => {
     const sections = [
+      "section-identity-documents",
       "section-basic-details",
       "section-registration",
       "section-documents",
@@ -200,7 +210,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     gstNo: "",
     authorizedSignatoryPhotoFile: null as File | null,
     authorizedSignatorySignatureFile: null as File | null,
+    aadhaarCardFile: null as File | null,
     panCardFile: null as File | null,
+    licenseCertificateFile: null as File | null,
     letterheadFile: null as File | null,
     
     // Common registration date for all consultant types
@@ -284,6 +296,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     acceptDeclaration: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const licenseExtractedRef = useRef<Record<string, string | null> | null>(null);
 
   const composeAddress = (line1: string, line2: string, line3: string): string =>
     [line1, line2, line3].map((v) => v.trim()).filter(Boolean).join("\n");
@@ -450,6 +463,96 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     });
   };
 
+  const wireLicenseCertificateFile = (
+    data: Record<string, unknown>,
+    consultantType: string
+  ) => {
+    const licenseFile = data.licenseCertificateFile;
+    if (!(licenseFile instanceof File)) return data;
+    const certField = getConsultantCertificateFileField(consultantType);
+    if (!certField) return data;
+    return { ...data, [certField]: licenseFile };
+  };
+
+  const applyRegistrationAutofill = (
+    patch: AutofillPatch,
+    files: AutofillFiles,
+    extractions?: Partial<
+      Record<
+        "aadhaar" | "pan" | "technical-person-license",
+        Record<string, string | null>
+      >
+    >,
+    options?: { overwriteKeys?: readonly string[] }
+  ) => {
+    if (extractions?.["technical-person-license"]) {
+      licenseExtractedRef.current = extractions["technical-person-license"];
+    }
+
+    setFormData((prev) => {
+      let merged = mergeAutofill(prev, patch, options);
+      if (patch.addressLine1 || patch.addressLine2 || patch.addressLine3) {
+        merged.address = composeAddress(
+          String(merged.addressLine1 || ""),
+          String(merged.addressLine2 || ""),
+          String(merged.addressLine3 || "")
+        );
+      }
+      if (files.aadhaarCardFile) merged.aadhaarCardFile = files.aadhaarCardFile;
+      if (files.panCardFile) merged.panCardFile = files.panCardFile;
+      if (files.licenseCertificateFile) {
+        merged.licenseCertificateFile = files.licenseCertificateFile;
+      }
+
+      if (licenseExtractedRef.current && merged.consultantType) {
+        const licensePatch = buildLicenseAutofillPatch(
+          licenseExtractedRef.current,
+          merged.consultantType,
+          "consultant"
+        );
+        merged = mergeAutofill(merged, licensePatch);
+        merged = wireLicenseCertificateFile(
+          merged as Record<string, unknown>,
+          merged.consultantType
+        ) as typeof merged;
+      }
+
+      return merged;
+    });
+
+    Object.entries(patch).forEach(([field, value]) => {
+      if (typeof value === "string" && value.trim()) {
+        validateField(field, value);
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!licenseExtractedRef.current || !formData.consultantType) return;
+
+    const licensePatch = buildLicenseAutofillPatch(
+      licenseExtractedRef.current,
+      formData.consultantType,
+      "consultant"
+    );
+
+    setFormData((prev) => {
+      let merged = mergeAutofill(prev, licensePatch);
+      merged = wireLicenseCertificateFile(
+        merged as Record<string, unknown>,
+        formData.consultantType
+      ) as typeof merged;
+      if (merged.addressLine1 || merged.addressLine2 || merged.addressLine3) {
+        merged.address = composeAddress(
+          String(merged.addressLine1 || ""),
+          String(merged.addressLine2 || ""),
+          String(merged.addressLine3 || "")
+        );
+      }
+      return merged;
+    });
+  }, [formData.consultantType]);
+
   // Handler for letterhead file change - creates preview URL and opens modal (image, A4 only)
   const handleLetterheadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -614,6 +717,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const sections = [
+    { id: "section-identity-documents", label: "Identity Documents" },
     { id: "section-basic-details", label: "Basic Details" },
     { id: "section-registration", label: "Registration Numbers" },
     { id: "section-documents", label: "Documents Upload" },
@@ -655,7 +759,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const pincodeRegex = /^\d{6}$/;
   const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
   const setFieldError = (field: string, error: string) => {
@@ -748,7 +851,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         break;
       case "pincode":
         if (!value) error = "Pincode is required";
-        else if (!pincodeRegex.test(value as string)) error = "Enter a 6-digit pincode";
+        else if (!isValidIndianPincode(value as string))
+          error = "Enter a 6-digit pincode";
         break;
       case "addressLine1":
         if (!value) error = "Address line 1 is required";
@@ -1508,6 +1612,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           gst_no: formData.gstNo || null,
             alternate_phone: formData.alternatePhone || null,
             pan: formData.pan || null,
+            aadhaar_no: formData.aadhaarNo || null,
             authorized_signatory_photo_url: authorizedSignatoryPhotoUrl,
             authorized_signatory_signature_url: authorizedSignatorySignatureUrl,
           pan_card_url: panCardUrl,
@@ -1712,6 +1817,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             {sections.map((section) => {
               const isActive = activeSection === section.id;
               const sectionIcons: Record<string, React.ReactNode> = {
+                "section-identity-documents": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                  </svg>
+                ),
                 "section-basic-details": (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -1828,6 +1938,30 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         )}
 
         <div className="space-y-6">
+          {/* Identity Documents */}
+          <div id="section-identity-documents" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-identity-documents" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
+            <div
+              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+              onClick={() => scrollToSection("section-identity-documents")}
+            >
+              <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-black">Identity Documents</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-4 ml-11">
+              Upload Aadhaar, PAN, and Technical Person License to auto-fill your details
+            </p>
+            <RegistrationDocumentAutofillStep
+              registrationKind="consultant"
+              consultantType={formData.consultantType}
+              onAutofill={applyRegistrationAutofill}
+              onContinue={() => scrollToSection("section-basic-details")}
+            />
+          </div>
+
           {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
             <div 
@@ -2090,6 +2224,21 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   />
                   {errors.pan && (
                     <p className="text-xs text-red-600 mt-1">{errors.pan}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-medium text-black mb-1">
+                    Aadhaar Number
+                  </label>
+                  <input
+                    value={formData.aadhaarNo}
+                    onChange={(e) => handleInputChange("aadhaarNo", e.target.value)}
+                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="XXXX XXXX XXXX"
+                  />
+                  {errors.aadhaarNo && (
+                    <p className="text-xs text-red-600 mt-1">{errors.aadhaarNo}</p>
                   )}
                 </div>
 

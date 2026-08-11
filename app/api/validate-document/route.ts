@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  isSupportedDocumentMediaType,
+  listDocumentTypes,
   resolveDocumentType,
-  validateDocumentPdf,
+  validateDocumentFile,
   type DocumentType,
 } from "@/app/lib/documentValidation";
 
@@ -25,31 +27,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    if (file.type !== "application/pdf") {
-      return NextResponse.json(
-        { error: "Please upload a valid PDF file" },
-        { status: 400 }
-      );
-    }
-
-    const documentType: DocumentType | null =
-      (documentTypeParam as DocumentType) ||
-      (applicationType ? resolveDocumentType(applicationType) : null);
-
-    if (!documentType) {
+    const mediaType = file.type || "application/octet-stream";
+    if (!isSupportedDocumentMediaType(mediaType)) {
       return NextResponse.json(
         {
           error:
-            applicationType
-              ? `Bot validation is not yet available for "${applicationType}". Currently supported: Appointment Letter for Architect.`
-              : "Missing applicationType or documentType.",
+            "Please upload a valid PDF or image file (JPEG, PNG, or WebP).",
         },
         { status: 400 }
       );
     }
 
+    const documentType: DocumentType | null = resolveDocumentType({
+      documentType: documentTypeParam || undefined,
+      applicationType: applicationType || undefined,
+    });
+
+    if (!documentType) {
+      const supported = listDocumentTypes().join(", ");
+      const error = documentTypeParam
+        ? `Unknown documentType "${documentTypeParam}". Supported: ${supported || "(none)"}.`
+        : applicationType
+          ? `Bot validation for "${applicationType}" requires an explicit documentType (supported: ${supported || "(none)"}).`
+          : "Missing applicationType or documentType.";
+
+      return NextResponse.json({ error }, { status: 400 });
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = await validateDocumentPdf(buffer, documentType);
+    const result = await validateDocumentFile(buffer, documentType, mediaType);
 
     return NextResponse.json(result);
   } catch (error: unknown) {
