@@ -210,3 +210,31 @@ export async function findOwnerByEmail(
   }
   return null;
 }
+
+/** Finds the login User ID for a registered email address (username recovery). */
+export async function findLoginUserIdByEmail(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  email: string
+): Promise<{ login_user_id: string; email: string } | null> {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  const users = await listAllAuthUsers(admin);
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const userEmail = (user.email || "").trim().toLowerCase();
+    const metaEmail = String(meta.email || "")
+      .trim()
+      .toLowerCase();
+    if (userEmail !== normalizedEmail && metaEmail !== normalizedEmail) continue;
+
+    const loginUserId = String(meta.user_id || "").trim();
+    if (!loginUserId) continue;
+
+    return {
+      login_user_id: loginUserId,
+      email: user.email || normalizedEmail,
+    };
+  }
+  return null;
+}

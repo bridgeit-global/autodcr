@@ -269,7 +269,7 @@ function DashboardLayoutContent({
         const returnPath = sanitizeReturnUrl(
           qs ? `${pathname}?${qs}` : pathname
         );
-        router.replace(`/?returnUrl=${encodeURIComponent(returnPath)}`);
+        router.replace(`/login?returnUrl=${encodeURIComponent(returnPath)}`);
         setAuthState("unauthenticated");
         return;
       }

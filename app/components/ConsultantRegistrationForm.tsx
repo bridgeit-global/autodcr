@@ -1717,9 +1717,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       console.log('Registration successful:', { userId: userId, metadata: userMetadata });
       setSubmitSuccess(true);
       
-      // Redirect to landing page after 2 seconds
+      // Send the new user to sign in after 2 seconds
       setTimeout(() => {
-        router.push('/');
+        router.push('/login');
       }, 2000);
 
     } catch (err) {
