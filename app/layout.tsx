@@ -15,8 +15,18 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Online Building Plan Approval System",
-  description: "Autodcr-like landing experience built with Next.js",
+  title: "Draft Desk — Document Smarter. Work Faster.",
+  description: "Building plan approval and compliance platform for architects, consultants, and owners.",
+  icons: {
+    icon: "/draft-desk-logo.png",
+  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover" as const,
 };
 
 export default function RootLayout({

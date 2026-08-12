@@ -2118,7 +2118,7 @@ export default function ApplicationDetailsPage() {
     } catch (err) {
       console.error("Logout failed:", err);
     }
-    router.replace(`/?returnUrl=${encodeURIComponent(returnPath)}`);
+    router.replace(`/login?returnUrl=${encodeURIComponent(returnPath)}`);
   };
 
   useEffect(() => {

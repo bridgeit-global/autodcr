@@ -111,12 +111,11 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
       // Close the dropdown menu
       setUserMenuOpen(false);
       
-      // Navigate to landing page
-      router.push('/');
+      router.push('/login');
     } catch (error) {
       console.error('Error during logout:', error);
-      // Still navigate to landing page even if logout fails
-      router.push('/');
+      // Still leave the session even if the sign-out call failed
+      router.push('/login');
     }
   };
 

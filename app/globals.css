@@ -3,20 +3,33 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --brand-navy: #0a1628;
+  --brand-navy-light: #1e293b;
+  --brand-blue: #2563eb;
+  --brand-blue-hover: #1d4ed8;
+  --surface: #f8fafc;
+  --card: #ffffff;
+  --status-success: #16a34a;
+  --status-warning: #f59e0b;
+  --status-danger: #dc2626;
+  --radius-card: 12px;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-navy-light: var(--brand-navy-light);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-hover: var(--brand-blue-hover);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-danger: var(--status-danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-card: var(--radius-card);
 }
 
 html {
@@ -40,6 +53,7 @@ body {
     line-height: 1.75rem;
     font-weight: 700;
     color: #111827;
+    font-family: inherit;
   }
 
   h2 {
@@ -47,6 +61,7 @@ body {
     line-height: 1.75rem;
     font-weight: 700;
     color: #000;
+    font-family: inherit;
   }
 
   h3 {
@@ -54,6 +69,7 @@ body {
     line-height: 1.5rem;
     font-weight: 600;
     color: #111827;
+    font-family: inherit;
   }
 
   h4 {
@@ -66,7 +82,7 @@ body {
   label {
     font-size: 0.875rem;
     font-weight: 500;
-    color: #000;
+    color: #374151;
   }
 
   button,
@@ -95,11 +111,7 @@ body {
 .marquee-content {
   display: inline-flex;
   gap: 2rem;
-
-  /* 👇 Perfect smooth infinite scrolling */
   animation: marquee-continuous 30s linear infinite;
-
-  /* Pause on hover/click */
   cursor: pointer;
 }
 
@@ -108,7 +120,6 @@ body {
   animation-play-state: paused;
 }
 
-/* Make calendar icon black for all date inputs - ensures visibility */
 input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 1 !important;
@@ -119,8 +130,3 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   opacity: 0.7 !important;
   filter: brightness(0);
 }
-
-
-
-
-

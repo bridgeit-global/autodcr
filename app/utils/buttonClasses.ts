@@ -1,23 +1,24 @@
-/** Primary CTA: emerald darkest → lighter (left to right). */
+/** Primary CTA — solid brand blue. */
 export const BTN_PRIMARY =
-  "bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all";
+  "bg-brand-blue hover:bg-brand-blue-hover text-white shadow-sm hover:shadow-md transition-all";
 
-/** Save / action before section is saved — medium emerald gradient. */
+/** Secondary action — outlined blue. */
+export const BTN_SECONDARY =
+  "border border-brand-blue text-brand-blue hover:bg-blue-50 transition-all";
+
+/** Save / secondary filled action. */
 export const BTN_SAVE_UNSAVED =
-  "bg-gradient-to-r from-emerald-600 to-emerald-400 hover:from-emerald-700 hover:to-emerald-500 text-white shadow-sm hover:shadow-md transition-all";
+  "bg-brand-navy-light hover:bg-brand-navy text-white shadow-sm hover:shadow-md transition-all";
 
-/** Active sidebar nav item — light emerald gradient. */
+/** Active sidebar nav item. */
 export const NAV_ITEM_ACTIVE =
-  "bg-gradient-to-r from-emerald-200 to-emerald-50 text-emerald-900 shadow-sm";
+  "bg-white/10 text-white border-l-2 border-brand-blue";
 
 /** Active nav left indicator bar. */
-export const NAV_ITEM_ACTIVE_BAR =
-  "bg-gradient-to-b from-emerald-700 to-emerald-500";
+export const NAV_ITEM_ACTIVE_BAR = "bg-brand-blue";
 
-/** Section / card header bar (landing tiles, info blocks). */
-export const CARD_HEADER_GRADIENT =
-  "bg-gradient-to-r from-emerald-800 to-emerald-500 text-white";
+/** Section / card header bar. */
+export const CARD_HEADER_GRADIENT = "bg-brand-navy text-white";
 
-/** Top navigation bar (landing header). */
-export const NAV_BAR_GRADIENT =
-  "bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-600 text-white";
+/** Top navigation bar (legacy landing header). */
+export const NAV_BAR_GRADIENT = "bg-brand-navy text-white";

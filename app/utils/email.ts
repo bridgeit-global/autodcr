@@ -340,3 +340,59 @@ export async function sendApplicationStatusEmail(params: {
     return { success: false, error: message };
   }
 }
+
+export async function sendUsernameRecoveryEmail(params: {
+  to: string;
+  userId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { to, userId } = params;
+
+  const subject = "Your Draft Desk User ID";
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /></head>
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background:#0a1628;padding:24px;">
+              <h1 style="margin:0;color:#ffffff;font-size:18px;font-weight:600;">Username Recovery</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px;">
+              <p style="margin:0 0 16px;color:#374151;font-size:14px;line-height:1.6;">
+                Your Draft Desk User ID is:
+              </p>
+              <p style="margin:0 0 20px;padding:12px 16px;background:#f1f5f9;border-radius:8px;font-size:18px;font-weight:700;color:#0a1628;letter-spacing:0.5px;">
+                ${userId}
+              </p>
+              <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">
+                Use this User ID to sign in. If you did not request this, please contact support.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  try {
+    await transporter.sendMail({
+      from: formatFromHeader(),
+      to,
+      subject,
+      html,
+    });
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown email error";
+    console.error(`[email] Failed to send username recovery to ${to}:`, message);
+    return { success: false, error: message };
+  }
+}
