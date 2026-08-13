@@ -91,6 +91,7 @@ import {
 } from "@/app/lib/bridge/pdfSigningPrep";
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
 import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
+import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
 
 type PreviewProjectData = {
   title?: string;
@@ -4092,12 +4093,16 @@ export default function ApplicationDetailsPage() {
 
   if (!isReadOnlyMode) {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <section className="border border-gray-200 rounded-2xl bg-white shadow-sm p-6">
-          <h2 className="text-xl font-bold text-gray-900">Application Details</h2>
-          <p className="text-sm text-gray-600 mt-2">
-            This section is available only when opening a project from an application number.
-          </p>
+      <div className="space-y-6">
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-5 md:px-6">
+            <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
+              Application Details
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              This section is available only when opening a project from an application number.
+            </p>
+          </div>
         </section>
       </div>
     );
@@ -4105,43 +4110,59 @@ export default function ApplicationDetailsPage() {
 
   if (applicationAccessState === "loading") {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 flex justify-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600" />
+      <div className="flex justify-center py-16">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
       </div>
     );
   }
 
   if (applicationAccessState === "denied") {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <section className="border border-red-200 rounded-2xl bg-white shadow-sm p-6">
-          <h2 className="text-xl font-bold text-gray-900">Access denied</h2>
-          <p className="text-sm text-gray-600 mt-2">
-            You do not have permission to view this application, or you may be signed in with the
-            wrong account. Please log in with the owner or consultant account that received the
-            notification email.
-          </p>
-          <button
-            type="button"
-            onClick={() => void handleAccessDeniedLogout()}
-            className="mt-4 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
-          >
-            Log out and sign in with another account
-          </button>
+      <div className="space-y-6">
+        <section className="overflow-hidden rounded-xl border border-rose-200 bg-white shadow-sm">
+          <div className="border-b border-rose-100 bg-rose-50/60 px-5 py-5 md:px-6">
+            <h2 className="text-xl font-semibold tracking-tight text-brand-navy">Access denied</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              You do not have permission to view this application, or you may be signed in with the
+              wrong account. Please log in with the owner or consultant account that received the
+              notification email.
+            </p>
+          </div>
+          <div className="px-5 py-4 md:px-6">
+            <button
+              type="button"
+              onClick={() => void handleAccessDeniedLogout()}
+              className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${BTN_PRIMARY}`}
+            >
+              Log out and sign in with another account
+            </button>
+          </div>
         </section>
       </div>
     );
   }
 
+  const selectClasses =
+    "h-10 min-w-[12rem] rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-      <section className="border border-gray-200 rounded-2xl bg-white shadow-sm p-6">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-xl font-bold text-gray-900">Application Details</h2>
-          <div className="flex items-center gap-2 flex-wrap">
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between md:px-6">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
+              Application Details
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Read-only details for the selected application.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             {applicationWorkflowStage === "in_process" && isReadOnlyMode && (
               <label className="flex items-center gap-2 text-sm text-gray-700">
-                <span className="whitespace-nowrap">Sign</span>
+                <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Sign
+                </span>
                 <select
                   value=""
                   onChange={(e) => {
@@ -4152,7 +4173,7 @@ export default function ApplicationDetailsPage() {
                     }
                   }}
                   disabled={isSigningPdf || isSavingPdf}
-                  className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 min-w-[12rem] disabled:opacity-50"
+                  className={selectClasses}
                   aria-label="Sign as role"
                 >
                   <option value="" disabled>
@@ -4180,7 +4201,9 @@ export default function ApplicationDetailsPage() {
             )}
             {isDualLetterType(previewTemplateType) && (
               <label className="flex items-center gap-2 text-sm text-gray-700">
-                <span className="whitespace-nowrap">Letter</span>
+                <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Letter
+                </span>
                 <select
                   value={letterVariant}
                   onChange={(e) =>
@@ -4188,7 +4211,7 @@ export default function ApplicationDetailsPage() {
                       e.target.value === "acceptance" ? "acceptance" : "appointment"
                     )
                   }
-                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-sm text-emerald-900 min-w-[11rem] font-semibold"
+                  className={selectClasses}
                   aria-label="Letter type"
                 >
                   <option value="appointment">Appointment</option>
@@ -4200,49 +4223,54 @@ export default function ApplicationDetailsPage() {
               type="button"
               onClick={handlePreview}
               disabled={isPreviewLoading}
-              className="px-4 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition-colors"
+              className={`rounded-lg px-4 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${BTN_SECONDARY}`}
             >
               {isPreviewLoading ? "Generating..." : "Preview"}
             </button>
           </div>
         </div>
-        <p className="text-sm text-gray-600 mt-1">
-          Read-only details for the selected application.
-        </p>
-        {previewError && (
-          <p className="text-sm text-red-600 mt-3">{previewError}</p>
-        )}
-        {detailsFieldsError && (
-          <p className="text-sm text-red-600 mt-2">{detailsFieldsError}</p>
-        )}
-        {savePdfMessage && (
-          <p className="text-sm text-emerald-700 mt-2">{savePdfMessage}</p>
-        )}
-        {savePdfError && (
-          <p className="text-sm text-red-600 mt-2">{savePdfError}</p>
-        )}
 
-        <div className="mt-6">
+        <div className="px-5 py-5 md:px-6">
+          {previewError && (
+            <p className="mb-3 text-sm text-status-danger">{previewError}</p>
+          )}
+          {detailsFieldsError && (
+            <p className="mb-3 text-sm text-status-danger">{detailsFieldsError}</p>
+          )}
+          {savePdfMessage && (
+            <p className="mb-3 text-sm text-status-success">{savePdfMessage}</p>
+          )}
+          {savePdfError && (
+            <p className="mb-3 text-sm text-status-danger">{savePdfError}</p>
+          )}
+
           {detailsFieldsLoading ? (
             <p className="text-sm text-gray-500">Resolving fields…</p>
           ) : detailsFieldRows.length === 0 && !detailsFieldsError ? (
             <p className="text-sm text-gray-500">No letter fields to show yet.</p>
           ) : (
-            <div className="rounded-xl border border-gray-200 overflow-hidden bg-white divide-y divide-gray-200">
-              {detailsFieldRows.map((row) => (
-                <div
-                  key={row.key}
-                  className="grid grid-cols-1 sm:grid-cols-[minmax(160px,38%)_1fr] gap-1 sm:gap-4 px-4 py-3"
-                >
-                  <div className="text-sm text-gray-600 font-medium">{row.label}</div>
+            <div className="overflow-hidden rounded-xl border border-gray-200">
+              <div className="border-b border-gray-100 bg-gray-50 px-4 py-2.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Letter fields
+                </p>
+              </div>
+              <div className="divide-y divide-gray-100 bg-white">
+                {detailsFieldRows.map((row) => (
                   <div
-                    className="text-sm text-gray-900 break-words sm:break-all sm:min-w-0"
-                    title={row.value.length > 120 ? row.value : undefined}
+                    key={row.key}
+                    className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(160px,38%)_1fr] sm:gap-4"
                   >
-                    {row.value}
+                    <div className="text-sm font-medium text-gray-600">{row.label}</div>
+                    <div
+                      className="break-words text-sm text-gray-900 sm:min-w-0 sm:break-all"
+                      title={row.value.length > 120 ? row.value : undefined}
+                    >
+                      {row.value}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -4286,15 +4314,19 @@ export default function ApplicationDetailsPage() {
           aria-modal="true"
           aria-labelledby="application-pdf-saved-title"
         >
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
-            <h2 id="application-pdf-saved-title" className="text-lg font-semibold text-gray-900">
-              Application saved
-            </h2>
-            <p className="text-sm text-gray-600 mt-3">
-              Your application PDF has been saved to the project. The application is now in{" "}
-              <span className="font-medium text-gray-800">In Process</span>.
-            </p>
-            <div className="mt-6 flex justify-end">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+            <div className="bg-brand-navy px-6 py-3">
+              <h2 id="application-pdf-saved-title" className="text-lg font-semibold text-white">
+                Application saved
+              </h2>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                Your application PDF has been saved to the project. The application is now in{" "}
+                <span className="font-medium text-gray-800">In Process</span>.
+              </p>
+            </div>
+            <div className="flex justify-end border-t border-gray-100 px-6 py-4">
               <button
                 type="button"
                 onClick={() => {
@@ -4303,7 +4335,7 @@ export default function ApplicationDetailsPage() {
                   setPendingDashboardUrl(null);
                   router.push(url);
                 }}
-                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
+                className={`rounded-lg px-5 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
               >
                 OK
               </button>
@@ -4348,15 +4380,19 @@ export default function ApplicationDetailsPage() {
           aria-modal="true"
           aria-labelledby="save-success-title"
         >
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
-            <h2 id="save-success-title" className="text-lg font-semibold text-gray-900">
-              Application signed
-            </h2>
-            <p className="text-sm text-gray-600 mt-3">
-              Your application has been signed and saved. The application is now in{" "}
-              <span className="font-medium text-gray-800">In Process</span>.
-            </p>
-            <div className="mt-6 flex justify-end">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+            <div className="bg-brand-navy px-6 py-3">
+              <h2 id="save-success-title" className="text-lg font-semibold text-white">
+                Application signed
+              </h2>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                Your application has been signed and saved. The application is now in{" "}
+                <span className="font-medium text-gray-800">In Process</span>.
+              </p>
+            </div>
+            <div className="flex justify-end border-t border-gray-100 px-6 py-4">
               <button
                 type="button"
                 onClick={() => {
@@ -4365,7 +4401,7 @@ export default function ApplicationDetailsPage() {
                   setPendingDashboardUrl(null);
                   router.push(url);
                 }}
-                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
+                className={`rounded-lg px-5 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
               >
                 OK
               </button>
@@ -4381,15 +4417,19 @@ export default function ApplicationDetailsPage() {
           aria-modal="true"
           aria-labelledby="signed-doc-success-title"
         >
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
-            <h2 id="signed-doc-success-title" className="text-lg font-semibold text-gray-900">
-              Signed document saved
-            </h2>
-            <p className="text-sm text-gray-600 mt-3">
-              Your signed application PDF has been saved to the project. The application is now in{" "}
-              <span className="font-medium text-gray-800">Approved or Verified</span>.
-            </p>
-            <div className="mt-6 flex justify-end">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+            <div className="bg-brand-navy px-6 py-3">
+              <h2 id="signed-doc-success-title" className="text-lg font-semibold text-white">
+                Signed document saved
+              </h2>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                Your signed application PDF has been saved to the project. The application is now in{" "}
+                <span className="font-medium text-gray-800">Approved or Verified</span>.
+              </p>
+            </div>
+            <div className="flex justify-end border-t border-gray-100 px-6 py-4">
               <button
                 type="button"
                 onClick={() => {
@@ -4398,7 +4438,7 @@ export default function ApplicationDetailsPage() {
                   setPendingDashboardUrl(null);
                   router.push(url);
                 }}
-                className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
+                className={`rounded-lg px-5 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
               >
                 OK
               </button>

@@ -79,6 +79,7 @@ export function clearProjectDrafts() {
     "saved-bg-details",
     "saved-bg-details-snapshot",
     "baseline-bg-details-snapshot",
+    "dirty-bg-details",
   ];
 
   try {

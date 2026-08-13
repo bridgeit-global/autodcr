@@ -356,7 +356,9 @@ const removePlot = (plotId: string) => {
   };
 
   const inputClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
+    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
+  const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
+  const requiredMark = <span className="text-brand-navy">*</span>;
 
   // Persist plots draft on change
   useEffect(() => {
@@ -374,19 +376,17 @@ const removePlot = (plotId: string) => {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading project data...</p>
-          </div>
+      <div className="flex min-h-[320px] items-center justify-center py-10">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
+          <p className="text-sm text-gray-500">Loading project data…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+    <div className="pb-2 space-y-6">
       <fieldset
         disabled={isReadOnlyMode}
         className={
@@ -395,36 +395,30 @@ const removePlot = (plotId: string) => {
             : ""
         }
       >
-      <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-        <div className="bg-white border-b border-gray-200 p-6 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Area Details</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Add plots and enter area for each extract of the plot. All areas are in sq. mtr.
-            </p>
-          </div>
-
-          <div className="w-full md:w-auto flex md:justify-end">
+      <div>
+        {!isReadOnlyMode && (
+          <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
             <button
+              type="button"
               onClick={handleSave}
-              className={`px-6 py-2 rounded-lg font-semibold ${
+              className={`rounded-lg px-5 py-2 text-sm font-semibold ${
                 isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
               }`}
             >
               {isSaved ? "Saved" : "Save"}
             </button>
           </div>
-        </div>
+        )}
 
-        <div className="p-6 space-y-8 pb-6">
+        <div className="space-y-6">
           {plots.map((plot, plotIndex) => {
             const plotTotals = getPlotFieldTotals(plot);
 
             return (
-            <div key={plot.id} className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div key={plot.id} className="overflow-hidden rounded-xl border border-gray-100">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4 p-4 border-b border-gray-200 bg-gray-50">
                 <div>
-                  <label className="block font-medium text-black mb-1">Plot No.</label>
+                  <label className={labelClasses}>Plot No.</label>
                   <input
                     value={plot.plotNumber}
                     onChange={(e) => handlePlotChange(plot.id, "plotNumber", e.target.value)}
@@ -432,8 +426,8 @@ const removePlot = (plotId: string) => {
                   />
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Name <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Name {requiredMark}
                   </label>
                   <input
                     value={plot.plotName}
@@ -443,8 +437,8 @@ const removePlot = (plotId: string) => {
                   />
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Owner Name <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Owner Name {requiredMark}
                   </label>
                   <input
                     value={plot.ownerName}
@@ -454,10 +448,10 @@ const removePlot = (plotId: string) => {
                   />
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Type <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Type {requiredMark}
                   </label>
-                  <div className="flex items-center gap-4 h-10 border border-gray-200 rounded-xl px-3 bg-white">
+                  <div className="flex h-11 items-center gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3">
                     <label className="flex items-center gap-2 text-sm text-black">
                       <input
                         type="radio"
@@ -478,7 +472,7 @@ const removePlot = (plotId: string) => {
                 </div>
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
-                    <label className="block font-medium text-black mb-1">Extract</label>
+                    <label className={labelClasses}>Extract</label>
                     <input
                       value={plot.extractCount}
                       onChange={(e) => handlePlotChange(plot.id, "extractCount", e.target.value)}
@@ -486,7 +480,7 @@ const removePlot = (plotId: string) => {
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="block font-medium text-black mb-1">Area</label>
+                    <label className={labelClasses}>Area</label>
                     <input
                       value={plot.area}
                       onChange={(e) => handlePlotChange(plot.id, "area", e.target.value)}
@@ -531,7 +525,7 @@ const removePlot = (plotId: string) => {
                       >
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.extractNo}
                             onChange={(e) =>
                               handleExtractChange(plot.id, extract.id, "extractNo", e.target.value)
@@ -540,7 +534,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.prcArea}
                             onChange={(e) =>
                               handleExtractChange(plot.id, extract.id, "prcArea", e.target.value)
@@ -549,7 +543,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.ulcArea}
                             onChange={(e) =>
                               handleExtractChange(plot.id, extract.id, "ulcArea", e.target.value)
@@ -558,7 +552,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.bFormArea}
                             onChange={(e) =>
                               handleExtractChange(plot.id, extract.id, "bFormArea", e.target.value)
@@ -567,7 +561,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.conveyanceArea}
                             onChange={(e) =>
                               handleExtractChange(
@@ -581,7 +575,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.attorneyArea}
                             onChange={(e) =>
                               handleExtractChange(plot.id, extract.id, "attorneyArea", e.target.value)
@@ -590,7 +584,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                             value={extract.dilrMapArea}
                             onChange={(e) =>
                               handleExtractChange(plot.id, extract.id, "dilrMapArea", e.target.value)
@@ -599,7 +593,7 @@ const removePlot = (plotId: string) => {
                         </td>
                         <td className="border-r border-gray-200 px-3 py-2">
                           <input
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1 bg-gray-100 text-gray-900"
+                            className="h-9 w-full rounded-lg border border-gray-200 bg-gray-100 px-2 text-sm text-gray-900"
                             value={extract.leaseArea}
                             readOnly
                           />
@@ -621,7 +615,7 @@ const removePlot = (plotId: string) => {
                       </tr>
                     ))}
                     {/* Sub Plot Total row inside the same table */}
-                    <tr className="bg-emerald-50 font-semibold text-gray-900">
+                    <tr className="bg-blue-50 font-semibold text-gray-900">
                       <td className="border-r border-gray-200 px-3 py-2 text-left">Sub Plot Total</td>
                       <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.prcArea}</td>
                       <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.ulcArea}</td>
@@ -659,7 +653,7 @@ const removePlot = (plotId: string) => {
             </button>
           </div>
 
-          <div className="mt-6 border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+          <div className="mt-6 overflow-hidden rounded-xl border border-gray-100">
             <div className="bg-gray-50 px-4 py-3 font-semibold text-gray-900">Plot Totals</div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-gray-900">
@@ -688,7 +682,7 @@ const removePlot = (plotId: string) => {
                       <td className="px-3 py-2">{totals.leaseArea}</td>
                     </tr>
                   ))}
-                  <tr className="bg-emerald-50 font-semibold text-gray-900">
+                  <tr className="bg-blue-50 font-semibold text-gray-900">
                     <td className="px-3 py-2">All Plots Total</td>
                     <td className="px-3 py-2">{portalTotals.prcArea}</td>
                     <td className="px-3 py-2">{portalTotals.ulcArea}</td>
@@ -710,7 +704,7 @@ const removePlot = (plotId: string) => {
             </div>
           </div>
         </div>
-      </section>
+      </div>
       </fieldset>
     </div>
   );

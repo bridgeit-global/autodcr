@@ -89,7 +89,10 @@ export default function BuildingDetailsPage() {
   const grossConstructionArea = watch("grossConstructionArea");
 
   const inputClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
+    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
+  const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
+  const requiredMark = <span className="text-brand-navy">*</span>;
+  const errorClasses = "mt-1 text-sm text-status-danger";
 
   const onSubmit = async (data: BuildingFormData) => {
     if (isReadOnlyMode) return;
@@ -190,19 +193,17 @@ export default function BuildingDetailsPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading project data...</p>
-          </div>
+      <div className="flex min-h-[320px] items-center justify-center py-10">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
+          <p className="text-sm text-gray-500">Loading project data…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+    <div className="pb-2">
       <form onSubmit={handleSubmit(onSubmit)}>
         <fieldset
           disabled={isReadOnlyMode}
@@ -212,126 +213,99 @@ export default function BuildingDetailsPage() {
               : ""
           }
         >
-        <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-          {/* Header */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Building Details</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Provide the core parameters for the proposed building.
-              </p>
-            </div>
-
-            {!isReadOnlyMode && (
+          {!isReadOnlyMode && (
+            <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="submit"
-                className={`px-6 py-2 rounded-lg font-semibold ${
+                className={`rounded-lg px-5 py-2 text-sm font-semibold ${
                   isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
                 }`}
               >
                 {isSaved ? "Saved" : "Save"}
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="p-6 space-y-6 pb-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  Type <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="hidden"
-                  {...register("buildingType", { required: "Please select a type" })}
-                />
-                <CustomSelect
-                  value={watch("buildingType") || ""}
-                  onChange={(val) => setValue("buildingType", val, { shouldValidate: true })}
-                  options={BUILDING_TYPES.map((type) => ({ value: type, label: type }))}
-                  placeholder="Select type"
-                />
-                {errors.buildingType && (
-                  <p className="text-red-600 text-sm mt-1">{errors.buildingType.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  Height (in meters) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  {...register("height", {
-                    required: "Height is required",
-                  })}
-                  className={inputClasses}
-                  placeholder="Enter total height"
-                />
-                {errors.height && (
-                  <p className="text-red-600 text-sm mt-1">{errors.height.message}</p>
-                )}
-              </div>
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
+            <div>
+              <label className={labelClasses}>Type {requiredMark}</label>
+              <input
+                type="hidden"
+                {...register("buildingType", { required: "Please select a type" })}
+              />
+              <CustomSelect
+                value={watch("buildingType") || ""}
+                onChange={(val) => setValue("buildingType", val, { shouldValidate: true })}
+                options={BUILDING_TYPES.map((type) => ({ value: type, label: type }))}
+                placeholder="Select type"
+              />
+              {errors.buildingType && (
+                <p className={errorClasses}>{errors.buildingType.message}</p>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  FSI Built-up Area (sq. m) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  {...register("fsiBuiltUpArea", {
-                    required: "FSI built-up area is required",
-                    validate: (value) => {
-                      const grossArea = parseFloat(grossConstructionArea || "0");
-                      const fsiArea = parseFloat(value || "0");
-                      if (grossArea > 0 && fsiArea >= grossArea) {
-                        return "FSI Built-up Area must be less than Gross Construction Area";
-                      }
-                      return true;
-                    },
-                  })}
-                  className={inputClasses}
-                  placeholder="Enter FSI built-up area"
-                />
-                {errors.fsiBuiltUpArea && (
-                  <p className="text-red-600 text-sm mt-1">{errors.fsiBuiltUpArea.message}</p>
-                )}
-              </div>
+            <div>
+              <label className={labelClasses}>Height (in meters) {requiredMark}</label>
+              <input
+                {...register("height", {
+                  required: "Height is required",
+                })}
+                className={inputClasses}
+                placeholder="Enter total height"
+              />
+              {errors.height && <p className={errorClasses}>{errors.height.message}</p>}
+            </div>
 
-              <div>
-                <label className="block font-medium text-black mb-1">
-                  Gross Construction Area (sq. m) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  {...register("grossConstructionArea", {
-                    required: "Gross construction area is required",
-                    validate: (value) => {
-                      const grossArea = parseFloat(value || "0");
-                      const fsiArea = parseFloat(fsiBuiltUpArea || "0");
-                      if (fsiArea > 0 && grossArea <= fsiArea) {
-                        return "Gross Construction Area must be greater than FSI Built-up Area";
-                      }
-                      return true;
-                    },
-                  })}
-                  className={inputClasses}
-                  placeholder="Enter gross construction area"
-                />
-                {errors.grossConstructionArea && (
-                  <p className="text-red-600 text-sm mt-1">
-                    {errors.grossConstructionArea.message}
-                  </p>
-                )}
-              </div>
+            <div>
+              <label className={labelClasses}>FSI Built-up Area (sq. m) {requiredMark}</label>
+              <input
+                type="number"
+                step="0.01"
+                {...register("fsiBuiltUpArea", {
+                  required: "FSI built-up area is required",
+                  validate: (value) => {
+                    const grossArea = parseFloat(grossConstructionArea || "0");
+                    const fsiArea = parseFloat(value || "0");
+                    if (grossArea > 0 && fsiArea >= grossArea) {
+                      return "FSI Built-up Area must be less than Gross Construction Area";
+                    }
+                    return true;
+                  },
+                })}
+                className={inputClasses}
+                placeholder="Enter FSI built-up area"
+              />
+              {errors.fsiBuiltUpArea && (
+                <p className={errorClasses}>{errors.fsiBuiltUpArea.message}</p>
+              )}
+            </div>
+
+            <div>
+              <label className={labelClasses}>Gross Construction Area (sq. m) {requiredMark}</label>
+              <input
+                type="number"
+                step="0.01"
+                {...register("grossConstructionArea", {
+                  required: "Gross construction area is required",
+                  validate: (value) => {
+                    const grossArea = parseFloat(value || "0");
+                    const fsiArea = parseFloat(fsiBuiltUpArea || "0");
+                    if (fsiArea > 0 && grossArea <= fsiArea) {
+                      return "Gross Construction Area must be greater than FSI Built-up Area";
+                    }
+                    return true;
+                  },
+                })}
+                className={inputClasses}
+                placeholder="Enter gross construction area"
+              />
+              {errors.grossConstructionArea && (
+                <p className={errorClasses}>{errors.grossConstructionArea.message}</p>
+              )}
             </div>
           </div>
-        </section>
         </fieldset>
       </form>
     </div>
   );
 }
-

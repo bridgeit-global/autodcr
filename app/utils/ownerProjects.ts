@@ -6,8 +6,26 @@ export type OwnerProjectSelectRow = {
   id: string;
   title: string;
   status?: string;
-  project_info?: { proposalNo?: string } | null;
-  save_plot_details?: { planningAuthority?: string } | null;
+  project_info?: {
+    proposalNo?: string;
+    title?: string;
+    propertyAddress?: string;
+    landmark?: string;
+  } | null;
+  save_plot_details?: {
+    planningAuthority?: string;
+    grossPlotArea?: string | number;
+    majorUseOfPlot?: string;
+    ward?: string;
+    roadName?: string;
+    dpZone?: string;
+  } | null;
+  building_details?: {
+    buildingType?: string;
+    height?: string | number;
+    fsiBuiltUpArea?: string | number;
+    grossConstructionArea?: string | number;
+  } | null;
   applicant_details?: unknown;
 };
 
@@ -17,6 +35,7 @@ type ProjectRow = {
   status: string | null;
   project_info: unknown;
   save_plot_details: unknown;
+  building_details?: unknown;
   applicant_details?: unknown;
 };
 
@@ -49,7 +68,7 @@ export async function fetchOwnerProjectsForSelect(): Promise<OwnerProjectSelectR
     console.warn("get_projects_for_owner failed, falling back to direct query:", rpcError.message);
     const { data, error } = await supabase
       .from("projects")
-      .select("id,title,status,project_info,save_plot_details,applicant_details")
+      .select("id,title,status,project_info,save_plot_details,building_details,applicant_details")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
@@ -72,6 +91,7 @@ export async function fetchOwnerProjectsForSelect(): Promise<OwnerProjectSelectR
     status: row.status ?? undefined,
     project_info: row.project_info as OwnerProjectSelectRow["project_info"],
     save_plot_details: row.save_plot_details as OwnerProjectSelectRow["save_plot_details"],
+    building_details: row.building_details as OwnerProjectSelectRow["building_details"],
     applicant_details: rosterByProject[row.id] ?? { applicants: [] },
   }));
 }
@@ -112,6 +132,7 @@ export async function fetchManageableProjectsForSelect(): Promise<OwnerProjectSe
     status: row.status ?? undefined,
     project_info: row.project_info as OwnerProjectSelectRow["project_info"],
     save_plot_details: row.save_plot_details as OwnerProjectSelectRow["save_plot_details"],
+    building_details: row.building_details as OwnerProjectSelectRow["building_details"],
     applicant_details: rosterByProject[row.id] ?? { applicants: [] },
   }));
 }

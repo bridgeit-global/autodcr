@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo, Suspense } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import DashboardHeader from "../components/DashboardHeader";
+import AppShell from "@/app/components/appshell/AppShell";
 import CustomSelect from "@/app/components/CustomSelect";
-import SiteFooter from "../components/SiteFooter";
 import { supabase } from "@/app/utils/supabase";
 import { getAppointmentPermissionIdsFromApplicantDetails } from "@/app/utils/applicantAppointmentPermissions";
 import {
@@ -17,11 +16,12 @@ import {
   fetchManageableProjectsForSelect,
   fetchOwnerProjectsForSelect,
   getProjectPlanningAuthority,
+  isProjectEligibleForNewApplication,
   type OwnerProjectSelectRow,
 } from "@/app/utils/ownerProjects";
 import { canCreateProjectAsArchitect } from "@/app/utils/projectAccess";
 import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
-
+import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 
 type PlanningAuthority = {
@@ -610,14 +610,10 @@ const authorityPermissions: Record<string, PermissionType[]> = {
 export default function CreateApplicationPage() {
   const router = useRouter();
   const { showAlert } = useDashboardAlertModal();
-  const [sessionTime, setSessionTime] = useState(3600);
   const [selectedAuthority, setSelectedAuthority] = useState("bmc");
   const [selectedProject, setSelectedProject] = useState("");
   const [projects, setProjects] = useState<OwnerProjectSelectRow[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
-  const [projectSearchQuery, setProjectSearchQuery] = useState("");
-  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
-  const projectDropdownRef = useRef<HTMLDivElement>(null);
   const [selectedDepartment, setSelectedDepartment] = useState("General");
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
   const [proposalSubmission, setProposalSubmission] = useState(proposalSubmissionOptions[0]);
@@ -682,8 +678,19 @@ export default function CreateApplicationPage() {
       if (cancelled) return;
 
       let applicantDetails: unknown;
+      let projectInfo: OwnerProjectSelectRow["project_info"];
+      let savePlot: OwnerProjectSelectRow["save_plot_details"];
+      let buildingDetails: OwnerProjectSelectRow["building_details"];
+
       if (!rpcError && rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-        applicantDetails = (rpcData as { applicant_details?: unknown }).applicant_details;
+        const row = rpcData as {
+          applicant_details?: unknown;
+          project_info?: OwnerProjectSelectRow["project_info"];
+          save_plot_details?: OwnerProjectSelectRow["save_plot_details"];
+        };
+        applicantDetails = row.applicant_details;
+        projectInfo = row.project_info;
+        savePlot = row.save_plot_details;
       } else {
         const { data: rosterData, error: rosterError } = await supabase.rpc(
           "get_applicant_details_for_project",
@@ -693,9 +700,27 @@ export default function CreateApplicationPage() {
         applicantDetails = rosterData;
       }
 
+      const { data: bdRow } = await supabase
+        .from("projects")
+        .select("building_details")
+        .eq("id", selectedProject)
+        .maybeSingle();
+      if (cancelled) return;
+      if (bdRow?.building_details && typeof bdRow.building_details === "object") {
+        buildingDetails = bdRow.building_details as OwnerProjectSelectRow["building_details"];
+      }
+
       setProjects((prev) =>
         prev.map((p) =>
-          p.id === selectedProject ? { ...p, applicant_details: applicantDetails } : p
+          p.id === selectedProject
+            ? {
+                ...p,
+                ...(applicantDetails !== undefined ? { applicant_details: applicantDetails } : {}),
+                ...(projectInfo ? { project_info: projectInfo } : {}),
+                ...(savePlot ? { save_plot_details: savePlot } : {}),
+                ...(buildingDetails ? { building_details: buildingDetails } : {}),
+              }
+            : p
         )
       );
     })();
@@ -705,17 +730,6 @@ export default function CreateApplicationPage() {
     };
   }, [selectedProject]);
 
-  useEffect(() => {
-    if (!projectDropdownOpen) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
-        setProjectDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [projectDropdownOpen]);
-
   const authorityLabelMap: Record<string, string> = {
     bmc: "BMC",
     sra: "SRA",
@@ -723,6 +737,7 @@ export default function CreateApplicationPage() {
     mmrda: "MMRDA",
   };
   const selectedAuthorityLabel = authorityLabelMap[selectedAuthority];
+
   const getProjectDisplayData = (project: {
     title: string;
     project_info?: { proposalNo?: string; title?: string } | null;
@@ -739,21 +754,15 @@ export default function CreateApplicationPage() {
     return {
       label: proposalNo ? `${cleanTitle} ${highlightedPart}` : cleanTitle,
       highlightedPart,
+      proposalNo,
+      cleanTitle,
     };
   };
+
   const filteredProjects = projects.filter(
-    (project) => getProjectPlanningAuthority(project) === selectedAuthorityLabel
-  );
-  const selectedProjectTitle =
-    getProjectDisplayData(
-      filteredProjects.find((project) => project.id === selectedProject) || { title: "" }
-    ).label || "";
-  const selectedProjectHighlightedPart =
-    getProjectDisplayData(
-      filteredProjects.find((project) => project.id === selectedProject) || { title: "" }
-    ).highlightedPart;
-  const filteredProjectOptions = filteredProjects.filter((project) =>
-    project.title.toLowerCase().includes(projectSearchQuery.trim().toLowerCase())
+    (project) =>
+      isProjectEligibleForNewApplication(project.status) &&
+      getProjectPlanningAuthority(project) === selectedAuthorityLabel
   );
 
   useEffect(() => {
@@ -779,18 +788,53 @@ export default function CreateApplicationPage() {
     return permissionTypes.filter((p) => allowed.has(p.id));
   }, [selectedDepartment, selectedProject, selectedProjectData, permissionTypes]);
 
+  const selectedPermissionRecord = visiblePermissionTypes.find((p) => p.id === selectedPermission);
+
+  const keyVariables = useMemo(() => {
+    if (!selectedProjectData) return [] as { field: string; value: string; source: string }[];
+    const info = selectedProjectData.project_info;
+    const plot = selectedProjectData.save_plot_details;
+    const building = selectedProjectData.building_details;
+    const display = getProjectDisplayData(selectedProjectData);
+    const rows: { field: string; value: string; source: string }[] = [];
+    const push = (field: string, value: string | number | undefined | null) => {
+      const text = value == null ? "" : String(value).trim();
+      if (!text) return;
+      rows.push({ field, value: text, source: "Project Data" });
+    };
+    push("Project Name", display.cleanTitle || selectedProjectData.title);
+    push("Proposal No", info?.proposalNo || display.proposalNo);
+    push("Plot Area", plot?.grossPlotArea);
+    push("Building Height", building?.height);
+    push("Planning Authority", plot?.planningAuthority || selectedAuthorityLabel);
+    push("Major Use of Plot", plot?.majorUseOfPlot);
+    push("Ward", plot?.ward);
+    push("Building Type", building?.buildingType);
+    push("Property Address", info?.propertyAddress);
+    return rows;
+  }, [selectedProjectData, selectedAuthorityLabel]);
+
   const handleProceed = async () => {
     if (!selectedProject || !selectedPermission) return;
 
     const selectedProjectRecord = filteredProjects.find((project) => project.id === selectedProject);
-    const selectedPermissionRecord = visiblePermissionTypes.find(
+    const selectedPermissionRec = visiblePermissionTypes.find(
       (permission) => permission.id === selectedPermission
     );
 
-    if (!selectedProjectRecord || !selectedPermissionRecord) {
+    if (!selectedProjectRecord || !selectedPermissionRec) {
       showAlert({
         title: "Selection required",
         message: "Please select a valid project and permission type.",
+      });
+      return;
+    }
+
+    if (!isProjectEligibleForNewApplication(selectedProjectRecord.status)) {
+      showAlert({
+        title: "Project still in draft",
+        message:
+          "Applications can only be created for submitted projects. Submit the project first, then try again.",
       });
       return;
     }
@@ -810,7 +854,7 @@ export default function CreateApplicationPage() {
       projectId: selectedProjectRecord.id,
       projectTitle: selectedProjectRecord.title,
       department: selectedDepartment,
-      permissionType: selectedPermissionRecord.title,
+      permissionType: selectedPermissionRec.title,
       workflowStage: "draft",
     });
     setIsSubmitting(false);
@@ -824,9 +868,9 @@ export default function CreateApplicationPage() {
         setRedirectOnModalOk(false);
         setShowInfoModal(true);
         setExistingPermissionTypes((prev) =>
-          prev.includes(selectedPermissionRecord.title)
+          prev.includes(selectedPermissionRec.title)
             ? prev
-            : [...prev, selectedPermissionRecord.title]
+            : [...prev, selectedPermissionRec.title]
         );
         return;
       }
@@ -838,7 +882,6 @@ export default function CreateApplicationPage() {
       return;
     }
 
-    // Notify owner + consultant via email (fire-and-forget)
     if ("applicationId" in result) {
       supabase.auth.getSession().then(({ data: { session: notifSession } }) => {
         const notifToken = notifSession?.access_token;
@@ -858,9 +901,9 @@ export default function CreateApplicationPage() {
     }
 
     setExistingPermissionTypes((prev) =>
-      prev.includes(selectedPermissionRecord.title)
+      prev.includes(selectedPermissionRec.title)
         ? prev
-        : [...prev, selectedPermissionRecord.title]
+        : [...prev, selectedPermissionRec.title]
     );
     setSelectedPermission(null);
     setModalMessage("Application created successfully.");
@@ -874,17 +917,6 @@ export default function CreateApplicationPage() {
       router.push(`/userdashboard?department=${encodeURIComponent(selectedDepartment)}`);
     }
   };
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSessionTime((prev) => {
-        if (prev <= 0) return 0;
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     setSelectedPermission(null);
@@ -936,17 +968,6 @@ export default function CreateApplicationPage() {
     };
   }, [selectedProject, selectedDepartment]);
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  const handlePermissionCardClick = (id: string) => {
-    setSelectedPermission((prev) => (prev === id ? null : id));
-  };
-
-  const showDepartment = true;
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const showBuildingPermissionFields = selectedDepartment === "Building Permission";
 
@@ -967,372 +988,361 @@ export default function CreateApplicationPage() {
   }, [visiblePermissionTypes, selectedPermission]);
 
   const inputClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
+    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20";
+
+  const canSubmit =
+    Boolean(selectedProject && selectedPermission) &&
+    !isSubmitting &&
+    !(
+      selectedPermission &&
+      existingPermissionTypes.includes(selectedPermissionRecord?.title ?? "")
+    ) &&
+    !(
+      showBuildingPermissionFields &&
+      (!typeOfNotice || !proposedApplication || !majorUse || !applicationType)
+    );
+
+  const projectSelectOptions = filteredProjects.map((project) => ({
+    value: project.id,
+    label: getProjectDisplayData(project).label,
+  }));
+
+  const applicationSelectOptions = visiblePermissionTypes.map((type) => {
+    const already = existingPermissionTypes.includes(type.title);
+    return {
+      value: type.id,
+      label: already ? `${type.title} (Already added)` : type.title,
+    };
+  });
+
+  const relatedRows = [
+    { label: "Authority", value: selectedAuthorityLabel },
+    { label: "Department", value: selectedDepartment || "—" },
+    {
+      label: "Application",
+      value: selectedPermissionRecord?.title || "—",
+    },
+    {
+      label: "Project",
+      value: selectedProjectData
+        ? getProjectDisplayData(selectedProjectData).cleanTitle || selectedProjectData.title
+        : "—",
+    },
+    {
+      label: "Proposal No",
+      value:
+        selectedProjectData?.project_info?.proposalNo?.trim() ||
+        (selectedProjectData ? getProjectDisplayData(selectedProjectData).proposalNo : "") ||
+        "—",
+    },
+    {
+      label: "Major Use",
+      value:
+        majorUse ||
+        selectedProjectData?.save_plot_details?.majorUseOfPlot?.trim() ||
+        "—",
+    },
+  ];
 
   return (
-    <div className="h-screen bg-gray-100 flex flex-col overflow-hidden">
-      <div className="p-4 md:p-6 shrink-0">
-        <Suspense fallback={<div className="h-16 bg-white border border-gray-200 rounded-3xl"></div>}>
-          <DashboardHeader sessionTime={formatTime(sessionTime)} />
-        </Suspense>
-      </div>
+    <AppShell title="Create Application">
+      <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between md:px-6">
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
+                Create Application
+              </h1>
+              <p className="mt-1 text-sm text-gray-500">
+                Select authority and project, then choose the application to create.
+              </p>
+            </div>
+            <div className="grid w-full gap-3 sm:max-w-xl sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Authority
+                </label>
+                <CustomSelect
+                  value={selectedAuthority}
+                  onChange={setSelectedAuthority}
+                  options={planningAuthorities.map((a) => ({
+                    value: a.id,
+                    label: a.label,
+                  }))}
+                  placeholder="Select authority"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Project
+                </label>
+                <CustomSelect
+                  value={selectedProject}
+                  onChange={(val) => setSelectedProject(val)}
+                  options={projectSelectOptions}
+                  placeholder={
+                    projectsLoading
+                      ? "Loading projects…"
+                      : filteredProjects.length === 0
+                        ? "No submitted projects"
+                        : "Select project"
+                  }
+                  disabled={projectsLoading || filteredProjects.length === 0}
+                />
+                {!projectsLoading && filteredProjects.length === 0 && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    Draft projects are not listed. Submit a project for this authority first.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
 
-      <div className="px-4 md:px-6 pb-4 md:pb-6 flex-1 min-h-0 overflow-hidden">
-        <div className="h-full w-full rounded-3xl bg-white shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-          <div className="flex flex-1 min-h-0 bg-gray-50">
-            <div className="p-4 md:p-6 flex flex-1 min-h-0 overflow-hidden">
-              <main className="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white border border-gray-200 shadow-sm px-4 md:px-6 py-6">
-                <div className="max-w-5xl mx-auto px-6 pt-8 space-y-6">
-                  <section className="border border-gray-200 rounded-2xl p-6 bg-white shadow-sm">
-                    <div className="border-b border-gray-200 pb-4 mb-6">
-                      <h2 className="text-xl font-bold text-black">Create New Application</h2>
-                      <p className="text-sm text-black mt-1">
-                        Fill in the details below to start a new application for your project.
-                      </p>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div>
-                        <label className="block font-medium text-black mb-1">
-                          Who is planning authority for the project?
-                        </label>
-                        <div className="flex flex-wrap gap-4">
-                          {planningAuthorities.map((authority) => (
-                            <label
-                              key={authority.id}
-                              className="flex items-center gap-2 text-sm text-black"
-                            >
-                              <input
-                                type="radio"
-                                name="planning-authority"
-                                checked={selectedAuthority === authority.id}
-                                onChange={() => setSelectedAuthority(authority.id)}
-                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
-                              />
-                              {authority.label}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className={`grid gap-4 ${showDepartment ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
-                        <div ref={projectDropdownRef} className="relative">
-                          <label className="block font-medium text-black mb-1">
-                            Project
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => setProjectDropdownOpen((prev) => !prev)}
-                            className={`${inputClasses} text-left flex items-center justify-between gap-2 h-auto min-h-[40px] py-2`}
-                          >
-                            <span className={`${selectedProject ? "text-gray-900" : "text-gray-400"} break-words text-left leading-snug`}>
-                              {selectedProject ? (
-                                selectedProjectHighlightedPart &&
-                                selectedProjectTitle.includes(selectedProjectHighlightedPart) ? (
-                                  <>
-                                    <span>
-                                      {selectedProjectTitle.split(selectedProjectHighlightedPart, 2)[0]}
-                                    </span>
-                                    <span className="text-black font-semibold">
-                                      {selectedProjectHighlightedPart}
-                                    </span>
-                                    <span>
-                                      {selectedProjectTitle.split(selectedProjectHighlightedPart, 2)[1]}
-                                    </span>
-                                  </>
-                                ) : (
-                                  selectedProjectTitle
-                                )
-                              ) : (
-                                "Select Project"
-                              )}
-                            </span>
-                            <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${projectDropdownOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          {projectDropdownOpen && (
-                            <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                              <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
-                                <input
-                                  type="text"
-                                  value={projectSearchQuery}
-                                  onChange={(event) => setProjectSearchQuery(event.target.value)}
-                                  placeholder="Search project"
-                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-emerald-500 outline-none"
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedProject("");
-                                  setProjectDropdownOpen(false);
-                                  setProjectSearchQuery("");
-                                }}
-                                className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50"
-                              >
-                                Select Project
-                              </button>
-                              {filteredProjectOptions.map((project) => (
-                                <button
-                                  key={project.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedProject(project.id);
-                                    setProjectDropdownOpen(false);
-                                    setProjectSearchQuery("");
-                                  }}
-                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 break-words leading-snug ${
-                                    selectedProject === project.id ? "bg-emerald-50 text-emerald-700 font-medium" : "text-gray-900"
-                                  }`}
-                                >
-                                  {(() => {
-                                    const display = getProjectDisplayData(project);
-                                    if (!display.highlightedPart || !display.label.includes(display.highlightedPart)) {
-                                      return display.label;
-                                    }
-                                    const [prefix, suffix] = display.label.split(display.highlightedPart, 2);
-                                    return (
-                                      <>
-                                        <span>{prefix}</span>
-                                        <span className="text-emerald-700 font-semibold">{display.highlightedPart}</span>
-                                        <span>{suffix}</span>
-                                      </>
-                                    );
-                                  })()}
-                                </button>
-                              ))}
-                              {filteredProjects.length === 0 && (
-                                <div className="px-3 py-2 text-sm text-gray-500">
-                                  {projectsLoading
-                                    ? "Loading projects…"
-                                    : projects.length === 0
-                                      ? "No submitted projects yet. Complete and submit a project from the dashboard first."
-                                      : `No projects for ${selectedAuthorityLabel}. Try another planning authority or update the project in project details.`}
-                                </div>
-                              )}
-                              {filteredProjects.length > 0 && filteredProjectOptions.length === 0 && (
-                                <div className="px-3 py-2 text-sm text-gray-500">
-                                  No projects match your search
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {showDepartment && (
-                          <div>
-                            <label htmlFor="department" className="block font-medium text-black mb-1">
-                              Department
-                            </label>
-                            <CustomSelect
-                              id="department"
-                              value={selectedDepartment}
-                              onChange={(val) => setSelectedDepartment(val)}
-                              options={departmentOptions.map((department) => ({
-                                value: department,
-                                label: department,
-                              }))}
-                              placeholder="Select Department"
-                              disabled={!selectedProject}
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <p className="block font-medium text-black mb-1">Permission Type</p>
-                        <p className="text-xs text-gray-500 mb-4">
-                          Select the type of permission you want to apply for
-                        </p>
-                        {selectedDepartment === "General" &&
-                        selectedProject &&
-                        visiblePermissionTypes.length === 0 ? (
-                          <p className="text-sm text-gray-600 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
-                            No consultant roles on this project match an appointment letter yet. Add
-                            matching roles (e.g. Architect, Fire Consultant) in{" "}
-                            <Link
-                              href={`/dashboard/applicant?projectId=${encodeURIComponent(selectedProject)}`}
-                              className="font-medium text-emerald-700 underline decoration-emerald-600/50 underline-offset-2 hover:text-emerald-800"
-                            >
-                              Applicant Details
-                            </Link>
-                            , then return here.
-                          </p>
-                        ) : (
-                          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            {visiblePermissionTypes.map((type) => {
-                              const isAlreadyCreated =
-                                selectedProject && existingPermissionTypes.includes(type.title);
-
-                              return (
-                                <button
-                                  key={type.id}
-                                  type="button"
-                                  disabled={Boolean(isAlreadyCreated)}
-                                  aria-disabled={Boolean(isAlreadyCreated)}
-                                  onClick={() => {
-                                    if (isAlreadyCreated) {
-                                      setModalMessage(
-                                        "This permission type is already created for the selected project."
-                                      );
-                                      setRedirectOnModalOk(false);
-                                      setShowInfoModal(true);
-                                      return;
-                                    }
-                                    handlePermissionCardClick(type.id);
-                                  }}
-                                  className={`h-full rounded-2xl border px-4 py-5 text-left transition ${
-                                    selectedPermission === type.id
-                                      ? "border-emerald-500 bg-emerald-50"
-                                      : isAlreadyCreated
-                                        ? "border-gray-200 bg-gray-100 opacity-70 cursor-not-allowed"
-                                        : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
-                                  }`}
-                                >
-                                  <div className="mb-4 flex items-center justify-center">{type.icon}</div>
-                                  <p className="text-sm font-semibold text-black">{type.title}</p>
-                                  <p className="text-xs text-gray-500 mt-2">{type.description}</p>
-                                  {isAlreadyCreated && (
-                                    <p className="text-xs font-medium text-amber-700 mt-2">
-                                      Already added for this project
-                                    </p>
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {showBuildingPermissionFields && (
-                        <div className="space-y-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
-                          <div>
-                            <p className="block font-medium text-black mb-3">
-                              Proposal Submission For -
-                            </p>
-                            <div className="flex flex-wrap gap-4">
-                              {proposalSubmissionOptions.map((option) => (
-                                <label key={option} className="flex items-center gap-2 text-sm text-black">
-                                  <input
-                                    type="radio"
-                                    name="proposal-submission"
-                                    value={option}
-                                    checked={proposalSubmission === option}
-                                    onChange={() => setProposalSubmission(option)}
-                                    className="h-4 w-4 text-emerald-600 focus:ring-emerald-500"
-                                  />
-                                  {option}
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                            <div>
-                              <label className="block font-medium text-black mb-1">Type of Notice</label>
-                              <CustomSelect
-                                value={typeOfNotice}
-                                onChange={(val) => setTypeOfNotice(val)}
-                                options={noticeOptions.map((option) => ({
-                                  value: option,
-                                  label: option,
-                                }))}
-                                placeholder="Select"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block font-medium text-black mb-1">Proposed Application</label>
-                              <input
-                                type="text"
-                                value={proposedApplication}
-                                onChange={(event) => setProposedApplication(event.target.value)}
-                                placeholder="Enter proposal reference"
-                                className={inputClasses}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block font-medium text-black mb-1">Major Use of Plot</label>
-                              <CustomSelect
-                                value={majorUse}
-                                onChange={(val) => setMajorUse(val)}
-                                options={majorUseOptions.map((option) => ({
-                                  value: option,
-                                  label: option,
-                                }))}
-                                placeholder="Select"
-                                className={inputClasses}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block font-medium text-black mb-1">Application Type</label>
-                              <CustomSelect
-                                value={applicationType}
-                                onChange={(val) => setApplicationType(val)}
-                                options={applicationTypeOptions.map((option) => ({
-                                  value: option,
-                                  label: option,
-                                }))}
-                                placeholder="Select"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  <div className="flex justify-end gap-3 pb-6">
-                    <button
-                      type="button"
-                      className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-xl bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all px-5 py-2 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={
-                        isSubmitting ||
-                        !selectedProject ||
-                        !selectedPermission ||
-                        (selectedPermission &&
-                          existingPermissionTypes.includes(
-                            visiblePermissionTypes.find((p) => p.id === selectedPermission)?.title ?? ""
-                          )) ||
-                        (showBuildingPermissionFields &&
-                          (!typeOfNotice || !proposedApplication || !majorUse || !applicationType))
+          <div className="grid gap-6 px-5 py-6 lg:grid-cols-3 md:px-6">
+            <div className="space-y-6 lg:col-span-2">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                    Department
+                  </label>
+                  <CustomSelect
+                    value={selectedDepartment}
+                    onChange={setSelectedDepartment}
+                    options={departmentOptions.map((dept) => ({
+                      value: dept,
+                      label: dept,
+                    }))}
+                    placeholder="Select department"
+                    disabled={!selectedProject}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                    Application type
+                  </label>
+                  {selectedDepartment === "General" &&
+                  selectedProject &&
+                  visiblePermissionTypes.length === 0 ? (
+                    <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-sm text-gray-700">
+                      No consultant roles match an appointment letter yet. Add matching roles in{" "}
+                      <Link
+                        href={`/dashboard/applicant?projectId=${encodeURIComponent(selectedProject)}`}
+                        className="font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy"
+                      >
+                        Applicant Details
+                      </Link>
+                      .
+                    </p>
+                  ) : (
+                    <CustomSelect
+                      value={selectedPermission ?? ""}
+                      onChange={(val) => {
+                        const type = visiblePermissionTypes.find((p) => p.id === val);
+                        if (type && existingPermissionTypes.includes(type.title)) {
+                          setModalMessage(
+                            "This permission type is already created for the selected project."
+                          );
+                          setRedirectOnModalOk(false);
+                          setShowInfoModal(true);
+                          return;
+                        }
+                        setSelectedPermission(val || null);
+                      }}
+                      options={applicationSelectOptions}
+                      placeholder={
+                        !selectedProject
+                          ? "Select a project first"
+                          : "Select application type"
                       }
-                      onClick={handleProceed}
-                    >
-                      {isSubmitting ? "Submitting..." : "Proceed"}
-                    </button>
+                      disabled={!selectedProject || visiblePermissionTypes.length === 0}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {showBuildingPermissionFields && (
+                <div className="space-y-5 rounded-xl border border-gray-200 bg-gray-50/80 p-4 md:p-5">
+                  <div>
+                    <p className="mb-3 text-sm font-medium text-gray-800">
+                      Proposal Submission For
+                    </p>
+                    <div className="flex flex-wrap gap-4">
+                      {proposalSubmissionOptions.map((option) => (
+                        <label key={option} className="flex items-center gap-2 text-sm text-gray-800">
+                          <input
+                            type="radio"
+                            name="proposal-submission"
+                            value={option}
+                            checked={proposalSubmission === option}
+                            onChange={() => setProposalSubmission(option)}
+                            className="h-4 w-4 text-brand-blue focus:ring-brand-blue"
+                          />
+                          {option}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                        Type of Notice
+                      </label>
+                      <CustomSelect
+                        value={typeOfNotice}
+                        onChange={setTypeOfNotice}
+                        options={noticeOptions.map((option) => ({
+                          value: option,
+                          label: option,
+                        }))}
+                        placeholder="Select"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                        Proposed Application
+                      </label>
+                      <input
+                        type="text"
+                        value={proposedApplication}
+                        onChange={(event) => setProposedApplication(event.target.value)}
+                        placeholder="Enter proposal reference"
+                        className={inputClasses}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                        Major Use of Plot
+                      </label>
+                      <CustomSelect
+                        value={majorUse}
+                        onChange={setMajorUse}
+                        options={majorUseOptions.map((option) => ({
+                          value: option,
+                          label: option,
+                        }))}
+                        placeholder="Select"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                        Application Type
+                      </label>
+                      <CustomSelect
+                        value={applicationType}
+                        onChange={setApplicationType}
+                        options={applicationTypeOptions.map((option) => ({
+                          value: option,
+                          label: option,
+                        }))}
+                        placeholder="Select"
+                      />
+                    </div>
                   </div>
                 </div>
-              </main>
+              )}
+
+              <div>
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-brand-navy">Key Variables</h2>
+                    <p className="text-xs text-gray-500">
+                      Pulled from the selected project. Empty fields are hidden.
+                    </p>
+                  </div>
+                </div>
+                <div className="overflow-hidden rounded-xl border border-gray-200">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">Field</th>
+                        <th className="px-4 py-3 font-medium">Value</th>
+                        <th className="px-4 py-3 font-medium">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white">
+                      {!selectedProject ? (
+                        <tr>
+                          <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                            Select a project to view key variables.
+                          </td>
+                        </tr>
+                      ) : keyVariables.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                            No project variables available yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        keyVariables.map((row) => (
+                          <tr key={row.field}>
+                            <td className="px-4 py-3 font-medium text-gray-800">{row.field}</td>
+                            <td className="px-4 py-3 text-gray-700">{row.value}</td>
+                            <td className="px-4 py-3 text-gray-500">{row.source}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
+
+            <aside className="lg:col-span-1">
+              <div className="h-full rounded-xl border border-sky-100 bg-sky-50/70 p-5">
+                <h2 className="text-sm font-semibold text-brand-navy">Related Information</h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  Summary of your current selections.
+                </p>
+                <dl className="mt-5 space-y-4">
+                  {relatedRows.map((row) => (
+                    <div key={row.label}>
+                      <dt className="text-xs font-medium uppercase tracking-wide text-sky-800/70">
+                        {row.label}
+                      </dt>
+                      <dd className="mt-1 text-sm font-medium text-gray-900 break-words">
+                        {row.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </aside>
+          </div>
+
+          <div className="flex flex-col-reverse gap-3 border-t border-gray-100 px-5 py-4 sm:flex-row sm:justify-end md:px-6">
+            <button
+              type="button"
+              onClick={() => router.push("/userdashboard")}
+              className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${BTN_SECONDARY}`}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={handleProceed}
+              className={`rounded-lg px-5 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${BTN_PRIMARY}`}
+            >
+              {isSubmitting ? "Creating…" : "Create Application"}
+            </button>
           </div>
         </div>
       </div>
 
       {showInfoModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-[500px] overflow-hidden">
-            <div className="bg-emerald-600 px-6 py-3">
-              <h3 className="text-white text-lg font-semibold">Information</h3>
+          <div className="w-[min(500px,92vw)] overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="bg-brand-navy px-6 py-3">
+              <h3 className="text-lg font-semibold text-white">Information</h3>
             </div>
             <div className="px-6 py-6">
-              <p className="text-gray-800 text-sm">
-                {modalMessage}
-              </p>
+              <p className="text-sm text-gray-800">{modalMessage}</p>
             </div>
-            <div className="px-6 py-4 flex justify-end border-t border-gray-200">
+            <div className="flex justify-end border-t border-gray-200 px-6 py-4">
               <button
                 onClick={handleModalOk}
-                className="px-6 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className={`rounded-lg px-6 py-2 text-sm font-medium ${BTN_SECONDARY}`}
               >
                 OK
               </button>
@@ -1340,11 +1350,6 @@ export default function CreateApplicationPage() {
           </div>
         </div>
       )}
-
-      <div className="shrink-0">
-        <SiteFooter />
-      </div>
-    </div>
+    </AppShell>
   );
 }
-

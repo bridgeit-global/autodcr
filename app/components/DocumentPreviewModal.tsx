@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
+import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 
 const ApplicationStoredPdfViewer = dynamic(() => import("./ApplicationStoredPdfViewer"), {
   ssr: false,
@@ -513,7 +514,7 @@ export default function DocumentPreviewModal({
                   <button
                     onClick={() => void handleDownloadStoredPdf()}
                     disabled={saveUiBusy}
-                    className="h-9 px-3 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
+                    className={`h-9 px-3 rounded-lg text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none ${BTN_PRIMARY}`}
                     aria-label="Download saved PDF"
                     type="button"
                   >
@@ -539,7 +540,7 @@ export default function DocumentPreviewModal({
                   <button
                     onClick={handlePrint}
                     disabled={saveUiBusy}
-                    className="h-9 px-3 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
+                    className={`h-9 px-3 rounded-lg text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none ${BTN_PRIMARY}`}
                     aria-label="Print or save as PDF"
                     type="button"
                   >

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useSearchParams, usePathname } from "next/navigation";
+import { useSearchParams, usePathname, useRouter } from "next/navigation";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { getSurveyNumbersForPlotFlowSync } from "@/app/utils/villageToSurveyNumbers";
 import { WARDS_WITH_FP_OPTION } from "@/app/utils/dp2034FpWards";
@@ -16,6 +17,8 @@ import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
+import Modal from "@/app/components/ui/Modal";
+import WizardSteps, { type WizardStep } from "@/app/components/ui/WizardSteps";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
   combineProjectTitleWithProposalNo,
@@ -211,9 +214,16 @@ function validateSurveySelectionMessage(plotBelongs: SavePlotFormData["plotBelon
   }
 }
 
+/** Wizard steps in order. Each `id` matches the `tab` query-param contract. */
+const WIZARD_STEPS: WizardStep[] = [
+  { id: "project-info", label: "Basic Details" },
+  { id: "save-plot", label: "Property Details" },
+];
+
 export default function ProjectDetailsClient() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const router = useRouter();
   const projectId = searchParams.get("projectId");
   const mode = searchParams.get("mode");
   const isReadOnlyMode = mode === "readonly";
@@ -228,8 +238,9 @@ export default function ProjectDetailsClient() {
   
   const tabParam = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    tabParam === "project-info" ? "project-info" : "save-plot"
+    tabParam === "save-plot" ? "save-plot" : "project-info"
   );
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   useEffect(() => {
     if (tabParam === "project-info" || tabParam === "save-plot") {
@@ -243,9 +254,22 @@ export default function ProjectDetailsClient() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const inputClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
+    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
   const textareaClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none";
+    "w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20";
+  const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
+  const requiredMark = <span className="text-brand-navy">*</span>;
+  const errorClasses = "mt-1 text-sm text-status-danger";
+  const radioClasses = "h-4 w-4 border-gray-300 text-brand-blue focus:ring-brand-blue";
+  const radioLabelClasses = "flex items-center gap-2 text-sm text-gray-700";
+  const chipClasses =
+    "inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-800";
+  const secondaryBtnClasses =
+    "inline-flex min-h-10 items-center rounded-lg border border-brand-blue/30 bg-white px-4 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-50";
+  const primaryBtnClasses =
+    "inline-flex min-h-10 items-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-blue-hover hover:shadow-md";
+  const footerBarClasses =
+    "mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-4";
 
   const {
     register: registerProject,
@@ -1058,10 +1082,18 @@ export default function ProjectDetailsClient() {
     }
   };
 
-  const tabs = [
-    { id: "save-plot", label: "Save Plot Details" },
-    { id: "project-info", label: "Project Info" },
-  ];
+  const currentStepIndex = Math.max(
+    0,
+    WIZARD_STEPS.findIndex((step) => step.id === activeTab)
+  );
+  const goToStep = (index: number) => {
+    const step = WIZARD_STEPS[index];
+    if (!step) return;
+    setActiveTab(step.id);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   const planningAuthorityOptions = [...PLANNING_AUTHORITY_OPTIONS];
 
@@ -1435,55 +1467,27 @@ export default function ProjectDetailsClient() {
   // Show loading state while fetching project data
   if (isLoadingProject) {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading project data...</p>
-          </div>
+      <div className="flex min-h-[320px] items-center justify-center py-10">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
+          <p className="text-sm text-gray-500">Loading project data…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-      {/* Warning Message */}
-      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md shadow-sm">
-        <p className="text-sm text-red-700">
-          <strong>Note:</strong>{" "}
-          {isReadOnlyMode
-            ? "This project is opened in read-only mode for a submitted/linked application. Editing is disabled."
-            : "Dear Applicant, you will not be able to edit project if any application submitted for this Project. You can edit / add information before submitting any application."}
-        </p>
-      </div>
+    <div className="pb-6">
+      {/* Basic Details → Property Details */}
+      <div>
+        <div className="mb-5 overflow-x-auto pb-1">
+          <WizardSteps
+            steps={WIZARD_STEPS}
+            currentStep={currentStepIndex}
+            onStepClick={goToStep}
+          />
+        </div>
 
-      {/* Sub-navigation Tabs (scrolls like the note section) */}
-      <section className="border border-gray-200 rounded-2xl bg-white shadow-sm">
-        <div className="p-4">
-          <div className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-              <button
-                key={tab.id}
-                  type="button"
-                onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    isActive
-                    ? `${BTN_PRIMARY} shadow-md ring-1 ring-emerald-700`
-                    : "text-gray-600 hover:text-gray-900 hover:bg-white/70"
-                  }`}
-              >
-                {tab.label}
-              </button>
-              );
-            })}
-          </div>
-      </div>
-      </section>
-
-      <div className="space-y-6">
         {activeTab === "project-info" && (
           <form onSubmit={handleProjectSubmit(onProjectSubmit)}>
             <fieldset
@@ -1494,48 +1498,27 @@ export default function ProjectDetailsClient() {
                   : ""
               }
             >
-            <section className="border border-gray-200 rounded-2xl p-6 bg-white shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 pb-4">
-            <div>
-                  <h2 className="text-xl font-bold text-black">Project Details</h2>
-                  <p className="text-sm text-black mt-1">
-                Keep the inputs consistent with your registered application to avoid review delays.
-              </p>
-            </div>
-
-            {!isReadOnlyMode && (
-              <button
-                type="submit"
-                className={`px-6 py-2 rounded-lg font-semibold ${
-                  isProjectInfoSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                }`}
-              >
-                {isProjectInfoSaved ? "Saved" : "Save"}
-              </button>
-            )}
-          </div>
-
-              <div className="pt-6 space-y-6">
+            <section className="pt-2">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             {/* Proposal is as per + Proposal No */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block font-medium text-black mb-1">Proposal is as per</label>
-                <div className="flex gap-6">
-                  <label className="flex items-center gap-2 text-sm text-black">
+                <label className={labelClasses}>Proposal is as per</label>
+                <div className="flex h-11 items-center gap-6">
+                  <label className={radioLabelClasses}>
                     <input
                       {...registerProject("proposalAsPer")}
                       type="radio"
                       value="DCPR 2034"
                       defaultChecked
-                      className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                      className={radioClasses}
                     />
                     DCPR 2034
                   </label>
                 </div>
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Proposal No <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Proposal No {requiredMark}
                 </label>
                 <input
                   {...registerProject("proposalNo", {
@@ -1545,14 +1528,13 @@ export default function ProjectDetailsClient() {
                   className={inputClasses}
                   placeholder="Enter proposal number"
                 />
-                {projectErrors.proposalNo && <p className="text-red-600 text-sm mt-1">{projectErrors.proposalNo.message}</p>}
+                {projectErrors.proposalNo && <p className={errorClasses}>{projectErrors.proposalNo.message}</p>}
               </div>
-            </div>
 
             {/* Title */}
-            <div>
-                <label className="block font-medium text-black mb-1">
-                Title <span className="text-red-500">*</span>
+            <div className="md:col-span-2">
+                <label className={labelClasses}>
+                Title {requiredMark}
               </label>
               <input
                   {...registerProject("title", {
@@ -1562,13 +1544,13 @@ export default function ProjectDetailsClient() {
                   className={inputClasses}
                 placeholder="Enter title"
               />
-                {projectErrors.title && <p className="text-red-600 text-sm mt-1">{projectErrors.title.message}</p>}
+                {projectErrors.title && <p className={errorClasses}>{projectErrors.title.message}</p>}
             </div>
 
             {/* Property Address */}
-              <div>
-                  <label className="block font-medium text-black mb-1">
-                  Property Address <span className="text-red-500">*</span>
+              <div className="md:col-span-2">
+                  <label className={labelClasses}>
+                  Property Address {requiredMark}
                 </label>
                 <input
                     {...registerProject("propertyAddress", {
@@ -1579,14 +1561,13 @@ export default function ProjectDetailsClient() {
                   placeholder="Enter property address"
                 />
                   {projectErrors.propertyAddress && (
-                    <p className="text-red-600 text-sm mt-1">{projectErrors.propertyAddress.message}</p>
+                    <p className={errorClasses}>{projectErrors.propertyAddress.message}</p>
                 )}
             </div>
 
             {/* File No & Pincode */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                  <label className="block font-medium text-black mb-1">Earlier Building Proposal File No.</label>
+                  <label className={labelClasses}>Earlier Building Proposal File No.</label>
                 <input
                     {...registerProject("earlierBuildingProposalFileNo")}
                   type="text"
@@ -1596,8 +1577,8 @@ export default function ProjectDetailsClient() {
               </div>
 
               <div>
-                  <label className="block font-medium text-black mb-1">
-                  Pincode <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                  Pincode {requiredMark}
                 </label>
                 <input
                     {...registerProject("pincode", {
@@ -1613,16 +1594,14 @@ export default function ProjectDetailsClient() {
                   placeholder="Enter pincode"
                 />
                   {projectErrors.pincode && (
-                    <p className="text-red-600 text-sm mt-1">{projectErrors.pincode.message}</p>
+                    <p className={errorClasses}>{projectErrors.pincode.message}</p>
                   )}
               </div>
-            </div>
 
             {/* Applicant name & address */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                  <label className="block font-medium text-black mb-1">
-                  Full name of applicant <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                  Full name of applicant {requiredMark}
                 </label>
                 <input
                     {...registerProject("fullNameOfApplicant", {
@@ -1630,17 +1609,17 @@ export default function ProjectDetailsClient() {
                   })}
                   type="text"
                   readOnly={!isEditMode}
-                    className={isEditMode ? inputClasses : `${inputClasses} bg-gray-100 cursor-not-allowed`}
+                    className={isEditMode ? inputClasses : `${inputClasses} cursor-not-allowed bg-gray-100 text-gray-500`}
                   placeholder={isEditMode ? "Enter full name" : "Auto-filled from profile"}
                 />
                   {projectErrors.fullNameOfApplicant && (
-                    <p className="text-red-600 text-sm mt-1">{projectErrors.fullNameOfApplicant.message}</p>
+                    <p className={errorClasses}>{projectErrors.fullNameOfApplicant.message}</p>
                 )}
               </div>
 
               <div>
-                  <label className="block font-medium text-black mb-1">
-                  Address of the applicant <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                  Address of the applicant {requiredMark}
                 </label>
                 <input
                     {...registerProject("addressOfApplicant", {
@@ -1648,20 +1627,18 @@ export default function ProjectDetailsClient() {
                   })}
                   type="text"
                   readOnly={!isEditMode}
-                    className={isEditMode ? inputClasses : `${inputClasses} bg-gray-100 cursor-not-allowed`}
+                    className={isEditMode ? inputClasses : `${inputClasses} cursor-not-allowed bg-gray-100 text-gray-500`}
                   placeholder={isEditMode ? "Enter address" : "Auto-filled from profile"}
                 />
                   {projectErrors.addressOfApplicant && (
-                    <p className="text-red-600 text-sm mt-1">{projectErrors.addressOfApplicant.message}</p>
+                    <p className={errorClasses}>{projectErrors.addressOfApplicant.message}</p>
                 )}
               </div>
-            </div>
 
             {/* Landmark and Property Tax */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             <div>
-                  <label className="block font-medium text-black mb-1">
-                  Landmark <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                  Landmark {requiredMark}
                 </label>
                 <input
                     {...registerProject("landmark", {
@@ -1672,37 +1649,65 @@ export default function ProjectDetailsClient() {
                   placeholder="Enter landmark"
                 />
                   {projectErrors.landmark && (
-                    <p className="text-red-600 text-sm mt-1">{projectErrors.landmark.message}</p>
+                    <p className={errorClasses}>{projectErrors.landmark.message}</p>
                   )}
               </div>
 
               <div className="flex flex-col">
-                  <label className="block font-medium text-black mb-1 mt-2">Have Paid Latest Current Year Property Tax?</label>
-              <div className="flex gap-6 mt-0">
-                    <label className="flex items-center gap-2 text-sm text-black">
+                  <label className={labelClasses}>Have Paid Latest Current Year Property Tax?</label>
+              <div className="flex h-11 items-center gap-6">
+                    <label className={radioLabelClasses}>
                   <input
                         {...registerProject("hasPaidLatestPropertyTax")}
                     type="radio"
                     value="Yes"
-                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                    className={radioClasses}
                   />
                   Yes
                 </label>
-                    <label className="flex items-center gap-2 text-sm text-black">
+                    <label className={radioLabelClasses}>
                   <input
                         {...registerProject("hasPaidLatestPropertyTax")}
                     type="radio"
                     value="No"
-                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                    className={radioClasses}
                   />
                   No
                 </label>
               </div>
               </div>
-            </div>
           </div>
         </section>
             </fieldset>
+
+            <div className={footerBarClasses}>
+              <button
+                type="button"
+                onClick={() => setShowLeaveConfirm(true)}
+                className={secondaryBtnClasses}
+              >
+                Cancel
+              </button>
+
+                {!isReadOnlyMode && (
+                  <button
+                    type="submit"
+                    className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
+                      isProjectInfoSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
+                    }`}
+                  >
+                    {isProjectInfoSaved ? "Saved" : "Save"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => goToStep(currentStepIndex + 1)}
+                  className={primaryBtnClasses}
+                >
+                  Next
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+            </div>
           </form>
         )}
 
@@ -1716,31 +1721,12 @@ export default function ProjectDetailsClient() {
                   : ""
               }
             >
-            <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm overflow-hidden">
-              {/* Header (scrolls with content) */}
-              <div className="bg-white border-b border-gray-200 p-4 flex flex-wrap items-center justify-between gap-4 rounded-t-2xl">
-                <div>
-                  <h2 className="text-xl font-bold text-black">Save Plot Details</h2>
-                  <p className="text-sm text-black mt-1">Provide comprehensive plot details for this application.</p>
-                </div>
-
-                {!isReadOnlyMode && (
-                  <button
-                    type="submit"
-                    className={`px-6 py-2 rounded-lg font-semibold ${
-                      isSavePlotSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                    }`}
-                  >
-                    {isSavePlotSaved ? "Saved" : "Save"}
-                  </button>
-                )}
-              </div>
-
-              <div className="pt-6 space-y-8 px-4 pb-4">
+            <section className="pt-2">
+              <div className="space-y-6">
               <div className="space-y-4">
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Planning Authority for the project? <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Planning Authority for the project? {requiredMark}
                   </label>
                   <Controller
                     name="planningAuthority"
@@ -1750,7 +1736,7 @@ export default function ProjectDetailsClient() {
                       <>
                         <div className="flex flex-wrap gap-4">
                           {planningAuthorityOptions.map((option, index) => (
-                            <label key={option} className="flex items-center gap-2 text-sm text-black">
+                            <label key={option} className={radioLabelClasses}>
                               <input
                                 type="radio"
                                 name={field.name}
@@ -1759,14 +1745,14 @@ export default function ProjectDetailsClient() {
                                 onChange={() => field.onChange(option)}
                                 onBlur={field.onBlur}
                                 ref={index === 0 ? field.ref : undefined}
-                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                                className={radioClasses}
                               />
                               {option}
                             </label>
                           ))}
                         </div>
                         {fieldState.error && (
-                          <p className="text-red-600 text-sm mt-1">{fieldState.error.message}</p>
+                          <p className={errorClasses}>{fieldState.error.message}</p>
                         )}
                       </>
                     )}
@@ -1774,10 +1760,10 @@ export default function ProjectDetailsClient() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Region <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Region {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("region") || ""}
@@ -1785,11 +1771,11 @@ export default function ProjectDetailsClient() {
                     options={regionOptions.map((option) => ({ value: option, label: option }))}
                     placeholder="----- Select Region -----"
                   />
-                  {savePlotErrors.region && <p className="text-red-600 text-sm mt-1">{savePlotErrors.region.message}</p>}
+                  {savePlotErrors.region && <p className={errorClasses}>{savePlotErrors.region.message}</p>}
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Zone <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Zone {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("zone") || ""}
@@ -1798,14 +1784,11 @@ export default function ProjectDetailsClient() {
                     placeholder="----- Select Zone -----"
                     disabled={!selectedRegion}
                   />
-                  {savePlotErrors.zone && <p className="text-red-600 text-sm mt-1">{savePlotErrors.zone.message}</p>}
+                  {savePlotErrors.zone && <p className={errorClasses}>{savePlotErrors.zone.message}</p>}
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Ward <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Ward {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("ward") || ""}
@@ -1814,23 +1797,23 @@ export default function ProjectDetailsClient() {
                     placeholder="----- Select Ward -----"
                     disabled={!selectedZone}
                   />
-                  {savePlotErrors.ward && <p className="text-red-600 text-sm mt-1">{savePlotErrors.ward.message}</p>}
+                  {savePlotErrors.ward && <p className={errorClasses}>{savePlotErrors.ward.message}</p>}
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    This plot belongs to <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    This plot belongs to {requiredMark}
                   </label>
                   {plotBelongsOptions.length === 0 ? (
-                    <p className="text-sm text-gray-500 py-2">Select a region first.</p>
+                    <p className="py-2 text-sm text-gray-500">Select a region first.</p>
                   ) : (
-                    <div className="flex flex-wrap gap-4 items-center">
+                    <div className="flex min-h-11 flex-wrap items-center gap-4">
                       {plotBelongsOptions.map((option) => (
-                        <label key={option} className="flex items-center gap-2 text-sm text-black">
+                        <label key={option} className={radioLabelClasses}>
                           <input
                             {...registerSavePlot("plotBelongsTo", { required: "Please select an option" })}
                             type="radio"
                             value={option}
-                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                            className={radioClasses}
                           />
                           {option}
                         </label>
@@ -1838,16 +1821,13 @@ export default function ProjectDetailsClient() {
                     </div>
                   )}
                   {savePlotErrors.plotBelongsTo && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotBelongsTo.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.plotBelongsTo.message}</p>
                   )}
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-medium text-black mb-1">
+                  <label className={labelClasses}>
                     {labelForVillageDivisionField(selectedPlotBelongs)}{" "}
-                    <span className="text-red-500">*</span>
+                    {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("villageName") || ""}
@@ -1860,12 +1840,12 @@ export default function ProjectDetailsClient() {
                     }
                   />
                   {savePlotErrors.villageName && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.villageName.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.villageName.message}</p>
                   )}
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    {labelForSurveyField(selectedPlotBelongs)} <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    {labelForSurveyField(selectedPlotBelongs)} {requiredMark}
                   </label>
                   <Controller
                     name="proposedCtsNumber"
@@ -1914,13 +1894,13 @@ export default function ProjectDetailsClient() {
                               {selectedSurveyNos.map((surveyNo) => (
                                 <span
                                   key={surveyNo}
-                                  className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gray-200 text-sm bg-white"
+                                  className={chipClasses}
                                 >
-                                  <span className="text-black">{surveyNo}</span>
+                                  <span className="text-brand-navy">{surveyNo}</span>
                                   <button
                                     type="button"
                                     onClick={() => removeSurveyNo(surveyNo)}
-                                    className="text-gray-700 hover:text-red-700 font-semibold"
+                                    className="font-semibold text-gray-500 hover:text-status-danger"
                                     aria-label={`Remove ${surveyKindLabel} ${surveyNo}`}
                                   >
                                     ×
@@ -1931,7 +1911,7 @@ export default function ProjectDetailsClient() {
                           )}
 
                           {fieldState.error?.message && (
-                            <p className="text-red-600 text-sm mt-1">{fieldState.error.message}</p>
+                            <p className={errorClasses}>{fieldState.error.message}</p>
                           )}
                         </div>
                       );
@@ -1941,10 +1921,10 @@ export default function ProjectDetailsClient() {
               </div>
 
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Gross Plot Area (Sq.m) <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Gross Plot Area (Sq.m) {requiredMark}
                 </label>
                 <input
                   {...registerSavePlot("grossPlotArea", { required: "Gross plot area is required" })}
@@ -1954,12 +1934,12 @@ export default function ProjectDetailsClient() {
                   placeholder="Enter area"
                 />
                 {savePlotErrors.grossPlotArea && (
-                  <p className="text-red-600 text-sm mt-1">{savePlotErrors.grossPlotArea.message}</p>
+                  <p className={errorClasses}>{savePlotErrors.grossPlotArea.message}</p>
                 )}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
-                  SAC Nos <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  SAC Nos {requiredMark}
                 </label>
                 <Controller
                   name="sacNo"
@@ -2050,13 +2030,13 @@ export default function ProjectDetailsClient() {
                             {current.map((sac) => (
                               <span
                                 key={sac}
-                                className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gray-200 text-sm bg-white"
+                                className={chipClasses}
                               >
-                                <span className="text-black">{sac}</span>
+                                <span className="text-brand-navy">{sac}</span>
                                 <button
                                   type="button"
                                   onClick={() => removeSacNo(sac)}
-                                  className="text-gray-700 hover:text-red-700 font-semibold"
+                                  className="font-semibold text-gray-500 hover:text-status-danger"
                                   aria-label={`Remove SAC ${sac}`}
                                 >
                                   ×
@@ -2070,15 +2050,15 @@ export default function ProjectDetailsClient() {
                   }}
                 />
                 {savePlotErrors.sacNo && (
-                  <p className="text-red-600 text-sm mt-1">{(savePlotErrors.sacNo as any).message}</p>
+                  <p className={errorClasses}>{(savePlotErrors.sacNo as any).message}</p>
                 )}
               </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Road / Street Name <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Road / Street Name {requiredMark}
                   </label>
                   <input
                     {...registerSavePlot("roadName", { required: "Road / Street Name is required" })}
@@ -2087,12 +2067,12 @@ export default function ProjectDetailsClient() {
                     placeholder="Enter road or street name"
                   />
                   {savePlotErrors.roadName && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.roadName.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.roadName.message}</p>
                   )}
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    DP Zone <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    DP Zone {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("dpZone") || ""}
@@ -2101,15 +2081,15 @@ export default function ProjectDetailsClient() {
                     placeholder="----- Select DP Zone -----"
                   />
                   {savePlotErrors.dpZone && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.dpZone.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.dpZone.message}</p>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Major Use of Plot <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Major Use of Plot {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("majorUseOfPlot") || ""}
@@ -2119,12 +2099,12 @@ export default function ProjectDetailsClient() {
                     disabled={!selectedDpZone}
                   />
                   {savePlotErrors.majorUseOfPlot && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.majorUseOfPlot.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.majorUseOfPlot.message}</p>
                   )}
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Plot SubUse <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Plot SubUse {requiredMark}
                   </label>
                   <CustomSelect
                     value={watchSavePlot("plotSubUse") || ""}
@@ -2134,15 +2114,15 @@ export default function ProjectDetailsClient() {
                     disabled={!selectedDpZone || !selectedMajorUse}
                   />
                   {savePlotErrors.plotSubUse && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotSubUse.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.plotSubUse.message}</p>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                    Plot No. <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Plot No. {requiredMark}
                   </label>
                   <input
                     {...registerSavePlot("plotNo", { required: "Plot number is required" })}
@@ -2150,37 +2130,37 @@ export default function ProjectDetailsClient() {
                     className={inputClasses}
                     placeholder="Enter plot number"
                   />
-                  {savePlotErrors.plotNo && <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotNo.message}</p>}
+                  {savePlotErrors.plotNo && <p className={errorClasses}>{savePlotErrors.plotNo.message}</p>}
                 </div>
                 <div>
-                  <label className="block font-medium text-black mb-2">
-                    Is Internal/Layout road present? <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                    Is Internal/Layout road present? {requiredMark}
                   </label>
                   <div className="flex gap-6">
                     {["Yes", "No"].map((option) => (
-                      <label key={option} className="flex items-center gap-2 text-sm text-black">
+                      <label key={option} className={radioLabelClasses}>
                         <input
                           {...registerSavePlot("isInternalRoadPresent", { required: "Please select an option" })}
                           type="radio"
                           value={option}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                          className={radioClasses}
                 />
                         {option}
                       </label>
                     ))}
                   </div>
                   {savePlotErrors.isInternalRoadPresent && (
-                    <p className="text-red-600 text-sm mt-1">{savePlotErrors.isInternalRoadPresent.message}</p>
+                    <p className={errorClasses}>{savePlotErrors.isInternalRoadPresent.message}</p>
                   )}
               </div>
             </div>
 
-            <div>
-                  <p className="font-semibold text-black mb-2">Plot Abutting Details:</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border-t border-gray-100 pt-5">
+                  <p className="mb-3 text-sm font-bold text-brand-navy">Plot Abutting Details</p>
+                  <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
                     <div>
-                      <label className="block font-medium text-black mb-1">
-                        Plot Type <span className="text-red-500">*</span>
+                      <label className={labelClasses}>
+                        Plot Type {requiredMark}
               </label>
                       <CustomSelect
                         value={watchSavePlot("plotType") || ""}
@@ -2189,7 +2169,7 @@ export default function ProjectDetailsClient() {
                         placeholder="----- Select -----"
                       />
                       {savePlotErrors.plotType && (
-                        <p className="text-red-600 text-sm mt-1">{savePlotErrors.plotType.message}</p>
+                        <p className={errorClasses}>{savePlotErrors.plotType.message}</p>
               )}
                     </div>
                   </div>
@@ -2197,9 +2177,69 @@ export default function ProjectDetailsClient() {
           </div>
         </section>
             </fieldset>
+
+            <div className={footerBarClasses}>
+              <button
+                type="button"
+                onClick={() => goToStep(currentStepIndex - 1)}
+                className={`${secondaryBtnClasses} gap-2`}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLeaveConfirm(true)}
+                className={secondaryBtnClasses}
+              >
+                Cancel
+              </button>
+                {!isReadOnlyMode && (
+                  <button
+                    type="submit"
+                    className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
+                      isSavePlotSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
+                    }`}
+                  >
+                    {isSavePlotSaved ? "Saved" : "Save"}
+                  </button>
+                )}
+            </div>
       </form>
         )}
       </div>
+
+      <Modal
+        open={showLeaveConfirm}
+        onClose={() => setShowLeaveConfirm(false)}
+        title={isEditMode ? "Leave Edit Project?" : "Leave Create Project?"}
+        maxWidth="sm"
+      >
+        <p className="text-sm text-gray-600">
+          {isEditMode
+            ? "You have unsaved changes. Any information that has not been saved will be lost if you go back to the dashboard."
+            : "You have not submitted this project. Any information that has not been saved will be lost if you go back to the dashboard."}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setShowLeaveConfirm(false)}
+            className="inline-flex min-h-10 items-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            Stay on this page
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowLeaveConfirm(false);
+              router.push("/userdashboard");
+            }}
+            className="inline-flex min-h-10 items-center rounded-lg bg-brand-blue px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-blue-hover"
+          >
+            Go to dashboard
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

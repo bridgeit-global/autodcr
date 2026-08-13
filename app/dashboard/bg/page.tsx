@@ -5,7 +5,6 @@ import { useForm } from "react-hook-form";
 import { useRouter, useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
-import { supabase } from "@/app/utils/supabase";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
@@ -65,7 +64,10 @@ export default function BGDetailsPage() {
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-bg-details"));
 
   const inputClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
+    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
+  const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
+  const requiredMark = <span className="text-brand-navy">*</span>;
+  const errorClasses = "mt-1 text-sm text-status-danger";
 
   const {
     register,
@@ -111,59 +113,13 @@ export default function BGDetailsPage() {
   const onSubmit = async (data: BGFormData) => {
     if (isReadOnlyMode) return;
     try {
-      // Only one entry allowed - replace existing or create new
-      const newEntry: BGEntry = { 
-        ...data, 
-        id: entry?.id || createId() 
+      // BG Details is retired from Create Project — keep local drafts only; do not persist to API.
+      const newEntry: BGEntry = {
+        ...data,
+        id: entry?.id || createId(),
       };
       setEntry(newEntry);
       saveDraft("draft-bg-details-entries", [newEntry]);
-
-      const isDraft = projectData?.status === "draft";
-      if (isEditMode && projectData?.id && !isDraft) {
-        const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
-        if (!userId) {
-          showAlert({
-            title: "Session required",
-            message: "User not found in session. Please log in again.",
-          });
-          return;
-        }
-
-        const { data: { session } } = await supabase.auth.getSession();
-        const authToken = session?.access_token;
-        
-        const headers: HeadersInit = { "Content-Type": "application/json" };
-        if (authToken) {
-          headers["Authorization"] = `Bearer ${authToken}`;
-        }
-
-        const response = await fetch(`/api/projects/${projectData.id}`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify({
-            user_id: userId,
-            bg_details: {
-              entries: [newEntry],
-            },
-          }),
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "Failed to update project");
-        }
-
-        showAlert({
-          title: "BG details",
-          message: "BG details updated successfully!",
-        });
-      } else {
-        showAlert({
-          title: "BG details",
-          message: "BG details saved successfully!",
-        });
-      }
 
       markPageSaved("saved-bg-details");
       saveDraft("dirty-bg-details", false);
@@ -173,6 +129,10 @@ export default function BGDetailsPage() {
         activeTab,
       });
       setIsSaved(true);
+      showAlert({
+        title: "BG details",
+        message: "BG Details is no longer part of project create/update and was not saved to the server.",
+      });
     } catch (error: any) {
       console.error("Error saving BG details:", error);
       showAlert({
@@ -296,7 +256,7 @@ export default function BGDetailsPage() {
 
   return (
     <div
-      className={`max-w-6xl mx-auto px-6 pt-8 space-y-6 relative ${
+      className={`pb-2 space-y-6 relative ${
         isReadOnlyMode
           ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
           : ""
@@ -339,29 +299,22 @@ export default function BGDetailsPage() {
           </div>
         </div>
       )}
-      <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 px-6 py-4 bg-white rounded-t-2xl">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Bank Guarantee Details</h2>
-            <p className="text-sm text-gray-700 mt-1">
-              Capture bank guarantee information for this project. Only one BG entry is allowed per project.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className={`px-4 py-2 rounded-lg font-semibold ${
-                isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-              } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
-              disabled={isReadOnlyMode}
-              onClick={handleSubmit(onSubmit)}
-            >
-              {isSaved ? "Saved" : "Save"}
-            </button>
-          </div>
+      <div>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-bold text-brand-navy">Bank Guarantee Details</h2>
+          <button
+            type="button"
+            className={`rounded-lg px-5 py-2 text-sm font-semibold ${
+              isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
+            } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
+            disabled={isReadOnlyMode}
+            onClick={handleSubmit(onSubmit)}
+          >
+            {isSaved ? "Saved" : "Save"}
+          </button>
         </div>
 
-        <form className="space-y-6 px-6 py-4" onSubmit={handleSubmit(onSubmit)}>
+        <form className="space-y-5" onSubmit={handleSubmit(onSubmit)}>
           <fieldset
             disabled={isReadOnlyMode}
             className={
@@ -370,10 +323,10 @@ export default function BGDetailsPage() {
                 : ""
             }
           >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <div>
-              <label className="block font-medium text-black mb-1">
-                Zone <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                Zone {requiredMark}
               </label>
               <input type="hidden" {...register("zone", { required: "Zone is required" })} />
               <CustomSelect
@@ -382,11 +335,11 @@ export default function BGDetailsPage() {
                 options={zoneOptions.map((zone) => ({ value: zone, label: zone }))}
                 placeholder="Select Zone"
               />
-              {errors.zone && <p className="text-sm text-red-600 mt-1">{errors.zone.message}</p>}
+              {errors.zone && <p className={errorClasses}>{errors.zone.message}</p>}
             </div>
             <div>
-              <label className="block font-medium text-black mb-1">
-                Proposal No <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                Proposal No {requiredMark}
               </label>
               <input
                 type="text"
@@ -395,64 +348,64 @@ export default function BGDetailsPage() {
                 className={`${inputClasses} bg-gray-100 cursor-not-allowed`}
                 placeholder="Auto-filled from Project Details"
               />
-              {errors.proposalNo && <p className="text-sm text-red-600 mt-1">{errors.proposalNo.message}</p>}
+              {errors.proposalNo && <p className={errorClasses}>{errors.proposalNo.message}</p>}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <div>
-              <label className="block font-medium text-black mb-1">
-                BG Number <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                BG Number {requiredMark}
               </label>
               <input
                 {...register("bgNumber", { required: "BG number is required" })}
                 className={inputClasses}
                 placeholder="Enter BG number"
               />
-              {errors.bgNumber && <p className="text-sm text-red-600 mt-1">{errors.bgNumber.message}</p>}
+              {errors.bgNumber && <p className={errorClasses}>{errors.bgNumber.message}</p>}
             </div>
             <div>
-              <label className="block font-medium text-black mb-1">
-                BG Date <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                BG Date {requiredMark}
               </label>
               <input
                 type="date"
                 {...register("bgDate", { required: "BG date is required" })}
                 className={inputClasses}
               />
-              {errors.bgDate && <p className="text-sm text-red-600 mt-1">{errors.bgDate.message}</p>}
+              {errors.bgDate && <p className={errorClasses}>{errors.bgDate.message}</p>}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <div>
-              <label className="block font-medium text-black mb-1">
-                Bank Name <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                Bank Name {requiredMark}
               </label>
               <input
                 {...register("bankName", { required: "Bank name is required" })}
                 className={inputClasses}
                 placeholder="Enter bank name"
               />
-              {errors.bankName && <p className="text-sm text-red-600 mt-1">{errors.bankName.message}</p>}
+              {errors.bankName && <p className={errorClasses}>{errors.bankName.message}</p>}
             </div>
             <div>
-              <label className="block font-medium text-black mb-1">
-                Branch Name <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                Branch Name {requiredMark}
               </label>
               <input
                 {...register("branchName", { required: "Branch name is required" })}
                 className={inputClasses}
                 placeholder="Enter branch name"
               />
-              {errors.branchName && <p className="text-sm text-red-600 mt-1">{errors.branchName.message}</p>}
+              {errors.branchName && <p className={errorClasses}>{errors.branchName.message}</p>}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <div>
-              <label className="block font-medium text-black mb-1">
-                Amount (₹) <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                Amount (₹) {requiredMark}
               </label>
               <input
                 type="number"
@@ -461,25 +414,25 @@ export default function BGDetailsPage() {
                 placeholder="Enter amount"
                 min={0}
               />
-              {errors.amount && <p className="text-sm text-red-600 mt-1">{errors.amount.message}</p>}
+              {errors.amount && <p className={errorClasses}>{errors.amount.message}</p>}
             </div>
             <div>
-              <label className="block font-medium text-black mb-1">
-                BG Valid Date <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                BG Valid Date {requiredMark}
               </label>
               <input
                 type="date"
                 {...register("bgValidDate", { required: "BG valid date is required" })}
                 className={inputClasses}
               />
-              {errors.bgValidDate && <p className="text-sm text-red-600 mt-1">{errors.bgValidDate.message}</p>}
+              {errors.bgValidDate && <p className={errorClasses}>{errors.bgValidDate.message}</p>}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <div>
-              <label className="block font-medium text-black mb-1">
-                BG Bank Email <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                BG Bank Email {requiredMark}
               </label>
               <input
                 {...register("bgBankEmail", {
@@ -489,11 +442,11 @@ export default function BGDetailsPage() {
                 className={inputClasses}
                 placeholder="bank@email.com"
               />
-              {errors.bgBankEmail && <p className="text-sm text-red-600 mt-1">{errors.bgBankEmail.message}</p>}
+              {errors.bgBankEmail && <p className={errorClasses}>{errors.bgBankEmail.message}</p>}
             </div>
             <div>
-              <label className="block font-medium text-black mb-1">
-                Attach BG Scanned Copy <span className="text-red-500">*</span>
+              <label className={labelClasses}>
+                Attach BG Scanned Copy {requiredMark}
               </label>
               <input
                 type="file"
@@ -502,21 +455,21 @@ export default function BGDetailsPage() {
                 className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
               />
               <input type="hidden" {...register("scanCopyName", { required: "Upload the BG scanned copy" })} />
-              {errors.scanCopyName && <p className="text-sm text-red-600 mt-1">{errors.scanCopyName.message}</p>}
+              {errors.scanCopyName && <p className={errorClasses}>{errors.scanCopyName.message}</p>}
             </div>
           </div>
           </fieldset>
         </form>
-      </section>
+      </div>
 
       {/* BG Details / Refund Details listing box */}
-      <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-        <div className="px-6 py-4">
+      <div className="overflow-hidden rounded-xl border border-gray-100">
+        <div className="px-4 py-4 sm:px-5">
           <div className="flex gap-6 border-b border-gray-200">
             <button
               className={`px-4 py-2 text-sm font-medium ${
                 activeTab === "bg-details"
-                  ? "text-emerald-700 border-b-2 border-emerald-600"
+                  ? "text-brand-blue border-b-2 border-brand-blue"
                   : "text-gray-500 hover:text-gray-700"
               }`}
               onClick={() => setActiveTab("bg-details")}
@@ -526,7 +479,7 @@ export default function BGDetailsPage() {
             <button
               className={`px-4 py-2 text-sm font-medium ${
                 activeTab === "bg-refund"
-                  ? "text-emerald-700 border-b-2 border-emerald-600"
+                  ? "text-brand-blue border-b-2 border-brand-blue"
                   : "text-gray-500 hover:text-gray-700"
               }`}
               onClick={() => setActiveTab("bg-refund")}
@@ -573,7 +526,7 @@ export default function BGDetailsPage() {
             </div>
           )}
         </div>
-      </section>
+      </div>
     </div>
   );
 }
