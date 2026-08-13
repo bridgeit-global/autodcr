@@ -36,8 +36,6 @@ export async function POST(request: NextRequest) {
       areaDetails,
       project_library,
       projectLibrary,
-      bg_details,
-      bgDetails,
     } = body || {};
 
     // Normalize keys coming from dashboard layout payload
@@ -48,7 +46,6 @@ export async function POST(request: NextRequest) {
     const normalizedBuildingDetails = building_details || buildingDetails || body?.building_details || body?.buildingDetails;
     const normalizedAreaDetails = area_details || areaDetails || body?.area_details || body?.areaDetails;
     const normalizedProjectLibrary = project_library || projectLibrary || body?.project_library || body?.projectLibrary;
-    const normalizedBgDetails = bg_details || bgDetails || body?.bg_details || body?.bgDetails;
 
     if (!normalizedUserId) {
       return NextResponse.json(
@@ -74,7 +71,8 @@ export async function POST(request: NextRequest) {
       p_building_details: normalizedBuildingDetails ?? {},
       p_area_details: normalizedAreaDetails ?? {},
       p_project_library: normalizedProjectLibrary ?? {},
-      p_bg_details: normalizedBgDetails ?? {},
+      // BG Details retired from Create Project — always persist empty
+      p_bg_details: {},
     });
 
     if (error) {

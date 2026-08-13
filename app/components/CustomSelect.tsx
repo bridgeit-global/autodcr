@@ -74,7 +74,7 @@ export default function CustomSelect({
     return (
       <>
         <span>{prefix}</span>
-        <span className="text-emerald-700 font-semibold">{highlightedPart}</span>
+        <span className="text-brand-blue font-semibold">{highlightedPart}</span>
         <span>{suffix}</span>
       </>
     );
@@ -139,8 +139,8 @@ export default function CustomSelect({
             }
           }
         }}
-        className={`border border-gray-200 rounded-xl px-3 h-10 w-full text-left bg-white focus:ring-2 focus:ring-emerald-500 outline-none flex items-center justify-between gap-2 ${
-          disabled ? "bg-gray-100 cursor-not-allowed" : ""
+        className={`flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${
+          disabled ? "cursor-not-allowed bg-gray-100 text-gray-400" : "hover:border-gray-300"
         }`}
       >
         <span
@@ -184,11 +184,11 @@ export default function CustomSelect({
                 onChange(opt.value);
                 setOpen(false);
               }}
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 break-words leading-snug ${
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 break-words leading-snug ${
                 value === opt.value
-                  ? "bg-emerald-50 text-emerald-700 font-medium"
+                  ? "bg-blue-50 text-brand-blue font-medium"
                   : activeIndex >= 0 && options[activeIndex]?.value === opt.value
-                    ? "bg-emerald-50 text-gray-900"
+                    ? "bg-blue-50 text-gray-900"
                   : "text-gray-900"
               }`}
             >

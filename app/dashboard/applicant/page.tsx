@@ -444,10 +444,12 @@ export default function ApplicantDetailsPage() {
   });
 
   const inputClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 h-10 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none";
+    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
   const textareaClasses =
-    "border border-gray-200 rounded-xl px-3 py-2 w-full text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none";
-  const disabledClasses = "bg-gray-100 cursor-not-allowed";
+    "w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20";
+  const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
+  const requiredMark = <span className="text-brand-navy">*</span>;
+  const disabledClasses = "cursor-not-allowed bg-gray-100 text-gray-500";
 
   const selectedApplicantType = watch("applicantType");
   const selectedDirectoryId = watch("plumbingConsultant");
@@ -1597,12 +1599,10 @@ export default function ApplicantDetailsPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading project data...</p>
-          </div>
+      <div className="flex min-h-[320px] items-center justify-center py-10">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
+          <p className="text-sm text-gray-500">Loading project data…</p>
         </div>
       </div>
     );
@@ -1610,26 +1610,27 @@ export default function ApplicantDetailsPage() {
 
   return (
     <>
-    <div className="max-w-6xl mx-auto px-6 space-y-6">
-        <div className="space-y-6 pt-8">
-        <div className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-          <div className="bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
-            <h2 className="text-xl font-bold text-gray-900">Applicants</h2>
-            {isArchitectCreatingProject && (
-              <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
-                Add a project Owner from the directory before submitting the project. The owner
-                will sign applications in In Process; you can manage everything else.
-              </p>
-            )}
-            {canManageProjectOwner && (ownerAwaitingReplacement || changingOwner) && (
-              <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
-                {changingOwner
-                  ? "Select a new Owner from the directory below and Save. That updates the applicants roster and projects.user_id together."
-                  : "Owner removed from the roster. Select a new Owner from the directory and Save to set the project owner. Update Project stays blocked until then."}
-              </p>
-            )}
+    <div className="space-y-8 pb-2">
+        <div>
+          {(isArchitectCreatingProject ||
+            (canManageProjectOwner && (ownerAwaitingReplacement || changingOwner))) && (
+            <div className="mb-4 space-y-3">
+              {isArchitectCreatingProject && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Add a project Owner from the directory before submitting the project. The owner
+                  will sign applications in In Process; you can manage everything else.
+                </p>
+              )}
+              {canManageProjectOwner && (ownerAwaitingReplacement || changingOwner) && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {changingOwner
+                    ? "Select a new Owner from the directory below and Save. That updates the applicants roster and projects.user_id together."
+                    : "Owner removed from the roster. Select a new Owner from the directory and Save to set the project owner. Update Project stays blocked until then."}
+                </p>
+              )}
             </div>
-            <div className="overflow-x-auto">
+          )}
+          <div className="overflow-x-auto rounded-xl border border-gray-100">
               <table className="min-w-full text-sm text-gray-900 border-collapse">
                 <thead className="bg-white uppercase text-xs">
                   <tr>
@@ -1673,7 +1674,7 @@ export default function ApplicantDetailsPage() {
                               {showChangeOwner && (
                                 <button
                                   type="button"
-                                  className="text-sm text-emerald-700 hover:underline"
+                                  className="text-sm text-brand-blue hover:underline"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -1712,42 +1713,36 @@ export default function ApplicantDetailsPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+        </div>
 
           {!isReadOnlyMode && (
-          <form onSubmit={handleSubmit(onSubmit)} className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-            {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-wrap items-start justify-between gap-4 rounded-t-2xl">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Applicant / Authorized Person Details</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Provide applicant/authorized person information. Ensure the details match the submitted documents.
-                </p>
+                <h2 className="text-base font-bold text-brand-navy">Applicant / Authorized Person Details</h2>
               </div>
-              {!isReadOnlyMode && (
-                <button
-                  type="submit"
-                  className={`px-6 py-2 rounded-lg font-semibold ${
-                    isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                  }`}
-                >
-                  {isSaved ? "Saved" : "Save"}
-                </button>
-              )}
+              <button
+                type="submit"
+                className={`rounded-lg px-5 py-2 text-sm font-semibold ${
+                  isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
+                }`}
+              >
+                {isSaved ? "Saved" : "Save"}
+              </button>
             </div>
 
             <fieldset
               disabled={isReadOnlyMode}
               className={
                 isReadOnlyMode
-                  ? "pt-6 space-y-6 px-6 pb-6 [&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
-                  : "pt-6 space-y-6 px-6 pb-6"
+                  ? "space-y-5 [&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed [&_[role='button']]:cursor-not-allowed"
+                  : "space-y-5"
               }
             >
             {isLocked && (
-              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <div className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-brand-navy">
                 <svg
-                  className="h-4 w-4 text-emerald-700"
+                  className="h-4 w-4 text-brand-blue"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -1764,10 +1759,10 @@ export default function ApplicantDetailsPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Applicant / Authorized Person <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Applicant / Authorized Person {requiredMark}
                 </label>
                 <input
                   type="hidden"
@@ -1784,8 +1779,8 @@ export default function ApplicantDetailsPage() {
 
 
                 <div>
-                  <label className="block font-medium text-black mb-1">
-                  Name <span className="text-red-500">*</span>
+                  <label className={labelClasses}>
+                  Name {requiredMark}
                   </label>
                   <input
                     type="hidden"
@@ -1834,8 +1829,8 @@ export default function ApplicantDetailsPage() {
               </div>
 
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Residential Address <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Residential Address {requiredMark}
                 </label>
                 <textarea
                   {...register("residentialAddress", { required: "Residential address is required" })}
@@ -1848,10 +1843,10 @@ export default function ApplicantDetailsPage() {
                 )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Contact Number <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Contact Number {requiredMark}
                 </label>
                 <input
                   {...register("contactNumber", {
@@ -1869,8 +1864,8 @@ export default function ApplicantDetailsPage() {
               </div>
 
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Email Address <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Email Address {requiredMark}
                 </label>
                 <input
                   {...register("emailAddress", {
@@ -1888,10 +1883,10 @@ export default function ApplicantDetailsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
-                <label className="block font-medium text-black mb-1">
-                  Registration Number <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  Registration Number {requiredMark}
                 </label>
                 <input
                   {...register("registrationNumber", { required: "Registration number is required" })}
@@ -1905,7 +1900,7 @@ export default function ApplicantDetailsPage() {
               </div>
 
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className={labelClasses}>
                   PAN No.
                 </label>
                 <input
@@ -1926,10 +1921,10 @@ export default function ApplicantDetailsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
-                <label className="block font-medium text-black mb-1">
-                  License Issue Date <span className="text-red-500">*</span>
+                <label className={labelClasses}>
+                  License Issue Date {requiredMark}
                 </label>
                 <input
                   type="date"
@@ -1960,8 +1955,7 @@ export default function ApplicantDetailsPage() {
             </fieldset>
           </form>
           )}
-        </div>
-      </div>
+    </div>
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>

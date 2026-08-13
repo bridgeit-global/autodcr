@@ -64,7 +64,6 @@ export type ProjectUpdatePayload = {
   building_details?: Record<string, unknown>;
   area_details?: { plots: unknown[]; totals: unknown | null };
   project_library?: { uploads: unknown[] };
-  bg_details?: { entries: unknown[] };
 };
 
 type BuildPayloadInput = {
@@ -79,7 +78,6 @@ type BuildPayloadInput = {
   areaPlots: unknown[];
   areaTotals: unknown | null;
   projectLibraryUploads: unknown[];
-  bgEntries: unknown[];
 };
 
 export function buildProjectUpdatePayload(input: BuildPayloadInput): ProjectUpdatePayload {
@@ -95,7 +93,6 @@ export function buildProjectUpdatePayload(input: BuildPayloadInput): ProjectUpda
     areaPlots,
     areaTotals,
     projectLibraryUploads,
-    bgEntries,
   } = input;
 
   const payload: ProjectUpdatePayload = {
@@ -180,16 +177,6 @@ export function buildProjectUpdatePayload(input: BuildPayloadInput): ProjectUpda
     payload.project_library = { uploads: filteredUploads };
   }
 
-  const existingBg = (existing?.bg_details as { entries?: unknown[] }) ?? {};
-  if (
-    includeIfChanged(bgEntries, existingBg.entries ?? [], {
-      savedKey: "saved-bg-details",
-      dirtyKey: "dirty-bg-details",
-    }, partialUpdate)
-  ) {
-    payload.bg_details = { entries: bgEntries };
-  }
-
   return payload;
 }
 
@@ -201,7 +188,6 @@ export function countPayloadSections(payload: ProjectUpdatePayload): number {
     "building_details",
     "area_details",
     "project_library",
-    "bg_details",
   ] as const;
   return keys.filter((k) => payload[k] !== undefined).length;
 }

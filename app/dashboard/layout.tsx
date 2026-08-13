@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import SiteFooter from "../components/SiteFooter";
-import DashboardHeader from "../components/DashboardHeader";
-import DashboardSidebar from "../components/DashboardSidebar";
+import AppShell from "../components/appshell/AppShell";
+import ProjectWizardToolbar from "../components/appshell/ProjectWizardToolbar";
+import ProjectSectionStepper from "../components/appshell/ProjectSectionStepper";
 import { ApplicationPdfSaveSlotProvider } from "./context/ApplicationPdfSaveSlotContext";
 import { ApplicationSignSlotProvider } from "./context/ApplicationSignSlotContext";
 import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
@@ -45,27 +45,9 @@ const REQUIRED_PAGES: RequiredPage[] = [
   { key: "saved-building-details", label: "Building Details", path: "/dashboard/building" },
   { key: "saved-area-details", label: "Area Details", path: "/dashboard/area" },
   { key: "saved-project-library", label: "Project Library", path: "/dashboard/project-library" },
-  { key: "saved-bg-details", label: "BG Details", path: "/dashboard/bg" },
 ];
 
 const PROJECT_LIBRARY_MAX_FILES = 5;
-
-type BGEntry = {
-  id: string;
-  zone: string;
-  proposalNo?: string;
-  proposal_no?: string;
-  fileNo?: string; // Keep for backward compatibility
-  file_no?: string; // Keep for backward compatibility
-  bgNumber: string;
-  bgDate: string;
-  bankName: string;
-  branchName: string;
-  amount: string;
-  bgValidDate: string;
-  bgBankEmail: string;
-  scanCopyName: string;
-};
 
 type ProjectLibraryUpload = {
   name?: string;
@@ -160,7 +142,6 @@ type ProjectCreatePayload = {
   building_details?: Record<string, unknown>;
   area_details?: Record<string, unknown>;
   project_library?: Record<string, unknown>;
-  bg_details?: Record<string, unknown>;
 };
 
 async function rpcCreateProject(
@@ -183,7 +164,7 @@ async function rpcCreateProject(
       p_building_details: payload.building_details ?? {},
       p_area_details: payload.area_details ?? {},
       p_project_library: payload.project_library ?? {},
-      p_bg_details: payload.bg_details ?? {},
+      p_bg_details: {},
     });
     if (error) {
       return { projectId: null, errorMessage: error.message || "Failed to create project." };
@@ -201,7 +182,7 @@ async function rpcCreateProject(
     p_building_details: payload.building_details ?? {},
     p_area_details: payload.area_details ?? {},
     p_project_library: payload.project_library ?? {},
-    p_bg_details: payload.bg_details ?? {},
+    p_bg_details: {},
   });
   if (error) {
     return { projectId: null, errorMessage: error.message || "Failed to create project." };
@@ -233,7 +214,6 @@ function getUnsavedRequiredPages(): RequiredPage[] {
     { key: "saved-building-details", label: "Building Details", path: "/dashboard/building" },
     { key: "saved-area-details", label: "Area Details", path: "/dashboard/area" },
     { key: "saved-project-library", label: "Project Library", path: "/dashboard/project-library" },
-    { key: "saved-bg-details", label: "BG Details", path: "/dashboard/bg" },
   ];
 
   for (const page of otherPages) {
@@ -256,6 +236,9 @@ function DashboardLayoutContent({
   const { showAlert } = useDashboardAlertModal();
   const projectId = searchParams.get("projectId");
   const isEditMode = !!projectId;
+  const mode = searchParams.get("mode");
+  const isReadOnlyMode = mode === "readonly";
+  const selectedApplication = searchParams.get("selectedApplication");
   const [authState, setAuthState] = useState<
     "checking" | "authenticated" | "unauthenticated"
   >("checking");
@@ -286,8 +269,6 @@ function DashboardLayoutContent({
   
   const isDraftProject = !!(verifiedProjectData && verifiedProjectData.status === "draft");
 
-  const [sessionTime, setSessionTime] = useState(3600); // 60 minutes in seconds
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [missingPages, setMissingPages] = useState<RequiredPage[]>([]);
   const [isSubmittingProject, setIsSubmittingProject] = useState(false);
@@ -309,17 +290,6 @@ function DashboardLayoutContent({
 
     checkAllPagesSaved();
     const interval = setInterval(checkAllPagesSaved, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSessionTime((prev) => {
-        if (prev <= 0) return 0;
-        return prev - 1;
-      });
-    }, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
@@ -350,7 +320,6 @@ function DashboardLayoutContent({
     if (hasMeaningful(verifiedProjectData.building_details)) markPageSaved("saved-building-details");
     if (hasMeaningful(verifiedProjectData.area_details)) markPageSaved("saved-area-details");
     if (hasMeaningful(verifiedProjectData.project_library)) markPageSaved("saved-project-library");
-    if (hasMeaningful(verifiedProjectData.bg_details)) markPageSaved("saved-bg-details");
   }
 
   // Clear all project drafts when leaving the dashboard (unmount)
@@ -359,12 +328,6 @@ function DashboardLayoutContent({
       clearProjectDrafts();
     };
   }, []);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
 
   const buildProjectPayload = (statusOverride: string) => {
     const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
@@ -414,7 +377,6 @@ function DashboardLayoutContent({
           }
         : null;
     const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
-    const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
     const proposalNo = (projectInfo as any)?.proposalNo?.trim() || "";
     const previousProposalNo = String(
@@ -500,14 +462,6 @@ function DashboardLayoutContent({
         if (!deepEqual(normalizedNew, normalizedExisting)) {
           payload.project_library = { uploads: filteredUploads };
         }
-      }
-    }
-
-    if (bgEntries && Array.isArray(bgEntries) && bgEntries.length > 0) {
-      const existingBg = existingData?.bg_details || {};
-      const existingBgEntries = existingBg.entries || [];
-      if (!deepEqual(bgEntries, existingBgEntries)) {
-        payload.bg_details = { entries: bgEntries };
       }
     }
 
@@ -707,7 +661,6 @@ function DashboardLayoutContent({
               building_details: payload.building_details,
               area_details: payload.area_details,
               project_library: payload.project_library,
-              bg_details: payload.bg_details,
             }
           );
 
@@ -894,7 +847,6 @@ function DashboardLayoutContent({
             }
           : null;
       const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
-      const bgEntries = loadDraft<BGEntry[]>("draft-bg-details-entries", []);
 
       const proposalNo = (projectInfo as { proposalNo?: string })?.proposalNo?.trim() || "";
       const previousProposalNo = String(
@@ -920,7 +872,6 @@ function DashboardLayoutContent({
         areaPlots,
         areaTotals,
         projectLibraryUploads,
-        bgEntries,
       });
 
       if (!payload.user_id) {
@@ -1031,7 +982,6 @@ function DashboardLayoutContent({
             building_details: payload.building_details as Record<string, unknown> | undefined,
             area_details: payload.area_details as Record<string, unknown> | undefined,
             project_library: payload.project_library as Record<string, unknown> | undefined,
-            bg_details: payload.bg_details as Record<string, unknown> | undefined,
           }
         );
 
@@ -1147,68 +1097,56 @@ function DashboardLayoutContent({
 
   if (authState === "checking" || authState === "unauthenticated") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600" />
+      <div className="flex min-h-dvh items-center justify-center bg-surface">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
       </div>
     );
   }
 
-  return (
-    <div className="h-screen bg-gray-100 flex flex-col overflow-hidden">
-      {/* Top area (header) */}
-      <div className="p-4 md:p-6 shrink-0">
-      <Suspense fallback={<div className="h-16 bg-white border border-gray-200 rounded-3xl"></div>}>
-        <DashboardHeader sessionTime={formatTime(sessionTime)} />
-      </Suspense>
-      </div>
+  const shellTitle = isReadOnlyMode
+    ? selectedApplication || "Application"
+    : isEditMode
+      ? "Edit Project"
+      : "Create Project";
 
-      {/* Dashboard area takes remaining height */}
-      <div className="px-4 md:px-6 pb-4 md:pb-6 flex-1 min-h-0 overflow-hidden">
-        {/* Outer rounded container (Donezo-like) */}
-        <div className="h-full w-full rounded-3xl bg-white shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-          <div className="flex flex-1 min-h-0 bg-gray-50">
-            {/* Inner padding so sidebar/content look like separate cards */}
-            <div className="p-4 md:p-6 flex flex-1 min-h-0 overflow-hidden gap-4">
-              <ApplicationPdfSaveSlotProvider>
-              <ApplicationSignSlotProvider>
-              <div className="shrink-0">
-                <div className="h-full rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+  return (
+    <>
+      <AppShell title={shellTitle}>
+        <ApplicationPdfSaveSlotProvider>
+          <ApplicationSignSlotProvider>
+            <div className="mx-auto flex min-h-0 max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 lg:px-8">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
+                <div className="shrink-0">
+                  <ProjectWizardToolbar
+                    onSubmitProjectClick={handleSubmitProjectClick}
+                    onSaveDraftClick={handleSaveDraftClick}
+                    allPagesSaved={allPagesSaved}
+                    isDraftProject={isDraftProject}
+                    isEditMode={isEditMode}
+                    isReadOnlyMode={isReadOnlyMode}
+                    isProjectDataLoading={isProjectDataLoading}
+                    isSubmittingProject={isSubmittingProject}
+                  />
+                </div>
+                <div className="shrink-0">
                   <Suspense
                     fallback={
-                      <div className="w-16 md:w-64 h-full flex items-center justify-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                      <div className="border-b border-gray-100 px-4 py-4 text-sm text-gray-500">
+                        Loading sections…
                       </div>
                     }
                   >
-                    <DashboardSidebar
-                      collapsed={isSidebarCollapsed}
-                      onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-                      onSubmitProjectClick={handleSubmitProjectClick}
-                      onSaveDraftClick={handleSaveDraftClick}
-                      allPagesSaved={allPagesSaved}
-                      isDraftProject={isDraftProject}
-                      isProjectDataLoading={isProjectDataLoading}
-                      isSubmittingProject={isSubmittingProject}
-                    />
+                    <ProjectSectionStepper />
                   </Suspense>
                 </div>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
+                  {children}
+                </div>
               </div>
-
-              {/* Main content card: fixed height, single scrollbar */}
-              <main className="flex-1 min-h-0 overflow-y-auto rounded-2xl bg-white border border-gray-200 shadow-sm px-4 md:px-6 py-6">
-                {children}
-              </main>
-              </ApplicationSignSlotProvider>
-              </ApplicationPdfSaveSlotProvider>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer at bottom (outside cards). Appears without stealing card height. */}
-      <div className="shrink-0">
-      <SiteFooter />
-      </div>
+          </ApplicationSignSlotProvider>
+        </ApplicationPdfSaveSlotProvider>
+      </AppShell>
 
       <SaveBeforeSubmitModal
         open={isSubmitModalOpen}
@@ -1239,10 +1177,10 @@ function DashboardLayoutContent({
                       <button
                         type="button"
                         onClick={() => navigateToDraftPage(page.path)}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:border-brand-blue hover:bg-blue-50 transition-colors"
                       >
                         <span>{page.label}</span>
-                        <span className="text-xs text-emerald-700 font-medium shrink-0 ml-2">
+                        <span className="text-xs text-brand-blue font-medium shrink-0 ml-2">
                           Go to section
                         </span>
                       </button>
@@ -1262,7 +1200,7 @@ function DashboardLayoutContent({
               <button
                 type="button"
                 onClick={handleDraftConfirmYes}
-                className="px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all"
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-blue hover:bg-brand-blue-hover text-white shadow-sm transition-all"
               >
                 Yes, Save Draft
               </button>
@@ -1271,11 +1209,10 @@ function DashboardLayoutContent({
         </div>
       )}
 
-      {/* Loading overlay when submitting project */}
       {isSubmittingProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col items-center space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-200 border-t-brand-blue"></div>
             <p className="text-lg font-semibold text-gray-900">
               {isEditMode ? "Updating Project..." : allPagesSaved ? "Creating Project..." : "Saving Draft..."}
             </p>
@@ -1286,13 +1223,12 @@ function DashboardLayoutContent({
         </div>
       )}
 
-      {/* Status messages */}
       {submitSuccessMessage && (
         <div className="fixed bottom-4 right-4 max-w-sm rounded-lg bg-green-100 text-green-800 px-4 py-2 shadow">
           {submitSuccessMessage}
         </div>
       )}
-    </div>
+    </>
   );
 }
 

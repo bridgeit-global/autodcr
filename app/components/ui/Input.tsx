@@ -21,10 +21,10 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={[
-            "w-full rounded-lg border px-3 py-2 text-base text-gray-900 sm:py-2.5 sm:text-sm",
+            "w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-base text-gray-900 sm:text-sm",
             "placeholder:text-gray-400",
             "outline-none transition-colors",
-            "focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20",
+            "focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20",
             error ? "border-status-danger" : "border-gray-200",
             className,
           ]

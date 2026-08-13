@@ -152,10 +152,6 @@ export async function PUT(
       updateData.project_library = body.project_library;
     }
 
-    if (body.bg_details !== undefined) {
-      updateData.bg_details = body.bg_details;
-    }
-
     if (body.title !== undefined) {
       updateData.title = body.title;
     }

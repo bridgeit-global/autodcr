@@ -193,12 +193,10 @@ export default function ProjectLibraryPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading project data...</p>
-          </div>
+      <div className="flex min-h-[320px] items-center justify-center py-10">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
+          <p className="text-sm text-gray-500">Loading project data…</p>
         </div>
       </div>
     );
@@ -206,7 +204,7 @@ export default function ProjectLibraryPage() {
 
   return (
     <div
-      className={`max-w-6xl mx-auto px-6 pt-8 space-y-6 ${
+      className={`pb-2 space-y-5 ${
         isReadOnlyMode
           ? "[&_input]:cursor-not-allowed [&_textarea]:cursor-not-allowed [&_select]:cursor-not-allowed"
           : ""
@@ -224,31 +222,24 @@ export default function ProjectLibraryPage() {
         fileUrl={previewUrl}
         title={previewTitle}
       />
-      <section className="border border-gray-200 rounded-2xl bg-white flex flex-col shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 px-6 py-4 bg-white rounded-t-2xl">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Project Library Document</h2>
-            <p className="text-sm text-gray-700 mt-1">
-              <span className="text-red-600 font-semibold">*Note :</span>{" "}
-              There will be common documents used across project and imported automatically to
-              application.
-            </p>
-          </div>
-          <div className="w-full md:w-auto md:ml-auto flex flex-col items-start md:items-end gap-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isReadOnlyMode}
-              className={`px-6 py-2 rounded-lg font-semibold text-sm ${
-                isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-              } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
-            >
-              {isSaved ? "Saved" : "Save"}
-            </button>
-          </div>
+      <div>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <p className="max-w-xl text-sm text-gray-500">
+            Common documents used across the project are imported automatically into applications.
+          </p>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isReadOnlyMode}
+            className={`rounded-lg px-5 py-2 text-sm font-semibold ${
+              isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
+            } ${isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
+          >
+            {isSaved ? "Saved" : "Save"}
+          </button>
         </div>
 
-        <div className="p-6 space-y-4 pb-6">
+        <div className="space-y-4">
           <div
             className={
               isReadOnlyMode
@@ -256,7 +247,7 @@ export default function ProjectLibraryPage() {
                 : ""
             }
           >
-          <div className="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+          <div className="overflow-hidden rounded-xl border border-gray-100">
             <table className="min-w-full text-sm text-left text-gray-900">
               <thead className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600">
                 <tr>
@@ -297,7 +288,7 @@ export default function ProjectLibraryPage() {
                           type="button"
                           onClick={() => inputRefs.current[index]?.click()}
                           disabled={isReadOnlyMode}
-                          className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 leading-none shadow-sm transition-colors ${
+                          className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border border-brand-blue/20 bg-blue-50 hover:bg-blue-100 text-brand-blue leading-none shadow-sm transition-colors ${
                             isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""
                           }`}
                           aria-label="Attach document"
@@ -353,7 +344,7 @@ export default function ProjectLibraryPage() {
                               setPreviewOpen(true);
                             })();
                           }}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-emerald-700 hover:text-emerald-900 shadow-sm transition-colors cursor-pointer"
+                          className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-brand-blue hover:text-brand-navy shadow-sm transition-colors cursor-pointer"
                           aria-label="Preview document"
                     >
                           <svg
@@ -381,7 +372,7 @@ export default function ProjectLibraryPage() {
           <div className="text-sm text-gray-700 mt-2">Total Number : {MAX_FILES}</div>
           </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
