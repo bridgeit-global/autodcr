@@ -2,7 +2,11 @@ import { getDocumentIdsForApplication } from "./applications";
 import {
   aadhaarCard,
   architectAppointmentLetter,
+  crzRemarks,
+  dpRemarks,
   panCard,
+  powerOfAttorney,
+  prCard,
   technicalPersonLicense,
 } from "./documents";
 
@@ -11,6 +15,10 @@ export const documents = {
   pan: panCard,
   "technical-person-license": technicalPersonLicense,
   aadhaar: aadhaarCard,
+  "pr-card": prCard,
+  "dp-remarks": dpRemarks,
+  "crz-remarks": crzRemarks,
+  "power-of-attorney": powerOfAttorney,
 } as const;
 
 export type DocumentType = keyof typeof documents;

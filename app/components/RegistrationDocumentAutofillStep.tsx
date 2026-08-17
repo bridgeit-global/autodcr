@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getFieldLabel } from "@/app/lib/documentValidation/fieldLabels";
 import type { DocumentValidationResult } from "@/app/components/DocumentValidationResultModal";
 import {
@@ -47,6 +47,7 @@ type RegistrationDocumentAutofillStepProps = {
     options?: AutofillApplyOptions
   ) => void;
   onContinue: () => void;
+  onExtractedChange?: (extracted: boolean) => void;
 };
 
 function slotsForKind(kind: RegistrationKind): DocSlot[] {
@@ -92,6 +93,7 @@ export default function RegistrationDocumentAutofillStep({
   entityType,
   onAutofill,
   onContinue,
+  onExtractedChange,
 }: RegistrationDocumentAutofillStepProps) {
   const docSlots = useMemo(
     () => slotsForKind(registrationKind),
@@ -105,6 +107,7 @@ export default function RegistrationDocumentAutofillStep({
     Partial<Record<DocSlot["id"], DocStatus>>
   >({});
   const [loading, setLoading] = useState(false);
+  const [hasExtracted, setHasExtracted] = useState(false);
   const [filledFields, setFilledFields] = useState<string[]>([]);
   const [stepError, setStepError] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<AutofillFieldConflict[]>([]);
@@ -120,6 +123,19 @@ export default function RegistrationDocumentAutofillStep({
 
   const agreedRef = useRef<AutofillPatch>({});
   const filesRef = useRef<AutofillFiles>({});
+
+  useEffect(() => {
+    onAutofill(
+      {},
+      {
+        aadhaarCardFile: files.aadhaar ?? null,
+        panCardFile: files.pan ?? null,
+        licenseCertificateFile: files["technical-person-license"] ?? null,
+      }
+    );
+    // Keep parent form files in sync with this step so they are submitted once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
   const extractionsRef = useRef<
     Partial<Record<AutofillDocSource, Record<string, string | null>>>
   >({});
@@ -176,6 +192,8 @@ export default function RegistrationDocumentAutofillStep({
   const handleExtractAndFill = async () => {
     setStepError(null);
     setFilledFields([]);
+    setHasExtracted(false);
+    onExtractedChange?.(false);
     setConflicts([]);
     setGroupConflicts([]);
     setConflictSelections({});
@@ -255,7 +273,21 @@ export default function RegistrationDocumentAutofillStep({
         autofillFiles,
         extractions
       );
+
+      const requiredSlots = docSlots.filter((slot) => slot.required);
+      const extractedOk = requiredSlots.every(
+        (slot) => Boolean(extractions[slot.id] || nextStatus[slot.id]?.result)
+      );
+      setHasExtracted(extractedOk);
+      onExtractedChange?.(extractedOk);
+      if (!extractedOk) {
+        setStepError(
+          "Upload and extract all identity documents before continuing."
+        );
+      }
     } catch {
+      setHasExtracted(false);
+      onExtractedChange?.(false);
       setStepError("Could not complete document extraction. Please try again.");
     } finally {
       setLoading(false);
@@ -295,17 +327,12 @@ export default function RegistrationDocumentAutofillStep({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-600">
-        Upload your identity documents. We will extract details and pre-fill the
-        registration form. You can review and edit everything before submitting.
-      </p>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {docSlots.map((slot) => {
           const status = statusByDoc[slot.id];
           return (
             <div key={slot.id} className="space-y-2">
-              <label className="block font-medium text-black">
+              <label className="block text-sm font-medium text-gray-800">
                 {slot.label}
                 {slot.required && (
                   <span className="text-red-600 font-bold"> *</span>
@@ -314,13 +341,15 @@ export default function RegistrationDocumentAutofillStep({
               <input
                 type="file"
                 accept={ACCEPTED}
-                onChange={(e) =>
+                onChange={(e) => {
+                  setHasExtracted(false);
+                  onExtractedChange?.(false);
                   setFiles((prev) => ({
                     ...prev,
                     [slot.id]: e.target.files?.[0] ?? null,
-                  }))
-                }
-                className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  }));
+                }}
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
               />
               {files[slot.id] && (
                 <p className="text-xs text-green-600">✓ {files[slot.id]!.name}</p>
@@ -331,7 +360,7 @@ export default function RegistrationDocumentAutofillStep({
               {status?.result && (
                 <p
                   className={`text-xs ${
-                    status.result.valid ? "text-emerald-700" : "text-amber-700"
+                    status.result.valid ? "text-brand-blue" : "text-amber-700"
                   }`}
                 >
                   {status.result.valid
@@ -343,14 +372,6 @@ export default function RegistrationDocumentAutofillStep({
           );
         })}
       </div>
-
-      {registrationKind === "consultant" && !consultantType && (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Select a Consultant Type in Basic Details to map license registration
-          numbers. You can still extract now; license registration fields apply
-          after type is chosen.
-        </p>
-      )}
 
       {stepError && (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -383,7 +404,7 @@ export default function RegistrationDocumentAutofillStep({
                       e.target.value as AutofillDocSource
                     )
                   }
-                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-black outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 >
                   {groupConflict.candidates.map((candidate) => (
                     <option
@@ -406,7 +427,7 @@ export default function RegistrationDocumentAutofillStep({
                   onChange={(e) =>
                     handleConflictChange(conflict.field, e.target.value)
                   }
-                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-black outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 >
                   {conflict.candidates.map((candidate) => (
                     <option
@@ -424,7 +445,7 @@ export default function RegistrationDocumentAutofillStep({
       )}
 
       {filledFields.length > 0 && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <div className="rounded-lg border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-brand-navy">
           <p className="font-semibold mb-1">Auto-filled fields</p>
           <p>{filledFields.map((key) => getFieldLabel(key)).join(", ")}</p>
         </div>
@@ -435,14 +456,15 @@ export default function RegistrationDocumentAutofillStep({
           type="button"
           onClick={handleExtractAndFill}
           disabled={loading}
-          className="rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Extracting…" : "Extract & fill form"}
         </button>
         <button
           type="button"
           onClick={onContinue}
-          className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+          disabled={!hasExtracted}
+          className="rounded-lg border border-brand-blue bg-white px-5 py-2.5 text-sm font-semibold text-brand-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Continue to Basic Details
         </button>

@@ -23,6 +23,23 @@ export function isSupportedDocumentMediaType(mediaType: string): boolean {
   return mediaType === "application/pdf" || IMAGE_TYPES.has(mediaType);
 }
 
+function flattenExtracted(raw: unknown): Record<string, string | null> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (value === null || value === undefined) {
+      out[key] = null;
+    } else if (typeof value === "string") {
+      out[key] = value;
+    } else if (typeof value === "boolean" || typeof value === "number") {
+      out[key] = String(value);
+    } else {
+      out[key] = JSON.stringify(value);
+    }
+  }
+  return out;
+}
+
 async function runValidation(
   documentType: DocumentType,
   extracted: Record<string, string | null>
@@ -65,10 +82,7 @@ export async function validateDocumentPdf(
     documentText
   );
 
-  return runValidation(
-    documentType,
-    extracted as Record<string, string | null>
-  );
+  return runValidation(documentType, flattenExtracted(extracted));
 }
 
 /**
@@ -96,30 +110,40 @@ export async function validateDocumentFile(
   }
 
   if (mediaType === "application/pdf") {
+    let documentText = "";
+    let textExtracted = false;
+
     try {
-      const documentText = await extractTextFromPdfBuffer(buffer);
-      const extracted = await extractDocument(
-        definition as DocumentDefinition<z.ZodTypeAny>,
-        documentText
-      );
-      return runValidation(
-        documentType,
-        extracted as Record<string, string | null>
-      );
+      documentText = await extractTextFromPdfBuffer(buffer);
+      textExtracted = true;
     } catch {
-      // Scanned / image-only PDF — use multimodal extraction.
-      const extracted = await extractDocumentFromMedia(
-        definition as DocumentDefinition<z.ZodTypeAny>,
-        {
-          data: buffer,
-          mediaType,
-        }
-      );
-      return runValidation(
-        documentType,
-        extracted as Record<string, string | null>
-      );
+      // Scanned / image-only PDF — use multimodal extraction below.
     }
+
+    if (textExtracted) {
+      try {
+        const extracted = await extractDocument(
+          definition as DocumentDefinition<z.ZodTypeAny>,
+          documentText
+        );
+        return runValidation(documentType, flattenExtracted(extracted));
+      } catch (textError) {
+        console.warn(
+          `[validate-document] Text-path extraction failed for ${documentType}, trying multimodal:`,
+          textError instanceof Error ? textError.message : textError
+        );
+      }
+    }
+
+    const extracted = await extractDocumentFromMedia(
+      definition as DocumentDefinition<z.ZodTypeAny>,
+      {
+        data: buffer,
+        mediaType,
+      },
+      documentText
+    );
+    return runValidation(documentType, flattenExtracted(extracted));
   }
 
   const extracted = await extractDocumentFromMedia(
@@ -130,10 +154,7 @@ export async function validateDocumentFile(
     }
   );
 
-  return runValidation(
-    documentType,
-    extracted as Record<string, string | null>
-  );
+  return runValidation(documentType, flattenExtracted(extracted));
 }
 
 export type { DocumentDefinition } from "./types";

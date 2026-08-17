@@ -1,14 +1,13 @@
 import RegistrationForm from "../components/RegistrationForm";
-import SiteFooter from "../components/SiteFooter";
+import RegistrationPageShell from "../components/RegistrationPageShell";
 
 export default function OwnerRegistrationPage() {
   return (
-    <div className="min-h-screen bg-gray-100">
-      <main className="py-8">
-        <RegistrationForm title="Owner Registration" />
-      </main>
-      <SiteFooter />
-    </div>
+    <RegistrationPageShell
+      title="Owner Registration"
+      description="Create your owner account"
+    >
+      <RegistrationForm title="Owner Registration" />
+    </RegistrationPageShell>
   );
 }
-

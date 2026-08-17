@@ -2,6 +2,7 @@
 
 import { useProjectSectionNavigation } from "@/app/hooks/useProjectSectionNavigation";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
+import { CREATE_PROJECT_SECTIONS } from "@/app/utils/projectSections";
 
 export type ProjectSection = {
   id: string;
@@ -9,13 +10,11 @@ export type ProjectSection = {
   path: string;
 };
 
-const BASE_SECTIONS: ProjectSection[] = [
-  { id: "project-details", label: "Project Details", path: "/dashboard/project-details" },
-  { id: "applicant-details", label: "Applicant Details", path: "/dashboard/applicant" },
-  { id: "building-details", label: "Building Details", path: "/dashboard/building" },
-  { id: "area-details", label: "Area Details", path: "/dashboard/area" },
-  { id: "project-library", label: "Project Library", path: "/dashboard/project-library" },
-];
+const BASE_SECTIONS: ProjectSection[] = CREATE_PROJECT_SECTIONS.map((section) => ({
+  id: section.id,
+  label: section.label,
+  path: section.path,
+}));
 
 const APPLICATION_SECTION: ProjectSection = {
   id: "application-details",
@@ -27,6 +26,7 @@ export default function ProjectSectionStepper() {
   const {
     pathname,
     isReadOnlyMode,
+    isLibraryGated,
     showUnsavedWarning,
     handleNavigation,
     confirmLeaveWithoutSaving,
@@ -49,6 +49,10 @@ export default function ProjectSectionStepper() {
         <ol className="flex items-center gap-1 overflow-x-auto pb-0.5 sm:gap-2">
           {sections.map((section, index) => {
             const isCurrent = index === currentIndex;
+            const isGated =
+              isLibraryGated &&
+              section.id !== "project-library" &&
+              section.id !== "application-details";
 
             return (
               <li key={section.id} className="flex shrink-0 items-center">
@@ -56,11 +60,14 @@ export default function ProjectSectionStepper() {
                   type="button"
                   onClick={() => handleNavigation(section.path)}
                   aria-current={isCurrent ? "step" : undefined}
+                  aria-disabled={isGated ? true : undefined}
                   className={[
                     "inline-flex items-center gap-2 px-1 py-1 text-sm transition-colors",
                     isCurrent
                       ? "font-semibold text-brand-blue"
-                      : "font-medium text-gray-400 hover:text-gray-600",
+                      : isGated
+                        ? "cursor-not-allowed font-medium text-gray-300"
+                        : "font-medium text-gray-400 hover:text-gray-600",
                   ].join(" ")}
                 >
                   <span
@@ -68,7 +75,9 @@ export default function ProjectSectionStepper() {
                       "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
                       isCurrent
                         ? "bg-brand-blue text-white"
-                        : "border border-gray-300 bg-white text-gray-400",
+                        : isGated
+                          ? "border border-gray-200 bg-gray-50 text-gray-300"
+                          : "border border-gray-300 bg-white text-gray-400",
                     ].join(" ")}
                   >
                     {index + 1}

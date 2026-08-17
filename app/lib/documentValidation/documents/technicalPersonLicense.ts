@@ -102,8 +102,11 @@ Example:
 
 10. profession
 - Extract the profession / category of technical person.
-- Examples: Architect, Engineer, Structural Engineer, Supervisor, etc.
-- Often near "Profession", "Category", "Licensed as".
+- Map to the closest of: Architect, Structural Engineer, Licensed Surveyor,
+  MEP Consultant, Plumber, Fire Consultant, Landscape Consultant,
+  PMC / Project Manager, Geotechnical Consultant, Environmental Consultant,
+  Town Planner.
+- Often near "Profession", "Category", "Licensed as", "License for".
 Example:
 Architect
 

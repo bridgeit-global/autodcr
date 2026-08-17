@@ -20,6 +20,16 @@ import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import WizardSteps, { type WizardStep } from "@/app/components/ui/WizardSteps";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
+import { subscribeProjectAutofillApplied } from "@/app/lib/projectDocumentAutofill";
+import {
+  enrichSavePlotLocation,
+  inferVillageFromCts,
+  matchVillageToWardOptions,
+  normalizeDpZoneForForm,
+  normalizeVillageForWard,
+  pickString,
+  sanitizeCtsNumbers,
+} from "@/app/lib/projectDocumentAutofill/utils";
 import {
   combineProjectTitleWithProposalNo,
   stripTrailingProposalNo,
@@ -214,6 +224,71 @@ function validateSurveySelectionMessage(plotBelongs: SavePlotFormData["plotBelon
   }
 }
 
+function readProjectFormDraft(): ProjectFormData {
+  const draft = loadDraft<ProjectFormData>("draft-project-details-project", {
+    proposalAsPer: "DCPR 2034",
+    title: "",
+    proposalNo: "",
+    propertyAddress: "",
+    landmark: "",
+    earlierBuildingProposalFileNo: "",
+    pincode: "",
+    fullNameOfApplicant: "",
+    addressOfApplicant: "",
+    hasPaidLatestPropertyTax: "",
+  });
+  const proposalNo = String(draft.proposalNo || "").trim();
+  return {
+    ...draft,
+    title: stripTrailingProposalNo(String(draft.title || ""), proposalNo),
+    proposalNo,
+  };
+}
+
+function readSavePlotFormDraft(): SavePlotFormData {
+  const stored = loadDraft<Partial<SavePlotFormData>>(
+    "draft-project-details-save-plot",
+    SAVE_PLOT_FORM_DEFAULTS
+  );
+  const projectStored = loadDraft<Partial<ProjectFormData>>(
+    "draft-project-details-project",
+    {} as ProjectFormData
+  );
+  const merged: SavePlotFormData = {
+    ...SAVE_PLOT_FORM_DEFAULTS,
+    ...(stored && typeof stored === "object" ? stored : {}),
+  };
+  const enriched = enrichSavePlotLocation({
+    ...merged,
+    propertyAddress: pickString(projectStored.propertyAddress),
+    landmark: pickString(projectStored.landmark),
+  }) as Partial<SavePlotFormData>;
+  const withLocation: SavePlotFormData = {
+    ...merged,
+    ...enriched,
+    planningAuthority: normalizePlanningAuthority(
+      String(enriched.planningAuthority ?? merged.planningAuthority ?? "")
+    ),
+    plotBelongsTo: normalizePlotBelongsForRegion(
+      String(enriched.region ?? merged.region ?? ""),
+      String(enriched.ward ?? merged.ward ?? "") || undefined,
+      String(enriched.plotBelongsTo ?? merged.plotBelongsTo ?? "")
+    ),
+    villageName: normalizeVillageForWard(
+      String(enriched.ward ?? merged.ward ?? ""),
+      String(enriched.villageName ?? merged.villageName ?? "")
+    ),
+    dpZone: normalizeDpZoneForForm(String(enriched.dpZone ?? merged.dpZone ?? "")),
+  };
+  const raw = withLocation.proposedCtsNumber;
+  const normalizedProposedCtsNumber = sanitizeCtsNumbers(raw);
+
+  return {
+    ...withLocation,
+    proposedCtsNumber: normalizedProposedCtsNumber,
+  };
+}
+
 /** Wizard steps in order. Each `id` matches the `tab` query-param contract. */
 const WIZARD_STEPS: WizardStep[] = [
   { id: "project-info", label: "Basic Details" },
@@ -252,6 +327,18 @@ export default function ProjectDetailsClient() {
   const [isSavePlotSaved, setIsSavePlotSaved] = useState(() => isPageSaved("saved-save-plot-details"));
   // Track initial load to prevent clearing fields during form initialization
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const lastAutofillHydratedRef = useRef(0);
+  const prevRegionRef = useRef<string | undefined>(undefined);
+  const prevZoneRef = useRef<string | undefined>(undefined);
+  const prevWardRef = useRef<string | undefined>(undefined);
+  const prevVillageRef = useRef<string | undefined>(undefined);
+
+  const syncCascadeRefs = (draft: SavePlotFormData) => {
+    prevRegionRef.current = draft.region;
+    prevZoneRef.current = draft.zone;
+    prevWardRef.current = draft.ward;
+    prevVillageRef.current = draft.villageName;
+  };
 
   const inputClasses =
     "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
@@ -280,26 +367,7 @@ export default function ProjectDetailsClient() {
     setValue: setProjectValue,
     setError: setProjectError,
   } = useForm<ProjectFormData>({
-    defaultValues: (() => {
-      const draft = loadDraft<ProjectFormData>("draft-project-details-project", {
-        proposalAsPer: "DCPR 2034",
-        title: "",
-        proposalNo: "",
-        propertyAddress: "",
-        landmark: "",
-        earlierBuildingProposalFileNo: "",
-        pincode: "",
-        fullNameOfApplicant: "",
-        addressOfApplicant: "",
-        hasPaidLatestPropertyTax: "",
-      });
-      const proposalNo = String(draft.proposalNo || "").trim();
-      return {
-        ...draft,
-        title: stripTrailingProposalNo(String(draft.title || ""), proposalNo),
-        proposalNo,
-      };
-    })(),
+    defaultValues: readProjectFormDraft(),
   });
 
   // Default for new projects only (edit mode loads proposalAsPer from the database)
@@ -336,32 +404,7 @@ export default function ProjectDetailsClient() {
     formState: { errors: savePlotErrors },
     reset: resetSavePlot,
   } = useForm<SavePlotFormData>({
-    defaultValues: (() => {
-      const stored = loadDraft<Partial<SavePlotFormData>>(
-        "draft-project-details-save-plot",
-        SAVE_PLOT_FORM_DEFAULTS
-      );
-      const merged: SavePlotFormData = {
-        ...SAVE_PLOT_FORM_DEFAULTS,
-        ...(stored && typeof stored === "object" ? stored : {}),
-      };
-
-      // Back-compat: older drafts may have `proposedCtsNumber` as a string (single select)
-      const raw = merged.proposedCtsNumber;
-      const normalizedProposedCtsNumber =
-        Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw ? [raw] : [];
-
-      return {
-        ...merged,
-        proposedCtsNumber: normalizedProposedCtsNumber,
-        planningAuthority: normalizePlanningAuthority(merged.planningAuthority),
-        plotBelongsTo: normalizePlotBelongsForRegion(
-          merged.region || "",
-          merged.ward || undefined,
-          merged.plotBelongsTo || ""
-        ),
-      };
-    })(),
+    defaultValues: readSavePlotFormDraft(),
   });
 
   const {
@@ -656,12 +699,66 @@ export default function ProjectDetailsClient() {
   }, [isReadOnlyMode, watchProject]);
 
   useEffect(() => {
-    if (isReadOnlyMode) return;
+    if (isReadOnlyMode || isInitialLoad) return;
     const subscription = watchSavePlot((value) => {
       saveDraft("draft-project-details-save-plot", value as SavePlotFormData);
     });
     return () => subscription.unsubscribe();
-  }, [isReadOnlyMode, watchSavePlot]);
+  }, [isInitialLoad, isReadOnlyMode, watchSavePlot]);
+
+  // Reload project + save-plot forms when Project Library extraction writes new drafts.
+  useEffect(() => {
+    if (isEditMode || isReadOnlyMode) return;
+
+    const hydrateFromAutofillDrafts = () => {
+      setIsInitialLoad(true);
+      resetProject(readProjectFormDraft());
+      const savePlotDraft = readSavePlotFormDraft();
+      resetSavePlot(savePlotDraft);
+      syncCascadeRefs(savePlotDraft);
+      setIsProjectInfoSaved(false);
+      setIsSavePlotSaved(false);
+      window.setTimeout(() => setIsInitialLoad(false), 500);
+    };
+
+    return subscribeProjectAutofillApplied(hydrateFromAutofillDrafts);
+  }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot]);
+
+  // If user navigates here after Library Save, hydrate from the latest autofill timestamp.
+  useEffect(() => {
+    if (isEditMode || isReadOnlyMode) return;
+    const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
+    if (!autofillAt || autofillAt <= lastAutofillHydratedRef.current) return;
+    lastAutofillHydratedRef.current = autofillAt;
+    setIsInitialLoad(true);
+    resetProject(readProjectFormDraft());
+    const savePlotDraft = readSavePlotFormDraft();
+    resetSavePlot(savePlotDraft);
+    syncCascadeRefs(savePlotDraft);
+    setIsProjectInfoSaved(false);
+    setIsSavePlotSaved(false);
+    window.setTimeout(() => setIsInitialLoad(false), 500);
+  }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot]);
+
+  // After hydration, backfill village/CTS from enriched draft if cascade effects cleared them.
+  useEffect(() => {
+    if (isEditMode || isReadOnlyMode || isInitialLoad) return;
+    const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
+    if (!autofillAt) return;
+
+    const draft = readSavePlotFormDraft();
+    const current = getSavePlotValues();
+
+    if (draft.villageName && !current.villageName) {
+      setSavePlotValue("villageName", draft.villageName, { shouldValidate: false });
+    }
+    if (
+      draft.proposedCtsNumber?.length &&
+      (!Array.isArray(current.proposedCtsNumber) || current.proposedCtsNumber.length === 0)
+    ) {
+      setSavePlotValue("proposedCtsNumber", draft.proposedCtsNumber, { shouldValidate: false });
+    }
+  }, [getSavePlotValues, isEditMode, isInitialLoad, isReadOnlyMode, setSavePlotValue]);
 
   // Mark as unsaved only on actual user interaction (DOM events don't fire for programmatic changes)
   useEffect(() => {
@@ -683,9 +780,6 @@ export default function ProjectDetailsClient() {
     };
   }, [activeTab, isProjectInfoSaved, isReadOnlyMode, isSavePlotSaved]);
 
-  // Track previous region value to detect actual changes
-  const prevRegionRef = useRef<string | undefined>(undefined);
-  
   // When region changes: clear zone, ward, village, survey no, and CTS numbers
   useEffect(() => {
     if (isReadOnlyMode) return;
@@ -696,7 +790,11 @@ export default function ProjectDetailsClient() {
     }
     
     // Only clear if region actually changed (not just on initial render)
-    if (prevRegionRef.current !== undefined && prevRegionRef.current !== selectedRegion) {
+    if (
+      prevRegionRef.current !== undefined &&
+      prevRegionRef.current !== selectedRegion &&
+      !(prevRegionRef.current === "" && selectedRegion)
+    ) {
       // Clear all dependent fields when region changes
       setSavePlotValue("zone", "", { shouldValidate: false });
       setSavePlotValue("ward", "", { shouldValidate: false });
@@ -709,9 +807,6 @@ export default function ProjectDetailsClient() {
     prevRegionRef.current = selectedRegion;
   }, [isInitialLoad, isReadOnlyMode, selectedRegion, setSavePlotValue]);
 
-  // Track previous zone value to detect actual changes (not just initial render)
-  const prevZoneRef = useRef<string | undefined>(undefined);
-  
   // When zone changes: clear ward, village, survey no, and CTS numbers
   useEffect(() => {
     if (isReadOnlyMode) return;
@@ -722,7 +817,11 @@ export default function ProjectDetailsClient() {
     }
     
     // Only clear if zone actually changed (not just on initial render)
-    if (prevZoneRef.current !== undefined && prevZoneRef.current !== selectedZone) {
+    if (
+      prevZoneRef.current !== undefined &&
+      prevZoneRef.current !== selectedZone &&
+      !(prevZoneRef.current === "" && selectedZone)
+    ) {
       // Clear all dependent fields when zone changes
       setSavePlotValue("ward", "", { shouldValidate: false });
       setSavePlotValue("villageName", "", { shouldValidate: false });
@@ -736,9 +835,6 @@ export default function ProjectDetailsClient() {
     prevZoneRef.current = selectedZone;
   }, [isInitialLoad, isReadOnlyMode, selectedRegion, selectedZone, setSavePlotValue]);
 
-  // Track previous ward value to detect actual changes
-  const prevWardRef = useRef<string | undefined>(undefined);
-  
   // When ward changes: clear village, survey no, and CTS numbers
   useEffect(() => {
     if (isReadOnlyMode) return;
@@ -749,7 +845,11 @@ export default function ProjectDetailsClient() {
     }
     
     // Only clear if ward actually changed (not just on initial render)
-    if (prevWardRef.current !== undefined && prevWardRef.current !== selectedWard) {
+    if (
+      prevWardRef.current !== undefined &&
+      prevWardRef.current !== selectedWard &&
+      !(prevWardRef.current === "" && selectedWard)
+    ) {
       // Clear dependent fields when ward changes
       setSavePlotValue("villageName", "", { shouldValidate: false });
       setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
@@ -768,9 +868,6 @@ export default function ProjectDetailsClient() {
     prevWardRef.current = selectedWard;
   }, [getSavePlotValues, isInitialLoad, isReadOnlyMode, selectedRegion, selectedWard, setSavePlotValue]);
 
-  // Track previous village value to detect actual changes
-  const prevVillageRef = useRef<string | undefined>(undefined);
-  
   // When village changes: clear survey no and CTS numbers
   useEffect(() => {
     if (isReadOnlyMode) return;
@@ -781,7 +878,11 @@ export default function ProjectDetailsClient() {
     }
     
     // Only clear if village actually changed (not just on initial render)
-    if (prevVillageRef.current !== undefined && prevVillageRef.current !== selectedVillage) {
+    if (
+      prevVillageRef.current !== undefined &&
+      prevVillageRef.current !== selectedVillage &&
+      !(prevVillageRef.current === "" && selectedVillage)
+    ) {
       // Clear survey numbers when village changes
       setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
       setCtsNumbers([]); // Clear CTS numbers state
@@ -851,15 +952,94 @@ export default function ProjectDetailsClient() {
 
   // F.P.No: TPS / village option list validation — clear if current value not in allowed set
   useEffect(() => {
-    if (isInitialLoad || !selectedWard) return;
+    if (isInitialLoad) return;
+
+    const draft = getSavePlotValues();
+    let ward = selectedWard;
+    const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
+    const recentAutofill = autofillAt > 0 && Date.now() - autofillAt < 15000;
+
+    const ctsDraft = Array.isArray(draft.proposedCtsNumber)
+      ? draft.proposedCtsNumber.map(String)
+      : [];
+
+    if (ward && !draft.villageName && ctsDraft.length > 0) {
+      const fromCts = inferVillageFromCts(ward, ctsDraft);
+      if (fromCts) {
+        setSavePlotValue("villageName", fromCts, { shouldValidate: false });
+        return;
+      }
+    }
+
+    if (ward && draft.villageName) {
+      const projectDraft = loadDraft<Partial<ProjectFormData>>(
+        "draft-project-details-project",
+        {} as ProjectFormData
+      );
+      const enriched = enrichSavePlotLocation({
+        region: draft.region,
+        zone: draft.zone,
+        ward,
+        villageName: draft.villageName,
+        proposedCtsNumber: ctsDraft,
+        propertyAddress: pickString(projectDraft.propertyAddress),
+        landmark: pickString(projectDraft.landmark),
+      }) as Partial<SavePlotFormData>;
+      if ((enriched.villageName || "") !== (draft.villageName || "")) {
+        setSavePlotValue("villageName", enriched.villageName || "", { shouldValidate: false });
+        return;
+      }
+    }
+
+    if (!ward && draft.villageName) {
+      const enriched = enrichSavePlotLocation({
+        region: draft.region,
+        zone: draft.zone,
+        ward: draft.ward,
+        villageName: draft.villageName,
+        proposedCtsNumber: ctsDraft,
+        propertyAddress: pickString(
+          loadDraft<Partial<ProjectFormData>>("draft-project-details-project", {} as ProjectFormData)
+            .propertyAddress
+        ),
+      }) as Partial<SavePlotFormData>;
+
+      if (enriched.ward && enriched.ward !== draft.ward) {
+        setSavePlotValue("ward", enriched.ward, { shouldValidate: false });
+      }
+      if (enriched.region && enriched.region !== draft.region) {
+        setSavePlotValue("region", enriched.region, { shouldValidate: false });
+      }
+      if (enriched.zone && enriched.zone !== draft.zone) {
+        setSavePlotValue("zone", enriched.zone, { shouldValidate: false });
+      }
+      if (enriched.villageName && enriched.villageName !== draft.villageName) {
+        setSavePlotValue("villageName", enriched.villageName, { shouldValidate: false });
+      }
+      if (enriched.ward) ward = enriched.ward;
+    }
+
+    if (!ward) return;
     if (selectedPlotBelongs === "F.P.No" && !fpTpsReady) return;
 
     const fpOpts =
       selectedPlotBelongs === "F.P.No" && fpTpsFromApi !== null ? fpTpsFromApi : null;
-    const regularOpts = villageOptionsByWard[selectedWard] ?? [];
+    const regularOpts = villageOptionsByWard[ward] ?? [];
     const opts = selectedPlotBelongs === "F.P.No" ? (fpOpts ?? []) : regularOpts;
     const v = getSavePlotValues().villageName;
+    const normalized = normalizeVillageForWard(ward, v);
+    const matched = matchVillageToWardOptions(ward, normalized || v);
+
+    if (matched && matched !== v && opts.includes(matched)) {
+      setSavePlotValue("villageName", matched, { shouldValidate: false });
+      return;
+    }
+    if (recentAutofill && v && opts.includes(v)) return;
     if (v && !opts.includes(v)) {
+      if (matched && opts.includes(matched)) {
+        setSavePlotValue("villageName", matched, { shouldValidate: false });
+        return;
+      }
       setSavePlotValue("villageName", "", { shouldValidate: false });
       setSavePlotValue("proposedCtsNumber", [], { shouldValidate: false });
       setCtsNumbers([]);
@@ -880,8 +1060,11 @@ export default function ProjectDetailsClient() {
       return;
     }
 
+    const draftSelected = getSavePlotValues().proposedCtsNumber;
+    const selected = Array.isArray(draftSelected) ? draftSelected.map(String) : [];
+
     if (!selectedVillage || !selectedWard) {
-      setCtsNumbers([]);
+      setCtsNumbers(selected.length > 0 ? [...new Set(selected)] : []);
       return;
     }
 
@@ -923,8 +1106,9 @@ export default function ProjectDetailsClient() {
       selectedVillage as string,
       selectedPlotBelongs || ""
     );
-    setCtsNumbers(numbers.length > 0 ? numbers : []);
-  }, [selectedVillage, selectedWard, selectedPlotBelongs, isInitialLoad, isEditMode]);
+    const merged = [...new Set([...numbers, ...selected])];
+    setCtsNumbers(merged.length > 0 ? merged : []);
+  }, [selectedVillage, selectedWard, selectedPlotBelongs, isInitialLoad, isEditMode, getSavePlotValues]);
 
   const onProjectSubmit = async (data: ProjectFormData) => {
     if (isReadOnlyMode) return;
@@ -1857,9 +2041,8 @@ export default function ProjectDetailsClient() {
                           : validateSurveySelectionMessage(selectedPlotBelongs),
                     }}
                     render={({ field, fieldState }) => {
-                      // Use CTS numbers from API (already sorted)
-                      const sortedOptions = ctsNumbers;
                       const current = Array.isArray(field.value) ? field.value : [];
+                      const sortedOptions = [...new Set([...ctsNumbers, ...current])];
                       const surveyKindLabel = labelForSurveyField(selectedPlotBelongs);
 
                       const addSurveyNo = (surveyNo: string) => {

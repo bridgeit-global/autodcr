@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
+import { loadDraft, saveDraft, markPageSaved, isPageSaved, clearPageSaved } from "@/app/utils/draftStorage";
+import { subscribeProjectAutofillApplied } from "@/app/lib/projectDocumentAutofill";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
@@ -145,8 +146,12 @@ export default function AreaDetailsPage() {
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   const { showAlert } = useDashboardAlertModal();
-  // Start with Plot No. 1 by default
-  const [plots, setPlots] = useState<PlotRow[]>([createPlot(1)]);
+  const plotsPersistReadyRef = useRef(false);
+  const lastAutofillHydratedRef = useRef(0);
+  const [plots, setPlots] = useState<PlotRow[]>(() => {
+    if (typeof window === "undefined") return [createPlot(1)];
+    return loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
+  });
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-area-details"));
   const portalTotals = useMemo(() => getPortalFieldTotals(plots), [plots]);
   const plotTotalsSummary = useMemo(
@@ -167,16 +172,18 @@ export default function AreaDetailsPage() {
 
   // Load saved plots from localStorage or project data
   useEffect(() => {
-    if (isEditMode && projectData && !isLoading) {
+    if (isLoading) return;
+
+    if (isEditMode && projectData) {
       const areaDetails = projectData.area_details || {};
       const plotsData = (areaDetails.plots || []) as PlotRow[];
-      
+
       if (plotsData.length > 0) {
         setPlots(plotsData);
         saveDraft("draft-area-details-plots", plotsData);
         markPageSaved("saved-area-details");
         setIsSaved(true);
-        
+
         if (areaDetails.totals) {
           saveDraft("draft-area-details-totals", areaDetails.totals);
         }
@@ -188,7 +195,35 @@ export default function AreaDetailsPage() {
       const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
       setPlots(saved);
     }
+
+    plotsPersistReadyRef.current = true;
   }, [isEditMode, projectData, isLoading]);
+
+  // When Project Library extraction completes, reload prefilled plots.
+  useEffect(() => {
+    return subscribeProjectAutofillApplied(() => {
+      if (isEditMode) return;
+      const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
+      setPlots(saved);
+      clearPageSaved("saved-area-details");
+      setIsSaved(false);
+      plotsPersistReadyRef.current = true;
+      lastAutofillHydratedRef.current = loadDraft<number>("project-library-autofill-at", 0);
+    });
+  }, [isEditMode]);
+
+  // If user navigates here after Library Save, hydrate from the latest autofill timestamp.
+  useEffect(() => {
+    if (isEditMode || isLoading) return;
+    const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
+    if (!autofillAt || autofillAt <= lastAutofillHydratedRef.current) return;
+    lastAutofillHydratedRef.current = autofillAt;
+    const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
+    setPlots(saved);
+    clearPageSaved("saved-area-details");
+    setIsSaved(false);
+    plotsPersistReadyRef.current = true;
+  }, [isEditMode, isLoading]);
 
   const handleExtractChange = (
     plotId: string,
@@ -360,8 +395,9 @@ const removePlot = (plotId: string) => {
   const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
   const requiredMark = <span className="text-brand-navy">*</span>;
 
-  // Persist plots draft on change
+  // Persist plots draft on change (skip until initial hydration completes)
   useEffect(() => {
+    if (!plotsPersistReadyRef.current) return;
     saveDraft("draft-area-details-plots", plots);
   }, [plots]);
 

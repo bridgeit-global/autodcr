@@ -19,6 +19,15 @@ export function isPageSaved(key: string): boolean {
   return !!(data && typeof data.savedAt === "number");
 }
 
+export function clearPageSaved(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 
 export function saveDraft<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
@@ -68,7 +77,9 @@ export function clearProjectDrafts() {
 
     // Project library
     "draft-project-library-uploads",
+    "draft-project-library-extra-pr-uploads",
     "saved-project-library",
+    "saved-project-library-files",
     "saved-project-library-snapshot",
     "baseline-project-library-snapshot",
 

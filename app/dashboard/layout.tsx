@@ -9,9 +9,9 @@ import { ApplicationPdfSaveSlotProvider } from "./context/ApplicationPdfSaveSlot
 import { ApplicationSignSlotProvider } from "./context/ApplicationSignSlotContext";
 import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
 import { useDashboardAlertModal } from "./context/DashboardAlertModalContext";
-import { isPageSaved, loadDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
+import { isPageSaved, loadDraft, saveDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
 import { supabase } from "../utils/supabase";
-import { clearAllProjectLibraryFiles, getProjectLibraryFile } from "../utils/projectLibraryFiles";
+import { clearAllProjectLibraryFiles, clearAllExtraPrCards, getExtraPrCard, getProjectLibraryFile } from "../utils/projectLibraryFiles";
 import { useProjectData } from "../hooks/useProjectData";
 import { fetchProjectForEdit } from "../utils/fetchProjectForEdit";
 import { buildProjectUpdatePayload, countPayloadSections } from "../utils/projectUpdatePayload";
@@ -32,6 +32,15 @@ import {
 import { ensureProjectOwnerOnRoster } from "../utils/ownerApplicantRoster";
 import { sanitizeReturnUrl } from "../utils/applicationDeepLink";
 import { combineProjectTitleWithProposalNo } from "../utils/projectTitleProposal";
+import {
+  CREATE_PROJECT_SECTIONS,
+  LIBRARY_GATE_ALERT,
+  DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
+  PROJECT_LIBRARY_MAX_FILES,
+  PROJECT_LIBRARY_PATH,
+  isGatedCreateProjectPath,
+  shouldGateCreateProjectSections,
+} from "../utils/projectSections";
 
 type RequiredPage = {
   key: string;
@@ -39,15 +48,11 @@ type RequiredPage = {
   path: string;
 };
 
-const REQUIRED_PAGES: RequiredPage[] = [
-  { key: "saved-project-details", label: "Project Details", path: "/dashboard/project-details" },
-  { key: "saved-applicant-details", label: "Applicant Details", path: "/dashboard/applicant" },
-  { key: "saved-building-details", label: "Building Details", path: "/dashboard/building" },
-  { key: "saved-area-details", label: "Area Details", path: "/dashboard/area" },
-  { key: "saved-project-library", label: "Project Library", path: "/dashboard/project-library" },
-];
-
-const PROJECT_LIBRARY_MAX_FILES = 5;
+const REQUIRED_PAGES: RequiredPage[] = CREATE_PROJECT_SECTIONS.map((section) => ({
+  key: section.savedKey,
+  label: section.label,
+  path: section.path,
+}));
 
 type ProjectLibraryUpload = {
   name?: string;
@@ -55,6 +60,91 @@ type ProjectLibraryUpload = {
   url?: string;
   uploadedAt?: string;
 };
+
+function loadAllProjectLibraryUploadsFromDraft(): unknown[] {
+  const fixed = loadDraft("draft-project-library-uploads", []);
+  const extraPrSlots = loadDraft<{ id: string; upload?: ProjectLibraryUpload }[]>(
+    DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
+    []
+  );
+  const extraUploads = Array.isArray(extraPrSlots)
+    ? extraPrSlots.map((slot) => slot?.upload).filter(Boolean)
+    : [];
+  return [
+    ...(Array.isArray(fixed) ? fixed.filter(Boolean) : []),
+    ...extraUploads,
+  ];
+}
+
+async function uploadProjectLibraryFilesToStorage(
+  projectId: string
+): Promise<ProjectLibraryUpload[]> {
+  const uploads: ProjectLibraryUpload[] = [];
+
+  for (let i = 0; i < PROJECT_LIBRARY_MAX_FILES; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    const local = await getProjectLibraryFile(i);
+    if (!local?.blob) continue;
+    const safeDocName = `document-${i + 1}`;
+    const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
+    const path = `${projectId}/project-library/${safeDocName}-${i + 1}.${extension}`;
+    // eslint-disable-next-line no-await-in-loop
+    const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
+      upsert: true,
+      contentType: local.type || "application/pdf",
+    });
+    if (uploadError) {
+      console.error("Error uploading project library doc:", uploadError);
+      continue;
+    }
+    const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
+    uploads.push({
+      name: local.name,
+      path,
+      url: publicData?.publicUrl || "",
+      uploadedAt: new Date().toISOString(),
+    });
+  }
+
+  const extraPrSlots = loadDraft<{ id: string }[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+  if (Array.isArray(extraPrSlots)) {
+    for (let i = 0; i < extraPrSlots.length; i++) {
+      const slot = extraPrSlots[i];
+      if (!slot?.id) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const local = await getExtraPrCard(slot.id);
+      if (!local?.blob) continue;
+      const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
+      const path = `${projectId}/project-library/extra-pr-${i + 1}.${extension}`;
+      // eslint-disable-next-line no-await-in-loop
+      const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
+        upsert: true,
+        contentType: local.type || "application/pdf",
+      });
+      if (uploadError) {
+        console.error("Error uploading extra PR card:", uploadError);
+        continue;
+      }
+      const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
+      uploads.push({
+        name: local.name,
+        path,
+        url: publicData?.publicUrl || "",
+        uploadedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  return uploads;
+}
+
+async function clearLocalProjectLibraryFiles(): Promise<void> {
+  await clearAllProjectLibraryFiles(PROJECT_LIBRARY_MAX_FILES);
+  const extraPrSlots = loadDraft<{ id: string }[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+  if (Array.isArray(extraPrSlots)) {
+    await clearAllExtraPrCards(extraPrSlots.map((slot) => slot.id).filter(Boolean));
+  }
+}
 
 function extractProjectIdFromRpc(data: any): string | null {
   if (!data) return null;
@@ -194,31 +284,31 @@ async function rpcCreateProject(
 function getUnsavedRequiredPages(): RequiredPage[] {
   const pages: RequiredPage[] = [];
 
-  if (!isPageSaved("saved-save-plot-details")) {
-    pages.push({
-      key: "saved-save-plot-details",
-      label: "Project Details (Save Plot Details)",
-      path: "/dashboard/project-details?tab=save-plot",
-    });
-  }
-  if (!isPageSaved("saved-project-info")) {
-    pages.push({
-      key: "saved-project-info",
-      label: "Project Details (Project Info)",
-      path: "/dashboard/project-details?tab=project-info",
-    });
-  }
+  for (const section of CREATE_PROJECT_SECTIONS) {
+    if (section.id === "project-details") {
+      if (!isPageSaved("saved-save-plot-details")) {
+        pages.push({
+          key: "saved-save-plot-details",
+          label: "Project Details (Save Plot Details)",
+          path: "/dashboard/project-details?tab=save-plot",
+        });
+      }
+      if (!isPageSaved("saved-project-info")) {
+        pages.push({
+          key: "saved-project-info",
+          label: "Project Details (Project Info)",
+          path: "/dashboard/project-details?tab=project-info",
+        });
+      }
+      continue;
+    }
 
-  const otherPages: RequiredPage[] = [
-    { key: "saved-applicant-details", label: "Applicant Details", path: "/dashboard/applicant" },
-    { key: "saved-building-details", label: "Building Details", path: "/dashboard/building" },
-    { key: "saved-area-details", label: "Area Details", path: "/dashboard/area" },
-    { key: "saved-project-library", label: "Project Library", path: "/dashboard/project-library" },
-  ];
-
-  for (const page of otherPages) {
-    if (!isPageSaved(page.key)) {
-      pages.push(page);
+    if (!isPageSaved(section.savedKey)) {
+      pages.push({
+        key: section.savedKey,
+        label: section.label,
+        path: section.path,
+      });
     }
   }
 
@@ -293,6 +383,16 @@ function DashboardLayoutContent({
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (authState !== "authenticated") return;
+    if (!shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode })) return;
+    if (!isGatedCreateProjectPath(pathname)) return;
+
+    const qs = searchParams.toString();
+    showAlert(LIBRARY_GATE_ALERT);
+    router.replace(qs ? `${PROJECT_LIBRARY_PATH}?${qs}` : PROJECT_LIBRARY_PATH);
+  }, [authState, isEditMode, isReadOnlyMode, pathname, router, searchParams, showAlert]);
+
   // Pre-mark sections that already have meaningful data for draft projects.
   // Runs synchronously during render (not in useEffect) so that child components
   // see the correct localStorage flags when they initialize their state.
@@ -319,7 +419,14 @@ function DashboardLayoutContent({
     if (hasMeaningful(verifiedProjectData.applicant_details)) markPageSaved("saved-applicant-details");
     if (hasMeaningful(verifiedProjectData.building_details)) markPageSaved("saved-building-details");
     if (hasMeaningful(verifiedProjectData.area_details)) markPageSaved("saved-area-details");
-    if (hasMeaningful(verifiedProjectData.project_library)) markPageSaved("saved-project-library");
+    if (hasMeaningful(verifiedProjectData.project_library)) {
+      markPageSaved("saved-project-library");
+      const libraryUploads = (verifiedProjectData.project_library as { uploads?: unknown[] })
+        ?.uploads;
+      if (Array.isArray(libraryUploads) && libraryUploads.filter(Boolean).length >= PROJECT_LIBRARY_MAX_FILES) {
+        saveDraft("saved-project-library-files", { count: PROJECT_LIBRARY_MAX_FILES });
+      }
+    }
   }
 
   // Clear all project drafts when leaving the dashboard (unmount)
@@ -376,7 +483,7 @@ function DashboardLayoutContent({
             totalLeaseArea: Number(rawAreaTotals?.totalLeaseArea ?? 0) || 0,
           }
         : null;
-    const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
+    const allProjectLibraryUploads = loadAllProjectLibraryUploadsFromDraft();
 
     const proposalNo = (projectInfo as any)?.proposalNo?.trim() || "";
     const previousProposalNo = String(
@@ -452,8 +559,8 @@ function DashboardLayoutContent({
       }
     }
 
-    if (projectLibraryUploads && Array.isArray(projectLibraryUploads)) {
-      const filteredUploads = (projectLibraryUploads as any[]).filter((u: any) => u !== null && u !== undefined && u !== "") as ProjectLibraryUpload[];
+    if (allProjectLibraryUploads && Array.isArray(allProjectLibraryUploads)) {
+      const filteredUploads = (allProjectLibraryUploads as any[]).filter((u: any) => u !== null && u !== undefined && u !== "") as ProjectLibraryUpload[];
       if (filteredUploads.length > 0) {
         const existingLibrary = existingData?.project_library || {};
         const existingUploads = existingLibrary.uploads || [];
@@ -692,31 +799,7 @@ function DashboardLayoutContent({
       }
 
       if (finalProjectId) {
-        const uploads: any[] = [];
-        for (let i = 0; i < PROJECT_LIBRARY_MAX_FILES; i++) {
-          const local = await getProjectLibraryFile(i);
-          if (!local?.blob) continue;
-          const safeDocName = `document-${i + 1}`;
-          const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
-          const path = `${finalProjectId}/project-library/${safeDocName}-${i + 1}.${extension}`;
-          const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
-            upsert: true,
-            contentType: local.type || "application/pdf",
-          });
-          if (uploadError) {
-            console.error("Error uploading project library doc:", uploadError);
-            setSubmitError(uploadError.message);
-          } else {
-            const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
-            uploads.push({
-              name: local.name,
-              path,
-              url: publicData?.publicUrl || "",
-              uploadedAt: new Date().toISOString(),
-            });
-          }
-        }
-
+        const uploads = await uploadProjectLibraryFilesToStorage(finalProjectId);
         if (uploads.length > 0) {
           const { error: updateError } = await supabase
             .from("projects")
@@ -727,7 +810,7 @@ function DashboardLayoutContent({
           }
         }
 
-        await clearAllProjectLibraryFiles(PROJECT_LIBRARY_MAX_FILES);
+        await clearLocalProjectLibraryFiles();
       }
 
       clearProjectDrafts();
@@ -846,7 +929,7 @@ function DashboardLayoutContent({
               totalLeaseArea: Number(rawAreaTotals?.totalLeaseArea ?? 0) || 0,
             }
           : null;
-      const projectLibraryUploads = loadDraft("draft-project-library-uploads", []);
+      const projectLibraryUploads = loadAllProjectLibraryUploadsFromDraft();
 
       const proposalNo = (projectInfo as { proposalNo?: string })?.proposalNo?.trim() || "";
       const previousProposalNo = String(
@@ -1013,37 +1096,8 @@ function DashboardLayoutContent({
 
       // Upload Project Library documents now (after project is created/updated)
       if (finalProjectId) {
-        const uploads: any[] = [];
-        for (let i = 0; i < PROJECT_LIBRARY_MAX_FILES; i++) {
-          // eslint-disable-next-line no-await-in-loop
-          const local = await getProjectLibraryFile(i);
-          if (!local?.blob) continue;
+        const uploads = await uploadProjectLibraryFilesToStorage(finalProjectId);
 
-          const safeDocName = `document-${i + 1}`;
-          const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
-          const path = `${finalProjectId}/project-library/${safeDocName}-${i + 1}.${extension}`;
-
-          // eslint-disable-next-line no-await-in-loop
-          const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
-            upsert: true,
-            contentType: local.type || "application/pdf",
-          });
-
-          if (uploadError) {
-            console.error("Error uploading project library doc:", uploadError);
-            setSubmitError(uploadError.message);
-          } else {
-            const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
-            uploads.push({
-              name: local.name,
-              path,
-              url: publicData?.publicUrl || "",
-              uploadedAt: new Date().toISOString(),
-            });
-          }
-        }
-
-        // Persist uploaded metadata into the project record (best-effort)
         if (uploads.length > 0) {
           const { error: updateError } = await supabase
             .from("projects")
@@ -1054,8 +1108,7 @@ function DashboardLayoutContent({
           }
         }
 
-        // Clear local IndexedDB files after submit
-        await clearAllProjectLibraryFiles(PROJECT_LIBRARY_MAX_FILES);
+        await clearLocalProjectLibraryFiles();
       }
 
       // Notify applicants via email (fire-and-forget — don't block redirect)

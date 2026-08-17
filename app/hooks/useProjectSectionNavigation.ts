@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { isPageSaved, loadDraft, saveDraft } from "@/app/utils/draftStorage";
+import {
+  LIBRARY_GATE_ALERT,
+  isGatedCreateProjectPath,
+  loadProjectLibraryDraftBundle,
+  restoreProjectLibraryDraft,
+  shouldGateCreateProjectSections,
+} from "@/app/utils/projectSections";
 
 export function useProjectSectionNavigation() {
   const pathname = usePathname() || "";
@@ -17,8 +25,26 @@ export function useProjectSectionNavigation() {
   const selectedApplicationNo = searchParams.get("applicationNo");
   const isEditMode = !!projectId;
 
+  const { showAlert } = useDashboardAlertModal();
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [isLibraryGated, setIsLibraryGated] = useState(() =>
+    shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode })
+  );
+
+  useEffect(() => {
+    const check = () => {
+      setIsLibraryGated(shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode }));
+    };
+    check();
+    const interval = setInterval(check, 400);
+    return () => clearInterval(interval);
+  }, [isEditMode, isReadOnlyMode]);
+
+  const isLibraryNavigationBlocked = (path: string) => {
+    if (!shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode })) return false;
+    return isGatedCreateProjectPath(path);
+  };
 
   const hasMeaningfulValue = (value: unknown): boolean => {
     if (value === null || value === undefined) return false;
@@ -219,14 +245,16 @@ export function useProjectSectionNavigation() {
 
     if (normalizedPath === "/dashboard/project-library") {
       return {
-        draft: loadDraft<Record<string, unknown>[]>("draft-project-library-uploads", []),
-        snapshot: loadDraft<Record<string, unknown>[] | null>("saved-project-library-snapshot", null),
-        baseline: loadDraft<Record<string, unknown>[] | null>(getBaselineKey(path), null),
+        draft: loadProjectLibraryDraftBundle(),
+        snapshot: loadDraft<unknown>("saved-project-library-snapshot", null),
+        baseline: loadDraft<unknown>(getBaselineKey(path), null),
         isSaved: isPageSaved("saved-project-library"),
         restore: () => {
-          const snapshot = loadDraft<Record<string, unknown>[] | null>("saved-project-library-snapshot", null);
-          const baseline = loadDraft<Record<string, unknown>[] | null>(getBaselineKey(path), null);
-          saveDraft("draft-project-library-uploads", snapshot ?? baseline ?? []);
+          const snapshot = loadDraft<unknown>("saved-project-library-snapshot", null);
+          const baseline = loadDraft<unknown>(getBaselineKey(path), null);
+          restoreProjectLibraryDraft(
+            snapshot ?? baseline ?? { fixed: [], extraPr: [] }
+          );
         },
       };
     }
@@ -411,6 +439,11 @@ export function useProjectSectionNavigation() {
 
   // Helper function to navigate while preserving projectId
   const handleNavigation = (path: string) => {
+    if (isLibraryNavigationBlocked(path)) {
+      showAlert(LIBRARY_GATE_ALERT);
+      return;
+    }
+
     const normalizedCurrentPath = pathname.replace(/\/$/, "");
     const normalizedTargetPath = path.replace(/\/$/, "");
 
@@ -431,6 +464,10 @@ export function useProjectSectionNavigation() {
     restoreSectionDraftToLastSaved(pathname.replace(/\/$/, ""));
     setShowUnsavedWarning(false);
     setPendingPath(null);
+    if (target && isLibraryNavigationBlocked(target)) {
+      showAlert(LIBRARY_GATE_ALERT);
+      return;
+    }
     if (target) navigateWithProjectId(target);
   };
 
@@ -443,6 +480,7 @@ export function useProjectSectionNavigation() {
     pathname,
     isReadOnlyMode,
     isEditMode,
+    isLibraryGated,
     selectedApplication,
     selectedApplicationNo,
     showUnsavedWarning,

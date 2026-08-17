@@ -5,9 +5,18 @@ import Image from "next/image";
 import { isPageSaved, loadDraft, saveDraft } from "@/app/utils/draftStorage";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
-import { useEffect, useState } from "react";
+import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+import { useEffect, useState, type ReactNode } from "react";
 import { BTN_PRIMARY, NAV_ITEM_ACTIVE, NAV_ITEM_ACTIVE_BAR } from "@/app/utils/buttonClasses";
 import { TEXT_CAPTION, TEXT_NAV, TEXT_TITLE_MD } from "@/app/utils/typography";
+import {
+  CREATE_PROJECT_SECTIONS,
+  LIBRARY_GATE_ALERT,
+  isGatedCreateProjectPath,
+  loadProjectLibraryDraftBundle,
+  restoreProjectLibraryDraft,
+  shouldGateCreateProjectSections,
+} from "@/app/utils/projectSections";
 
 type DashboardSidebarProps = {
   collapsed: boolean;
@@ -44,8 +53,21 @@ const DashboardSidebar = ({
   const selectedApplication = searchParams.get("selectedApplication");
   const selectedApplicationNo = searchParams.get("applicationNo");
   const isEditMode = !!projectId;
+  const { showAlert } = useDashboardAlertModal();
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [isLibraryGated, setIsLibraryGated] = useState(() =>
+    shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode })
+  );
+
+  useEffect(() => {
+    const check = () => {
+      setIsLibraryGated(shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode }));
+    };
+    check();
+    const interval = setInterval(check, 400);
+    return () => clearInterval(interval);
+  }, [isEditMode, isReadOnlyMode]);
 
   const hasMeaningfulValue = (value: unknown): boolean => {
     if (value === null || value === undefined) return false;
@@ -246,14 +268,16 @@ const DashboardSidebar = ({
 
     if (normalizedPath === "/dashboard/project-library") {
       return {
-        draft: loadDraft<Record<string, unknown>[]>("draft-project-library-uploads", []),
-        snapshot: loadDraft<Record<string, unknown>[] | null>("saved-project-library-snapshot", null),
-        baseline: loadDraft<Record<string, unknown>[] | null>(getBaselineKey(path), null),
+        draft: loadProjectLibraryDraftBundle(),
+        snapshot: loadDraft<unknown>("saved-project-library-snapshot", null),
+        baseline: loadDraft<unknown>(getBaselineKey(path), null),
         isSaved: isPageSaved("saved-project-library"),
         restore: () => {
-          const snapshot = loadDraft<Record<string, unknown>[] | null>("saved-project-library-snapshot", null);
-          const baseline = loadDraft<Record<string, unknown>[] | null>(getBaselineKey(path), null);
-          saveDraft("draft-project-library-uploads", snapshot ?? baseline ?? []);
+          const snapshot = loadDraft<unknown>("saved-project-library-snapshot", null);
+          const baseline = loadDraft<unknown>(getBaselineKey(path), null);
+          restoreProjectLibraryDraft(
+            snapshot ?? baseline ?? { fixed: [], extraPr: [] }
+          );
         },
       };
     }
@@ -436,8 +460,18 @@ const DashboardSidebar = ({
     router.push(url);
   };
 
+  const isLibraryNavigationBlocked = (path: string) => {
+    if (!shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode })) return false;
+    return isGatedCreateProjectPath(path);
+  };
+
   // Helper function to navigate while preserving projectId
   const handleNavigation = (path: string) => {
+    if (isLibraryNavigationBlocked(path)) {
+      showAlert(LIBRARY_GATE_ALERT);
+      return;
+    }
+
     const normalizedCurrentPath = pathname.replace(/\/$/, "");
     const normalizedTargetPath = path.replace(/\/$/, "");
 
@@ -450,6 +484,61 @@ const DashboardSidebar = ({
     }
 
     navigateWithProjectId(path);
+  };
+
+  const sectionIcons: Record<string, ReactNode> = {
+    "project-library": (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z"
+        />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 8h6M9 12h6M9 16h4" />
+      </svg>
+    ),
+    "project-details": (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M3 7a2 2 0 012-2h5.172a2 2 0 011.414.586L13.414 7H19a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+        />
+      </svg>
+    ),
+    "applicant-details": (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+        />
+      </svg>
+    ),
+    "area-details": (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M3 10h18M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10"
+        />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 14h2M11 14h2M15 14h2M7 17h2M11 17h2M15 17h2" />
+      </svg>
+    ),
+    "building-details": (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M3 21h18M5 21V7a2 2 0 012-2h4v16M13 21V5h4a2 2 0 012 2v14"
+        />
+      </svg>
+    ),
   };
 
   const menuItems = [
@@ -472,83 +561,12 @@ const DashboardSidebar = ({
           },
         ]
       : []),
-    {
-      id: "project-details",
-      label: "Project Details",
-      path: "/dashboard/project-details",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M3 7a2 2 0 012-2h5.172a2 2 0 011.414.586L13.414 7H19a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
-          />
-        </svg>
-      ),
-    },
-    {
-      id: "applicant-details",
-      label: "Applicant Details",
-      path: "/dashboard/applicant",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-          />
-        </svg>
-      ),
-    },
-    {
-      id: "building-details",
-      label: "Building Details",
-      path: "/dashboard/building",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M3 21h18M5 21V7a2 2 0 012-2h4v16M13 21V5h4a2 2 0 012 2v14"
-          />
-        </svg>
-      ),
-    },
-    {
-      id: "area-details",
-      label: "Area Details",
-      path: "/dashboard/area",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M3 10h18M5 10v10a1 1 0 001 1h12a1 1 0 001-1V10"
-          />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 14h2M11 14h2M15 14h2M7 17h2M11 17h2M15 17h2" />
-        </svg>
-      ),
-    },
-    {
-      id: "project-library",
-      label: "Project Library",
-      path: "/dashboard/project-library",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z"
-          />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 8h6M9 12h6M9 16h4" />
-        </svg>
-      ),
-    },
+    ...CREATE_PROJECT_SECTIONS.map((section) => ({
+      id: section.id,
+      label: section.label,
+      path: section.path,
+      icon: sectionIcons[section.id],
+    })),
   ];
 
   // Narrow sidebar on small screens; expand only on md+ for better mobile layout
@@ -757,6 +775,7 @@ const DashboardSidebar = ({
             const normalizedItemPath = item.path.replace(/\/$/, "");
             
             const isActive = normalizedPathname === normalizedItemPath;
+            const isGated = isLibraryGated && isGatedCreateProjectPath(item.path);
 
             const justifyClass = collapsed ? "justify-center" : "justify-between";
 
@@ -764,8 +783,13 @@ const DashboardSidebar = ({
               <button
                 key={item.id}
                 onClick={() => handleNavigation(item.path)}
+                aria-disabled={isGated ? true : undefined}
                 className={`relative w-full flex items-center ${justifyClass} px-4 py-3 rounded-xl transition-colors ${
-                  isActive ? NAV_ITEM_ACTIVE : "text-gray-700 hover:bg-gray-100"
+                  isActive
+                    ? NAV_ITEM_ACTIVE
+                    : isGated
+                      ? "text-gray-400 cursor-not-allowed"
+                      : "text-gray-700 hover:bg-gray-100"
                 }`}
               >
                 {/* Active indicator bar */}
@@ -830,6 +854,10 @@ const DashboardSidebar = ({
                   restoreSectionDraftToLastSaved(pathname.replace(/\/$/, ""));
                   setShowUnsavedWarning(false);
                   setPendingPath(null);
+                  if (target && isLibraryNavigationBlocked(target)) {
+                    showAlert(LIBRARY_GATE_ALERT);
+                    return;
+                  }
                   if (target) navigateWithProjectId(target);
                 }}
               >

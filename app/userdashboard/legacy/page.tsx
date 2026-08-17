@@ -423,7 +423,7 @@ const PROJECT_MENU_ITEMS: MenuItem[] = [
   {
     header: "New Project",
     action: "Create New Project",
-    route: "/dashboard/project-details",
+    route: "/dashboard/project-library",
   },
   {
     header: "Existing Projects",

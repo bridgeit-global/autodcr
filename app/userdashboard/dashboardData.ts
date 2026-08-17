@@ -101,7 +101,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
   {
     id: "create-project",
     label: "Create New Project",
-    href: "/dashboard/project-details",
+    href: "/dashboard/project-library",
     enabled: true,
   },
   {

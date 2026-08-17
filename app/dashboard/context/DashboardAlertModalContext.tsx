@@ -45,7 +45,7 @@ export function DashboardAlertModalProvider({ children }: { children: ReactNode 
           aria-labelledby="dashboard-alert-title"
           aria-describedby="dashboard-alert-desc"
         >
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 max-h-[85vh] overflow-y-auto">
             <h3
               id="dashboard-alert-title"
               className="text-lg font-semibold text-gray-900 mb-2"
