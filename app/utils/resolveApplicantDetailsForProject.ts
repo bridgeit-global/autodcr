@@ -6,7 +6,10 @@ export type ApplicantDetailsJson = {
 };
 
 function normalizeApplicantDetailsPayload(data: unknown): ApplicantDetailsJson {
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
+  if (Array.isArray(data)) {
+    return { applicants: data };
+  }
+  if (!data || typeof data !== "object") {
     return { applicants: [] };
   }
   const row = data as ApplicantDetailsJson;
@@ -69,7 +72,7 @@ export async function fetchApplicantDetailsWithFallback(
   projectId: string | undefined | null
 ): Promise<ApplicantDetailsJson | null> {
   const fromTable = await fetchApplicantDetailsFromTable(supabase, projectId);
-  if (fromTable) return fromTable;
+  if (fromTable && (fromTable.applicants?.length ?? 0) > 0) return fromTable;
 
   const id = projectId?.trim();
   if (!id) return null;
@@ -114,7 +117,7 @@ export async function persistApplicantRosterForProject(
   return { error: error?.message ?? null };
 }
 
-/** Batch-load rosters from public.applicants for many projects. */
+/** Batch-load rosters via SECURITY DEFINER RPC (direct table SELECT can miss roster rows). */
 export async function fetchApplicantDetailsMapForProjects(
   supabase: SupabaseClient,
   projectIds: string[]
@@ -123,28 +126,15 @@ export async function fetchApplicantDetailsMapForProjects(
   const map: Record<string, ApplicantDetailsJson> = {};
   if (!ids.length) return map;
 
-  for (const id of ids) {
-    map[id] = { applicants: [] };
-  }
+  const results = await Promise.all(
+    ids.map(async (id) => {
+      const roster = await fetchApplicantDetailsWithFallback(supabase, id);
+      return [id, roster ?? { applicants: [] }] as const;
+    })
+  );
 
-  const { data, error } = await supabase
-    .from("applicants")
-    .select("project_id, user_id, applicant_details")
-    .in("project_id", ids);
-
-  if (error || !data) return map;
-
-  for (const row of data) {
-    const projectId = String(row.project_id ?? "");
-    if (!projectId || !map[projectId]) continue;
-    const details =
-      row.applicant_details && typeof row.applicant_details === "object" && !Array.isArray(row.applicant_details)
-        ? (row.applicant_details as Record<string, unknown>)
-        : {};
-    map[projectId].applicants!.push({
-      ...details,
-      user_id: String(row.user_id ?? ""),
-    });
+  for (const [id, roster] of results) {
+    map[id] = roster;
   }
 
   return map;
