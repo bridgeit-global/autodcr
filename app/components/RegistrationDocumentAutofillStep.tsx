@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getFieldLabel } from "@/app/lib/documentValidation/fieldLabels";
 import type { DocumentValidationResult } from "@/app/components/DocumentValidationResultModal";
+import { validateDocumentFile } from "@/app/utils/validateDocumentApi";
 import {
   autofillOverwriteKeys,
   buildAutofillPatch,
@@ -144,23 +145,7 @@ export default function RegistrationDocumentAutofillStep({
     file: File,
     documentType: DocSlot["id"]
   ): Promise<DocumentValidationResult> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("documentType", documentType);
-
-    const response = await fetch("/api/validate-document", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(
-        typeof data?.error === "string"
-          ? data.error
-          : "Could not validate this document."
-      );
-    }
-    return data as DocumentValidationResult;
+    return validateDocumentFile(file, documentType);
   };
 
   const pushAutofill = (

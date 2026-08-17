@@ -1,7 +1,8 @@
 /**
  * PDF text extraction using pdf-parse (text-based PDFs only).
+ * Import the lib entry so Vercel does not execute pdf-parse's debug test-file loader.
  */
-import pdfParse from "pdf-parse";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 export async function extractTextFromPdfBuffer(
   buffer: Buffer

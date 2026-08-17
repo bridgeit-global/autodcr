@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { DocumentValidationResult } from "@/app/components/DocumentValidationResultModal";
 import type { DocumentType } from "@/app/lib/documentValidation/registry";
 import {
   buildProjectAutofillFromExtractions,
@@ -13,6 +12,7 @@ import {
   getExtraPrCard,
   getProjectLibraryFile,
 } from "@/app/utils/projectLibraryFiles";
+import { validateDocumentFile } from "@/app/utils/validateDocumentApi";
 
 export type ProjectLibraryExtractionOutcome = {
   extractions: ProjectLibraryExtraction[];
@@ -49,27 +49,6 @@ const FIXED_JOBS: Array<Omit<ExtractionJob, "loadBlob"> & { index: number }> = [
     label: "Power of Attorney",
   },
 ];
-
-async function validateDocumentFile(
-  file: File,
-  documentType: DocumentType
-): Promise<DocumentValidationResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("documentType", documentType);
-
-  const response = await fetch("/api/validate-document", {
-    method: "POST",
-    body: formData,
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      typeof data?.error === "string" ? data.error : "Could not validate this document."
-    );
-  }
-  return data as DocumentValidationResult;
-}
 
 function storedBlobToFile(stored: {
   name: string;

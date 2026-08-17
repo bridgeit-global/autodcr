@@ -12,3 +12,7 @@ declare module "pdf-parse" {
 
   export default pdfParse;
 }
+
+declare module "pdf-parse/lib/pdf-parse.js" {
+  export { default } from "pdf-parse";
+}
