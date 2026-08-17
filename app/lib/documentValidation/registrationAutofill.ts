@@ -509,6 +509,29 @@ export function resolveConsultantTypeFromProfession(
   return exact ?? null;
 }
 
+/** Infer consultant type from license extraction, not a manual Basic Details choice. */
+export function resolveConsultantTypeFromLicense(
+  extracted: Record<string, string | null>
+): string | null {
+  const fromProfession = resolveConsultantTypeFromProfession(extracted.profession);
+  if (fromProfession) return fromProfession;
+
+  const coaNo = extracted.coaCertificateNumber?.trim() || "";
+  if (/^CA\//i.test(coaNo)) return "Architect";
+
+  const haystack = [
+    extracted.profession,
+    extracted.certificateNumber,
+    extracted.coaCertificateNumber,
+    extracted.regulationNumber,
+    extracted.department,
+  ]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(" ");
+
+  return resolveConsultantTypeFromProfession(haystack);
+}
+
 /** Parse printed dates to HTML date input format (YYYY-MM-DD). */
 export function parseDateForInput(value: string | null | undefined): string {
   const raw = String(value || "").trim();
@@ -636,6 +659,38 @@ const CONSULTANT_CERTIFICATE_FILE_BY_TYPE: Record<string, string> = {
   "Town Planner": "townPlannerCertificateFile",
 };
 
+const CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE: Record<string, string> = {
+  Architect: "coa_certificate",
+  "Structural Engineer": "structural_license",
+  "Licensed Surveyor": "lbs_certificate",
+  "MEP Consultant": "mep_experience",
+  Plumber: "phe_accreditation",
+  "Fire Consultant": "fire_noc",
+  "Landscape Consultant": "landscape_certificate",
+  "PMC / Project Manager": "pmc_certificate",
+  "Geotechnical Consultant": "lab_registration",
+  "Environmental Consultant": "env_certificate",
+  "Town Planner": "town_planner_certificate",
+};
+
+export function resolveConsultantCertificateUpload(
+  consultantType: string,
+  formData: Record<string, unknown>
+): { file: File; storageType: string } | null {
+  const field = CONSULTANT_CERTIFICATE_FILE_BY_TYPE[consultantType];
+  const typed = field ? formData[field] : null;
+  const license = formData.licenseCertificateFile;
+  const file =
+    typed instanceof File ? typed : license instanceof File ? license : null;
+  if (!file) return null;
+  return {
+    file,
+    storageType:
+      CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE[consultantType] ??
+      "license_certificate",
+  };
+}
+
 function firstExpiryField(consultantType: string): string | null {
   const extras = EXTRA_REG_REQUIRED_BY_TYPE[consultantType] ?? [];
   return (
@@ -655,7 +710,7 @@ export function buildLicenseAutofillPatch(
   registrationKind: RegistrationKind = "consultant"
 ): AutofillPatch {
   const patch: AutofillPatch = {};
-  const inferredType = resolveConsultantTypeFromProfession(extracted.profession);
+  const inferredType = resolveConsultantTypeFromLicense(extracted);
   const effectiveType =
     registrationKind === "consultant"
       ? consultantType || inferredType || undefined

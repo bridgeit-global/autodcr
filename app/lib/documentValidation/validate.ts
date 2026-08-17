@@ -1,6 +1,6 @@
 /**
- * Post-extraction validation — null/empty values become missingFields.
- * Supports optional alternative field groups (any-one-present satisfies the requirement).
+ * Post-extraction validation — null/empty values become missingFields unless the
+ * field is in optionalFields or covered by an alternativeFieldGroup.
  */
 import type { DocumentValidationRules } from "./types";
 
@@ -19,6 +19,7 @@ export function validateExtractedFields<T extends Record<string, string | null>>
   rules?: DocumentValidationRules
 ): ValidationResult<T> {
   const alternativeGroups = rules?.alternativeFieldGroups ?? [];
+  const optionalFields = new Set(rules?.optionalFields ?? []);
   const groupedKeys = new Set(
     alternativeGroups.flatMap((group) => group.fields)
   );
@@ -34,6 +35,7 @@ export function validateExtractedFields<T extends Record<string, string | null>>
 
   for (const [key, value] of Object.entries(extracted)) {
     if (groupedKeys.has(key)) continue;
+    if (optionalFields.has(key)) continue;
     if (isEmpty(value)) {
       missingFields.push(key);
     }

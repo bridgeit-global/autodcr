@@ -380,8 +380,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           String(merged.addressLine3 || "")
         );
       }
-      if (files.aadhaarCardFile) merged.aadhaarCardFile = files.aadhaarCardFile;
-      if (files.panCardFile) merged.panCardFile = files.panCardFile;
+      if ("aadhaarCardFile" in files) {
+        merged.aadhaarCardFile = files.aadhaarCardFile ?? null;
+      }
+      if ("panCardFile" in files) {
+        merged.panCardFile = files.panCardFile ?? null;
+      }
       return merged;
     });
     Object.entries(patch).forEach(([field, value]) => {
@@ -818,8 +822,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       case "authorizedSignatorySignatureFile":
         if (!value) error = "Upload signature";
         break;
+      case "aadhaarCardFile":
+        if (!value) error = "Upload Aadhaar Card in Identity Documents";
+        break;
       case "panCardFile":
-        if (!value) error = "Upload PAN Card";
+        if (!value) error = "Upload PAN Card in Identity Documents";
         break;
       case "letterheadFile":
         if (!value && !existingLetterheadUrl) error = "Upload Letterhead";
@@ -1382,6 +1389,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "gstNo",
         "authorizedSignatoryPhotoFile",
         "authorizedSignatorySignatureFile",
+        "aadhaarCardFile",
         "panCardFile",
         ...(existingLetterheadUrl ? [] : ["letterheadFile"]),
         "userId",
@@ -1472,6 +1480,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       if (firstErrorField) {
         if (firstErrorField.includes('entityType') || firstErrorField.includes('email') || firstErrorField.includes('city')) {
           scrollToSection("section-basic-details");
+        } else if (
+          firstErrorField === "aadhaarCardFile" ||
+          firstErrorField === "panCardFile"
+        ) {
+          scrollToSection("section-identity-documents");
         } else if (firstErrorField.includes('RegNo') || firstErrorField.includes('License') || firstErrorField.includes('Accreditation')) {
           scrollToSection("section-registration");
         } else if (firstErrorField.includes('File') || firstErrorField.includes('Photo') || firstErrorField.includes('Signature')) {
@@ -1620,6 +1633,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       // Step 2: Upload all files to Supabase Storage
       let authorizedSignatoryPhotoUrl: string | null = null;
       let authorizedSignatorySignatureUrl: string | null = null;
+      let aadhaarCardUrl: string | null = null;
       let panCardUrl: string | null = null;
       let letterheadUrl: string | null = null;
       const entityDocumentUrls: Record<string, string> = {};
@@ -1653,7 +1667,20 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           uploadedFilePaths.push(result.path);
         }
 
-        // Upload PAN Card
+        // Upload identity documents collected in Identity Documents
+        if (formData.aadhaarCardFile) {
+          const result = await uploadFileToStorageWithPath(
+            formData.aadhaarCardFile,
+            userId,
+            'aadhaar_card'
+          );
+          if (!result) {
+            throw new Error('Failed to upload Aadhaar Card');
+          }
+          aadhaarCardUrl = result.url;
+          uploadedFilePaths.push(result.path);
+        }
+
         if (formData.panCardFile) {
           const result = await uploadFileToStorageWithPath(
             formData.panCardFile,
@@ -1818,6 +1845,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             aadhaar_no: formData.aadhaarNo || null,
             authorized_signatory_photo_url: authorizedSignatoryPhotoUrl,
             authorized_signatory_signature_url: authorizedSignatorySignatureUrl,
+          aadhaar_card_url: aadhaarCardUrl,
           pan_card_url: panCardUrl,
           letterhead_url: letterheadUrl,
             declaration_accepted: formData.acceptDeclaration,
@@ -1930,12 +1958,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-              <label className="block font-medium text-black mb-1">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
                 <input
                 value={formData.gstNo}
                 onChange={(e) => handleInputChange("gstNo", e.target.value.toUpperCase())}
                 onBlur={(e) => validateField("gstNo", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="15-character GSTIN"
                   maxLength={15}
                 />
@@ -1943,13 +1971,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               </div>
               {formData.entityType === "Proprietorship" && (
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Full Name of Proprietor <span className="text-red-500">*</span>
                 </label>
                 <input
                 value={formData.fullNameProprietor}
                 onChange={(e) => handleInputChange("fullNameProprietor", e.target.value)}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Name as per PAN / Aadhaar"
                 />
                 {errors.fullNameProprietor && (
@@ -1958,14 +1986,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
               )}
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Registration Number <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                 value={formData.proprietorshipRegistrationNo}
                 onChange={(e) => handleInputChange("proprietorshipRegistrationNo", e.target.value)}
                 onBlur={(e) => validateField("proprietorshipRegistrationNo", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Registration Number"
                 />
                 {errors.proprietorshipRegistrationNo && (
@@ -1973,7 +2001,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 )}
               </div>
               <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Registration Date <span className="text-red-600 font-bold">*</span>
               </label>
                 <input
@@ -1984,7 +2012,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("proprietorshipRegistrationDate", value);
                 }}
                 onBlur={(e) => validateField("proprietorshipRegistrationDate", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 />
                 {errors.proprietorshipRegistrationDate && (
                 <p className="text-red-600 text-sm mt-1">{errors.proprietorshipRegistrationDate}</p>
@@ -1997,26 +2025,26 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-              <label className="block font-medium text-black mb-1">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
                 <input
                 value={formData.gstNo}
                 onChange={(e) => handleInputChange("gstNo", e.target.value.toUpperCase())}
                 onBlur={(e) => validateField("gstNo", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="15-character GSTIN"
                   maxLength={15}
                 />
               {errors.gstNo && <p className="text-red-600 text-sm mt-1">{errors.gstNo}</p>}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Firm Registration No. <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                 value={formData.firmRegistrationNo}
                 onChange={(e) => handleInputChange("firmRegistrationNo", e.target.value)}
                 onBlur={(e) => validateField("firmRegistrationNo", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="As per Registrar of Firms"
                 />
                 {errors.firmRegistrationNo && (
@@ -2024,7 +2052,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 )}
               </div>
               <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Date of Registration <span className="text-red-600 font-bold">*</span>
               </label>
                 <input
@@ -2035,14 +2063,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("partnershipRegistrationDate", value);
                 }}
                 onBlur={(e) => validateField("partnershipRegistrationDate", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 />
                 {errors.partnershipRegistrationDate && (
                 <p className="text-red-600 text-sm mt-1">{errors.partnershipRegistrationDate}</p>
                 )}
               </div>
               <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Number of Partners <span className="text-red-600 font-bold">*</span>
               </label>
                 <input
@@ -2057,7 +2085,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   }
                 }}
                 onBlur={(e) => validateField("numberOfPartners", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Total partners"
                 />
               {errors.numberOfPartners && (
@@ -2071,26 +2099,26 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-              <label className="block font-medium text-black mb-1">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
                 <input
                 value={formData.gstNo}
                 onChange={(e) => handleInputChange("gstNo", e.target.value.toUpperCase())}
                 onBlur={(e) => validateField("gstNo", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="15-character GSTIN"
                   maxLength={15}
                 />
               {errors.gstNo && <p className="text-red-600 text-sm mt-1">{errors.gstNo}</p>}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   CIN (Corporate Identification Number) <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                 value={formData.cin}
                 onChange={(e) => handleInputChange("cin", e.target.value.toUpperCase().replace(/\s/g, ""))}
                 onBlur={(e) => validateField("cin", e.target.value.trim().toUpperCase().replace(/\s/g, "") || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="L12345MH2019ABC123456"
                   maxLength={21}
                 />
@@ -2102,7 +2130,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 )}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   ROC Registration Date <span className="text-red-600 font-bold">*</span>
                 </label>
                   <input
@@ -2113,14 +2141,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("rocRegistrationDate", value);
                 }}
                 onBlur={(e) => validateField("rocRegistrationDate", e.target.value.trim() || "")}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   />
                   {errors.rocRegistrationDate && (
                 <p className="text-red-600 text-sm mt-1">{errors.rocRegistrationDate}</p>
               )}
                 </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Number of Directors <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
@@ -2135,7 +2163,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   }
                 }}
                 onBlur={(e) => validateField("numberOfDirectors", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Total directors"
                 />
               {errors.numberOfDirectors && (
@@ -2149,19 +2177,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-              <label className="block font-medium text-black mb-1">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
                 <input
                 value={formData.gstNo}
                 onChange={(e) => handleInputChange("gstNo", e.target.value.toUpperCase())}
                 onBlur={(e) => validateField("gstNo", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="15-character GSTIN"
                   maxLength={15}
                 />
               {errors.gstNo && <p className="text-red-600 text-sm mt-1">{errors.gstNo}</p>}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   LLPIN (LLP Identification No.) <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
@@ -2175,14 +2203,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("llpin", value);
                 }}
                 onBlur={(e) => validateField("llpin", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="AAX-1234"
                   maxLength={8}
                 />
                 {errors.llpin && <p className="text-red-600 text-sm mt-1">{errors.llpin}</p>}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Date of Registration <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
@@ -2193,14 +2221,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("llpIncorporationDate", value);
                 }}
                 onBlur={(e) => validateField("llpIncorporationDate", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 />
                 {errors.llpIncorporationDate && (
                 <p className="text-red-600 text-sm mt-1">{errors.llpIncorporationDate}</p>
                 )}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Number of Designated Partners <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
@@ -2215,7 +2243,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   }
                 }}
                 onBlur={(e) => validateField("numberOfDesignatedPartners", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Total designated partners"
                 />
                 {errors.numberOfDesignatedPartners && (
@@ -2229,26 +2257,26 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-              <label className="block font-medium text-black mb-1">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
                 <input
                 value={formData.gstNo}
                 onChange={(e) => handleInputChange("gstNo", e.target.value.toUpperCase())}
                 onBlur={(e) => validateField("gstNo", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="15-character GSTIN"
                   maxLength={15}
                 />
               {errors.gstNo && <p className="text-red-600 text-sm mt-1">{errors.gstNo}</p>}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Registration No. <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                 value={formData.trustRegistrationNo}
                 onChange={(e) => handleInputChange("trustRegistrationNo", e.target.value)}
                 onBlur={(e) => validateField("trustRegistrationNo", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="As per Charity Commissioner / Registrar"
                 />
                 {errors.trustRegistrationNo && (
@@ -2256,7 +2284,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 )}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Date of Registration <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
@@ -2267,14 +2295,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("trustRegistrationDate", value);
                 }}
                 onBlur={(e) => validateField("trustRegistrationDate", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 />
                 {errors.trustRegistrationDate && (
                 <p className="text-red-600 text-sm mt-1">{errors.trustRegistrationDate}</p>
                 )}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Number of Trustees <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
@@ -2289,7 +2317,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   }
                 }}
                 onBlur={(e) => validateField("numberOfTrustees", e.target.value.trim() || "")}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Total trustees"
                 />
               {errors.numberOfTrustees && (
@@ -2303,26 +2331,26 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-              <label className="block font-medium text-black mb-1">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">GSTIN No. <span className="text-red-600 font-bold">*</span></label>
                 <input
                 value={formData.gstNo}
                 onChange={(e) => handleInputChange("gstNo", e.target.value.toUpperCase())}
                 onBlur={(e) => validateField("gstNo", e.target.value.trim().toUpperCase() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="15-character GSTIN"
                   maxLength={15}
                 />
               {errors.gstNo && <p className="text-red-600 text-sm mt-1">{errors.gstNo}</p>}
               </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Department / Undertaking Name <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                 value={formData.departmentName}
                 onChange={(e) => handleInputChange("departmentName", e.target.value)}
                 onBlur={(e) => validateField("departmentName", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="e.g. MHADA / MMRDA / BMC / XYZ Dept."
                 />
                 {errors.departmentName && (
@@ -2330,14 +2358,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               )}
             </div>
               <div>
-                <label className="block font-medium text-black mb-1">
+                <label className="mb-1.5 block text-sm font-medium text-gray-800">
                   Registration Number <span className="text-red-600 font-bold">*</span>
                 </label>
                 <input
                 value={formData.govtRegistrationNo}
                 onChange={(e) => handleInputChange("govtRegistrationNo", e.target.value)}
                 onBlur={(e) => validateField("govtRegistrationNo", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Registration Number"
                 />
                 {errors.govtRegistrationNo && (
@@ -2345,7 +2373,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 )}
               </div>
               <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Registration Date <span className="text-red-600 font-bold">*</span>
               </label>
                 <input
@@ -2356,7 +2384,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   handleInputChange("govtRegistrationDate", value);
                 }}
                 onBlur={(e) => validateField("govtRegistrationDate", e.target.value.trim() || "")}
-                  className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 />
                 {errors.govtRegistrationDate && (
                 <p className="text-red-600 text-sm mt-1">{errors.govtRegistrationDate}</p>
@@ -2372,30 +2400,21 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
   return (
     <>
-    <div className="flex gap-6 max-w-6xl mx-auto p-6">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 md:px-6 lg:flex-row">
       {/* Sidebar Navigation */}
-      <div className="w-72 flex-shrink-0">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sticky top-6">
-          {/* Title */}
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-900 uppercase tracking-wide">{title.toUpperCase()}</h2>
-          <button
-            onClick={() => router.push("/")}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Back to Home"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-      </div>
+      <div className="lg:w-72 lg:flex-shrink-0">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm lg:sticky lg:top-24">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold tracking-tight text-brand-navy">{title}</h2>
+            <p className="mt-1 text-xs text-gray-500">Complete each section, then submit.</p>
+          </div>
 
           {/* Submit Button */}
           <button
             type="button"
             onClick={handleSubmitForm}
             disabled={isSubmitting}
-            className="w-full mb-6 py-3 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="mb-6 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-blue-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? (
               <>
@@ -2411,7 +2430,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </button>
 
           {/* Navigation Items */}
-          <nav className="space-y-1">
+          <nav className="-mx-1 flex gap-1 overflow-x-auto pb-1 lg:mx-0 lg:flex-col lg:space-y-1 lg:overflow-visible lg:pb-0">
           {sections.map((section) => {
             const isActive = activeSection === section.id;
               const sectionIcons: Record<string, React.ReactNode> = {
@@ -2457,17 +2476,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               key={section.id}
               type="button"
               onClick={() => scrollToSection(section.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-200 ${
+                  className={`flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200 lg:w-full ${
                   isActive
-                      ? "bg-emerald-50 text-emerald-700 border-l-4 border-emerald-600 font-medium"
+                      ? "bg-blue-50 font-medium text-brand-blue"
                       : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   }`}
                 >
-                  <span className={isActive ? "text-emerald-600" : "text-gray-400"}>
+                  <span className={isActive ? "text-brand-blue" : "text-gray-400"}>
                     {sectionIcons[section.id]}
                   </span>
-                  <span className="text-sm">{section.label}</span>
-                  <svg className={`w-4 h-4 ml-auto transition-transform ${isActive ? "text-emerald-600" : "text-gray-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <span className="whitespace-nowrap text-sm">{section.label}</span>
+                  <svg className={`ml-auto hidden h-4 w-4 transition-transform lg:block ${isActive ? "text-brand-blue" : "text-gray-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
             </button>
@@ -2480,9 +2499,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       {/* Main Content */}
       <div className="flex-1 min-w-0">
         {/* Note Banner */}
-        <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
-          <p className="text-red-700 text-sm">
-            <span className="font-semibold">Note:</span> Please fill all required fields marked with <span className="text-red-600 font-bold">*</span> before submitting the registration form.
+        <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50 p-4">
+          <p className="text-sm text-gray-700">
+            <span className="font-semibold text-brand-navy">Note:</span> Please fill all required fields marked with <span className="font-bold text-status-danger">*</span> before submitting.
           </p>
         </div>
 
@@ -2511,7 +2530,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     resumePrompt.email
                   )
                 }
-                className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700"
+                className="bg-brand-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-blue-hover"
               >
                 Continue Remaining Steps
               </button>
@@ -2527,7 +2546,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         )}
 
         {isResumingIncomplete && (
-          <div className="mb-6 p-4 border border-emerald-200 bg-emerald-50 rounded-lg text-emerald-900 text-sm">
+          <div className="mb-6 p-4 border border-sky-100 bg-sky-50/70 rounded-lg text-brand-navy text-sm">
             Resuming incomplete registration. Basic details, registration numbers
             {existingLetterheadUrl ? ", and letterhead" : ""} are read-only. Complete
             documents{existingLetterheadUrl ? "" : ", letterhead"}, login setup, and
@@ -2537,20 +2556,20 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
         <div className="space-y-6">
             {/* Identity Documents */}
-          <div id="section-identity-documents" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-identity-documents" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
+          <div id="section-identity-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-identity-documents" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
             <div
-              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
               onClick={() => scrollToSection("section-identity-documents")}
             >
-              <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+                <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-black">Identity Documents</h3>
+              <h3 className="text-lg font-semibold text-brand-navy">Identity Documents</h3>
             </div>
             <p className="text-sm text-gray-600 mb-4 ml-11">
-              Upload Aadhaar and PAN to auto-fill your details
+              Upload Aadhaar and PAN to auto-fill your details. These files are submitted with registration and are not asked again below.
             </p>
             <RegistrationDocumentAutofillStep
               registrationKind="owner"
@@ -2561,17 +2580,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
 
             {/* Basic Details Section */}
-          <div id="section-basic-details" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : "shadow-sm"}`}>
+          <div id="section-basic-details" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
             <div 
-              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+              className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
               onClick={() => scrollToSection("section-basic-details")}
             >
-              <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+                <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-black">
+              <h3 className="text-lg font-semibold text-brand-navy">
                 Basic Details
               </h3>
             </div>
@@ -2587,7 +2606,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           >
                 {/* Row 1 */}
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Entity Type <span className="text-red-600 font-bold">*</span>
             </label>
               <CustomSelect
@@ -2605,14 +2624,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 {formData.entityType !== "Individual" && (
                 <div>
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Entity Name <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     type="text"
                     value={formData.entityName}
                     onChange={(e) => handleInputChange("entityName", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="e.g. M/s. XYZ Developers LLP"
                   />
                   {errors.entityName && (
@@ -2623,14 +2642,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 {/* Row 2 - Name Fields */}
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     First Name <span className="text-red-600 font-bold">*</span>
               </label>
               <input
                     type="text"
                     value={formData.firstName}
                     onChange={(e) => handleInputChange("firstName", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Enter first name"
               />
                   {errors.firstName && (
@@ -2639,14 +2658,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     </div>
 
           <div>
-            <label className="block font-medium text-black mb-1">
+            <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Middle Name
             </label>
             <input
                     type="text"
                     value={formData.middleName}
                     onChange={(e) => handleInputChange("middleName", e.target.value)}
-              className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Enter middle name"
             />
                   {errors.middleName && (
@@ -2655,14 +2674,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
 
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Last Name <span className="text-red-600 font-bold">*</span>
               </label>
               <input
                     type="text"
                     value={formData.lastName}
                     onChange={(e) => handleInputChange("lastName", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Enter last name"
               />
                   {errors.lastName && (
@@ -2671,7 +2690,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Email <span className="text-red-600 font-bold">*</span>
               </label>
                   <div className="flex gap-2">
@@ -2683,12 +2702,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         // Reset verification if email changes
                         if (isEmailVerified) setIsEmailVerified(false);
                       }}
-                      className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-emerald-500 outline-none ${isEmailVerified ? 'bg-green-50 border-green-300' : ''}`}
+                      className={`h-11 flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${isEmailVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="Enter email address"
                       disabled={isEmailVerified}
                     />
                     {isEmailVerified ? (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-status-success text-white rounded-lg font-medium">
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                         </svg>
@@ -2709,7 +2728,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                             setErrors(prev => ({ ...prev, email: "Please enter a valid email address" }));
                           }
                         }}
-                      className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg font-medium hover:bg-emerald-100 transition whitespace-nowrap"
+                      className="bg-blue-50 border border-blue-200 text-brand-blue px-4 py-2 rounded-lg font-medium hover:bg-blue-100 transition whitespace-nowrap"
                     >
                       Verify
                     </button>
@@ -2722,13 +2741,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 {/* Row 3 */}
                 <div>
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     City <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     value={formData.city}
                     onChange={(e) => handleInputChange("city", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Enter City"
                   />
                   {errors.city && (
@@ -2737,7 +2756,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 </div>
 
                 <div>
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Phone Number <span className="text-red-600 font-bold">*</span>
                   </label>
                   <div className="flex gap-2">
@@ -2748,12 +2767,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                         // Reset verification if phone number changes
                         if (isPhoneVerified) setIsPhoneVerified(false);
                       }}
-                      className={`border rounded-lg px-3 py-2 h-10 flex-1 text-black focus:ring-2 focus:ring-emerald-500 outline-none ${isPhoneVerified ? 'bg-green-50 border-green-300' : ''}`}
+                      className={`h-11 flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${isPhoneVerified ? 'bg-green-50 border-green-300' : ''}`}
                       placeholder="Enter 10-digit phone number"
                       disabled={isPhoneVerified}
                     />
                     {isPhoneVerified ? (
-                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-status-success text-white rounded-lg font-medium">
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                         </svg>
@@ -2776,7 +2795,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                             setShowPhoneOTPModal(true);
                           }
                         }}
-                        className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg font-medium hover:bg-emerald-100 transition whitespace-nowrap"
+                        className="bg-blue-50 border border-blue-200 text-brand-blue px-4 py-2 rounded-lg font-medium hover:bg-blue-100 transition whitespace-nowrap"
                       >
                         Verify
                       </button>
@@ -2789,13 +2808,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 {/* Row 4 */}
           <div>
-            <label className="block font-medium text-black mb-1">
+            <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Pincode <span className="text-red-600 font-bold">*</span>
             </label>
                   <input
                     value={formData.pincode}
                     onChange={(e) => handleInputChange("pincode", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Enter Pincode"
                   />
                   {errors.pincode && (
@@ -2804,13 +2823,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
 
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 PAN
               </label>
               <input
                 value={formData.pan}
                 onChange={(e) => handleInputChange("pan", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 placeholder="ABCDE1234F"
               />
                   {errors.pan && (
@@ -2819,13 +2838,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         </div>
 
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Aadhaar Number
               </label>
               <input
                 value={formData.aadhaarNo}
                 onChange={(e) => handleInputChange("aadhaarNo", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 placeholder="XXXX XXXX XXXX"
               />
                   {errors.aadhaarNo && (
@@ -2835,13 +2854,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                 {/* Row 5 */}
                 <div className="md:col-span-2">
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Address Line 1 <span className="text-red-600 font-bold">*</span>
                   </label>
                   <input
                     value={formData.addressLine1}
                     onChange={(e) => handleInputChange("addressLine1", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Building / Street / Area"
                   />
                   {errors.addressLine1 && (
@@ -2850,25 +2869,25 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Address Line 2
                   </label>
                   <input
                     value={formData.addressLine2}
                     onChange={(e) => handleInputChange("addressLine2", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Landmark / Locality"
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Address Line 3
                   </label>
                   <input
                     value={formData.addressLine3}
                     onChange={(e) => handleInputChange("addressLine3", e.target.value)}
-                    className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     placeholder="Additional details (optional)"
                   />
                 </div>
@@ -2876,17 +2895,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     </div>
 
         {/* Registration Numbers Section - Dynamic based on Entity Type */}
-            <div id="section-registration" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-registration" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
+            <div id="section-registration" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-registration" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
                 onClick={() => scrollToSection("section-registration")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+                  <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-                <h3 className="text-lg font-semibold text-black">
+                <h3 className="text-lg font-semibold text-brand-navy">
                   Registration Numbers
                 </h3>
               </div>
@@ -2901,7 +2920,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 }`}
               >
               {!formData.entityType && (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-sm">
+                <div className="p-4 bg-sky-50/70 border border-sky-100 rounded-lg text-sky-800 text-sm">
                   ⚠️ Please select an Entity Type in Basic Details to see the required registration fields.
     </div>
               )}
@@ -2911,38 +2930,39 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
         {/* Documents Upload Section - Dynamic based on Entity Type */}
-            <div id="section-documents" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-documents" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
+            <div id="section-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-documents" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
               <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
                 onClick={() => scrollToSection("section-documents")}
               >
-                <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+                  <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 </div>
-                <h3 className="text-lg font-semibold text-black">Documents Upload</h3>
+                <h3 className="text-lg font-semibold text-brand-navy">Documents Upload</h3>
               </div>
               <p className="text-sm text-gray-600 mb-4 ml-11">
-                {formData.entityType ? `Upload documents for ${formData.entityType}` : "Select an Entity Type first"}
+                {formData.entityType
+                  ? `Upload remaining documents for ${formData.entityType}. Aadhaar and PAN are collected in Identity Documents.`
+                  : "Select an Entity Type first"}
               </p>
 
               {!formData.entityType && (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-sm">
+                <div className="p-4 bg-sky-50/70 border border-sky-100 rounded-lg text-sky-800 text-sm">
                   ⚠️ Please select an Entity Type in Basic Details to see the required documents.
                 </div>
               )}
 
-              {/* Common Documents - PAN Card for all entity types */}
               {formData.entityType && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                   <div>
-                    <label className="block font-medium text-black mb-1">Authorized Signatory Photograph <span className="text-red-600 font-bold">*</span></label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Authorized Signatory Photograph <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="file"
                       accept=".gif,.jpg,.jpeg,.png,.bmp"
                       onChange={(e) => handleFileChange("authorizedSignatoryPhotoFile", e.target.files?.[0] || null)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     />
                     <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
                     {formData.authorizedSignatoryPhotoFile && (
@@ -2953,12 +2973,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                   </div>
                   <div>
-                    <label className="block font-medium text-black mb-1">Authorized Signatory Signature <span className="text-red-600 font-bold">*</span></label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Authorized Signatory Signature <span className="text-red-600 font-bold">*</span></label>
                     <input
                       type="file"
                       accept=".gif,.jpg,.jpeg,.png,.bmp"
                       onChange={(e) => handleFileChange("authorizedSignatorySignatureFile", e.target.files?.[0] || null)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                     />
                     <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
                     {formData.authorizedSignatorySignatureFile && (
@@ -2966,22 +2986,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     )}
                     {errors.authorizedSignatorySignatureFile && (
                       <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatorySignatureFile}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block font-medium text-black mb-1">PAN Card (Image) <span className="text-red-600 font-bold">*</span></label>
-                    <input
-                      type="file"
-                      accept=".gif,.jpg,.jpeg,.png,.bmp"
-                      onChange={(e) => handleFileChange("panCardFile", e.target.files?.[0] || null)}
-                      className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP</p>
-                    {formData.panCardFile && (
-                      <p className="text-xs text-green-600 mt-1">✓ {formData.panCardFile.name}</p>
-                    )}
-                    {errors.panCardFile && (
-                      <p className="text-xs text-red-600 mt-1">{errors.panCardFile}</p>
                     )}
                   </div>
 
@@ -2992,14 +2996,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
                     return (
                       <div key={doc.id}>
-                        <label className="block font-medium text-black mb-1">
+                        <label className="mb-1.5 block text-sm font-medium text-gray-800">
                           {doc.label} {doc.required && <span className="text-red-600 font-bold">*</span>}
                         </label>
                         <input
                           type="file"
                           accept={doc.accept || ".pdf,.jpg,.jpeg,.png"}
                           onChange={(e) => handleEntityDocumentChange(doc.id, e.target.files?.[0] || null)}
-                          className="border rounded-lg px-3 py-2 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                         />
                         {doc.accept === ".pdf" && (
                           <p className="text-xs text-gray-500 mt-1">Only .PDF</p>
@@ -3024,17 +3028,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
             {/* Letterhead Upload Section */}
-            <div id="section-letterhead" className={`scroll-mt-24 border rounded-lg p-6 bg-white transition-shadow duration-300 ${activeSection === "section-letterhead" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
+            <div id="section-letterhead" className={`scroll-mt-24 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-shadow duration-300 ${activeSection === "section-letterhead" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
           <div 
-            className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+            className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
                 onClick={() => scrollToSection("section-letterhead")}
           >
-            <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+              <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-black">Letterhead</h3>
+            <h3 className="text-lg font-semibold text-brand-navy">Letterhead</h3>
           </div>
           <p className="text-sm text-gray-600 mb-4 ml-11">
             {existingLetterheadUrl
@@ -3050,7 +3054,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   : ""
               }`}
             >
-              <p className="text-sm font-medium text-emerald-800">
+              <p className="text-sm font-medium text-brand-navy">
                 Letterhead already on file
               </p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -3063,7 +3067,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           ) : (
           <div className="grid grid-cols-1 gap-4">
             <div>
-              <label className="block font-medium text-black mb-1">Letterhead PDF <span className="text-red-600 font-bold">*</span></label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">Letterhead PDF <span className="text-red-600 font-bold">*</span></label>
               <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
                     errors.letterheadFile
                       ? 'border-red-300 bg-red-50'
@@ -3096,7 +3100,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                             <span className="text-green-600 font-medium">✓ {formData.letterheadFile.name}</span>
                       ) : (
                         <>
-                          <span className="text-emerald-600 font-medium">Click to upload</span> or drag and drop
+                          <span className="text-brand-blue font-medium">Click to upload</span> or drag and drop
                         </>
                       )}
                     </span>
@@ -3175,17 +3179,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         </div>
 
             {/* Login Setup Section */}
-            <div id="section-login" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-login" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
+            <div id="section-login" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-login" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
           <div 
-            className="flex items-center gap-3 mb-2 cursor-pointer hover:text-emerald-600 transition-colors"
+            className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
                 onClick={() => scrollToSection("section-login")}
           >
-            <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+              <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-black">
+            <h3 className="text-lg font-semibold text-brand-navy">
               Login Setup
             </h3>
           </div>
@@ -3195,14 +3199,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 User ID <span className="text-red-600 font-bold">*</span>
               </label>
               <input
                     type="text"
                     value={formData.userId}
                     onChange={(e) => handleInputChange("userId", e.target.value)}
-                className="border rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                 placeholder="Enter User ID"
               />
                   {errors.userId && (
@@ -3211,7 +3215,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
 
             <div>
-              <label className="block font-medium text-black mb-1">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
                 Password <span className="text-red-600 font-bold">*</span>
               </label>
               <div className="relative">
@@ -3219,7 +3223,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   type={showPassword ? "text" : "password"}
                   value={formData.password}
                   onChange={(e) => handleInputChange("password", e.target.value)}
-                  className="border rounded-lg px-3 py-2 h-10 w-full pr-24 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 pr-24 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                   placeholder="Create a strong password"
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -3373,7 +3377,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 </div>
 
                 <div>
-                  <label className="block font-medium text-black mb-1">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Confirm Password <span className="text-red-600 font-bold">*</span>
                   </label>
                   <div className="relative">
@@ -3395,7 +3399,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                           }
                         }
                       }}
-                      className="border rounded-lg px-3 py-2 h-10 w-full pr-10 text-black focus:ring-2 focus:ring-emerald-500 outline-none"
+                      className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 pr-10 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
                       placeholder="Re-enter password"
                       autoComplete="new-password"
                     />
@@ -3433,17 +3437,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       </div>
         
         {/* Declaration Section */}
-            <div id="section-declaration" className={`scroll-mt-6 bg-white border border-gray-200 rounded-xl p-6 transition-all duration-300 shadow-sm ${activeSection === "section-declaration" ? "shadow-lg ring-2 ring-emerald-500 ring-opacity-20" : ""}`}>
+            <div id="section-declaration" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-declaration" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
           <div 
-            className="flex items-center gap-3 mb-4 cursor-pointer hover:text-emerald-600 transition-colors"
+            className="flex items-center gap-3 mb-4 cursor-pointer hover:text-brand-blue transition-colors"
                 onClick={() => scrollToSection("section-declaration")}
           >
-            <div className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg">
-              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+              <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-black">
+            <h3 className="text-lg font-semibold text-brand-navy">
                 Declaration *
             </h3>
           </div>
@@ -3503,15 +3507,15 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             </div>
           )}
 
-          <div className="flex justify-end mt-8 pt-6 border-t">
+          <div className="mt-8 flex justify-end border-t border-gray-100 pt-6">
           <button
               type="button"
               onClick={handleSubmitForm}
               disabled={isSubmitting || submitSuccess}
-              className={`px-10 py-2 rounded-lg font-medium shadow transition flex items-center gap-2
+              className={`flex items-center gap-2 rounded-lg px-8 py-2.5 text-sm font-semibold shadow-sm transition-all
                 ${isSubmitting || submitSuccess 
-                  ? 'bg-gray-400 cursor-not-allowed' 
-                  : 'bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all'}`}
+                  ? 'cursor-not-allowed bg-gray-300 text-white' 
+                  : 'bg-brand-blue text-white hover:bg-brand-blue-hover hover:shadow-md'}`}
             >
               {isSubmitting ? (
                 <>
@@ -3560,13 +3564,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   exit={{ y: -40, opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.25 }}
                 >
-                  <div className="flex justify-between items-center p-6 border-b">
+                  <div className="flex items-center justify-between border-b border-gray-100 bg-brand-navy px-6 py-4">
                     <div>
-                      <h2 className="text-2xl font-bold text-black">
-                        Letterhead Preview - Assigned Placement Demo
+                      <h2 className="text-lg font-semibold text-white">
+                        Letterhead Preview
                       </h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        This is a demo showing where your letterhead will be placed in the system.
+                      <p className="mt-0.5 text-sm text-white/70">
+                        This is a demo showing where your letterhead will be placed.
                       </p>
                     </div>
                     <button
@@ -3576,7 +3580,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                           setHasViewedLetterhead(true);
                         }
                       }}
-                      className="text-2xl font-bold text-gray-700 hover:text-black transition-colors"
+                      className="text-2xl font-bold text-white/80 transition-colors hover:text-white"
                       aria-label="Close modal"
                     >
                       ×

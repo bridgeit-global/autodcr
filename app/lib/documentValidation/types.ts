@@ -9,6 +9,8 @@ export type AlternativeFieldGroup = {
 
 export type DocumentValidationRules = {
   alternativeFieldGroups?: readonly AlternativeFieldGroup[];
+  /** Fields that may be null/empty without failing validation. */
+  optionalFields?: readonly string[];
 };
 
 export type DocumentDefinition<T extends z.ZodTypeAny> = {

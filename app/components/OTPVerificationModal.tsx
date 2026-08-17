@@ -365,7 +365,7 @@ const OTPVerificationModal: React.FC<Props> = ({
             {step === 'sending' && (
               <div className="space-y-4 text-center py-8">
                 <div className="flex justify-center">
-                  <svg className="animate-spin h-10 w-10 text-emerald-600" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-10 w-10 text-brand-blue" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
@@ -400,8 +400,8 @@ const OTPVerificationModal: React.FC<Props> = ({
                       onKeyDown={(e) => handleOTPKeyDown(index, e)}
                       onPaste={index === 0 ? handleOTPPaste : undefined}
                       className={`w-11 h-12 text-center text-lg font-semibold border-2 rounded-lg transition-all duration-200
-                        ${digit ? 'border-emerald-500 bg-emerald-50' : 'border-gray-300 bg-white'}
-                        focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-gray-900`}
+                        ${digit ? 'border-brand-blue bg-blue-50' : 'border-gray-300 bg-white'}
+                        focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue text-gray-900`}
                       disabled={isLoading}
                     />
                   ))}
@@ -420,7 +420,7 @@ const OTPVerificationModal: React.FC<Props> = ({
                         <button
                           onClick={handleResendOTP}
                           disabled={isLoading}
-                          className="text-emerald-600 hover:text-emerald-700 font-medium hover:underline"
+                          className="text-brand-blue hover:text-brand-blue-hover font-medium hover:underline"
                         >
                           resend
                         </button>
@@ -441,7 +441,7 @@ const OTPVerificationModal: React.FC<Props> = ({
                   disabled={isLoading}
                   className={`w-full py-3 rounded-lg font-semibold text-white transition-all duration-200
                     ${otp.join('').length === 6 && !isLoading
-                      ? 'bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all shadow-lg shadow-emerald-200'
+                      ? 'bg-brand-blue text-white shadow-sm transition-all hover:bg-brand-blue-hover hover:shadow-md'
                       : 'bg-gray-300 cursor-not-allowed'
                     }`}
                 >

@@ -1,15 +1,13 @@
 import ConsultantRegistrationForm from "../components/ConsultantRegistrationForm";
-import SiteFooter from "../components/SiteFooter";
+import RegistrationPageShell from "../components/RegistrationPageShell";
 
-export default function OwnerRegistrationPage() {
+export default function ConsultantRegistrationPage() {
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* <Header /> */}
-      <main className="py-8">
-        <ConsultantRegistrationForm title="Consultant Registration" />
-      </main>
-      <SiteFooter />
-    </div>
+    <RegistrationPageShell
+      title="Consultant Registration"
+      description="Create your consultant account"
+    >
+      <ConsultantRegistrationForm title="Consultant Registration" />
+    </RegistrationPageShell>
   );
 }
-

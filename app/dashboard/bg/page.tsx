@@ -8,6 +8,7 @@ import { useProjectData } from "@/app/hooks/useProjectData";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import CustomSelect from "@/app/components/CustomSelect";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
+import { CREATE_PROJECT_SECTIONS } from "@/app/utils/projectSections";
 
 type BGFormData = {
   zone: string;
@@ -40,11 +41,11 @@ type RequiredPage = {
 };
 
 const REQUIRED_PAGES: RequiredPage[] = [
-  { key: "saved-project-details", label: "Project Details", path: "/dashboard/project-details" },
-  { key: "saved-applicant-details", label: "Applicant Details", path: "/dashboard/applicant" },
-  { key: "saved-building-details", label: "Building Details", path: "/dashboard/building" },
-  { key: "saved-area-details", label: "Area Details", path: "/dashboard/area" },
-  { key: "saved-project-library", label: "Project Library", path: "/dashboard/project-library" },
+  ...CREATE_PROJECT_SECTIONS.map((section) => ({
+    key: section.savedKey,
+    label: section.label,
+    path: section.path,
+  })),
   { key: "saved-bg-details", label: "BG Details", path: "/dashboard/bg" },
 ];
 

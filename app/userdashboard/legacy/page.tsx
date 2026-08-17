@@ -19,10 +19,6 @@ import {
   normalizeApplicationWorkflowStage,
   type ApplicationWorkflowStage,
 } from "@/app/components/DraftApplicationsModal";
-import DocumentValidationResultModal, {
-  type DocumentValidationResult,
-} from "@/app/components/DocumentValidationResultModal";
-import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 
 /** Maps dashboard column header (when opening the list modal) to DB `workflow_stage`. */
 function dashboardColumnStatusToWorkflowStage(status: string): ApplicationWorkflowStage | null {
@@ -427,7 +423,7 @@ const PROJECT_MENU_ITEMS: MenuItem[] = [
   {
     header: "New Project",
     action: "Create New Project",
-    route: "/dashboard/project-details",
+    route: "/dashboard/project-library",
   },
   {
     header: "Existing Projects",
@@ -447,7 +443,6 @@ interface ApplicationModalProps {
   items: MenuItem[];
   title: string;
   projects?: { id: string; title: string; status?: string; project_info?: { proposalNo?: string } | null }[];
-  onSelectExistingApplicationProject?: (projectId: string) => void;
 }
 
 const ApplicationModal: React.FC<ApplicationModalProps> = ({
@@ -456,7 +451,6 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({
   items,
   title,
   projects = [],
-  onSelectExistingApplicationProject,
 }) => {
   const router = useRouter();
   const [showProjectDropdownIndex, setShowProjectDropdownIndex] = useState<number | null>(null);
@@ -518,8 +512,8 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({
   };
 
   const handleExistingApplicationProjectSelect = (projectId: string) => {
-    if (projectId && onSelectExistingApplicationProject) {
-      onSelectExistingApplicationProject(projectId);
+    if (projectId) {
+      router.push(`/userdashboard/documents?projectId=${encodeURIComponent(projectId)}`);
       onClose();
     }
   };
@@ -683,171 +677,12 @@ function UserDashboardContent() {
   const [approvedCounts, setApprovedCounts] = useState<Record<string, number>>({});
   const [rejectedCounts, setRejectedCounts] = useState<Record<string, number>>({});
   const [draftApplicationsByType, setDraftApplicationsByType] = useState<Record<string, DraftApplication[]>>({});
-  const [existingApplicationMode, setExistingApplicationMode] = useState(false);
-  const [uploadedPdfsByType, setUploadedPdfsByType] = useState<
-    Record<string, { name: string; file: File }>
-  >({});
-  const [validationResultsByType, setValidationResultsByType] = useState<
-    Record<string, DocumentValidationResult>
-  >({});
-  const [validatingAppType, setValidatingAppType] = useState<string | null>(null);
-  const [validationModalOpen, setValidationModalOpen] = useState(false);
-  const [validationAppType, setValidationAppType] = useState<string | null>(null);
-  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
-  const [pdfPreviewAppType, setPdfPreviewAppType] = useState<string | null>(null);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const departmentOptions = [...departments].sort((a, b) => a.localeCompare(b));
   const selectableProjects = projects.filter((project) => project.status !== "draft");
-  const showExistingApplicationActions =
-    existingApplicationMode && selectedProject !== "ALL";
-
-  const clearExistingApplicationState = () => {
-    setUploadedPdfsByType({});
-    setValidationResultsByType({});
-    setValidationModalOpen(false);
-    setValidationAppType(null);
-    setPdfPreviewOpen(false);
-    setPdfPreviewAppType(null);
-  };
 
   const handleProjectFilterChange = (val: string) => {
     setSelectedProject(val);
-    if (val === "ALL") {
-      setExistingApplicationMode(false);
-      clearExistingApplicationState();
-    }
   };
-
-  const handleSelectExistingApplicationProject = (projectId: string) => {
-    setSelectedProject(projectId);
-    setExistingApplicationMode(true);
-    clearExistingApplicationState();
-    setIsProjectModalOpen(false);
-  };
-
-  const handleExitExistingApplicationMode = () => {
-    setSelectedProject("ALL");
-    setExistingApplicationMode(false);
-    clearExistingApplicationState();
-  };
-
-  const handleExistingApplicationPdfUpload = (appType: string, file: File | undefined) => {
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      showAlert({ title: "Invalid file", message: "Please upload a PDF file." });
-      return;
-    }
-    setUploadedPdfsByType((prev) => ({
-      ...prev,
-      [appType]: { name: file.name, file },
-    }));
-    // New upload invalidates previous bot result for this type.
-    setValidationResultsByType((prev) => {
-      if (!(appType in prev)) return prev;
-      const next = { ...prev };
-      delete next[appType];
-      return next;
-    });
-  };
-
-  const openPdfPreview = (appType: string) => {
-    const uploaded = uploadedPdfsByType[appType];
-    if (!uploaded) {
-      showAlert({
-        title: "Upload required",
-        message: "Please upload a PDF before previewing.",
-      });
-      return;
-    }
-    setPdfPreviewAppType(appType);
-    setPdfPreviewOpen(true);
-  };
-
-  const handleValidateWithBot = async (appType: string) => {
-    const uploaded = uploadedPdfsByType[appType];
-    if (!uploaded) {
-      showAlert({
-        title: "Upload required",
-        message: "Please upload a PDF before validating with the bot.",
-      });
-      return;
-    }
-
-    setValidatingAppType(appType);
-    try {
-      const formData = new FormData();
-      formData.append("file", uploaded.file);
-      formData.append("applicationType", appType);
-
-      const response = await fetch("/api/validate-document", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        showAlert({
-          title: "Validation failed",
-          message:
-            typeof data?.error === "string"
-              ? data.error
-              : "Could not validate this document. Please try again.",
-        });
-        return;
-      }
-
-      const result = data as DocumentValidationResult;
-      setValidationResultsByType((prev) => ({
-        ...prev,
-        [appType]: result,
-      }));
-      setValidationAppType(appType);
-      setValidationModalOpen(true);
-    } catch {
-      showAlert({
-        title: "Validation failed",
-        message: "Could not reach the validation service. Please try again.",
-      });
-    } finally {
-      setValidatingAppType(null);
-    }
-  };
-
-  useEffect(() => {
-    if (!pdfPreviewOpen || !pdfPreviewAppType) {
-      setPreviewPdfUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-      return;
-    }
-
-    const uploaded = uploadedPdfsByType[pdfPreviewAppType];
-    if (!uploaded) {
-      setPreviewPdfUrl(null);
-      return;
-    }
-
-    const url = URL.createObjectURL(uploaded.file);
-    setPreviewPdfUrl(url);
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [pdfPreviewOpen, pdfPreviewAppType, uploadedPdfsByType]);
-
-  const activeValidationResult =
-    validationAppType != null
-      ? validationResultsByType[validationAppType] ?? null
-      : null;
-  const activeValidationFileName =
-    validationAppType != null
-      ? uploadedPdfsByType[validationAppType]?.name ?? ""
-      : "";
-  const activePdfPreviewFileName =
-    pdfPreviewAppType != null
-      ? uploadedPdfsByType[pdfPreviewAppType]?.name ?? ""
-      : "";
-
   const getProjectOptionLabel = (project: {
     title: string;
     status?: string;
@@ -868,13 +703,6 @@ function UserDashboardContent() {
       highlightedPart: proposalNo ? `(${proposalNo})` : undefined,
     };
   };
-
-  const existingApplicationProjectLabel = (() => {
-    if (!showExistingApplicationActions) return "";
-    const project = selectableProjects.find((p) => p.id === selectedProject);
-    if (!project) return "selected project";
-    return getProjectOptionLabel(project).label;
-  })();
 
   // Read department from URL query parameter
   useEffect(() => {
@@ -1268,22 +1096,6 @@ function UserDashboardContent() {
             {!projectsLoading && projects.length === 0 && (
               <span className="text-xs text-gray-600 mt-1 inline-block">No projects found</span>
             )}
-            {showExistingApplicationActions && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
-                <p className="text-sm text-emerald-900 min-w-0">
-                  Adding existing applications for{" "}
-                  <span className="font-semibold">{existingApplicationProjectLabel}</span>
-                </p>
-                <button
-                  type="button"
-                  onClick={handleExitExistingApplicationMode}
-                  className="shrink-0 text-sm font-semibold text-emerald-800 hover:text-emerald-950 underline"
-                >
-                  Exit
-                </button>
-              </div>
-            )}
-
             {/* Main Data Table */}
             <div className="rounded-2xl border border-gray-200 shadow-sm bg-white overflow-hidden flex-1 min-h-0">
               <div className="overflow-auto h-full min-h-[420px]">
@@ -1293,46 +1105,31 @@ function UserDashboardContent() {
                       <th className="bg-emerald-800 border-b border-emerald-700 px-4 py-3 text-left text-sm font-semibold text-white">
                         Application Type
                       </th>
-                      {showExistingApplicationActions ? (
-                        <>
-                          <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
-                            Upload
-                          </th>
-                          <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
-                            Validate with Bot
-                          </th>
-                          <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
-                            Preview
-                          </th>
-                        </>
-                      ) : (
-                        <>
-                          <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
-                            Draft
-                          </th>
-                          <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
-                            Due Payment
-                          </th>
-                          <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
-                            In Process
-                          </th>
-                          <th className="bg-emerald-400 border-b border-emerald-300 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
-                            Need Clarification
-                          </th>
-                          <th className="bg-emerald-300 border-b border-emerald-200 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
-                            Withdrawn
-                          </th>
-                          <th className="bg-emerald-200 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-900">
-                            Rejected or Cancelled
-                          </th>
-                          <th className="bg-emerald-100 border-b border-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
-                            Approved or Verified
-                          </th>
-                          <th className="bg-emerald-50 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
-                            System Approved
-                          </th>
-                        </>
-                      )}
+
+                      <th className="bg-emerald-700 border-b border-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white">
+                        Draft
+                      </th>
+                      <th className="bg-emerald-600 border-b border-emerald-500 px-4 py-3 text-center text-sm font-semibold text-white">
+                        Due Payment
+                      </th>
+                      <th className="bg-emerald-500 border-b border-emerald-400 px-4 py-3 text-center text-sm font-semibold text-white">
+                        In Process
+                      </th>
+                      <th className="bg-emerald-400 border-b border-emerald-300 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
+                        Need Clarification
+                      </th>
+                      <th className="bg-emerald-300 border-b border-emerald-200 px-4 py-3 text-center text-sm font-semibold text-emerald-950">
+                        Withdrawn
+                      </th>
+                      <th className="bg-emerald-200 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-900">
+                        Rejected or Cancelled
+                      </th>
+                      <th className="bg-emerald-100 border-b border-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
+                        Approved or Verified
+                      </th>
+                      <th className="bg-emerald-50 border-b border-emerald-100 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
+                        System Approved
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1341,74 +1138,11 @@ function UserDashboardContent() {
                       const inProcessCount = inProcessCounts[app.name] ?? 0;
                       const approvedCount = approvedCounts[app.name] ?? 0;
                       const rejectedCount = rejectedCounts[app.name] ?? 0;
-                      const uploadedPdf = uploadedPdfsByType[app.name];
-                      const uploadInputId = `existing-app-upload-${index}`;
                       return (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="border-b border-gray-200 px-4 py-3 text-left font-medium text-gray-900">
                           {app.name}
                         </td>
-                        {showExistingApplicationActions ? (
-                          <>
-                            <td className="border-b border-gray-200 px-4 py-3 text-center">
-                              <div className="flex flex-col items-center gap-1">
-                                <input
-                                  id={uploadInputId}
-                                  type="file"
-                                  accept="application/pdf"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    handleExistingApplicationPdfUpload(
-                                      app.name,
-                                      e.target.files?.[0]
-                                    );
-                                    e.target.value = "";
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    document.getElementById(uploadInputId)?.click()
-                                  }
-                                  className="inline-flex items-center justify-center rounded-lg border border-emerald-600 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
-                                >
-                                  {uploadedPdf ? "Replace PDF" : "Upload"}
-                                </button>
-                                {uploadedPdf && (
-                                  <span
-                                    className="max-w-[180px] truncate text-xs text-gray-600"
-                                    title={uploadedPdf.name}
-                                  >
-                                    {uploadedPdf.name}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="border-b border-gray-200 px-4 py-3 text-center">
-                              <button
-                                type="button"
-                                disabled={validatingAppType === app.name}
-                                onClick={() => handleValidateWithBot(app.name)}
-                                className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              >
-                                {validatingAppType === app.name
-                                  ? "Validating…"
-                                  : "Validate with Bot"}
-                              </button>
-                            </td>
-                            <td className="border-b border-gray-200 px-4 py-3 text-center">
-                              <button
-                                type="button"
-                                onClick={() => openPdfPreview(app.name)}
-                                disabled={!uploadedPdf}
-                                className="inline-flex items-center justify-center rounded-lg border border-emerald-600 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
-                              >
-                                Preview
-                              </button>
-                            </td>
-                          </>
-                        ) : (
-                          <>
                         <td
                           className={`border-b border-gray-200 px-4 py-3 text-center ${
                             draftCount > 0
@@ -1463,8 +1197,6 @@ function UserDashboardContent() {
                         <td className="border-b border-gray-200 px-4 py-3 text-center text-gray-900" onClick={() => handleCellClick(app.name, 0, "System Approved")}>
                           0
                         </td>
-                          </>
-                        )}
                       </tr>
                     )})}
                   </tbody>
@@ -1524,7 +1256,6 @@ function UserDashboardContent() {
         items={PROJECT_MENU_ITEMS}
         title="Projects"
         projects={projects}
-        onSelectExistingApplicationProject={handleSelectExistingApplicationProject}
       />
 
       {/* Draft Applications Modal */}
@@ -1550,32 +1281,6 @@ function UserDashboardContent() {
         />
       )}
 
-      <DocumentValidationResultModal
-        open={validationModalOpen}
-        result={activeValidationResult}
-        fileName={activeValidationFileName}
-        onClose={() => {
-          setValidationModalOpen(false);
-          setValidationAppType(null);
-        }}
-      />
-
-      <DocumentPreviewModal
-        open={pdfPreviewOpen}
-        fileUrl={previewPdfUrl}
-        title={
-          pdfPreviewAppType
-            ? `${pdfPreviewAppType} Preview`
-            : activePdfPreviewFileName
-              ? `PDF Preview · ${activePdfPreviewFileName}`
-              : "PDF Preview"
-        }
-        hideSaveButton
-        onClose={() => {
-          setPdfPreviewOpen(false);
-          setPdfPreviewAppType(null);
-        }}
-      />
     </div>
   );
 }
