@@ -13,6 +13,7 @@ import {
   listDocumentTypes,
   type DocumentType,
 } from "@/app/lib/documentValidation/registry";
+import { validateDocumentFile } from "@/app/utils/validateDocumentApi";
 
 export type DocumentTypeOption = {
   id: DocumentType;
@@ -141,37 +142,23 @@ export async function validateDocumentUpload(params: {
   | { ok: true; result: DocumentValidationResult }
   | { ok: false; error: string }
 > {
-  const formData = new FormData();
-  formData.append("file", params.file);
-  if (params.applicationType) {
-    formData.append("applicationType", params.applicationType);
+  if (!params.documentType) {
+    return { ok: false, error: "Missing documentType." };
   }
-  if (params.documentType) {
-    formData.append("documentType", params.documentType);
-  }
-
   try {
-    const response = await fetch("/api/validate-document", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        error:
-          typeof data?.error === "string"
-            ? data.error
-            : "Could not validate this document. Please try again.",
-      };
-    }
-
-    return { ok: true, result: data as DocumentValidationResult };
-  } catch {
+    const result = await validateDocumentFile(
+      params.file,
+      params.documentType as DocumentType,
+      params.applicationType
+    );
+    return { ok: true, result };
+  } catch (err) {
     return {
       ok: false,
-      error: "Could not reach the validation service. Please try again.",
+      error:
+        err instanceof Error
+          ? err.message
+          : "Could not reach the validation service. Please try again.",
     };
   }
 }
