@@ -10,7 +10,8 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ingest:regulations": "node --env-file=.env --import tsx scripts/ingest-regulations.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.36",
@@ -19,6 +20,7 @@
     "@mlightcad/libredwg-converter": "3.13.1",
     "@mlightcad/mtext-renderer": "0.12.4",
     "@mlightcad/three-renderer": "1.6.1",
+    "@pinecone-database/pinecone": "^8.2.0",
     "@react-pdf-viewer/core": "^3.12.0",
     "@react-pdf-viewer/default-layout": "^3.12.0",
     "@signpdf/placeholder-pdf-lib": "^3.3.0",
@@ -37,6 +39,7 @@
     "next": "^16.0.7",
     "node-forge": "^1.4.0",
     "nodemailer": "^8.0.8",
+    "openai": "^7.5.0",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "1.1.1",
     "pdfjs-dist": "^3.11.174",
@@ -63,6 +66,7 @@
     "eslint-config-next": "^16.0.7",
     "supabase": "^2.65.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.12",
     "typescript": "^5",
     "xlsx": "^0.18.5"
   }

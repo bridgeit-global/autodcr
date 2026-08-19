@@ -6,6 +6,7 @@ import {
   FolderKanban,
   FileStack,
   FileText,
+  ShieldCheck,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -73,6 +74,13 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     label: "Drawing Review",
     href: "/userdashboard/drawings",
     icon: DraftingCompass,
+    live: true,
+  },
+  {
+    id: "compliance",
+    label: "Compliance",
+    href: "/userdashboard/compliance",
+    icon: ShieldCheck,
     live: true,
   },
   {
