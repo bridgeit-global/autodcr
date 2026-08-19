@@ -1,6 +1,7 @@
 import {
   Briefcase,
   ClipboardCheck,
+  DraftingCompass,
   LayoutDashboard,
   FolderKanban,
   FileStack,
@@ -65,6 +66,13 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     label: "Documents",
     href: "/userdashboard/documents",
     icon: FileText,
+    live: true,
+  },
+  {
+    id: "drawings",
+    label: "Drawing Review",
+    href: "/userdashboard/drawings",
+    icon: DraftingCompass,
     live: true,
   },
   {

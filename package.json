@@ -5,6 +5,8 @@
   "scripts": {
     "generate-dp2034-fp": "node scripts/fetch-dp2034-fp-static.mjs",
     "generate-sql-values": "node scripts/generate-sql-values-from-demo.mjs",
+    "copy-cad-workers": "node scripts/copy-cad-workers.mjs",
+    "postinstall": "node scripts/copy-cad-workers.mjs",
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
@@ -12,6 +14,11 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.36",
+    "@mlightcad/cad-simple-viewer": "1.6.1",
+    "@mlightcad/data-model": "1.13.1",
+    "@mlightcad/libredwg-converter": "3.13.1",
+    "@mlightcad/mtext-renderer": "0.12.4",
+    "@mlightcad/three-renderer": "1.6.1",
     "@react-pdf-viewer/core": "^3.12.0",
     "@react-pdf-viewer/default-layout": "^3.12.0",
     "@signpdf/placeholder-pdf-lib": "^3.3.0",
@@ -24,6 +31,7 @@
     "framer-motion": "^12.23.24",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "lodash-es": "4.17.21",
     "lucide-react": "^1.31.0",
     "mammoth": "^1.11.0",
     "next": "^16.0.7",
@@ -39,6 +47,7 @@
     "react-dom": "^19.2.1",
     "react-hook-form": "^7.66.0",
     "resend": "^6.12.4",
+    "three": "0.172.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

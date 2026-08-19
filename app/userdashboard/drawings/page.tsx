@@ -1,5 +1,7 @@
-import ComingSoon from "@/app/components/appshell/ComingSoon";
+"use client";
+
+import DrawingReviewClient from "./DrawingReviewClient";
 
 export default function DrawingsPage() {
-  return <ComingSoon title="Drawings" />;
+  return <DrawingReviewClient />;
 }

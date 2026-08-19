@@ -58,3 +58,7 @@ supabase/.temp/
 Parkour-Letterhead-*.png
 
 html/
+
+# Generated CAD workers (copied from node_modules on postinstall)
+/public/cad-workers/*
+!/public/cad-workers/.gitkeep
