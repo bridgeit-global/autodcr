@@ -1,13 +1,17 @@
 export type DrawingReviewMode = "view" | "overlay" | "compare" | "redline";
 
-export type DrawingVersionStatus = "current" | "approved" | "previous";
+export type DrawingVersionStatus = "current" | "approved" | "previous" | "revision_requested";
+
+export type DrawingRemarkKind = "comment" | "revision_request" | "approval";
 
 export type DrawingVersion = {
   id: string;
   name: string;
   fileName: string;
+  storagePath: string;
   dateLabel: string;
   status: DrawingVersionStatus;
+  keyChanges: KeyChange[];
 };
 
 export type KeyChangeTone = "up" | "down" | "ok" | "note";
@@ -20,11 +24,13 @@ export type KeyChange = {
 
 export type DrawingRemark = {
   id: string;
+  versionId: string;
   author: string;
   role: string;
   initials: string;
   dateLabel: string;
   body: string;
+  kind: DrawingRemarkKind;
 };
 
 export type RedlineMark = {
@@ -37,31 +43,5 @@ export type RedlineMark = {
   color: string;
   label?: string;
 };
-
-export const SAMPLE_KEY_CHANGES: KeyChange[] = [
-  { id: "kc-1", label: "Floor Area increased by 2%", tone: "up" },
-  { id: "kc-2", label: "Stair width reduced", tone: "down" },
-  { id: "kc-3", label: "Fire tank location updated", tone: "ok" },
-  { id: "kc-4", label: "Utility area reconfigured", tone: "note" },
-];
-
-export const SAMPLE_REMARKS: DrawingRemark[] = [
-  {
-    id: "rm-1",
-    author: "Fire Consultant",
-    role: "Fire Consultant",
-    initials: "FC",
-    dateLabel: "May 31, 2024",
-    body: "Please review fire stair width as per latest circular.",
-  },
-  {
-    id: "rm-2",
-    author: "Architect",
-    role: "Architect",
-    initials: "AR",
-    dateLabel: "May 30, 2024",
-    body: "Updated drawing uploaded for review.",
-  },
-];
 
 export const REDLINE_COLORS = ["#dc2626", "#16a34a", "#d97706", "#2563eb"];

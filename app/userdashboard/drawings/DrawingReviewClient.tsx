@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowUpRight,
   Check,
@@ -27,9 +28,16 @@ import {
 } from "@/app/userdashboard/ownerWorkspaceConsultants";
 import CadViewerHost from "@/app/userdashboard/drawings/CadViewerHost";
 import {
+  addDrawingRemark,
+  downloadDrawingBuffer,
+  listDrawingReview,
+  replaceDrawingRedlines,
+  updateDrawingKeyChanges,
+  updateDrawingVersionStatus,
+  uploadDrawingVersion,
+} from "@/app/userdashboard/drawings/drawingPersistence";
+import {
   REDLINE_COLORS,
-  SAMPLE_KEY_CHANGES,
-  SAMPLE_REMARKS,
   type DrawingRemark,
   type DrawingReviewMode,
   type DrawingVersion,
@@ -37,21 +45,9 @@ import {
   type RedlineMark,
 } from "@/app/userdashboard/drawings/drawingsData";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
+import { supabase } from "@/app/utils/supabase";
 
 type ViewerMode = Exclude<DrawingReviewMode, "redline"> | "view";
-
-function formatDateLabel(date: Date): string {
-  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function initialsFromName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-}
 
 function isCadFile(file: File): boolean {
   const name = file.name.toLowerCase();
@@ -65,7 +61,16 @@ function keyChangeIcon(tone: KeyChange["tone"]) {
   return <Sparkles className="h-3.5 w-3.5 text-amber-500" />;
 }
 
+function keyChangesFromMarks(marks: RedlineMark[]): KeyChange[] {
+  return marks.map((mark, index) => ({
+    id: mark.id || `kc-${index}`,
+    label: mark.label || (mark.kind === "pin" ? "Redline note" : "Area marked"),
+    tone: mark.color === "#16a34a" ? "ok" : mark.kind === "pin" ? "note" : "down",
+  }));
+}
+
 export default function DrawingReviewClient() {
+  const searchParams = useSearchParams();
   const { userMetadata } = useUserMetadata();
   const { projects, loading: projectsLoading } = useDashboardProjects();
   const nonDraftProjects = useMemo(() => filterNonDraftProjects(projects), [projects]);
@@ -76,9 +81,10 @@ export default function DrawingReviewClient() {
   const [versions, setVersions] = useState<DrawingVersion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [compareVersionId, setCompareVersionId] = useState<string | null>(null);
-  const [keyChanges, setKeyChanges] = useState<KeyChange[]>(SAMPLE_KEY_CHANGES);
-  const [remarks, setRemarks] = useState<DrawingRemark[]>(SAMPLE_REMARKS);
+  const [keyChanges, setKeyChanges] = useState<KeyChange[]>([]);
+  const [remarks, setRemarks] = useState<DrawingRemark[]>([]);
   const [redlines, setRedlines] = useState<RedlineMark[]>([]);
+  const [redlinesByVersionId, setRedlinesByVersionId] = useState<Record<string, RedlineMark[]>>({});
   const [redlineTool, setRedlineTool] = useState<"rect" | "pin">("rect");
   const [draftRect, setDraftRect] = useState<RedlineMark | null>(null);
   const [commentOpen, setCommentOpen] = useState(false);
@@ -86,13 +92,17 @@ export default function DrawingReviewClient() {
   const [commentBody, setCommentBody] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [highlightVersions, setHighlightVersions] = useState(false);
+  const [loadingReview, setLoadingReview] = useState(false);
+  const [loadingBuffer, setLoadingBuffer] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [bufferTick, setBufferTick] = useState(0);
 
   const buffersRef = useRef<Map<string, ArrayBuffer>>(new Map());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const versionsRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedProject = nonDraftProjects.find((p) => p.id === selectedProjectId) ?? nonDraftProjects[0];
+  const selectedProject = nonDraftProjects.find((p) => p.id === selectedProjectId) ?? null;
   const projectValue = selectedProject?.id ?? "";
   const projectLabel = selectedProject ? getProjectLabel(selectedProject) : "No project";
 
@@ -117,6 +127,7 @@ export default function DrawingReviewClient() {
     versions.find((v) => v.id !== activeVersion?.id) ??
     null;
 
+  void bufferTick;
   const primaryBuffer = activeVersion ? buffersRef.current.get(activeVersion.id) ?? null : null;
   const secondaryBuffer = compareVersion ? buffersRef.current.get(compareVersion.id) ?? null : null;
   const viewerMode: ViewerMode = mode === "redline" ? "view" : mode === "overlay" || mode === "compare" ? mode : "view";
@@ -126,16 +137,119 @@ export default function DrawingReviewClient() {
     window.setTimeout(() => setToast(null), 2400);
   };
 
-  const addRemark = (body: string, author = reviewerName, role = reviewerRole) => {
-    const remark: DrawingRemark = {
-      id: `rm-${Date.now()}`,
-      author,
-      role,
-      initials: initialsFromName(author === reviewerName ? reviewerName : role),
-      dateLabel: formatDateLabel(new Date()),
-      body,
+  useEffect(() => {
+    const fromQuery = searchParams.get("projectId")?.trim() || "";
+    if (projectsLoading) return;
+    if (fromQuery && nonDraftProjects.some((project) => project.id === fromQuery)) {
+      setSelectedProjectId(fromQuery);
+      return;
+    }
+    if (!selectedProjectId && nonDraftProjects[0]) {
+      setSelectedProjectId(nonDraftProjects[0].id);
+    }
+  }, [searchParams, projectsLoading, nonDraftProjects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!projectValue) {
+      setVersions([]);
+      setRemarks([]);
+      setRedlines([]);
+      setKeyChanges([]);
+      setActiveVersionId(null);
+      setCompareVersionId(null);
+      buffersRef.current.clear();
+      return;
+    }
+
+    let cancelled = false;
+    async function load() {
+      setLoadingReview(true);
+      buffersRef.current.clear();
+      setBufferTick((tick) => tick + 1);
+      try {
+        const snapshot = await listDrawingReview(projectValue);
+        if (cancelled) return;
+        setVersions(snapshot.versions);
+        setRemarks(snapshot.remarks);
+        setRedlinesByVersionId(snapshot.redlinesByVersionId);
+        const first = snapshot.versions[0] ?? null;
+        setActiveVersionId(first?.id ?? null);
+        setCompareVersionId(snapshot.versions[1]?.id ?? null);
+        setRedlines(first ? snapshot.redlinesByVersionId[first.id] ?? [] : []);
+        setKeyChanges(first?.keyChanges ?? []);
+      } catch (error) {
+        console.error("Failed to load drawings", error);
+        if (!cancelled) {
+          setVersions([]);
+          setRemarks([]);
+          setRedlines([]);
+          setKeyChanges([]);
+          showToast("Failed to load drawings");
+        }
+      } finally {
+        if (!cancelled) setLoadingReview(false);
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
     };
-    setRemarks((prev) => [remark, ...prev]);
+  }, [projectValue]);
+
+  const ensureBuffer = async (version: DrawingVersion | null) => {
+    if (!version) return null;
+    const cached = buffersRef.current.get(version.id);
+    if (cached) return cached;
+    setLoadingBuffer(true);
+    try {
+      const buffer = await downloadDrawingBuffer(version.storagePath);
+      buffersRef.current.set(version.id, buffer);
+      setBufferTick((tick) => tick + 1);
+      return buffer;
+    } catch (error) {
+      console.error("Failed to download drawing", error);
+      showToast("Failed to open drawing");
+      return null;
+    } finally {
+      setLoadingBuffer(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeVersion) return;
+    void ensureBuffer(activeVersion);
+    setRedlines(redlinesByVersionId[activeVersion.id] ?? []);
+    setKeyChanges(activeVersion.keyChanges ?? []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVersion?.id]);
+
+  useEffect(() => {
+    if ((mode !== "overlay" && mode !== "compare") || !compareVersion) return;
+    void ensureBuffer(compareVersion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, compareVersion?.id]);
+
+  const persistMarks = async (versionId: string, marks: RedlineMark[]) => {
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      showToast("Sign in to save markups");
+      return;
+    }
+    const nextKeyChanges = keyChangesFromMarks(marks);
+    try {
+      await replaceDrawingRedlines({ versionId, userId, marks });
+      await updateDrawingKeyChanges(versionId, nextKeyChanges);
+      setRedlinesByVersionId((prev) => ({ ...prev, [versionId]: marks }));
+      setKeyChanges(nextKeyChanges);
+      setVersions((prev) =>
+        prev.map((item) => (item.id === versionId ? { ...item, keyChanges: nextKeyChanges } : item))
+      );
+    } catch (error) {
+      console.error("Failed to save redlines", error);
+      showToast("Failed to save markups");
+    }
   };
 
   const ingestFile = async (file: File) => {
@@ -143,25 +257,40 @@ export default function DrawingReviewClient() {
       showToast("Please choose a DWG or DXF file");
       return;
     }
-    const buffer = await file.arrayBuffer();
-    const id = `ver-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    buffersRef.current.set(id, buffer);
-    const version: DrawingVersion = {
-      id,
-      name: file.name.replace(/\.(dwg|dxf)$/i, ""),
-      fileName: file.name,
-      dateLabel: formatDateLabel(new Date(file.lastModified || Date.now())),
-      status: versions.length === 0 ? "current" : "current",
-    };
-    setVersions((prev) => {
-      const rest = prev.map((item) =>
-        item.status === "current" ? { ...item, status: "previous" as const } : item
-      );
-      return [version, ...rest];
-    });
-    if (activeVersionId) setCompareVersionId(activeVersionId);
-    setActiveVersionId(id);
-    showToast(`Opened ${file.name}`);
+    if (!projectValue) {
+      showToast("Select a project first");
+      return;
+    }
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      showToast("Sign in to upload a drawing");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const version = await uploadDrawingVersion({ projectId: projectValue, file, userId });
+      buffersRef.current.set(version.id, buffer);
+      setBufferTick((tick) => tick + 1);
+      setVersions((prev) => {
+        const rest = prev.map((item) =>
+          item.status === "current" ? { ...item, status: "previous" as const } : item
+        );
+        return [version, ...rest];
+      });
+      if (activeVersionId) setCompareVersionId(activeVersionId);
+      setActiveVersionId(version.id);
+      setRedlines([]);
+      setKeyChanges([]);
+      showToast(`Saved ${file.name}`);
+    } catch (error) {
+      console.error("Failed to upload drawing", error);
+      showToast("Failed to upload drawing");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const onPickFiles = (fileList: FileList | null) => {
@@ -184,7 +313,7 @@ export default function DrawingReviewClient() {
   };
 
   const onRedlinePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (mode !== "redline") return;
+    if (mode !== "redline" || !activeVersion) return;
     const point = percentPoint(event);
     event.currentTarget.setPointerCapture(event.pointerId);
     if (redlineTool === "pin") {
@@ -196,11 +325,9 @@ export default function DrawingReviewClient() {
         color: REDLINE_COLORS[redlines.length % REDLINE_COLORS.length],
         label: `Note ${redlines.length + 1}`,
       };
-      setRedlines((prev) => [...prev, mark]);
-      setKeyChanges((prev) => [
-        { id: `kc-${Date.now()}`, label: mark.label || "Redline note", tone: "note" },
-        ...prev,
-      ]);
+      const next = [...redlines, mark];
+      setRedlines(next);
+      void persistMarks(activeVersion.id, next);
       return;
     }
     setDraftRect({
@@ -228,7 +355,10 @@ export default function DrawingReviewClient() {
   };
 
   const onRedlinePointerUp = () => {
-    if (!draftRect) return;
+    if (!draftRect || !activeVersion) {
+      setDraftRect(null);
+      return;
+    }
     const w = Math.abs(draftRect.w ?? 0);
     const h = Math.abs(draftRect.h ?? 0);
     if (w > 1.5 && h > 1.5) {
@@ -241,46 +371,100 @@ export default function DrawingReviewClient() {
         h,
         label: `Markup ${redlines.length + 1}`,
       };
-      setRedlines((prev) => [...prev, mark]);
-      setKeyChanges((prev) => [
-        { id: `kc-${Date.now()}`, label: mark.label || "Area marked", tone: mark.color === "#16a34a" ? "ok" : "down" },
-        ...prev,
-      ]);
+      const next = [...redlines, mark];
+      setRedlines(next);
+      void persistMarks(activeVersion.id, next);
     }
     setDraftRect(null);
   };
 
-  const approveActive = () => {
+  const approveActive = async () => {
     if (!activeVersion) {
       showToast("Open a drawing first");
       return;
     }
-    setVersions((prev) =>
-      prev.map((item) =>
-        item.id === activeVersion.id ? { ...item, status: "approved" as const } : item
-      )
-    );
-    addRemark(`Approved ${activeVersion.name}.`);
-    showToast("Drawing approved");
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      showToast("Sign in to approve");
+      return;
+    }
+    try {
+      await updateDrawingVersionStatus(activeVersion.id, "approved");
+      const remark = await addDrawingRemark({
+        versionId: activeVersion.id,
+        userId,
+        authorName: reviewerName,
+        authorRole: reviewerRole,
+        kind: "approval",
+        body: `Approved ${activeVersion.name}.`,
+      });
+      setVersions((prev) =>
+        prev.map((item) => (item.id === activeVersion.id ? { ...item, status: "approved" } : item))
+      );
+      setRemarks((prev) => [remark, ...prev]);
+      showToast("Drawing approved");
+    } catch (error) {
+      console.error("Failed to approve drawing", error);
+      showToast("Failed to approve drawing");
+    }
   };
 
-  const submitComment = (kind: "comment" | "revision") => {
+  const submitComment = async (kind: "comment" | "revision") => {
     const body = commentBody.trim();
     if (!body) return;
-    addRemark(kind === "revision" ? `Revision requested: ${body}` : body);
-    setCommentBody("");
-    setCommentOpen(false);
-    setRevisionOpen(false);
-    showToast(kind === "revision" ? "Revision requested" : "Comment added");
+    if (!activeVersion) {
+      showToast("Open a drawing first");
+      return;
+    }
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      showToast("Sign in to comment");
+      return;
+    }
+    try {
+      if (kind === "revision") {
+        await updateDrawingVersionStatus(activeVersion.id, "revision_requested");
+        setVersions((prev) =>
+          prev.map((item) =>
+            item.id === activeVersion.id ? { ...item, status: "revision_requested" } : item
+          )
+        );
+      }
+      const remark = await addDrawingRemark({
+        versionId: activeVersion.id,
+        userId,
+        authorName: reviewerName,
+        authorRole: reviewerRole,
+        kind: kind === "revision" ? "revision_request" : "comment",
+        body: kind === "revision" ? `Revision requested: ${body}` : body,
+      });
+      setRemarks((prev) => [remark, ...prev]);
+      setCommentBody("");
+      setCommentOpen(false);
+      setRevisionOpen(false);
+      showToast(kind === "revision" ? "Revision requested" : "Comment added");
+    } catch (error) {
+      console.error("Failed to save remark", error);
+      showToast("Failed to save remark");
+    }
   };
 
   const shareDrawing = async () => {
     const text = `${activeVersion?.fileName ?? "Drawing"} — Drawing Review (${projectLabel})`;
     try {
-      await navigator.clipboard.writeText(text);
-      showToast("Review note copied");
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/userdashboard/drawings?projectId=${encodeURIComponent(projectValue)}`
+      );
+      showToast("Review link copied");
     } catch {
-      showToast("Unable to copy");
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Review note copied");
+      } catch {
+        showToast("Unable to copy");
+      }
     }
     if (activeVersion) {
       const buffer = buffersRef.current.get(activeVersion.id);
@@ -327,14 +511,21 @@ export default function DrawingReviewClient() {
       <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-brand-blue">
         <Upload className="h-6 w-6" />
       </span>
-      <p className="mt-4 text-sm font-semibold text-brand-navy">Open a CAD drawing</p>
-      <p className="mt-1 text-xs text-gray-500">Drop a DWG or DXF file here, or browse from your computer.</p>
+      <p className="mt-4 text-sm font-semibold text-brand-navy">
+        {projectValue ? "Open a CAD drawing" : "Select a project"}
+      </p>
+      <p className="mt-1 text-xs text-gray-500">
+        {projectValue
+          ? "Drop a DWG or DXF file here, or browse from your computer."
+          : "Choose a project to review and store drawings."}
+      </p>
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        className={`mt-4 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
+        disabled={!projectValue || uploading}
+        className={`mt-4 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY} disabled:cursor-not-allowed disabled:opacity-50`}
       >
-        Open DWG / DXF
+        {uploading ? "Uploading…" : "Open DWG / DXF"}
       </button>
     </div>
   );
@@ -412,10 +603,11 @@ export default function DrawingReviewClient() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-brand-blue hover:bg-blue-50"
+              disabled={!projectValue || uploading}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-brand-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Upload className="h-3.5 w-3.5" />
-              Open file
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {uploading ? "Uploading…" : "Open file"}
             </button>
           </div>
 
@@ -460,7 +652,10 @@ export default function DrawingReviewClient() {
               </button>
               <button
                 type="button"
-                onClick={() => setRedlines([])}
+                onClick={() => {
+                  setRedlines([]);
+                  if (activeVersion) void persistMarks(activeVersion.id, []);
+                }}
                 className="rounded-md px-2 py-1 font-semibold hover:bg-gray-50"
               >
                 Clear marks
@@ -478,7 +673,12 @@ export default function DrawingReviewClient() {
             ].join(" ")}
           >
             <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Drawing versions</h2>
-            {versions.length === 0 ? (
+            {loadingReview ? (
+              <p className="mt-3 flex items-center gap-2 text-sm text-gray-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-blue" />
+                Loading…
+              </p>
+            ) : versions.length === 0 ? (
               <p className="mt-3 text-sm text-gray-500">No drawings yet. Open a DWG or DXF to start a review.</p>
             ) : (
               <ul className="mt-3 space-y-2">
@@ -506,6 +706,11 @@ export default function DrawingReviewClient() {
                             Approved
                           </span>
                         ) : null}
+                        {version.status === "revision_requested" ? (
+                          <span className="mt-1 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                            Revision requested
+                          </span>
+                        ) : null}
                       </button>
                     </li>
                   );
@@ -514,14 +719,18 @@ export default function DrawingReviewClient() {
             )}
 
             <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-gray-500">Key changes</h2>
-            <ul className="mt-3 space-y-2">
-              {keyChanges.map((change) => (
-                <li key={change.id} className="flex items-start gap-2 text-sm text-gray-700">
-                  <span className="mt-0.5">{keyChangeIcon(change.tone)}</span>
-                  <span>{change.label}</span>
-                </li>
-              ))}
-            </ul>
+            {keyChanges.length === 0 ? (
+              <p className="mt-3 text-sm text-gray-500">No key changes yet.</p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {keyChanges.map((change) => (
+                  <li key={change.id} className="flex items-start gap-2 text-sm text-gray-700">
+                    <span className="mt-0.5">{keyChangeIcon(change.tone)}</span>
+                    <span>{change.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </aside>
 
           <section
@@ -539,6 +748,11 @@ export default function DrawingReviewClient() {
               overlayOpacity={overlayOpacity}
               emptyState={emptyState}
             />
+            {loadingBuffer ? (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70">
+                <Loader2 className="h-6 w-6 animate-spin text-brand-blue" />
+              </div>
+            ) : null}
             {primaryBuffer ? (
               <svg
                 className={[
@@ -619,7 +833,7 @@ export default function DrawingReviewClient() {
           </button>
           <button
             type="button"
-            onClick={approveActive}
+            onClick={() => void approveActive()}
             className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
           >
             <Check className="h-4 w-4" />
@@ -652,7 +866,7 @@ export default function DrawingReviewClient() {
           <button type="button" onClick={() => setCommentOpen(false)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${BTN_SECONDARY}`}>
             Cancel
           </button>
-          <button type="button" onClick={() => submitComment("comment")} className={`rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}>
+          <button type="button" onClick={() => void submitComment("comment")} className={`rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}>
             Post comment
           </button>
         </div>
@@ -670,7 +884,7 @@ export default function DrawingReviewClient() {
           <button type="button" onClick={() => setRevisionOpen(false)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${BTN_SECONDARY}`}>
             Cancel
           </button>
-          <button type="button" onClick={() => submitComment("revision")} className={`rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}>
+          <button type="button" onClick={() => void submitComment("revision")} className={`rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}>
             Send request
           </button>
         </div>

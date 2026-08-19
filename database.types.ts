@@ -127,6 +127,132 @@ export type Database = {
         }
         Relationships: []
       }
+      drawing_redlines: {
+        Row: {
+          author_user_id: string | null
+          color: string | null
+          created_at: string
+          drawing_version_id: string
+          geometry: Json
+          id: string
+          kind: string
+          label: string | null
+        }
+        Insert: {
+          author_user_id?: string | null
+          color?: string | null
+          created_at?: string
+          drawing_version_id: string
+          geometry?: Json
+          id?: string
+          kind: string
+          label?: string | null
+        }
+        Update: {
+          author_user_id?: string | null
+          color?: string | null
+          created_at?: string
+          drawing_version_id?: string
+          geometry?: Json
+          id?: string
+          kind?: string
+          label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drawing_redlines_drawing_version_id_fkey"
+            columns: ["drawing_version_id"]
+            isOneToOne: false
+            referencedRelation: "drawing_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      drawing_remarks: {
+        Row: {
+          author_name: string
+          author_role: string
+          author_user_id: string
+          body: string
+          created_at: string
+          drawing_version_id: string
+          id: string
+          kind: string
+        }
+        Insert: {
+          author_name?: string
+          author_role?: string
+          author_user_id: string
+          body: string
+          created_at?: string
+          drawing_version_id: string
+          id?: string
+          kind?: string
+        }
+        Update: {
+          author_name?: string
+          author_role?: string
+          author_user_id?: string
+          body?: string
+          created_at?: string
+          drawing_version_id?: string
+          id?: string
+          kind?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drawing_remarks_drawing_version_id_fkey"
+            columns: ["drawing_version_id"]
+            isOneToOne: false
+            referencedRelation: "drawing_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      drawing_versions: {
+        Row: {
+          created_at: string
+          file_name: string
+          file_size_bytes: number | null
+          id: string
+          key_changes: Json
+          project_id: string
+          status: string
+          storage_path: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          file_name: string
+          file_size_bytes?: number | null
+          id?: string
+          key_changes?: Json
+          project_id: string
+          status?: string
+          storage_path: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          file_name?: string
+          file_size_bytes?: number | null
+          id?: string
+          key_changes?: Json
+          project_id?: string
+          status?: string
+          storage_path?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drawing_versions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           applicant_details: Json
@@ -219,6 +345,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      user_can_access_project: {
+        Args: { p_project_id: string }
+        Returns: boolean
+      }
       create_project: {
         Args: {
           p_applicant_details?: Json
