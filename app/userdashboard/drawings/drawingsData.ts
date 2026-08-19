@@ -1,4 +1,4 @@
-export type DrawingReviewMode = "view" | "overlay" | "compare" | "redline";
+export type DrawingReviewMode = "view" | "overlay" | "compare" | "redline" | "edit";
 
 export type DrawingVersionStatus = "current" | "approved" | "previous" | "revision_requested";
 

@@ -6,6 +6,13 @@ import {
   isCadHostMessage,
 } from "@/app/lib/cadViewer/protocol";
 
+function postToParent(
+  payload: { type: string; [key: string]: unknown },
+  transfer: Transferable[] = []
+) {
+  window.parent.postMessage({ source: CAD_EMBED_SOURCE, ...payload }, window.location.origin, transfer);
+}
+
 export default function CadEmbedClient() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,20 +27,16 @@ export default function CadEmbedClient() {
       ReturnType<typeof import("@/app/lib/cadViewer/ensureCadViewer")["ensureCadViewer"]>
     > | null = null;
 
-    const post = (payload: { type: string; [key: string]: unknown }) => {
-      window.parent.postMessage({ source: CAD_EMBED_SOURCE, ...payload }, window.location.origin);
-    };
-
     async function boot() {
       try {
-        const { ensureCadViewer, openCadDocument } = await import(
+        const { ensureCadViewer, openCadDocument, exportCurrentDrawingDxf } = await import(
           "@/app/lib/cadViewer/ensureCadViewer"
         );
         if (cancelled || !container) return;
         manager = await ensureCadViewer(container);
         if (cancelled) return;
         setStatus("");
-        post({ type: "ready" });
+        postToParent({ type: "ready" });
 
         const onMessage = (event: MessageEvent) => {
           if (event.origin !== window.location.origin) return;
@@ -43,17 +46,22 @@ export default function CadEmbedClient() {
           if (data.type === "open") {
             setError(null);
             setStatus(`Opening ${data.name}…`);
-            void openCadDocument(manager!, data.name, data.buffer)
+            void openCadDocument(manager!, data.name, data.buffer, data.mode === "write")
               .then((ok) => {
                 setStatus("");
                 if (!ok) setError(`Failed to load ${data.name}`);
-                post({ type: "opened", ok, name: data.name, error: ok ? undefined : `Failed to load ${data.name}` });
+                postToParent({
+                  type: "opened",
+                  ok,
+                  name: data.name,
+                  error: ok ? undefined : `Failed to load ${data.name}`,
+                });
               })
               .catch((err: unknown) => {
                 const message = err instanceof Error ? err.message : String(err);
                 setError(message);
                 setStatus("");
-                post({ type: "opened", ok: false, name: data.name, error: message });
+                postToParent({ type: "opened", ok: false, name: data.name, error: message });
               });
             return;
           }
@@ -63,6 +71,41 @@ export default function CadEmbedClient() {
               manager?.sendStringToExecute(data.cmd);
             } catch (err) {
               console.error("CAD command failed", err);
+            }
+            return;
+          }
+
+          if (data.type === "cancel") {
+            try {
+              manager?.editor.cancelActiveInput();
+            } catch (err) {
+              console.error("CAD cancel failed", err);
+            }
+            return;
+          }
+
+          if (data.type === "export") {
+            try {
+              if (!manager) throw new Error("CAD viewer is not ready");
+              const buffer = exportCurrentDrawingDxf(manager);
+              postToParent(
+                {
+                  type: "exported",
+                  requestId: data.requestId,
+                  ok: true,
+                  name: manager.curDocument?.fileName,
+                  buffer,
+                },
+                [buffer]
+              );
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              postToParent({
+                type: "exported",
+                requestId: data.requestId,
+                ok: false,
+                error: message,
+              });
             }
           }
         };

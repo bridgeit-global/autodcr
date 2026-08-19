@@ -1,6 +1,8 @@
 export const CAD_EMBED_SOURCE = "autodcr-cad-embed";
 export const CAD_HOST_SOURCE = "autodcr-cad-host";
 
+export type CadOpenMode = "review" | "write";
+
 export type CadEmbedToParent =
   | { source: typeof CAD_EMBED_SOURCE; type: "ready" }
   | {
@@ -10,11 +12,28 @@ export type CadEmbedToParent =
       name?: string;
       error?: string;
     }
-  | { source: typeof CAD_EMBED_SOURCE; type: "status"; message: string };
+  | { source: typeof CAD_EMBED_SOURCE; type: "status"; message: string }
+  | {
+      source: typeof CAD_EMBED_SOURCE;
+      type: "exported";
+      requestId: string;
+      ok: boolean;
+      name?: string;
+      buffer?: ArrayBuffer;
+      error?: string;
+    };
 
 export type CadParentToEmbed =
-  | { source: typeof CAD_HOST_SOURCE; type: "open"; name: string; buffer: ArrayBuffer }
+  | {
+      source: typeof CAD_HOST_SOURCE;
+      type: "open";
+      name: string;
+      buffer: ArrayBuffer;
+      mode?: CadOpenMode;
+    }
   | { source: typeof CAD_HOST_SOURCE; type: "command"; cmd: string }
+  | { source: typeof CAD_HOST_SOURCE; type: "export"; requestId: string }
+  | { source: typeof CAD_HOST_SOURCE; type: "cancel" }
   | { source: typeof CAD_HOST_SOURCE; type: "clear" };
 
 export function isCadEmbedMessage(data: unknown): data is CadEmbedToParent {
