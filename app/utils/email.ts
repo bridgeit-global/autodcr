@@ -36,6 +36,10 @@ function resolveRecipientKind(role: string): RecipientKind {
   return role.trim().toLowerCase() === "owner" ? "owner" : "consultant";
 }
 
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]+>/g, "");
+}
+
 function getApplicationEmailContent(params: {
   stage: ApplicationStage;
   permissionType: string;
@@ -143,6 +147,24 @@ function getApplicationEmailContent(params: {
     helperText: "Open the application below to view the signed document.",
     ctaText: "View Application",
     headerColor: "#059669",
+  };
+}
+
+export function getApplicationNotificationCopy(params: {
+  stage: ApplicationStage;
+  permissionType: string;
+  projectTitle: string;
+  recipientRole?: string;
+}): { title: string; body: string } {
+  const content = getApplicationEmailContent({
+    stage: params.stage,
+    permissionType: params.permissionType,
+    projectTitle: params.projectTitle,
+    recipientKind: resolveRecipientKind(params.recipientRole || ""),
+  });
+  return {
+    title: content.heading,
+    body: stripHtml(content.bodyText),
   };
 }
 
@@ -394,5 +416,86 @@ export async function sendUsernameRecoveryEmail(params: {
     const message = err instanceof Error ? err.message : "Unknown email error";
     console.error(`[email] Failed to send username recovery to ${to}:`, message);
     return { success: false, error: message };
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function getHelpDeskInboxAddress(): string {
+  return (
+    process.env.HELP_DESK_EMAIL?.trim() ||
+    process.env.EMAIL_FROM_ADDRESS?.trim() ||
+    process.env.SMTP_USER?.trim() ||
+    ""
+  );
+}
+
+export async function sendHelpDeskEmail(params: {
+  category: string;
+  subject: string;
+  message: string;
+  senderName: string;
+  senderEmail: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const to = getHelpDeskInboxAddress();
+  if (!to) {
+    return { success: false, error: "Help desk inbox is not configured." };
+  }
+
+  const { category, subject, message, senderName, senderEmail } = params;
+  const safeName = escapeHtml(senderName);
+  const safeEmail = escapeHtml(senderEmail);
+  const safeCategory = escapeHtml(category);
+  const safeSubject = escapeHtml(subject);
+  const safeMessage = escapeHtml(message).replace(/\n/g, "<br />");
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /></head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background:#0a1628;padding:24px;">
+              <h1 style="margin:0;color:#ffffff;font-size:18px;font-weight:600;">Help Desk message</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px;">
+              <p style="margin:0 0 12px;color:#374151;font-size:14px;line-height:1.6;"><strong>From:</strong> ${safeName} (${safeEmail})</p>
+              <p style="margin:0 0 12px;color:#374151;font-size:14px;line-height:1.6;"><strong>Category:</strong> ${safeCategory}</p>
+              <p style="margin:0 0 16px;color:#374151;font-size:14px;line-height:1.6;"><strong>Subject:</strong> ${safeSubject}</p>
+              <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">${safeMessage}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  try {
+    await transporter.sendMail({
+      from: formatFromHeader(),
+      to,
+      replyTo: senderEmail,
+      subject: `[Help Desk] [${category}] ${subject}`,
+      html,
+    });
+    return { success: true };
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : "Unknown email error";
+    console.error("[email] Failed to send help desk message:", errMessage);
+    return { success: false, error: errMessage };
   }
 }

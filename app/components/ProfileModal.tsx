@@ -1207,7 +1207,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
               {activeTab === "notifications" && (
               <ProfileSection
                 title="Email Notifications"
-                subtitle="Stay updated on application progress — toggle what you want in your inbox."
+                subtitle="These toggles only control email. The same application updates always appear in the header bell."
                 icon={<Mail className="h-4 w-4" />}
               >
                 {(() => {

@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { supabase } from "@/app/utils/supabase";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import ChangePasswordModal from "@/app/components/ChangePasswordModal";
 import ProfileModal from "@/app/components/ProfileModal";
 import DscSignerInstallModal from "@/app/components/DscSignerInstallModal";
 import { AppSidebarMobileTrigger } from "./AppSidebar";
+import NotificationBell from "./NotificationBell";
 
 type AppHeaderProps = {
   title: string;
@@ -112,14 +113,7 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
           </h1>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-              aria-label="Notifications"
-            >
-              <Bell className="h-5 w-5" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-status-danger" />
-            </button>
+            <NotificationBell />
 
             <div className="relative" ref={userMenuRef}>
               <button
@@ -173,6 +167,16 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
                     className="block w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50"
                   >
                     Install DSC Signer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      router.push("/userdashboard/help-desk");
+                    }}
+                    className="block w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Help Desk
                   </button>
                   <div className="my-1 border-t border-gray-100" />
                   <button
