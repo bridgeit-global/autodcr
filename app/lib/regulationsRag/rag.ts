@@ -70,7 +70,7 @@ export async function askQuestion(
       page: h.page ?? null,
       authority: h.authority,
       score: Number(h.score?.toFixed?.(4) ?? h.score ?? 0),
-      snippet: h.text.slice(0, 240).replace(/\s+/g, " ").trim(),
+      snippet: h.text.trim(),
     })),
   };
 }

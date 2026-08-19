@@ -232,7 +232,7 @@ ${proposalExcerpt}`,
       authority: h.authority,
       docType: h.docType,
       score: Number(h.score?.toFixed?.(4) ?? h.score ?? 0),
-      snippet: h.text.slice(0, 240).replace(/\s+/g, " ").trim(),
+      snippet: h.text.trim(),
     })),
     proposal: { filename, pages, chars: proposalText.length },
   };

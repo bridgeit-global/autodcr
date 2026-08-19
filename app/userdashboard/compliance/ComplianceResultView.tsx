@@ -57,11 +57,18 @@ function SourcesList({ sources }: { sources: RagSource[] }) {
               className="flex gap-2.5 rounded-xl bg-gray-50 px-3 py-2.5"
             >
               <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
-              <span className="wrap-break-word text-xs leading-relaxed text-gray-600">
-                {auth}
-                {s.source}
-                {page}
-              </span>
+              <div className="min-w-0">
+                <p className="wrap-break-word text-xs font-semibold text-brand-navy">
+                  {auth}
+                  {s.source}
+                  {page}
+                </p>
+                {s.snippet ? (
+                  <p className="mt-1.5 whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-gray-600">
+                    {s.snippet}
+                  </p>
+                ) : null}
+              </div>
             </li>
           );
         })}

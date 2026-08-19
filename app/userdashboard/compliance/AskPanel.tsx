@@ -26,41 +26,34 @@ const SUGGESTIONS = [
   "When is a fire NOC required?",
 ];
 
-function Sources({
-  sources,
-  inverted,
-}: {
-  sources: RagSource[];
-  inverted?: boolean;
-}) {
+function sourceLabel(s: RagSource) {
+  const page = s.page != null ? ` · p.${s.page}` : "";
+  const auth = s.authority ? `${s.authority} · ` : "";
+  return `${auth}${s.source}${page}`;
+}
+
+function Sources({ sources }: { sources: RagSource[] }) {
   if (!sources.length) return null;
   return (
-    <div className="mt-2.5 space-y-1 border-t border-current/10 pt-2">
-      <p
-        className={[
-          "text-[11px] font-semibold uppercase tracking-wide",
-          inverted ? "text-white/70" : "text-gray-400",
-        ].join(" ")}
-      >
+    <div className="mt-2 max-w-[92%] space-y-2 sm:max-w-[80%]">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
         Sources
       </p>
-      {sources.map((s, i) => {
-        const page = s.page != null ? ` · p.${s.page}` : "";
-        const auth = s.authority ? `${s.authority} · ` : "";
-        return (
-          <p
-            key={`${s.source}-${s.page}-${i}`}
-            className={[
-              "wrap-break-word text-xs leading-relaxed",
-              inverted ? "text-white/80" : "text-gray-500",
-            ].join(" ")}
-          >
-            {auth}
-            {s.source}
-            {page}
+      {sources.map((s, i) => (
+        <div
+          key={`${s.source}-${s.page}-${i}`}
+          className="rounded-xl border border-gray-100 bg-white px-3 py-2.5"
+        >
+          <p className="wrap-break-word text-xs font-semibold text-brand-navy">
+            {sourceLabel(s)}
           </p>
-        );
-      })}
+          {s.snippet ? (
+            <p className="mt-1.5 whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-gray-600">
+              {s.snippet}
+            </p>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -196,30 +189,29 @@ export default function AskPanel({
             </div>
           ) : (
             messages.map((m, i) => (
-              <article
-                key={i}
-                className={[
-                  "max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[80%]",
-                  m.role === "user"
-                    ? "ml-auto rounded-br-md bg-brand-blue text-white"
-                    : m.error
-                      ? "rounded-bl-md bg-red-50 text-red-800"
-                      : "rounded-bl-md bg-slate-50 text-gray-800",
-                ].join(" ")}
-              >
-                {m.role === "bot" &&
-                m.text === "Searching the regulation library…" ? (
-                  <p className="flex items-center gap-2 text-gray-500">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {m.text}
-                  </p>
-                ) : (
-                  <p className="whitespace-pre-wrap wrap-break-word">{m.text}</p>
-                )}
-                {m.sources?.length ? (
-                  <Sources sources={m.sources} inverted={m.role === "user"} />
-                ) : null}
-              </article>
+              <div key={i} className="flex flex-col gap-2">
+                <article
+                  className={[
+                    "max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[80%]",
+                    m.role === "user"
+                      ? "ml-auto rounded-br-md bg-brand-blue text-white"
+                      : m.error
+                        ? "rounded-bl-md bg-red-50 text-red-800"
+                        : "rounded-bl-md bg-slate-50 text-gray-800",
+                  ].join(" ")}
+                >
+                  {m.role === "bot" &&
+                  m.text === "Searching the regulation library…" ? (
+                    <p className="flex items-center gap-2 text-gray-500">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {m.text}
+                    </p>
+                  ) : (
+                    <p className="whitespace-pre-wrap wrap-break-word">{m.text}</p>
+                  )}
+                </article>
+                {m.sources?.length ? <Sources sources={m.sources} /> : null}
+              </div>
             ))
           )}
         </div>
