@@ -15,6 +15,9 @@ function resolvePageTitle(pathname: string, role: string): string {
   if (pathname.startsWith("/userdashboard/legacy")) {
     return "Projects";
   }
+  if (pathname.startsWith("/userdashboard/help-desk")) {
+    return "Help Desk";
+  }
   const match = APP_NAV_ITEMS.find(
     (item) => item.href !== "/userdashboard" && pathname.startsWith(item.href)
   );

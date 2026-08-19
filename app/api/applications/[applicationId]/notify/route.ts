@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import {
+  getApplicationNotificationCopy,
   sendApplicationStatusEmail,
   type ApplicationStage,
 } from "@/app/utils/email";
@@ -179,7 +180,7 @@ export async function POST(
       const type = String(applicant.applicantType || applicant.applicant_type || "").trim();
       const userId = String(applicant.user_id || applicant.userId || "").trim() || undefined;
 
-      if (!isValidEmail(email)) continue;
+      if (!userId && !isValidEmail(email)) continue;
 
       const isOwner = type.toLowerCase() === "owner";
       const isTargetConsultant =
@@ -197,8 +198,53 @@ export async function POST(
     }
 
     const results: { email: string; success: boolean; skipped?: boolean; error?: string }[] = [];
+    let inAppCreated = 0;
+    let inAppFailed = 0;
 
     for (const recipient of recipients) {
+      if (recipient.userId && adminClient) {
+        const copy = getApplicationNotificationCopy({
+          stage,
+          permissionType,
+          projectTitle,
+          recipientRole: recipient.role,
+        });
+        const { error: inboxErr } = await adminClient
+          .from("notifications")
+          .upsert(
+            {
+              user_id: recipient.userId,
+              application_id: applicationId,
+              project_id: projectId,
+              stage,
+              title: copy.title,
+              body: copy.body,
+              link_url: projectUrl,
+              read_at: null,
+              created_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,application_id,stage" }
+          );
+        if (inboxErr) {
+          inAppFailed += 1;
+          console.error(
+            `[notify-application] In-app insert failed for ${recipient.userId}:`,
+            inboxErr.message
+          );
+        } else {
+          inAppCreated += 1;
+        }
+      }
+
+      if (!isValidEmail(recipient.email)) {
+        results.push({
+          email: recipient.email || "(no email)",
+          success: true,
+          skipped: true,
+        });
+        continue;
+      }
+
       if (adminClient) {
         const metadata = await getRecipientMetadata(adminClient, recipient);
         if (metadata && !isMailNotificationEnabledForStage(metadata, stage, recipient.role)) {
@@ -225,10 +271,17 @@ export async function POST(
     const failed = results.filter((r) => !r.success).length;
 
     console.log(
-      `[notify-application] App ${applicationId} stage=${stage}: ${sent} sent, ${skipped} skipped, ${failed} failed out of ${results.length} emails`
+      `[notify-application] App ${applicationId} stage=${stage}: ${sent} sent, ${skipped} skipped, ${failed} failed out of ${results.length} emails; in-app ${inAppCreated} upserted, ${inAppFailed} failed`
     );
 
-    return NextResponse.json({ sent, skipped, failed, total: results.length });
+    return NextResponse.json({
+      sent,
+      skipped,
+      failed,
+      total: results.length,
+      inAppCreated,
+      inAppFailed,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal server error";
     console.error("[notify-application] Error:", message);

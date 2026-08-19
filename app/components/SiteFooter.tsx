@@ -9,7 +9,12 @@ const SiteFooter = () => {
 						<span>System Online</span>
 					</span>
 					<span className="text-gray-300">|</span>
-					<span>Need help? Contact Help Desk</span>
+					<a
+						href="/userdashboard/help-desk"
+						className="hover:text-brand-blue transition-colors"
+					>
+						Need help? Contact Help Desk
+					</a>
 				</div>
 			</div>
 		</footer>
