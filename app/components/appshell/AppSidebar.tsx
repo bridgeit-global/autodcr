@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, PanelLeftClose, PanelLeft, X } from "lucide-react";
 import { APP_NAV_ITEMS } from "./navItems";
+import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 
 type AppSidebarProps = {
   collapsed: boolean;
@@ -35,10 +36,17 @@ export default function AppSidebar({
   onCloseMobile,
 }: AppSidebarProps) {
   const pathname = usePathname() || "/userdashboard";
+  const { isConsultant } = useDashboardProjects();
+
+  const visibleNavItems = APP_NAV_ITEMS.filter((item) => {
+    if (!item.audience) return true;
+    if (isConsultant) return item.audience === "consultant";
+    return item.audience === "owner";
+  });
 
   const nav = (
     <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-3">
-      {APP_NAV_ITEMS.map((item) => {
+      {visibleNavItems.map((item) => {
         const active = isActivePath(pathname, item.href);
         const Icon = item.icon;
         return (

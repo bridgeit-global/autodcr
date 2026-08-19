@@ -1,4 +1,6 @@
 import {
+  Briefcase,
+  ClipboardCheck,
   LayoutDashboard,
   FolderKanban,
   FileStack,
@@ -7,6 +9,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+export type AppNavAudience = "owner" | "consultant";
+
 export type AppNavItem = {
   id: string;
   label: string;
@@ -14,6 +18,8 @@ export type AppNavItem = {
   icon: LucideIcon;
   /** When true, this route is live; otherwise it shows the placeholder page. */
   live?: boolean;
+  /** When set, item is shown only to that role. Omit for shared items. */
+  audience?: AppNavAudience;
 };
 
 export const APP_NAV_ITEMS: AppNavItem[] = [
@@ -23,6 +29,22 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     href: "/userdashboard",
     icon: LayoutDashboard,
     live: true,
+  },
+  {
+    id: "owner-workspace",
+    label: "Owner Workspace",
+    href: "/userdashboard/owner-workspace",
+    icon: ClipboardCheck,
+    live: true,
+    audience: "owner",
+  },
+  {
+    id: "consultant-workspace",
+    label: "Consultant Workspace",
+    href: "/userdashboard/consultant-workspace",
+    icon: Briefcase,
+    live: true,
+    audience: "consultant",
   },
   {
     id: "projects",
