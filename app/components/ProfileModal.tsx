@@ -3,10 +3,13 @@
 import React, { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm } from "react-hook-form";
+import { Camera, CheckCircle2, Clock, Eye, FilePenLine, ImageIcon, Loader2, Mail, MapPin, PenLine, User, X, XCircle } from "lucide-react";
+
+type ProfileTab = "profile" | "address" | "notifications";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { uploadFileIdempotent, cleanupOldFile } from "@/app/utils/fileUtils";
-import CustomSelect from "@/app/components/CustomSelect";
+import Button from "@/app/components/ui/Button";
 import {
   DEFAULT_MAIL_NOTIFICATION_PREFERENCES,
   getMailNotificationPreferences,
@@ -23,6 +26,147 @@ import {
 interface Props {
   open: boolean;
   onClose: () => void;
+}
+
+function ProfileSection({
+  title,
+  subtitle,
+  icon,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-start gap-3">
+        {icon ? (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-blue">
+            {icon}
+          </span>
+        ) : null}
+        <div>
+          <h3 className="text-base font-semibold text-brand-navy">{title}</h3>
+          {subtitle ? <p className="mt-0.5 text-sm text-gray-500">{subtitle}</p> : null}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ProfileInfoField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-surface px-3.5 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-gray-900">{value || "—"}</p>
+    </div>
+  );
+}
+
+const MAIL_PHASE_STYLE: Record<
+  MailNotificationPhase,
+  { icon: React.ReactNode; activeBg: string; iconBg: string; iconColor: string }
+> = {
+  draft: {
+    icon: <FilePenLine className="h-4 w-4" />,
+    activeBg: "bg-amber-50/90 border-amber-200 ring-1 ring-amber-100",
+    iconBg: "bg-amber-100",
+    iconColor: "text-amber-700",
+  },
+  in_process: {
+    icon: <Clock className="h-4 w-4" />,
+    activeBg: "bg-blue-50/90 border-brand-blue/30 ring-1 ring-blue-100",
+    iconBg: "bg-blue-100",
+    iconColor: "text-brand-blue",
+  },
+  approved: {
+    icon: <CheckCircle2 className="h-4 w-4" />,
+    activeBg: "bg-emerald-50/90 border-emerald-200 ring-1 ring-emerald-100",
+    iconBg: "bg-emerald-100",
+    iconColor: "text-emerald-700",
+  },
+  rejected: {
+    icon: <XCircle className="h-4 w-4" />,
+    activeBg: "bg-rose-50/90 border-rose-200 ring-1 ring-rose-100",
+    iconBg: "bg-rose-100",
+    iconColor: "text-rose-700",
+  },
+  signing: {
+    icon: <PenLine className="h-4 w-4" />,
+    activeBg: "bg-violet-50/90 border-violet-200 ring-1 ring-violet-100",
+    iconBg: "bg-violet-100",
+    iconColor: "text-violet-700",
+  },
+};
+
+function MailNotificationToggle({
+  phase,
+  title,
+  description,
+  enabled,
+  disabled,
+  onToggle,
+}: {
+  phase: MailNotificationPhase;
+  title: string;
+  description: string;
+  enabled: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  const style = MAIL_PHASE_STYLE[phase];
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      aria-label={`${enabled ? "Disable" : "Enable"} ${title} notifications`}
+      disabled={disabled}
+      onClick={onToggle}
+      className={[
+        "group flex h-full min-h-[132px] flex-col rounded-2xl border p-4 text-left shadow-sm transition-all",
+        enabled
+          ? style.activeBg
+          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-md",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-blue focus:ring-offset-2",
+      ].join(" ")}
+    >
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <span
+          className={[
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors",
+            enabled ? style.iconBg : "bg-gray-100 group-hover:bg-gray-200/70",
+            enabled ? style.iconColor : "text-gray-400",
+          ].join(" ")}
+        >
+          {style.icon}
+        </span>
+
+        <span
+          aria-hidden
+          className={[
+            "relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors",
+            enabled ? "bg-brand-blue" : "bg-gray-200 group-hover:bg-gray-300",
+          ].join(" ")}
+        >
+          <span
+            className={[
+              "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition",
+              enabled ? "translate-x-5" : "translate-x-0.5",
+              "mt-0.5",
+            ].join(" ")}
+          />
+        </span>
+      </div>
+
+      <p className="text-sm font-semibold text-brand-navy">{title}</p>
+      <p className="mt-1 line-clamp-3 flex-1 text-xs leading-relaxed text-gray-500">{description}</p>
+    </button>
+  );
 }
 
 type FormValues = {
@@ -108,6 +252,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [originalPhotoUrl, setOriginalPhotoUrl] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ProfileTab>("profile");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -337,7 +482,8 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       document.body.style.overflow = "hidden";
       setSubmitError(null);
       setSubmitSuccess(false);
-      
+      setActiveTab("profile");
+
       // Reset any unsaved changes when modal opens
       setLetterheadFile(null);
       setLetterheadPreviewUrl(null);
@@ -801,62 +947,129 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
 
   if (!open) return null;
 
+  const displayName =
+    watch("name") ||
+    (userMetadata?.first_name && userMetadata?.last_name
+      ? `${userMetadata.first_name} ${userMetadata.last_name}`.trim()
+      : "User Name");
+
+  const roleLabel = watch("console") || userMetadata?.role || "Role";
+  const registrationInfo = getRegistrationInfo();
+
+  const addressDisplay = (() => {
+    const line1 = String(userMetadata?.address_line1 || userMetadata?.addressLine1 || "").trim();
+    const line2 = String(userMetadata?.address_line2 || userMetadata?.addressLine2 || "").trim();
+    const line3 = String(userMetadata?.address_line3 || userMetadata?.addressLine3 || "").trim();
+    const city = watch("city") || String(userMetadata?.city || "").trim();
+    const pincode = watch("zip") || String(userMetadata?.pincode || "").trim();
+    if (line1 || line2 || line3) {
+      const resolved = resolveAddressLinesWithCityPincode(line1, line2, line3, city, pincode);
+      return [resolved.line1, resolved.line2, resolved.line3].filter(Boolean).join("\n");
+    }
+    const combined = watch("address") || userMetadata?.address || "";
+    const suffix = resolveAddressLinesWithCityPincode("", "", "", city, pincode).line3;
+    if (combined && suffix && !String(combined).includes(suffix)) {
+      return `${String(combined).replace(/[,.\s]+$/, "")}\n${suffix}`;
+    }
+    return combined || suffix || "—";
+  })();
+
   return (
     <>
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[9999] flex justify-center items-center bg-black/50 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           onClick={handleCloseAttempt}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          {/* Modal Container */}
           <motion.div
-            className="bg-white w-full max-w-2xl rounded-xl shadow-2xl p-6 relative max-h-[90vh] overflow-y-auto"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
-            initial={{ y: -40, opacity: 0, scale: 0.95 }}
+            initial={{ y: -24, opacity: 0, scale: 0.97 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: -40, opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.25 }}
+            exit={{ y: -24, opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.2 }}
           >
-            {/* Body */}
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-              {/* Success Message */}
+            {/* Header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4 md:px-6">
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight text-brand-navy md:text-xl">
+                  My Profile
+                </h2>
+                <p className="mt-0.5 text-sm text-gray-500">View and update your account details</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseAttempt}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close profile"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Tab bar */}
+            <div className="flex shrink-0 gap-1 border-b border-gray-100 px-5 md:px-6">
+              {(
+                [
+                  { id: "profile" as ProfileTab, label: "Profile", icon: <User className="h-3.5 w-3.5" /> },
+                  { id: "address" as ProfileTab, label: "Address", icon: <MapPin className="h-3.5 w-3.5" /> },
+                  { id: "notifications" as ProfileTab, label: "Notifications", icon: <Mail className="h-3.5 w-3.5" /> },
+                ]
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={[
+                    "flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-semibold transition-colors",
+                    activeTab === tab.id
+                      ? "border-brand-blue text-brand-blue"
+                      : "border-transparent text-gray-500 hover:text-gray-700",
+                  ].join(" ")}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <form
+              onSubmit={handleSubmit(onSubmit)}
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 md:px-6"
+            >
               {submitSuccess && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-800 text-sm">
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
                   Profile updated successfully!
                 </div>
               )}
-
-              {/* Error Message */}
               {submitError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-800 text-sm">
+                <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
                   {submitError}
                 </div>
               )}
 
-              {/* Profile Header Section */}
-              <div className="flex items-start justify-between mb-6">
-                <div className="flex items-start gap-6 flex-1">
-                  {/* Profile Photo with Camera Icon */}
-                  <div className="relative">
-                    <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+              {/* ── TAB: Profile ── */}
+              {activeTab === "profile" && (
+              <div className="space-y-4">
+              {/* Profile hero */}
+              <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-surface to-white p-5 shadow-sm">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                  <div className="relative shrink-0 self-center sm:self-start">
+                    <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gray-100 shadow-md ring-2 ring-brand-blue/20">
                       {profilePhoto ? (
-                        <img src={profilePhoto} alt="Profile" className="w-full h-full object-cover" />
+                        <img src={profilePhoto} alt="Profile" className="h-full w-full object-cover" />
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-4xl font-bold">
+                        <div className="flex h-full w-full items-center justify-center bg-brand-navy text-2xl font-bold text-white">
                           {userMetadata?.first_name?.[0] || userMetadata?.last_name?.[0] || "U"}
                         </div>
                       )}
                     </div>
-                    {/* Camera Icon Overlay */}
-                    <label className="absolute bottom-0 right-0 w-10 h-10 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-full flex items-center justify-center cursor-pointer shadow-lg border-4 border-white">
-                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
+                    <label className="absolute bottom-0 right-0 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-2 border-white bg-brand-blue text-white shadow-md transition-colors hover:bg-brand-blue-hover">
+                      <Camera className="h-4 w-4" />
                       <input
                         ref={photoInputRef}
                         type="file"
@@ -868,356 +1081,209 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
                     </label>
                   </div>
 
-                  {/* User Details */}
-                  <div className="flex-1">
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                      {watch("name") || (userMetadata && userMetadata.first_name && userMetadata.last_name 
-                        ? `${userMetadata.first_name} ${userMetadata.last_name}`.trim()
-                        : "User Name")}
-                    </h2>
-                    <div className="flex items-center gap-2 text-sm text-emerald-600 mb-3">
-                      <span>{watch("console") || userMetadata?.role || "Role"}</span>
-                      <span>|</span>
-                      <span>{userId || "User ID"}</span>
+                  <div className="min-w-0 flex-1 text-center sm:text-left">
+                    <h3 className="text-xl font-bold text-brand-navy">{displayName}</h3>
+                    <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                      <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-brand-blue ring-1 ring-inset ring-blue-200">
+                        {roleLabel}
+                      </span>
+                      {userId ? (
+                        <span className="text-xs text-gray-400">ID: {userId.slice(0, 8)}…</span>
+                      ) : null}
                     </div>
-                    
-                    {/* Letterhead Preview and Upload */}
-                    <div className="flex items-center gap-3 mt-3">
-                      {/* Letterhead Thumbnail */}
-                      <div 
-                        className={`w-20 h-20 rounded-lg bg-gray-200 flex items-center justify-center overflow-hidden transition ${
-                          (letterheadPreviewUrl || letterheadUrl) 
-                            ? 'cursor-pointer hover:bg-gray-300 border-2 border-emerald-500' 
-                            : 'cursor-default border-2 border-gray-300'
-                        }`}
-                        onClick={handleLetterheadThumbnailClick}
-                        title={(letterheadPreviewUrl || letterheadUrl) ? "Click to view letterhead" : "No letterhead uploaded"}
-                      >
-                        {(letterheadPreviewUrl || letterheadUrl) ? (
-                          letterheadThumbnail ? (
-                            <img 
-                              src={letterheadThumbnail} 
-                              alt="Letterhead Preview" 
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
-                              <svg className="w-8 h-8 text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                              </svg>
-                              <span className="text-xs text-gray-500 font-medium">Image</span>
-                            </div>
-                          )
+                    <p className="mt-2 text-sm text-gray-500">
+                      {watch("email") || userMetadata?.email || "—"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Letterhead */}
+                <div className="mt-5 flex flex-col gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={[
+                        "flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-gray-50",
+                        letterheadPreviewUrl || letterheadUrl
+                          ? "cursor-pointer border-brand-blue hover:bg-blue-50"
+                          : "border-gray-200",
+                      ].join(" ")}
+                      onClick={handleLetterheadThumbnailClick}
+                      title={
+                        letterheadPreviewUrl || letterheadUrl
+                          ? "Click to preview letterhead"
+                          : "No letterhead uploaded"
+                      }
+                    >
+                      {letterheadPreviewUrl || letterheadUrl ? (
+                        letterheadThumbnail ? (
+                          <img
+                            src={letterheadThumbnail}
+                            alt="Letterhead"
+                            className="h-full w-full object-cover"
+                          />
                         ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                            <svg className="w-8 h-8 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span className="text-xs">Image</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Upload Button */}
-                      <div>
+                          <ImageIcon className="h-6 w-6 text-gray-400" />
+                        )
+                      ) : (
+                        <ImageIcon className="h-6 w-6 text-gray-300" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-brand-navy">Letterhead</p>
+                      <p className="text-xs text-gray-500">A4 JPG or PNG for documents</p>
+                      {(letterheadPreviewUrl || letterheadUrl) && (
                         <button
                           type="button"
-                          onClick={handleUploadPDFClick}
-                          disabled={isSubmitting}
-                          className="px-4 py-2 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-md text-sm font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={handleLetterheadThumbnailClick}
+                          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand-blue hover:text-brand-blue-hover"
                         >
-                          Update Letterhead
+                          <Eye className="h-3 w-3" />
+                          Click thumbnail to preview
                         </button>
-                        <input
-                          ref={letterheadInputRef}
-                          type="file"
-                          accept="image/jpeg,image/jpg,image/png,.jpg,.jpeg,.png"
-                          onChange={handleLetterheadChange}
-                          className="hidden"
-                          disabled={isSubmitting}
-                        />
-                      </div>
+                      )}
                     </div>
                   </div>
-                </div>
-
-                {/* Close Button */}
-                <button
-                  onClick={handleCloseAttempt}
-                  className="text-2xl font-bold text-gray-700 hover:text-black ml-4"
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Personal Information Section */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Personal Information</h3>
-                
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">First name</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {userMetadata?.first_name || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">Last name</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {userMetadata?.last_name || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">Phone</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("mobile") || userMetadata?.alternate_phone || userMetadata?.mobile || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">Title</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("console") || userMetadata?.role || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">PAN No.</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("panNo") || userMetadata?.pan || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">{getRegistrationInfo().label}</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("nmaRegNumber") || getRegistrationInfo().value || "-"}
-                    </div>
-                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleUploadPDFClick}
+                    disabled={isSubmitting}
+                  >
+                    Update Letterhead
+                  </Button>
+                  <input
+                    ref={letterheadInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,.jpg,.jpeg,.png"
+                    onChange={handleLetterheadChange}
+                    className="hidden"
+                    disabled={isSubmitting}
+                  />
                 </div>
               </div>
 
-              {/* Address Section */}
-              <div className="space-y-4 pt-4 border-t border-gray-200">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Address</h3>
-                
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">Country</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      India
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">City/State</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("city") || userMetadata?.city || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">Zip Code</label>
-                    <div className="text-base font-semibold text-gray-900">
-                      {watch("zip") || userMetadata?.pincode || "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-500 mb-1">Address</label>
-                    <div className="text-base font-semibold text-gray-900 whitespace-pre-line">
-                      {(() => {
-                        const line1 = String(
-                          userMetadata?.address_line1 || userMetadata?.addressLine1 || ""
-                        ).trim();
-                        const line2 = String(
-                          userMetadata?.address_line2 || userMetadata?.addressLine2 || ""
-                        ).trim();
-                        const line3 = String(
-                          userMetadata?.address_line3 || userMetadata?.addressLine3 || ""
-                        ).trim();
-                        const city =
-                          watch("city") ||
-                          String(userMetadata?.city || "").trim();
-                        const pincode =
-                          watch("zip") ||
-                          String(userMetadata?.pincode || "").trim();
-                        if (line1 || line2 || line3) {
-                          const resolved = resolveAddressLinesWithCityPincode(
-                            line1,
-                            line2,
-                            line3,
-                            city,
-                            pincode
-                          );
-                          return [resolved.line1, resolved.line2, resolved.line3]
-                            .filter(Boolean)
-                            .join("\n");
-                        }
-                        const combined =
-                          watch("address") || userMetadata?.address || "";
-                        const suffix = resolveAddressLinesWithCityPincode(
-                          "",
-                          "",
-                          "",
-                          city,
-                          pincode
-                        ).line3;
-                        if (combined && suffix && !String(combined).includes(suffix)) {
-                          return `${String(combined).replace(/[,.\s]+$/, "")}\n${suffix}`;
-                        }
-                        return combined || suffix || "-";
-                      })()}
-                    </div>
-                  </div>
+              <ProfileSection title="Personal Information" icon={<User className="h-4 w-4" />}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ProfileInfoField label="First name" value={userMetadata?.first_name} />
+                  <ProfileInfoField label="Last name" value={userMetadata?.last_name} />
+                  <ProfileInfoField
+                    label="Phone"
+                    value={watch("mobile") || userMetadata?.alternate_phone || userMetadata?.mobile}
+                  />
+                  <ProfileInfoField label="Title" value={roleLabel} />
+                  <ProfileInfoField label="PAN No." value={watch("panNo") || userMetadata?.pan} />
+                  <ProfileInfoField
+                    label={registrationInfo.label.replace(/:$/, "")}
+                    value={watch("nmaRegNumber") || registrationInfo.value}
+                  />
                 </div>
+              </ProfileSection>
               </div>
-
-              {/* Email Notification Preferences */}
-              <div className="space-y-4 pt-4 border-t border-gray-200">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">Email Notifications</h3>
-                <p className="text-sm text-gray-500 mb-4">
-                  Choose which application phase emails you want to receive. All are enabled by default.
-                </p>
-                <div className="space-y-3">
-                  {getVisibleMailNotificationPhases(userMetadata?.role).map((phase) => {
-                    const { title, description } = MAIL_NOTIFICATION_LABELS[phase];
-                    const enabled = mailNotificationPrefs[phase];
-                    return (
-                      <label
-                        key={phase}
-                        className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={enabled}
-                          onChange={() => toggleMailNotification(phase)}
-                          disabled={isSubmitting}
-                          className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        <div>
-                          <div className="text-sm font-semibold text-gray-900">{title}</div>
-                          <div className="text-xs text-gray-500">{description}</div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Owner: Appointment letter HTML templates */}
-              {false && userMetadata?.role === "Owner" && (
-                <div className="space-y-3 pt-2">
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Appointment Letter Templates (HTML)
-                  </h3>
-                  <div className="text-xs text-gray-600">
-                    Upload one HTML per appointment type. We’ll reuse these templates across your projects.
-                  </div>
-
-                  {templateUploadSuccess && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-2 text-green-800 text-xs">
-                      {templateUploadSuccess}
-                    </div>
-                  )}
-                  {templateUploadError && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-red-800 text-xs">
-                      {templateUploadError}
-                    </div>
-                  )}
-
-                  <div className="rounded-lg border border-gray-200 bg-white p-3">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                          Template type
-                        </label>
-                        <CustomSelect
-                          value={selectedAppointmentTemplateType}
-                          onChange={(v) =>
-                            setSelectedAppointmentTemplateType(v as AppointmentTemplateType)
-                          }
-                          disabled={isSubmitting}
-                          options={APPOINTMENT_TEMPLATE_TYPES.map((t) => ({
-                            value: t,
-                              label: appointmentTemplateTypeLabel(t),
-                          }))}
-                          placeholder="Select template type"
-                        />
-                        <div className="text-xs text-gray-500 mt-1 truncate">
-                          {ownerHtmlTemplates[selectedAppointmentTemplateType]
-                            ? `Saved: ${ownerHtmlTemplates[selectedAppointmentTemplateType]}`
-                            : "Not uploaded yet"}
-                        </div>
-                      </div>
-
-                      <div className="md:col-span-1 flex md:justify-end">
-                        {(() => {
-                          const busy = Boolean(templateUploadBusy[selectedAppointmentTemplateType]);
-                          const savedPath = ownerHtmlTemplates[selectedAppointmentTemplateType] || "";
-                          return (
-                            <label className="w-full md:w-auto">
-                              <input
-                                type="file"
-                                accept=".html,text/html"
-                                className="hidden"
-                                disabled={isSubmitting || busy}
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (!file) return;
-                                  void uploadOwnerAppointmentTemplate(selectedAppointmentTemplateType, file);
-                                  e.currentTarget.value = "";
-                                }}
-                              />
-                              <span
-                                className={
-                                  "inline-flex w-full md:w-auto items-center justify-center h-10 px-4 rounded-lg text-sm font-semibold transition cursor-pointer " +
-                                  (isSubmitting || busy
-                                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                    : "bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all")
-                                }
-                              >
-                                {savedPath
-                                  ? busy
-                                    ? "Uploading..."
-                                    : "Replace HTML"
-                                  : busy
-                                    ? "Uploading..."
-                                    : "Upload HTML"}
-                              </span>
-                            </label>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                </div>
               )}
 
-              {/* Action Buttons */}
+              {/* ── TAB: Address ── */}
+              {activeTab === "address" && (
+              <ProfileSection title="Address" icon={<MapPin className="h-4 w-4" />}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ProfileInfoField label="Country" value="India" />
+                  <ProfileInfoField
+                    label="City / State"
+                    value={watch("city") || userMetadata?.city}
+                  />
+                  <ProfileInfoField
+                    label="Zip Code"
+                    value={watch("zip") || userMetadata?.pincode}
+                  />
+                  <ProfileInfoField
+                    label="Full Address"
+                    value={<span className="whitespace-pre-line">{addressDisplay}</span>}
+                  />
+                </div>
+              </ProfileSection>
+              )}
+
+              {/* ── TAB: Notifications ── */}
+              {activeTab === "notifications" && (
+              <ProfileSection
+                title="Email Notifications"
+                subtitle="Stay updated on application progress — toggle what you want in your inbox."
+                icon={<Mail className="h-4 w-4" />}
+              >
+                {(() => {
+                  const phases = getVisibleMailNotificationPhases(userMetadata?.role);
+                  const enabledCount = phases.filter((p) => mailNotificationPrefs[p]).length;
+                  const allEnabled = enabledCount === phases.length;
+
+                  return (
+                    <>
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-blue/20 bg-gradient-to-r from-blue-50/80 to-white px-4 py-3.5 shadow-sm">
+                        <div>
+                          <p className="text-sm font-semibold text-brand-navy">
+                            {enabledCount} of {phases.length} notifications on
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {allEnabled
+                              ? "You’ll receive emails for all application updates"
+                              : "Some updates won’t be emailed to you"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => {
+                            const next = !allEnabled;
+                            setMailNotificationPrefs((prev) => {
+                              const updated = { ...prev };
+                              for (const phase of phases) updated[phase] = next;
+                              return updated;
+                            });
+                          }}
+                          className="text-xs font-semibold text-brand-blue hover:text-brand-blue-hover disabled:opacity-50"
+                        >
+                          {allEnabled ? "Turn all off" : "Turn all on"}
+                        </button>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {phases.map((phase) => {
+                          const { title, description } = MAIL_NOTIFICATION_LABELS[phase];
+                          return (
+                            <MailNotificationToggle
+                              key={phase}
+                              phase={phase}
+                              title={title}
+                              description={description}
+                              enabled={mailNotificationPrefs[phase]}
+                              disabled={isSubmitting}
+                              onToggle={() => toggleMailNotification(phase)}
+                            />
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
+              </ProfileSection>
+              )}
+
               {hasUnsavedChanges && (
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all rounded-md text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    disabled={isSubmitting || submitSuccess}
-                  >
+                <div className="sticky bottom-0 mt-4 flex justify-end gap-3 border-t border-gray-100 bg-white pt-4">
+                  <Button type="button" variant="ghost" onClick={handleCloseAttempt} disabled={isSubmitting}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isSubmitting || submitSuccess}>
                     {isSubmitting ? (
                       <>
-                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Saving...
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving…
                       </>
                     ) : submitSuccess ? (
                       "Saved!"
                     ) : (
                       "Save Changes"
                     )}
-                  </button>
+                  </Button>
                 </div>
               )}
             </form>
@@ -1246,7 +1312,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
         
         return (
           <motion.div
-            className="fixed inset-0 z-[10000] flex justify-center items-start bg-black/50 backdrop-blur-sm p-4 pt-10"
+            className="fixed inset-0 z-[10000] flex items-start justify-center bg-black/50 p-4 pt-10 backdrop-blur-sm"
             onClick={handleCloseLetterheadModal}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1254,53 +1320,48 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
           >
             <motion.div
               id="letterhead-modal"
-              className="bg-white w-full max-w-5xl rounded-xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden"
+              className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
               onClick={(e) => e.stopPropagation()}
-              initial={{ y: -40, opacity: 0, scale: 0.95 }}
+              initial={{ y: -24, opacity: 0, scale: 0.97 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: -40, opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.25 }}
+              exit={{ y: -24, opacity: 0, scale: 0.97 }}
+              transition={{ duration: 0.2 }}
             >
-              <div className="flex justify-between items-center p-6 border-b">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
                 <div>
-                  <h2 className="text-2xl font-bold text-black">Letterhead Preview - Assigned Placement Demo</h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    This content area should be blank.
+                  <h2 className="text-lg font-semibold text-brand-navy">Letterhead Preview</h2>
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Content area should remain blank for document placement
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={handleCloseLetterheadModal}
-                  className="text-2xl font-bold text-gray-700 hover:text-black transition-colors"
-                  aria-label="Close modal"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                  aria-label="Close preview"
                 >
-                  ×
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="flex-1 overflow-auto p-6 space-y-4">
+              <div className="flex-1 overflow-auto p-5">
                 <div
-                  className="border rounded-lg bg-white flex items-center justify-center"
-                  style={{ minHeight: "600px" }}
+                  className="relative mx-auto w-full max-w-md overflow-hidden rounded-xl border-2 border-gray-200 bg-white shadow-sm"
+                  style={{ aspectRatio: "210 / 297" }}
                 >
+                  <img
+                    src={previewUrl}
+                    alt="Letterhead"
+                    className="absolute inset-0 h-full w-full object-contain"
+                    onError={(e) => {
+                      console.error("Error loading letterhead image:", previewUrl);
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
                   <div
-                    className="relative w-full max-w-3xl mx-auto rounded-lg border-2 border-gray-300 bg-white shadow-sm overflow-hidden"
-                    style={{ aspectRatio: "210 / 297" }}
-                  >
-                    <img
-                      src={previewUrl}
-                      alt="Letterhead"
-                      className="absolute inset-0 w-full h-full object-contain"
-                      onError={(e) => {
-                        console.error('Error loading letterhead image:', previewUrl);
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                    {/* Blue content area overlay (simulating where content will appear) */}
-                    <div
-                      className="absolute rounded-xl border-2 border-blue-400 bg-blue-50/40"
-                      style={{ top: "14%", bottom: "14%", left: "8%", right: "8%" }}
-                    />
-                  </div>
+                    className="absolute rounded-lg border-2 border-dashed border-brand-blue/40 bg-blue-50/30"
+                    style={{ top: "14%", bottom: "14%", left: "8%", right: "8%" }}
+                  />
                 </div>
               </div>
             </motion.div>
@@ -1313,47 +1374,37 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
     <AnimatePresence>
       {showCloseConfirmation && (
         <motion.div
-          className="fixed inset-0 z-[10000] flex justify-center items-center bg-black/50 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           onClick={handleCancelClose}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-white w-full max-w-md rounded-xl shadow-2xl p-6 relative"
+            className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
-            initial={{ y: -40, opacity: 0, scale: 0.95 }}
+            initial={{ y: -16, opacity: 0, scale: 0.97 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: -40, opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.25 }}
+            exit={{ y: -16, opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.2 }}
           >
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-black">Unsaved Changes</h3>
-              <button
-                onClick={handleCancelClose}
-                className="text-2xl font-bold text-gray-700 hover:text-black"
-              >
-                ×
-              </button>
+            <div className="border-b border-gray-100 px-5 py-4">
+              <h3 className="text-lg font-semibold text-brand-navy">Unsaved changes</h3>
             </div>
-            
-            <p className="text-gray-700 mb-6">
-              You have unsaved changes. Are you sure you want to close without saving?
-            </p>
-            
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={handleCancelClose}
-                className="px-6 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition"
-              >
-                No
-              </button>
-              <button
-                onClick={handleConfirmClose}
-                className="px-6 py-2 bg-red-600 text-white rounded-lg font-medium shadow hover:bg-red-700 transition"
-              >
-                Yes, Close
-              </button>
+
+            <div className="px-5 py-4">
+              <p className="text-sm text-gray-600">
+                You have unsaved changes. Close without saving?
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-gray-100 px-5 py-4">
+              <Button type="button" variant="ghost" onClick={handleCancelClose}>
+                Keep editing
+              </Button>
+              <Button type="button" variant="danger" onClick={handleConfirmClose}>
+                Close anyway
+              </Button>
             </div>
           </motion.div>
         </motion.div>
