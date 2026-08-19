@@ -8,9 +8,9 @@ export default function CompliancePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
-          Loading…
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4">
+          <Loader2 className="h-5 w-5 animate-spin text-brand-blue" />
+          <p className="text-sm text-gray-500">Loading compliance…</p>
         </div>
       }
     >
