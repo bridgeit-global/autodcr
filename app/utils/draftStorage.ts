@@ -9,14 +9,13 @@ export function loadDraft<T>(key: string, fallback: T): T {
   }
 }
 
-// Simple flags to track whether a page has been explicitly saved
-export function markPageSaved(key: string) {
-  saveDraft(key, { savedAt: Date.now() });
-}
-
-export function isPageSaved(key: string): boolean {
-  const data = loadDraft<{ savedAt?: number } | null>(key, null);
-  return !!(data && typeof data.savedAt === "number");
+export function saveDraft<T>(key: string, value: T) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore quota / serialization errors for now
+  }
 }
 
 export function clearPageSaved(key: string) {
@@ -28,14 +27,13 @@ export function clearPageSaved(key: string) {
   }
 }
 
+export function markPageSaved(key: string) {
+  saveDraft(key, { savedAt: Date.now() });
+}
 
-export function saveDraft<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore quota / serialization errors for now
-  }
+export function isPageSaved(key: string): boolean {
+  const data = loadDraft<{ savedAt?: number } | null>(key, null);
+  return !!(data && typeof data.savedAt === "number");
 }
 
 // Clear all project-related drafts and "saved" flags.
@@ -101,6 +99,3 @@ export function clearProjectDrafts() {
     // ignore errors
   }
 }
-
-
-

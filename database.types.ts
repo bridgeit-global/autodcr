@@ -193,6 +193,45 @@ export type Database = {
         }
         Relationships: []
       }
+      notifications: {
+        Row: {
+          application_id: string
+          body: string
+          created_at: string
+          id: string
+          link_url: string
+          project_id: string | null
+          read_at: string | null
+          stage: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          application_id: string
+          body?: string
+          created_at?: string
+          id?: string
+          link_url?: string
+          project_id?: string | null
+          read_at?: string | null
+          stage: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          application_id?: string
+          body?: string
+          created_at?: string
+          id?: string
+          link_url?: string
+          project_id?: string | null
+          read_at?: string | null
+          stage?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       sms_logs: {
         Row: {
           created_at: string | null
