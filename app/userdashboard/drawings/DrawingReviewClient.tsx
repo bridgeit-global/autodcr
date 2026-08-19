@@ -6,16 +6,30 @@ import {
   ArrowUpRight,
   Check,
   CheckCircle2,
+  Circle,
+  Copy,
+  Eraser,
   GitCompare,
   History,
   Layers,
   Loader2,
   MessageSquare,
+  Minus,
   MinusCircle,
+  MousePointer2,
+  Move,
   Pencil,
+  PenLine,
+  Redo2,
   RotateCcw,
+  Save,
   Share2,
   Sparkles,
+  Spline,
+  Square,
+  Trash2,
+  Type,
+  Undo2,
   Upload,
 } from "lucide-react";
 import CustomSelect from "@/app/components/CustomSelect";
@@ -26,7 +40,7 @@ import {
   filterNonDraftProjects,
   getProjectLabel,
 } from "@/app/userdashboard/ownerWorkspaceConsultants";
-import CadViewerHost from "@/app/userdashboard/drawings/CadViewerHost";
+import CadViewerHost, { type CadViewerHandle } from "@/app/userdashboard/drawings/CadViewerHost";
 import {
   addDrawingRemark,
   downloadDrawingBuffer,
@@ -47,7 +61,33 @@ import {
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
 import { supabase } from "@/app/utils/supabase";
 
-type ViewerMode = Exclude<DrawingReviewMode, "redline"> | "view";
+type ViewerMode = "view" | "overlay" | "compare";
+
+type CadEditTool = {
+  id: string;
+  label: string;
+  cmd: string;
+  icon: ReactNode;
+  sticky?: boolean;
+};
+
+const CAD_DRAW_TOOLS: CadEditTool[] = [
+  { id: "select", label: "Select", cmd: "select", icon: <MousePointer2 className="h-3.5 w-3.5" />, sticky: true },
+  { id: "line", label: "Line", cmd: "line", icon: <Minus className="h-3.5 w-3.5" />, sticky: true },
+  { id: "pline", label: "Polyline", cmd: "pline", icon: <Spline className="h-3.5 w-3.5" />, sticky: true },
+  { id: "rectang", label: "Rectangle", cmd: "rectang", icon: <Square className="h-3.5 w-3.5" />, sticky: true },
+  { id: "circle", label: "Circle", cmd: "circle", icon: <Circle className="h-3.5 w-3.5" />, sticky: true },
+  { id: "arc", label: "Arc", cmd: "arc", icon: <PenLine className="h-3.5 w-3.5" />, sticky: true },
+  { id: "mtext", label: "Text", cmd: "mtext", icon: <Type className="h-3.5 w-3.5" />, sticky: true },
+];
+
+const CAD_MODIFY_TOOLS: CadEditTool[] = [
+  { id: "move", label: "Move", cmd: "move", icon: <Move className="h-3.5 w-3.5" />, sticky: true },
+  { id: "copy", label: "Copy", cmd: "copy", icon: <Copy className="h-3.5 w-3.5" />, sticky: true },
+  { id: "erase", label: "Erase", cmd: "erase", icon: <Trash2 className="h-3.5 w-3.5" />, sticky: true },
+  { id: "undo", label: "Undo", cmd: "undo", icon: <Undo2 className="h-3.5 w-3.5" /> },
+  { id: "redo", label: "Redo", cmd: "redo", icon: <Redo2 className="h-3.5 w-3.5" /> },
+];
 
 function isCadFile(file: File): boolean {
   const name = file.name.toLowerCase();
@@ -95,12 +135,16 @@ export default function DrawingReviewClient() {
   const [loadingReview, setLoadingReview] = useState(false);
   const [loadingBuffer, setLoadingBuffer] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [savingEdits, setSavingEdits] = useState(false);
+  const [editDirty, setEditDirty] = useState(false);
+  const [activeCadTool, setActiveCadTool] = useState<string>("select");
   const [bufferTick, setBufferTick] = useState(0);
 
   const buffersRef = useRef<Map<string, ArrayBuffer>>(new Map());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const versionsRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<CadViewerHandle | null>(null);
 
   const selectedProject = nonDraftProjects.find((p) => p.id === selectedProjectId) ?? null;
   const projectValue = selectedProject?.id ?? "";
@@ -130,11 +174,68 @@ export default function DrawingReviewClient() {
   void bufferTick;
   const primaryBuffer = activeVersion ? buffersRef.current.get(activeVersion.id) ?? null : null;
   const secondaryBuffer = compareVersion ? buffersRef.current.get(compareVersion.id) ?? null : null;
-  const viewerMode: ViewerMode = mode === "redline" ? "view" : mode === "overlay" || mode === "compare" ? mode : "view";
+  const viewerMode: ViewerMode =
+    mode === "overlay" || mode === "compare" ? mode : "view";
+  const editing = mode === "edit";
 
   const showToast = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(null), 2400);
+  };
+
+  const editedFileName = (fileName: string) => fileName.replace(/\.(dwg|dxf)$/i, "") + ".dxf";
+
+  const captureEditedBuffer = async (applyLocally = true): Promise<ArrayBuffer | null> => {
+    if (!editing || !activeVersion) return null;
+    try {
+      const buffer = await viewerRef.current?.exportDxf();
+      if (!buffer) return null;
+      if (applyLocally) {
+        buffersRef.current.set(activeVersion.id, buffer);
+        setBufferTick((tick) => tick + 1);
+      }
+      return buffer;
+    } catch (error) {
+      console.error("Failed to export drawing", error);
+      showToast("Failed to export drawing");
+      return null;
+    }
+  };
+
+  const changeMode = async (next: DrawingReviewMode) => {
+    if (next === mode) {
+      if (next !== "view") {
+        if (editing) {
+          await captureEditedBuffer();
+          setEditDirty(false);
+          setActiveCadTool("select");
+        }
+        setMode("view");
+      }
+      return;
+    }
+    if (editing && next !== "edit") {
+      await captureEditedBuffer();
+      setEditDirty(false);
+      setActiveCadTool("select");
+    }
+    if (next === "edit") {
+      if (!activeVersion) {
+        showToast("Open a drawing first");
+        return;
+      }
+      setActiveCadTool("select");
+    }
+    setMode(next);
+  };
+
+  const runCadCommand = (tool: CadEditTool) => {
+    if (!editing) return;
+    viewerRef.current?.sendCommand(tool.cmd);
+    setActiveCadTool(tool.sticky ? tool.id : activeCadTool);
+    if (tool.cmd !== "select" && tool.cmd !== "undo" && tool.cmd !== "redo") {
+      setEditDirty(true);
+    }
   };
 
   useEffect(() => {
@@ -158,6 +259,9 @@ export default function DrawingReviewClient() {
       setActiveVersionId(null);
       setCompareVersionId(null);
       buffersRef.current.clear();
+      setEditDirty(false);
+      setActiveCadTool("select");
+      setMode((prev) => (prev === "edit" ? "view" : prev));
       return;
     }
 
@@ -166,6 +270,9 @@ export default function DrawingReviewClient() {
       setLoadingReview(true);
       buffersRef.current.clear();
       setBufferTick((tick) => tick + 1);
+      setEditDirty(false);
+      setActiveCadTool("select");
+      setMode((prev) => (prev === "edit" ? "view" : prev));
       try {
         const snapshot = await listDrawingReview(projectValue);
         if (cancelled) return;
@@ -290,6 +397,51 @@ export default function DrawingReviewClient() {
       showToast("Failed to upload drawing");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const saveEditedVersion = async () => {
+    if (!editing || !activeVersion) {
+      showToast("Open a drawing first");
+      return;
+    }
+    if (!projectValue) {
+      showToast("Select a project first");
+      return;
+    }
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      showToast("Sign in to save a drawing");
+      return;
+    }
+
+    setSavingEdits(true);
+    try {
+      const buffer = await captureEditedBuffer(false);
+      if (!buffer) return;
+      const fileName = editedFileName(activeVersion.fileName);
+      const file = new File([new Uint8Array(buffer)], fileName, { type: "application/octet-stream" });
+      const version = await uploadDrawingVersion({ projectId: projectValue, file, userId });
+      buffersRef.current.set(version.id, buffer);
+      setBufferTick((tick) => tick + 1);
+      setVersions((prev) => {
+        const rest = prev.map((item) =>
+          item.status === "current" ? { ...item, status: "previous" as const } : item
+        );
+        return [version, ...rest];
+      });
+      setCompareVersionId(activeVersion.id);
+      setActiveVersionId(version.id);
+      setRedlines([]);
+      setKeyChanges([]);
+      setEditDirty(false);
+      showToast(`Saved ${fileName} as a new version`);
+    } catch (error) {
+      console.error("Failed to save edited drawing", error);
+      showToast("Failed to save drawing");
+    } finally {
+      setSavingEdits(false);
     }
   };
 
@@ -547,7 +699,9 @@ export default function DrawingReviewClient() {
               <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
                 Drawing Review & Comparison
               </h1>
-              <p className="mt-1 text-sm text-gray-500">Review CAD versions, overlay changes, and leave remarks.</p>
+              <p className="mt-1 text-sm text-gray-500">
+                Review CAD versions, overlay changes, edit geometry, and leave remarks.
+              </p>
             </div>
             <div className="w-full lg:max-w-sm">
               <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -575,22 +729,29 @@ export default function DrawingReviewClient() {
               "overlay",
               "Overlay",
               <Layers className="h-3.5 w-3.5" />,
-              () => setMode((prev) => (prev === "overlay" ? "view" : "overlay")),
+              () => void changeMode("overlay"),
               mode === "overlay"
             )}
             {toolbarButton(
               "compare",
               "Compare",
               <GitCompare className="h-3.5 w-3.5" />,
-              () => setMode((prev) => (prev === "compare" ? "view" : "compare")),
+              () => void changeMode("compare"),
               mode === "compare"
             )}
             {toolbarButton(
               "redline",
               "Redline",
               <Pencil className="h-3.5 w-3.5" />,
-              () => setMode((prev) => (prev === "redline" ? "view" : "redline")),
+              () => void changeMode("redline"),
               mode === "redline"
+            )}
+            {toolbarButton(
+              "edit",
+              editing && editDirty ? "Edit CAD*" : "Edit CAD",
+              <PenLine className="h-3.5 w-3.5" />,
+              () => void changeMode("edit"),
+              mode === "edit"
             )}
             {toolbarButton("history", "History", <History className="h-3.5 w-3.5" />, () => {
               setHighlightVersions(true);
@@ -662,6 +823,64 @@ export default function DrawingReviewClient() {
               </button>
             </div>
           ) : null}
+
+          {editing ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {CAD_DRAW_TOOLS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => runCadCommand(tool)}
+                  className={[
+                    "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold",
+                    activeCadTool === tool.id
+                      ? "bg-blue-50 text-brand-blue ring-1 ring-inset ring-brand-blue/30"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-brand-navy",
+                  ].join(" ")}
+                >
+                  {tool.icon}
+                  {tool.label}
+                </button>
+              ))}
+              <span className="mx-1 h-4 w-px bg-gray-200" />
+              {CAD_MODIFY_TOOLS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => runCadCommand(tool)}
+                  className={[
+                    "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold",
+                    activeCadTool === tool.id
+                      ? "bg-blue-50 text-brand-blue ring-1 ring-inset ring-brand-blue/30"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-brand-navy",
+                  ].join(" ")}
+                >
+                  {tool.icon}
+                  {tool.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => viewerRef.current?.cancelCommand()}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveEditedVersion()}
+                disabled={savingEdits || !activeVersion}
+                className={`ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${BTN_PRIMARY} disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                {savingEdits ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {savingEdits ? "Saving…" : editDirty ? "Save as new version" : "Save copy"}
+              </button>
+              <p className="w-full text-[11px] text-gray-400">
+                Draw or edit entities in the viewer. Enter finishes a command, Esc cancels. Edits are saved as a DXF version.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)_260px]">
@@ -690,9 +909,14 @@ export default function DrawingReviewClient() {
                         type="button"
                         onClick={() => {
                           if (activeVersionId && activeVersionId !== version.id) {
+                            if (editing) void captureEditedBuffer();
                             setCompareVersionId(activeVersionId);
                           }
                           setActiveVersionId(version.id);
+                          if (editing) {
+                            setEditDirty(false);
+                            setActiveCadTool("select");
+                          }
                         }}
                         className={[
                           "w-full rounded-xl px-3 py-2.5 text-left transition-colors",
@@ -740,7 +964,9 @@ export default function DrawingReviewClient() {
             onDrop={onDrop}
           >
             <CadViewerHost
+              ref={viewerRef}
               mode={viewerMode}
+              writable={editing}
               primaryBuffer={primaryBuffer}
               primaryName={activeVersion?.fileName ?? null}
               secondaryBuffer={secondaryBuffer}
@@ -753,7 +979,7 @@ export default function DrawingReviewClient() {
                 <Loader2 className="h-6 w-6 animate-spin text-brand-blue" />
               </div>
             ) : null}
-            {primaryBuffer ? (
+            {primaryBuffer && mode !== "edit" ? (
               <svg
                 className={[
                   "absolute inset-0 z-10 h-full w-full",

@@ -49,7 +49,8 @@ export async function ensureCadViewer(container: HTMLElement): Promise<AcApDocMa
 export async function openCadDocument(
   manager: AcApDocManager,
   name: string,
-  content: ArrayBuffer
+  content: ArrayBuffer,
+  writable = false
 ): Promise<boolean> {
   if (!(await manager.areWorkersReady())) {
     throw new Error("CAD worker scripts are not reachable.");
@@ -57,7 +58,7 @@ export async function openCadDocument(
 
   const success = await manager.openDocument(name, content, {
     minimumChunkSize: 1000,
-    mode: AcEdOpenMode.Review,
+    mode: writable ? AcEdOpenMode.Write : AcEdOpenMode.Review,
     drawNoPlotLayers: false,
     progressiveRendering: true,
     openViewMode: AcApOpenViewMode.Extents,
@@ -72,4 +73,17 @@ export async function openCadDocument(
   }
 
   return success;
+}
+
+export function exportCurrentDrawingDxf(manager: AcApDocManager): ArrayBuffer {
+  const document = manager.curDocument;
+  if (!document?.database) {
+    throw new Error("No drawing is open");
+  }
+
+  const dxfContent = document.database.dxfOut(undefined, 6);
+  const bytes = typeof dxfContent === "string" ? new TextEncoder().encode(dxfContent) : dxfContent;
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return copy;
 }

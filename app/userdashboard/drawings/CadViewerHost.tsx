@@ -1,26 +1,88 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Loader2 } from "lucide-react";
 import {
   CAD_HOST_SOURCE,
   isCadEmbedMessage,
 } from "@/app/lib/cadViewer/protocol";
 
+export type CadViewerHandle = {
+  sendCommand: (cmd: string) => void;
+  cancelCommand: () => void;
+  exportDxf: () => Promise<ArrayBuffer>;
+};
+
 type CadPaneProps = {
   buffer: ArrayBuffer | null;
   name: string | null;
   label?: string;
   opacity?: number;
+  writable?: boolean;
   className?: string;
 };
 
-function CadPane({ buffer, name, label, opacity = 1, className = "" }: CadPaneProps) {
+type PendingExport = {
+  resolve: (buffer: ArrayBuffer) => void;
+  reject: (error: Error) => void;
+  timer: number;
+};
+
+const CadPane = forwardRef<CadViewerHandle, CadPaneProps>(function CadPane(
+  { buffer, name, label, opacity = 1, writable = false, className = "" },
+  ref
+) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const pendingExportsRef = useRef(new Map<string, PendingExport>());
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastOpenedRef = useRef<string | null>(null);
+
+  const postToEmbed = (payload: Record<string, unknown>, transfer: Transferable[] = []) => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return false;
+    iframe.contentWindow.postMessage(
+      { source: CAD_HOST_SOURCE, ...payload },
+      window.location.origin,
+      transfer
+    );
+    return true;
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      sendCommand: (cmd: string) => {
+        postToEmbed({ type: "command", cmd });
+      },
+      cancelCommand: () => {
+        postToEmbed({ type: "cancel" });
+      },
+      exportDxf: () =>
+        new Promise<ArrayBuffer>((resolve, reject) => {
+          const requestId = crypto.randomUUID();
+          const timer = window.setTimeout(() => {
+            pendingExportsRef.current.delete(requestId);
+            reject(new Error("Timed out exporting drawing"));
+          }, 30000);
+          pendingExportsRef.current.set(requestId, { resolve, reject, timer });
+          if (!postToEmbed({ type: "export", requestId })) {
+            window.clearTimeout(timer);
+            pendingExportsRef.current.delete(requestId);
+            reject(new Error("CAD viewer is not ready"));
+          }
+        }),
+    }),
+    []
+  );
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -38,17 +100,36 @@ function CadPane({ buffer, name, label, opacity = 1, className = "" }: CadPanePr
       if (event.data.type === "opened") {
         setLoading(false);
         setError(event.data.ok ? null : event.data.error || "Failed to open drawing");
+        return;
+      }
+      if (event.data.type === "exported") {
+        const pending = pendingExportsRef.current.get(event.data.requestId);
+        if (!pending) return;
+        pendingExportsRef.current.delete(event.data.requestId);
+        window.clearTimeout(pending.timer);
+        if (event.data.ok && event.data.buffer) {
+          pending.resolve(event.data.buffer);
+        } else {
+          pending.reject(new Error(event.data.error || "Failed to export drawing"));
+        }
       }
     };
 
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      for (const pending of pendingExportsRef.current.values()) {
+        window.clearTimeout(pending.timer);
+        pending.reject(new Error("CAD viewer closed"));
+      }
+      pendingExportsRef.current.clear();
+    };
   }, []);
 
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe?.contentWindow || !ready || !buffer || !name) return;
-    const openKey = `${name}:${buffer.byteLength}`;
+    const openKey = `${name}:${buffer.byteLength}:${writable ? "write" : "review"}`;
     if (lastOpenedRef.current === openKey) return;
     lastOpenedRef.current = openKey;
 
@@ -56,11 +137,11 @@ function CadPane({ buffer, name, label, opacity = 1, className = "" }: CadPanePr
     setError(null);
     const copy = buffer.slice(0);
     iframe.contentWindow.postMessage(
-      { source: CAD_HOST_SOURCE, type: "open", name, buffer: copy },
+      { source: CAD_HOST_SOURCE, type: "open", name, buffer: copy, mode: writable ? "write" : "review" },
       window.location.origin,
       [copy]
     );
-  }, [ready, buffer, name]);
+  }, [ready, buffer, name, writable]);
 
   return (
     <div className={["relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-white", className].join(" ")} style={{ opacity }}>
@@ -87,10 +168,11 @@ function CadPane({ buffer, name, label, opacity = 1, className = "" }: CadPanePr
       ) : null}
     </div>
   );
-}
+});
 
 type CadViewerHostProps = {
   mode: "view" | "overlay" | "compare";
+  writable?: boolean;
   primaryBuffer: ArrayBuffer | null;
   primaryName: string | null;
   secondaryBuffer: ArrayBuffer | null;
@@ -99,15 +181,19 @@ type CadViewerHostProps = {
   emptyState: ReactNode;
 };
 
-export default function CadViewerHost({
-  mode,
-  primaryBuffer,
-  primaryName,
-  secondaryBuffer,
-  secondaryName,
-  overlayOpacity,
-  emptyState,
-}: CadViewerHostProps) {
+const CadViewerHost = forwardRef<CadViewerHandle, CadViewerHostProps>(function CadViewerHost(
+  {
+    mode,
+    writable = false,
+    primaryBuffer,
+    primaryName,
+    secondaryBuffer,
+    secondaryName,
+    overlayOpacity,
+    emptyState,
+  },
+  ref
+) {
   if (!primaryBuffer || !primaryName) {
     return <div className="flex h-full min-h-0 flex-1 items-center justify-center">{emptyState}</div>;
   }
@@ -139,5 +225,15 @@ export default function CadViewerHost({
     );
   }
 
-  return <CadPane buffer={primaryBuffer} name={primaryName} className="flex-1" />;
-}
+  return (
+    <CadPane
+      ref={ref}
+      buffer={primaryBuffer}
+      name={primaryName}
+      writable={writable}
+      className="flex-1"
+    />
+  );
+});
+
+export default CadViewerHost;
