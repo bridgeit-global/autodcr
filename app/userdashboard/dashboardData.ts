@@ -115,5 +115,10 @@ export const QUICK_ACTIONS: QuickAction[] = [
     label: "Edit Project",
     enabled: true,
   },
-  { id: "check-compliance", label: "Check Compliance", enabled: false },
+  {
+    id: "check-compliance",
+    label: "Check Compliance",
+    href: "/userdashboard/compliance",
+    enabled: true,
+  },
 ];
