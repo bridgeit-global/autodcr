@@ -1957,7 +1957,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               consultantType={formData.consultantType}
               onAutofill={applyRegistrationAutofill}
               onExtractedChange={setIdentityExtracted}
-              onContinue={() => scrollToSection("section-basic-details")}
+              onContinue={() => {
+                const element = document.getElementById("section-basic-details");
+                if (element) {
+                  setActiveSection("section-basic-details");
+                  element.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+              }}
             />
           </div>
 

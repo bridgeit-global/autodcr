@@ -195,7 +195,6 @@ export default function RegistrationDocumentAutofillStep({
     }
 
     setLoading(true);
-    const nextStatus: Partial<Record<DocSlot["id"], DocStatus>> = {};
     const patchesBySource: Partial<Record<AutofillDocSource, AutofillPatch>> =
       {};
     const extractions: Partial<
@@ -203,32 +202,55 @@ export default function RegistrationDocumentAutofillStep({
     > = {};
 
     try {
-      for (const slot of docSlots) {
-        const file = files[slot.id];
-        if (!file) continue;
-
-        nextStatus[slot.id] = { loading: true, result: null, error: null };
-        setStatusByDoc({ ...nextStatus });
-
-        try {
-          const result = await validateDocument(file, slot.id);
-          nextStatus[slot.id] = { loading: false, result, error: null };
-          extractions[slot.id] = result.extracted;
-
-          patchesBySource[slot.id] = buildAutofillPatch(
-            slot.id,
-            result.extracted,
-            registrationKind,
-            { consultantType, entityType }
-          );
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Validation failed.";
-          nextStatus[slot.id] = { loading: false, result: null, error: message };
-        }
-
-        setStatusByDoc({ ...nextStatus });
+      const slotsToExtract = docSlots.filter((slot) => files[slot.id]);
+      const loadingStatus: Partial<Record<DocSlot["id"], DocStatus>> = {};
+      for (const slot of slotsToExtract) {
+        loadingStatus[slot.id] = { loading: true, result: null, error: null };
       }
+      setStatusByDoc(loadingStatus);
+
+      const outcomes = await Promise.all(
+        slotsToExtract.map(async (slot) => {
+          const file = files[slot.id];
+          if (!file) return { slot, error: "File not found." as string | null, result: null };
+          try {
+            const result = await validateDocument(file, slot.id);
+            return { slot, result, error: null as string | null };
+          } catch (err) {
+            return {
+              slot,
+              result: null,
+              error: err instanceof Error ? err.message : "Validation failed.",
+            };
+          }
+        })
+      );
+
+      const nextStatus: Partial<Record<DocSlot["id"], DocStatus>> = {};
+      for (const outcome of outcomes) {
+        if (outcome.error) {
+          nextStatus[outcome.slot.id] = {
+            loading: false,
+            result: null,
+            error: outcome.error,
+          };
+          continue;
+        }
+        if (!outcome.result) continue;
+        nextStatus[outcome.slot.id] = {
+          loading: false,
+          result: outcome.result,
+          error: null,
+        };
+        extractions[outcome.slot.id] = outcome.result.extracted;
+        patchesBySource[outcome.slot.id] = buildAutofillPatch(
+          outcome.slot.id,
+          outcome.result.extracted,
+          registrationKind,
+          { consultantType, entityType }
+        );
+      }
+      setStatusByDoc(nextStatus);
 
       const autofillFiles: AutofillFiles = {
         aadhaarCardFile: files.aadhaar ?? null,
@@ -269,7 +291,9 @@ export default function RegistrationDocumentAutofillStep({
         setStepError(
           "Upload and extract all identity documents before continuing."
         );
+        return;
       }
+      onContinue();
     } catch {
       setHasExtracted(false);
       onExtractedChange?.(false);
@@ -341,17 +365,6 @@ export default function RegistrationDocumentAutofillStep({
               )}
               {status?.error && (
                 <p className="text-xs text-red-600">{status.error}</p>
-              )}
-              {status?.result && (
-                <p
-                  className={`text-xs ${
-                    status.result.valid ? "text-brand-blue" : "text-amber-700"
-                  }`}
-                >
-                  {status.result.valid
-                    ? "All extractable fields found."
-                    : `Extracted with ${status.result.missingFields.length} missing field(s) — you can fill those manually.`}
-                </p>
               )}
             </div>
           );
@@ -443,15 +456,7 @@ export default function RegistrationDocumentAutofillStep({
           disabled={loading}
           className="rounded-lg bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? "Extracting…" : "Extract & fill form"}
-        </button>
-        <button
-          type="button"
-          onClick={onContinue}
-          disabled={!hasExtracted}
-          className="rounded-lg border border-brand-blue bg-white px-5 py-2.5 text-sm font-semibold text-brand-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Continue to Basic Details
+          {loading ? "Saving…" : "Save"}
         </button>
       </div>
     </div>

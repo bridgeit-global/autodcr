@@ -84,47 +84,60 @@ export function useProjectLibraryExtraction() {
           });
         }
 
+        const outcomes = await Promise.all(
+          jobs.map(async (job) => {
+            const stored = await job.loadBlob();
+            if (!stored?.blob) {
+              return {
+                job,
+                stored: null as { name: string } | null,
+                extraction: null as ProjectLibraryExtraction | null,
+                error: "File not found in local storage.",
+              };
+            }
+
+            try {
+              const file = storedBlobToFile(stored);
+              const result = await validateDocumentFile(file, job.documentType);
+              return {
+                job,
+                stored: { name: stored.name },
+                extraction: {
+                  slot: job.slot,
+                  documentType: job.documentType,
+                  label: job.label,
+                  valid: result.valid,
+                  missingFields: result.missingFields,
+                  extracted: result.extracted,
+                },
+                error: null as string | null,
+              };
+            } catch (err) {
+              return {
+                job,
+                stored: { name: stored.name },
+                extraction: null,
+                error: err instanceof Error ? err.message : "Validation failed.",
+              };
+            }
+          })
+        );
+
         const extractions: ProjectLibraryExtraction[] = [];
         const failures: ProjectLibraryExtractionOutcome["failures"] = [];
         let primaryPrFailed = false;
 
-        for (const job of jobs) {
-          const stored = await job.loadBlob();
-          if (!stored?.blob) {
-            if (job.slot === "pr-primary") primaryPrFailed = true;
-            failures.push({
-              label: job.label,
-              fileName: stored?.name ?? job.label,
-              error: "File not found in local storage.",
-            });
+        for (const outcome of outcomes) {
+          if (outcome.extraction) {
+            extractions.push(outcome.extraction);
             continue;
           }
-
-          try {
-            const file = storedBlobToFile(stored);
-            const result = await validateDocumentFile(file, job.documentType);
-            extractions.push({
-              slot: job.slot,
-              documentType: job.documentType,
-              label: job.label,
-              valid: result.valid,
-              missingFields: result.missingFields,
-              extracted: result.extracted,
-            });
-
-            if (!result.valid) {
-              failures.push({
-                label: job.label,
-                fileName: stored.name,
-                missingFields: result.missingFields,
-              });
-              if (job.slot === "pr-primary") primaryPrFailed = true;
-            }
-          } catch (err) {
-            const message = err instanceof Error ? err.message : "Validation failed.";
-            failures.push({ label: job.label, fileName: stored.name, error: message });
-            if (job.slot === "pr-primary") primaryPrFailed = true;
-          }
+          if (outcome.job.slot === "pr-primary") primaryPrFailed = true;
+          failures.push({
+            label: outcome.job.label,
+            fileName: outcome.stored?.name ?? outcome.job.label,
+            error: outcome.error ?? "Validation failed.",
+          });
         }
 
         const autofill =
