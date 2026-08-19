@@ -31,7 +31,7 @@ function gapSeverity(gap: ComplianceGap) {
 function SourcesList({ sources }: { sources: RagSource[] }) {
   if (!sources.length) return null;
   return (
-    <div className="mt-6">
+    <div className="mt-5 sm:mt-6">
       <h3 className="text-sm font-semibold text-brand-navy">Sources</h3>
       <ul className="mt-2 space-y-1.5">
         {sources.map((s, i) => {
@@ -40,7 +40,7 @@ function SourcesList({ sources }: { sources: RagSource[] }) {
           return (
             <li
               key={`${s.source}-${s.page}-${i}`}
-              className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600"
+              className="wrap-break-word rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600"
             >
               {auth}
               {s.source}
@@ -60,7 +60,7 @@ export default function ComplianceResultView({
 }) {
   if (data.needsAuthoritySelection) {
     return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 sm:px-4">
         {data.summary ||
           "Select an authority above and run Analyze again."}
       </div>
@@ -68,15 +68,14 @@ export default function ComplianceResultView({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-5 sm:space-y-6">
       <div>
         <p className="text-sm text-gray-600">
           <span className="font-semibold text-brand-navy">
             {data.authorityLabels || data.authorities.join(", ")}
           </span>
-          <span className="text-gray-400">
-            {" "}
-            ·{" "}
+          <span className="mt-0.5 block text-gray-400 sm:mt-0 sm:inline">
+            <span className="hidden sm:inline"> · </span>
             {data.authoritySource === "user_override"
               ? "your selection"
               : "auto-detected"}{" "}
@@ -102,16 +101,19 @@ export default function ComplianceResultView({
               return (
                 <li
                   key={g.id || i}
-                  className="flex gap-3 rounded-xl border border-gray-100 bg-white p-4"
+                  className="flex flex-col gap-2 rounded-xl border border-gray-100 bg-white p-3 sm:flex-row sm:gap-3 sm:p-4"
                 >
-                  <Badge variant={severityVariant(gapSeverity(g))}>
+                  <Badge
+                    variant={severityVariant(gapSeverity(g))}
+                    className="w-fit shrink-0"
+                  >
                     {gapSeverity(g)}
                   </Badge>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900">
                       {g.title || g.id}
                     </p>
-                    <p className="mt-1 text-sm text-gray-600">
+                    <p className="mt-1 wrap-break-word text-sm text-gray-600">
                       {g.detail || ""}
                       {cite !== "—" ? ` (${cite})` : ""}
                     </p>
@@ -124,15 +126,40 @@ export default function ComplianceResultView({
       ) : null}
 
       {data.checklist?.length ? (
-        <div>
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-brand-navy">Checklist</h3>
-          <div className="mt-3 overflow-x-auto rounded-xl border border-gray-100">
+
+          <ul className="mt-3 space-y-3 md:hidden">
+            {data.checklist.map((c, i) => (
+              <li
+                key={c.id || i}
+                className="rounded-xl border border-gray-100 bg-white p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={statusVariant(c.status)}>
+                    {c.status || "unclear"}
+                  </Badge>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {c.requirement || ""}
+                  </p>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">
+                  {c.evidence_from_proposal || c.notes || "—"}
+                </p>
+                <p className="mt-1 wrap-break-word text-xs text-gray-500">
+                  {formatCite(c.regulation_cite)}
+                </p>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-3 hidden overflow-x-auto rounded-xl border border-gray-100 md:block">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500">
                 <tr>
                   <th className="px-3 py-2.5">Status</th>
                   <th className="px-3 py-2.5">Requirement</th>
-                  <th className="hidden px-3 py-2.5 sm:table-cell">Proposal</th>
+                  <th className="px-3 py-2.5">Proposal</th>
                   <th className="px-3 py-2.5">Cite</th>
                 </tr>
               </thead>
@@ -144,13 +171,13 @@ export default function ComplianceResultView({
                         {c.status || "unclear"}
                       </Badge>
                     </td>
-                    <td className="px-3 py-3 align-top text-gray-800">
+                    <td className="max-w-xs px-3 py-3 align-top text-gray-800">
                       {c.requirement || ""}
                     </td>
-                    <td className="hidden px-3 py-3 align-top text-gray-600 sm:table-cell">
+                    <td className="max-w-sm px-3 py-3 align-top text-gray-600">
                       {c.evidence_from_proposal || c.notes || "—"}
                     </td>
-                    <td className="px-3 py-3 align-top text-xs text-gray-500">
+                    <td className="max-w-48 wrap-break-word px-3 py-3 align-top text-xs text-gray-500">
                       {formatCite(c.regulation_cite)}
                     </td>
                   </tr>

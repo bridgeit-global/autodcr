@@ -22,7 +22,7 @@ export default function AuthorityChips({
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-1.5 sm:gap-2">
       {authorities.map((a) => {
         const active = selected.has(a.id);
         return (
@@ -32,7 +32,7 @@ export default function AuthorityChips({
             title={a.description || a.id}
             onClick={() => onToggle(a.id)}
             className={[
-              "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+              "min-h-9 rounded-full border px-2.5 py-1.5 text-xs font-semibold transition-colors sm:min-h-8 sm:px-3",
               active
                 ? "border-brand-blue bg-brand-blue text-white"
                 : "border-gray-200 bg-white text-gray-700 hover:border-brand-blue/40 hover:bg-blue-50",

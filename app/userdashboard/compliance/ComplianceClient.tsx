@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FileUp, Loader2 } from "lucide-react";
 import CustomSelect from "@/app/components/CustomSelect";
@@ -82,6 +82,7 @@ export default function ComplianceClient() {
   const [hint, setHint] = useState("Select a project to begin.");
   const [result, setResult] = useState<ComplianceResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedProject =
     nonDraftProjects.find((p) => p.id === selectedProjectId) ?? null;
@@ -182,22 +183,21 @@ export default function ComplianceClient() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
+    <div className="mx-auto w-full min-w-0 max-w-5xl space-y-4 px-3 py-4 sm:space-y-5 sm:px-6 sm:py-6 lg:px-8">
+      <div className="flex min-w-0 flex-col gap-3 sm:gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">
             Regulation library
           </p>
-          <h1 className="mt-1 text-xl font-bold text-brand-navy">
+          <h1 className="mt-1 text-lg font-bold text-brand-navy sm:text-xl">
             Regulation compliance
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-500">
-            Match your project proposal to the right regulations (CIDCO, MIDC,
-            SRA, MCGM/DCPR) and see checklist gaps — or ask the regulation
-            library directly.
+            Match your proposal to CIDCO, MIDC, SRA, or MCGM/DCPR — or ask the
+            regulation library.
           </p>
         </div>
-        <div className="w-full lg:max-w-sm">
+        <div className="w-full min-w-0 lg:max-w-sm">
           <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
             Project
           </label>
@@ -227,8 +227,8 @@ export default function ComplianceClient() {
       <div className="flex gap-1 rounded-xl bg-gray-100 p-1">
         {(
           [
-            { id: "compliance", label: "Compliance Check" },
-            { id: "ask", label: "Ask Regulations" },
+            { id: "compliance", label: "Check", long: "Compliance Check" },
+            { id: "ask", label: "Ask", long: "Ask Regulations" },
           ] as const
         ).map((t) => (
           <button
@@ -238,45 +238,61 @@ export default function ComplianceClient() {
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={[
-              "flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
+              "min-h-11 flex-1 rounded-lg px-2 py-2 text-xs font-semibold transition-colors sm:min-h-10 sm:px-3 sm:text-sm",
               tab === t.id
                 ? "bg-white text-brand-navy shadow-sm"
                 : "text-gray-500 hover:text-brand-navy",
             ].join(" ")}
           >
-            {t.label}
+            <span className="sm:hidden">{t.label}</span>
+            <span className="hidden sm:inline">{t.long}</span>
           </button>
         ))}
       </div>
 
       {tab === "compliance" ? (
-        <div className="space-y-5">
-          <Card>
+        <div className="min-w-0 space-y-4 sm:space-y-5">
+          <Card padding="none" className="p-4 sm:p-6">
             <form onSubmit={onAnalyze} className="space-y-4">
-              <label className="block">
+              <div>
                 <span className="mb-1.5 block text-sm font-medium text-gray-700">
                   Project proposal (PDF)
                 </span>
-                <span className="flex items-center gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  disabled={!selectedProjectId}
+                  className="sr-only"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+                <button
+                  type="button"
+                  disabled={!selectedProjectId}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   <FileUp className="h-4 w-4 shrink-0 text-brand-blue" />
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    required
-                    disabled={!selectedProjectId}
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                    className="w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-brand-blue file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white disabled:opacity-50"
-                  />
-                </span>
-              </label>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-gray-800">
+                      {file ? file.name : "Choose PDF"}
+                    </span>
+                    <span className="block text-xs text-gray-500">
+                      {file
+                        ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+                        : "PDF only, up to 25 MB"}
+                    </span>
+                  </span>
+                </button>
+              </div>
 
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className="mb-1.5 text-sm font-medium text-gray-700">
                   Authorities{" "}
-                  <span className="font-normal text-gray-400">
+                  <span className="block font-normal text-gray-400 sm:inline">
                     {getPlanningAuthority(selectedProject ?? {})
                       ? "(from project; override anytime)"
-                      : "(auto-detected if empty; override anytime)"}
+                      : "(auto-detected if empty)"}
                   </span>
                 </legend>
                 <AuthorityChips
@@ -286,7 +302,7 @@ export default function ComplianceClient() {
                 />
               </fieldset>
 
-              <label className="block">
+              <label className="block min-w-0">
                 <span className="mb-1.5 block text-sm font-medium text-gray-700">
                   Project notes{" "}
                   <span className="font-normal text-gray-400">(optional)</span>
@@ -296,13 +312,14 @@ export default function ComplianceClient() {
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="e.g. Residential tower in CIDCO Node, Plot X, proposed FSI 2.5…"
-                  className="w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
+                  className="w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-base text-gray-900 outline-none placeholder:text-gray-400 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 sm:text-sm"
                 />
               </label>
 
               <Button
                 type="submit"
                 disabled={busy || !file || !selectedProjectId}
+                className="w-full sm:w-auto"
               >
                 {busy ? (
                   <>
@@ -319,13 +336,13 @@ export default function ComplianceClient() {
           <p className="text-xs text-gray-400">{hint}</p>
 
           {error ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="wrap-break-word rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800 sm:px-4">
               {error}
             </div>
           ) : null}
 
           {result ? (
-            <Card>
+            <Card padding="none" className="overflow-hidden p-4 sm:p-6">
               <ComplianceResultView data={result} />
             </Card>
           ) : null}
