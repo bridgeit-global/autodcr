@@ -15,7 +15,9 @@ import {
   FolderKanban,
   History,
   Loader2,
+  Maximize2,
   MessageSquarePlus,
+  Minimize2,
   PanelLeftClose,
   Paperclip,
   Send,
@@ -194,6 +196,7 @@ export default function ComplianceClient() {
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyVisible, setHistoryVisible] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
   const [chatToDelete, setChatToDelete] = useState<RegulationChatSummary | null>(null);
   const [deletingChat, setDeletingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -202,6 +205,8 @@ export default function ComplianceClient() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const nativeFullscreenRef = useRef(false);
   const skipChatLoadRef = useRef(false);
   const [statusText, setStatusText] = useState("Searching the regulation library…");
 
@@ -381,6 +386,65 @@ export default function ComplianceClient() {
       /* ignore */
     }
   }
+
+  const setFullscreenMode = useCallback(async (next: boolean) => {
+    setFullscreen(next);
+    if (next) {
+      try {
+        await rootRef.current?.requestFullscreen();
+        nativeFullscreenRef.current = document.fullscreenElement === rootRef.current;
+      } catch {
+        nativeFullscreenRef.current = false;
+      }
+      return;
+    }
+    nativeFullscreenRef.current = false;
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        /* overlay state is already cleared */
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement === rootRef.current) {
+        nativeFullscreenRef.current = true;
+        setFullscreen(true);
+        return;
+      }
+      if (!document.fullscreenElement && nativeFullscreenRef.current) {
+        nativeFullscreenRef.current = false;
+        setFullscreen(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.fullscreenElement) return;
+      void setFullscreenMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fullscreen, setFullscreenMode]);
+
+  const chatFullWidth = fullscreen || !historyVisible;
 
   function toggleHistory() {
     if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
@@ -611,7 +675,15 @@ export default function ComplianceClient() {
   );
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] min-h-0 w-full flex-col overflow-hidden">
+    <div
+      ref={rootRef}
+      className={[
+        "flex min-h-0 w-full flex-col overflow-hidden bg-white",
+        fullscreen
+          ? "fixed inset-0 z-[80] h-dvh"
+          : "h-[calc(100dvh-4rem)]",
+      ].join(" ")}
+    >
       <div className="relative z-20 shrink-0 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -622,13 +694,38 @@ export default function ComplianceClient() {
               <h1 className="text-base font-bold text-brand-navy sm:text-lg">
                 Regulation chat
               </h1>
-              <p className="mt-0.5 text-sm text-gray-500">
-                Ask CIDCO, MIDC, SRA &amp; MCGM, or upload a proposal PDF to check
-                compliance.
-              </p>
+              {fullscreen ? (
+                <p className="mt-0.5 text-sm text-gray-500">
+                  Fullscreen · Esc to exit
+                </p>
+              ) : (
+                <p className="mt-0.5 text-sm text-gray-500">
+                  Ask CIDCO, MIDC, SRA &amp; MCGM, or upload a proposal PDF to check
+                  compliance.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex min-w-0 items-end gap-2">
+            <button
+              type="button"
+              onClick={() => void setFullscreenMode(!fullscreen)}
+              aria-pressed={fullscreen}
+              aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              className={[
+                "inline-flex h-11 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold",
+                fullscreen
+                  ? "border-brand-blue/40 bg-blue-50 text-brand-navy"
+                  : "border-gray-200 bg-white text-gray-700 hover:bg-slate-50",
+              ].join(" ")}
+            >
+              {fullscreen ? (
+                <Minimize2 className="h-4 w-4" />
+              ) : (
+                <Maximize2 className="h-4 w-4" />
+              )}
+              {fullscreen ? "Exit" : "Fullscreen"}
+            </button>
             <button
               type="button"
               onClick={toggleHistory}
@@ -765,7 +862,7 @@ export default function ComplianceClient() {
               <div
                 className={[
                   "mx-auto flex w-full flex-col gap-4",
-                  historyVisible ? "max-w-3xl" : "max-w-none",
+                  chatFullWidth ? "max-w-none" : "max-w-3xl",
                 ].join(" ")}
               >
                 {activeChat?.document_filename || attachedFilename ? (
@@ -802,9 +899,9 @@ export default function ComplianceClient() {
                       <article
                         className={[
                           "rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm leading-relaxed",
-                          historyVisible
-                            ? "max-w-[92%] sm:max-w-[80%]"
-                            : "w-full max-w-full",
+                          chatFullWidth
+                            ? "w-full max-w-full"
+                            : "max-w-[92%] sm:max-w-[80%]",
                           m.error ? "bg-red-50 text-red-800" : "bg-white text-gray-800",
                         ].join(" ")}
                       >
@@ -812,7 +909,7 @@ export default function ComplianceClient() {
                       </article>
                     )}
                     {m.role === "assistant" && m.kind !== "compliance" && m.sources?.length ? (
-                      <Sources sources={m.sources} fullWidth={!historyVisible} />
+                      <Sources sources={m.sources} fullWidth={chatFullWidth} />
                     ) : null}
                   </div>
                 ))}
@@ -821,9 +918,9 @@ export default function ComplianceClient() {
                   <article
                     className={[
                       "rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm text-gray-500",
-                      historyVisible
-                        ? "max-w-[92%] sm:max-w-[80%]"
-                        : "w-full max-w-full",
+                      chatFullWidth
+                        ? "w-full max-w-full"
+                        : "max-w-[92%] sm:max-w-[80%]",
                     ].join(" ")}
                   >
                     <p className="flex items-center gap-2">
