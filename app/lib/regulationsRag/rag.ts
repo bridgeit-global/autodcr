@@ -29,12 +29,16 @@ export async function askQuestion(
     documentFilename = "",
     notes = "",
     history = [],
+    onStatus,
+    onDelta,
   }: {
     authorities?: unknown;
     documentText?: string;
     documentFilename?: string;
     notes?: string;
     history?: AskHistoryTurn[];
+    onStatus?: (text: string) => void;
+    onDelta?: (text: string) => void;
   } = {}
 ): Promise<AskResult> {
   assertApiKey();
@@ -44,6 +48,7 @@ export async function askQuestion(
   const config = getConfig();
   const filterAuth = normalizeAuthorities(authorities);
   const llm = getLLM();
+  onStatus?.("Searching the regulation library…");
   const [queryEmbedding] = await embedTexts(llm, [q]);
   const hits = await similaritySearch(queryEmbedding, config.topK, {
     authorities: filterAuth.length ? filterAuth : null,
@@ -51,10 +56,12 @@ export async function askQuestion(
 
   const doc = String(documentText || "").trim();
   if (!hits.length && !doc) {
+    const answer = filterAuth.length
+      ? `No relevant passages were found for authorities: ${filterAuth.join(", ")}.`
+      : "No relevant passages were found in the indexed documents.";
+    onDelta?.(answer);
     return {
-      answer: filterAuth.length
-        ? `No relevant passages were found for authorities: ${filterAuth.join(", ")}.`
-        : "No relevant passages were found in the indexed documents.",
+      answer,
       sources: [],
       authorities: filterAuth,
     };
@@ -80,10 +87,12 @@ export async function askQuestion(
       content: turn.content.slice(0, 4000),
     }));
 
+  onStatus?.("Writing answer…");
   const completion = await llm.chat.completions.create({
     model: config.chatModel,
     temperature: 0,
     max_tokens: config.maxTokens,
+    stream: true,
     messages: [
       {
         role: "system",
@@ -94,11 +103,16 @@ export async function askQuestion(
     ],
   });
 
-  const answer =
-    completion.choices[0]?.message?.content?.trim() || "No answer generated.";
+  let answer = "";
+  for await (const chunk of completion) {
+    const delta = chunk.choices[0]?.delta?.content || "";
+    if (!delta) continue;
+    answer += delta;
+    onDelta?.(delta);
+  }
 
   return {
-    answer,
+    answer: answer.trim() || "No answer generated.",
     authorities: filterAuth,
     sources: hits.map((h) => ({
       source: h.source,

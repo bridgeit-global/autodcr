@@ -6,6 +6,7 @@ import type {
   ChecklistItem,
   ComplianceGap,
   ComplianceResult,
+  RagSource,
   SearchHit,
 } from "./types";
 import { embedTexts, getLLM, similaritySearch } from "./vectorstore";
@@ -58,6 +59,131 @@ async function retrieveRegulations(
   return dedupeHits(batches.flat()).slice(0, 40);
 }
 
+function skipWs(raw: string, i: number) {
+  while (i < raw.length && /\s/.test(raw[i])) i += 1;
+  return i;
+}
+
+function findJsonKey(raw: string, key: string): number {
+  const needle = `"${key}"`;
+  let from = 0;
+  while (from < raw.length) {
+    const idx = raw.indexOf(needle, from);
+    if (idx < 0) return -1;
+    let i = skipWs(raw, idx + needle.length);
+    if (raw[i] === ":") return i + 1;
+    from = idx + 1;
+  }
+  return -1;
+}
+
+function extractJsonString(
+  raw: string,
+  key: string
+): { value: string; complete: boolean } | null {
+  const afterColon = findJsonKey(raw, key);
+  if (afterColon < 0) return null;
+  let i = skipWs(raw, afterColon);
+  if (raw[i] !== '"') return null;
+  i += 1;
+  let value = "";
+  let escaped = false;
+  for (; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (escaped) {
+      const map: Record<string, string> = {
+        n: "\n",
+        t: "\t",
+        r: "\r",
+        b: "\b",
+        f: "\f",
+        '"': '"',
+        "\\": "\\",
+        "/": "/",
+      };
+      value += map[ch] ?? ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') return { value, complete: true };
+    value += ch;
+  }
+  return { value, complete: false };
+}
+
+function extractJsonObjectArray(raw: string, key: string): unknown[] {
+  const afterColon = findJsonKey(raw, key);
+  if (afterColon < 0) return [];
+  let i = skipWs(raw, afterColon);
+  if (raw[i] !== "[") return [];
+  i += 1;
+  const items: unknown[] = [];
+  while (i < raw.length) {
+    i = skipWs(raw, i);
+    if (raw[i] === "]") break;
+    if (raw[i] === ",") {
+      i += 1;
+      continue;
+    }
+    if (raw[i] !== "{") break;
+    const start = i;
+    let depth = 0;
+    let inStr = false;
+    let escaped = false;
+    let closed = false;
+    for (; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (inStr) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = true;
+        continue;
+      }
+      if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          i += 1;
+          closed = true;
+          break;
+        }
+      }
+    }
+    if (!closed) break;
+    try {
+      items.push(JSON.parse(raw.slice(start, i)));
+    } catch {
+      break;
+    }
+  }
+  return items;
+}
+
+function toSources(hits: SearchHit[]): RagSource[] {
+  return hits.slice(0, 20).map((h) => ({
+    source: h.source,
+    page: h.page ?? null,
+    authority: h.authority,
+    docType: h.docType,
+    score: Number(h.score?.toFixed?.(4) ?? h.score ?? 0),
+    snippet: h.text.trim(),
+  }));
+}
+
 function parseJsonContent(raw: string): {
   summary?: string;
   checklist?: ChecklistItem[];
@@ -90,6 +216,9 @@ export async function analyzeCompliance({
   authoritiesOverride = null,
   notes = "",
   pages: pagesIn,
+  onStatus,
+  onDelta,
+  onPartial,
 }: {
   pdfBuffer?: Buffer | null;
   proposalText?: string;
@@ -97,6 +226,9 @@ export async function analyzeCompliance({
   authoritiesOverride?: unknown;
   notes?: string;
   pages?: number | null;
+  onStatus?: (text: string) => void;
+  onDelta?: (text: string) => void;
+  onPartial?: (data: ComplianceResult) => void;
 }): Promise<ComplianceResult> {
   assertApiKey();
   assertPinecone();
@@ -104,6 +236,7 @@ export async function analyzeCompliance({
   let proposalText = String(proposalTextIn || "").trim();
   let pages = pagesIn ?? 0;
   if (pdfBuffer && pdfBuffer.length) {
+    onStatus?.("Reading your proposal…");
     const extracted = await extractPdf(pdfBuffer);
     proposalText = extracted.text.trim();
     pages = extracted.pages;
@@ -114,6 +247,7 @@ export async function analyzeCompliance({
     );
   }
 
+  onStatus?.("Detecting planning authority…");
   const detection = await detectJurisdiction(proposalText);
   const resolved = resolveAuthorities({
     override: authoritiesOverride,
@@ -121,7 +255,7 @@ export async function analyzeCompliance({
   });
 
   if (!resolved.authorities.length) {
-    return {
+    const missing: ComplianceResult = {
       needsAuthoritySelection: true,
       detection,
       authorities: [],
@@ -132,10 +266,14 @@ export async function analyzeCompliance({
       sources: [],
       proposal: { filename, pages, chars: proposalText.length },
     };
+    onDelta?.(missing.summary);
+    onPartial?.(missing);
+    return missing;
   }
 
   const config = getConfig();
   const llm = getLLM();
+  onStatus?.("Matching your proposal to regulations…");
   const hits = await retrieveRegulations(llm, resolved.authorities);
   if (!hits.length) {
     throw new Error(
@@ -154,10 +292,26 @@ export async function analyzeCompliance({
     .filter(Boolean)
     .join("\n");
 
+  const draft: ComplianceResult = {
+    needsAuthoritySelection: false,
+    detection,
+    authorities: resolved.authorities,
+    authoritySource: resolved.source,
+    authorityLabels,
+    summary: "",
+    checklist: [],
+    gaps: [],
+    sources: toSources(hits),
+    proposal: { filename, pages, chars: proposalText.length },
+  };
+  onPartial?.(draft);
+  onStatus?.("Writing compliance analysis…");
+
   const completion = await llm.chat.completions.create({
     model: config.chatModel,
     temperature: 0,
     max_tokens: config.complianceMaxTokens,
+    stream: true,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -209,12 +363,51 @@ ${proposalExcerpt}`,
     ],
   });
 
-  const parsed = parseJsonContent(
-    completion.choices[0]?.message?.content || "{}"
-  );
+  let raw = "";
+  let summaryLen = 0;
+  let checkCount = 0;
+  let gapCount = 0;
+
+  for await (const chunk of completion) {
+    const delta = chunk.choices[0]?.delta?.content || "";
+    if (!delta) continue;
+    raw += delta;
+
+    const summary = extractJsonString(raw, "summary");
+    if (summary && summary.value.length > summaryLen) {
+      onDelta?.(summary.value.slice(summaryLen));
+      summaryLen = summary.value.length;
+      draft.summary = summary.value;
+    }
+
+    const checklist = extractJsonObjectArray(raw, "checklist") as ChecklistItem[];
+    const gaps = extractJsonObjectArray(raw, "gaps") as ComplianceGap[];
+    if (checklist.length !== checkCount || gaps.length !== gapCount) {
+      checkCount = checklist.length;
+      gapCount = gaps.length;
+      draft.checklist = checklist;
+      if (gaps.length) draft.gaps = gaps;
+      onPartial?.({ ...draft, sources: [] });
+    }
+  }
+
+  let parsed: {
+    summary?: string;
+    checklist?: ChecklistItem[];
+    gaps?: ComplianceGap[];
+  };
+  try {
+    parsed = parseJsonContent(raw || "{}");
+  } catch {
+    parsed = {
+      summary: draft.summary,
+      checklist: draft.checklist,
+      gaps: draft.gaps,
+    };
+  }
 
   const checklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];
-  const gaps: ComplianceGap[] = Array.isArray(parsed.gaps)
+  const gaps: ComplianceGap[] = Array.isArray(parsed.gaps) && parsed.gaps.length
     ? parsed.gaps
     : checklist
         .filter((c) => c.status === "gap")
@@ -227,22 +420,9 @@ ${proposalExcerpt}`,
         }));
 
   return {
-    needsAuthoritySelection: false,
-    detection,
-    authorities: resolved.authorities,
-    authoritySource: resolved.source,
-    authorityLabels,
-    summary: parsed.summary || "",
+    ...draft,
+    summary: parsed.summary || draft.summary || "",
     checklist,
     gaps,
-    sources: hits.slice(0, 20).map((h) => ({
-      source: h.source,
-      page: h.page ?? null,
-      authority: h.authority,
-      docType: h.docType,
-      score: Number(h.score?.toFixed?.(4) ?? h.score ?? 0),
-      snippet: h.text.trim(),
-    })),
-    proposal: { filename, pages, chars: proposalText.length },
   };
 }

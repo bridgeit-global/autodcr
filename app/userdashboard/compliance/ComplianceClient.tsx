@@ -34,6 +34,7 @@ import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
 import type {
   AuthorityWithDocuments,
+  ComplianceResult,
   RagSource,
   RegulationChatMessage,
   RegulationChatSummary,
@@ -119,6 +120,33 @@ function plotPills(plot: PlotDetails) {
     pills.push({ label: "Area", value: String(plot.grossPlotArea).trim() });
   }
   return pills;
+}
+
+function AssistantBody({
+  text,
+  streaming = false,
+  error = false,
+}: {
+  text: string;
+  streaming?: boolean;
+  error?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "whitespace-pre-wrap wrap-break-word text-[15px] leading-7",
+        error ? "text-red-800" : "text-gray-800",
+      ].join(" ")}
+    >
+      {text}
+      {streaming ? (
+        <span
+          className="ml-0.5 inline-block h-[1.15em] w-[2px] animate-pulse bg-brand-blue align-text-bottom"
+          aria-hidden
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function sourceLabel(s: RagSource) {
@@ -209,7 +237,13 @@ export default function ComplianceClient() {
   const rootRef = useRef<HTMLDivElement>(null);
   const nativeFullscreenRef = useRef(false);
   const skipChatLoadRef = useRef(false);
+  const streamBufRef = useRef("");
+  const streamRafRef = useRef(0);
   const [statusText, setStatusText] = useState("Searching the regulation library…");
+  const [streamText, setStreamText] = useState("");
+  const [streamCompliance, setStreamCompliance] = useState<ComplianceResult | null>(
+    null
+  );
 
   const selectedProject =
     nonDraftProjects.find((p) => p.id === selectedProjectId) ?? null;
@@ -234,9 +268,15 @@ export default function ComplianceClient() {
   useEffect(() => {
     scrollerRef.current?.scrollTo({
       top: scrollerRef.current.scrollHeight,
-      behavior: "smooth",
+      behavior: streamText || streamCompliance ? "auto" : "smooth",
     });
-  }, [messages, busy]);
+  }, [messages, busy, streamText, streamCompliance, statusText]);
+
+  useEffect(() => {
+    return () => {
+      if (streamRafRef.current) cancelAnimationFrame(streamRafRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -488,6 +528,9 @@ export default function ComplianceClient() {
     const pendingFile = file;
     setBusy(true);
     setError(null);
+    streamBufRef.current = "";
+    setStreamText("");
+    setStreamCompliance(null);
     setStatusText(
       pendingFile || /complian|analy[sz]e|gap analysis/i.test(trimmed)
         ? "Matching your proposal to regulations…"
@@ -511,14 +554,34 @@ export default function ComplianceClient() {
     ]);
 
     try {
-      const result = await sendRegulationChatTurn({
-        projectId: selectedProjectId,
-        chatId: activeChatId || undefined,
-        question: trimmed,
-        file: pendingFile,
-        authorities: [...selected],
-        notes,
-      });
+      const result = await sendRegulationChatTurn(
+        {
+          projectId: selectedProjectId,
+          chatId: activeChatId || undefined,
+          question: trimmed,
+          file: pendingFile,
+          authorities: [...selected],
+          notes,
+        },
+        {
+          onStatus: setStatusText,
+          onToken: (text) => {
+            streamBufRef.current += text;
+            if (streamRafRef.current) return;
+            streamRafRef.current = requestAnimationFrame(() => {
+              streamRafRef.current = 0;
+              setStreamText(streamBufRef.current);
+            });
+          },
+          onCompliance: (data) => {
+            setStreamCompliance((prev) => ({
+              ...data,
+              sources: data.sources?.length ? data.sources : prev?.sources || [],
+              summary: streamBufRef.current || data.summary,
+            }));
+          },
+        }
+      );
 
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -541,6 +604,13 @@ export default function ComplianceClient() {
       setMessages((prev) => prev.filter((m) => !m.id.startsWith("local-")));
       setError(err instanceof Error ? err.message : "Request failed.");
     } finally {
+      if (streamRafRef.current) {
+        cancelAnimationFrame(streamRafRef.current);
+        streamRafRef.current = 0;
+      }
+      streamBufRef.current = "";
+      setStreamText("");
+      setStreamCompliance(null);
       setBusy(false);
       inputRef.current?.focus();
     }
@@ -935,7 +1005,7 @@ export default function ComplianceClient() {
                           m.error ? "bg-red-50 text-red-800" : "bg-white text-gray-800",
                         ].join(" ")}
                       >
-                        <p className="whitespace-pre-wrap wrap-break-word">{m.content}</p>
+                        <AssistantBody text={m.content} error={m.error} />
                       </article>
                     )}
                     {m.role === "assistant" && m.kind !== "compliance" && m.sources?.length ? (
@@ -944,20 +1014,37 @@ export default function ComplianceClient() {
                   </div>
                 ))}
 
-                {busy ? (
-                  <article
-                    className={[
-                      "rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm text-gray-500",
-                      chatFullWidth
-                        ? "w-full max-w-full"
-                        : "max-w-[92%] sm:max-w-[80%]",
-                    ].join(" ")}
-                  >
-                    <p className="flex items-center gap-2">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-blue" />
-                      {statusText}
-                    </p>
-                  </article>
+                {busy && messages[messages.length - 1]?.role !== "assistant" ? (
+                  streamCompliance ? (
+                    <div className="w-full max-w-full rounded-2xl rounded-bl-md border border-gray-100 bg-white p-4 sm:p-5">
+                      <ComplianceResultView
+                        data={{
+                          ...streamCompliance,
+                          summary: streamText || streamCompliance.summary,
+                        }}
+                        streaming
+                      />
+                    </div>
+                  ) : (
+                    <article
+                      className={[
+                        "rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm leading-relaxed",
+                        chatFullWidth
+                          ? "w-full max-w-full"
+                          : "max-w-[92%] sm:max-w-[80%]",
+                        streamText ? "text-gray-800" : "text-gray-500",
+                      ].join(" ")}
+                    >
+                      {streamText ? (
+                        <AssistantBody text={streamText} streaming />
+                      ) : (
+                        <p className="flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-blue" />
+                          {statusText}
+                        </p>
+                      )}
+                    </article>
+                  )
                 ) : null}
               </div>
             )}

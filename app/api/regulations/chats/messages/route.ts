@@ -27,6 +27,7 @@ import type {
 } from "@/app/lib/regulationsRag/types";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const CHAT_SELECT =
@@ -206,87 +207,160 @@ export async function POST(req: NextRequest) {
       .select(CHAT_SELECT)
       .single();
     if (patchedChat) chat = patchedChat as ChatRecord;
+    if (!chat) {
+      return NextResponse.json({ error: "Chat not found." }, { status: 404 });
+    }
+    const currentChat = chat;
 
     const documentText = extractedText || storedText;
     const documentFilename =
-      filename || chat.document_filename || "uploaded-document.pdf";
+      filename || currentChat.document_filename || "uploaded-document.pdf";
     const scopedAuthorities =
       authorities.length > 0
         ? authorities
-        : Array.isArray(chat.authorities)
-          ? chat.authorities
+        : Array.isArray(currentChat.authorities)
+          ? currentChat.authorities
           : [];
 
-    let assistantKind: ChatMessageKind = "ask";
-    let assistantContent = "";
-    let sources: RagSource[] = [];
-    let compliance: ComplianceResult | null = null;
-    let assistantError = false;
-
-    try {
-      if (intent === "compliance") {
-        compliance = await analyzeCompliance({
-          pdfBuffer,
-          proposalText: pdfBuffer ? undefined : documentText,
-          filename: documentFilename,
-          authoritiesOverride: scopedAuthorities.length ? scopedAuthorities : null,
-          notes,
-          pages: pdfBuffer ? undefined : chat.document_pages,
-        });
-        assistantKind = "compliance";
-        assistantContent =
-          compliance.summary ||
-          (compliance.needsAuthoritySelection
-            ? "Select an authority and try again."
-            : "Compliance analysis complete.");
-        sources = compliance.sources || [];
-      } else {
-        const asked = await askQuestion(question, {
-          authorities: scopedAuthorities,
-          documentText,
-          documentFilename,
-          notes,
-          history: historyFromMessages(priorMessages),
-        });
-        assistantKind = "ask";
-        assistantContent = asked.answer;
-        sources = asked.sources || [];
-      }
-    } catch (err) {
-      assistantError = true;
-      assistantContent = err instanceof Error ? err.message : "Request failed";
-    }
-
-    const { data: assistantRow, error: assistantInsertError } = await auth.client
-      .from("regulation_chat_messages")
-      .insert({
-        chat_id: chat.id,
-        role: "assistant",
-        content: assistantContent,
-        kind: assistantKind,
-        sources,
-        compliance,
-        error: assistantError,
-      })
-      .select(MESSAGE_SELECT)
-      .single();
-
-    if (assistantInsertError || !assistantRow) {
-      return NextResponse.json(
-        { error: assistantInsertError?.message || "Could not save the reply." },
-        { status: 400 }
-      );
-    }
-
     const userMessage = mapMessage(userRow);
-    const assistantMessage = mapMessage(assistantRow);
-    const messages: RegulationChatMessage[] = [...priorMessages, userMessage, assistantMessage];
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (event: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        };
 
-    return NextResponse.json({
-      chat: mapChatSummary(chat),
-      userMessage,
-      assistantMessage,
-      messages,
+        let assistantKind: ChatMessageKind = "ask";
+        let assistantContent = "";
+        let sources: RagSource[] = [];
+        let compliance: ComplianceResult | null = null;
+        let assistantError = false;
+
+        try {
+          send({
+            type: "status",
+            text:
+              intent === "compliance"
+                ? "Matching your proposal to regulations…"
+                : "Searching the regulation library…",
+          });
+
+          if (intent === "compliance") {
+            compliance = await analyzeCompliance({
+              pdfBuffer,
+              proposalText: pdfBuffer ? undefined : documentText,
+              filename: documentFilename,
+              authoritiesOverride: scopedAuthorities.length ? scopedAuthorities : null,
+              notes,
+              pages: pdfBuffer ? undefined : currentChat.document_pages,
+              onStatus: (text) => send({ type: "status", text }),
+              onDelta: (text) => send({ type: "token", text }),
+              onPartial: (data) => send({ type: "compliance", compliance: data }),
+            });
+            assistantKind = "compliance";
+            assistantContent =
+              compliance.summary ||
+              (compliance.needsAuthoritySelection
+                ? "Select an authority and try again."
+                : "Compliance analysis complete.");
+            sources = compliance.sources || [];
+          } else {
+            const asked = await askQuestion(question, {
+              authorities: scopedAuthorities,
+              documentText,
+              documentFilename,
+              notes,
+              history: historyFromMessages(priorMessages),
+              onStatus: (text) => send({ type: "status", text }),
+              onDelta: (text) => send({ type: "token", text }),
+            });
+            assistantKind = "ask";
+            assistantContent = asked.answer;
+            sources = asked.sources || [];
+          }
+
+          const { data: assistantRow, error: assistantInsertError } = await auth.client
+            .from("regulation_chat_messages")
+            .insert({
+              chat_id: currentChat.id,
+              role: "assistant",
+              content: assistantContent,
+              kind: assistantKind,
+              sources,
+              compliance,
+              error: assistantError,
+            })
+            .select(MESSAGE_SELECT)
+            .single();
+
+          if (assistantInsertError || !assistantRow) {
+            send({
+              type: "error",
+              error: assistantInsertError?.message || "Could not save the reply.",
+            });
+            return;
+          }
+
+          const assistantMessage = mapMessage(assistantRow);
+          const messages: RegulationChatMessage[] = [
+            ...priorMessages,
+            userMessage,
+            assistantMessage,
+          ];
+          send({
+            type: "done",
+            chat: mapChatSummary(currentChat),
+            userMessage,
+            assistantMessage,
+            messages,
+          });
+        } catch (err) {
+          assistantError = true;
+          assistantContent = err instanceof Error ? err.message : "Request failed";
+          try {
+            const { data: assistantRow, error: assistantInsertError } = await auth.client
+              .from("regulation_chat_messages")
+              .insert({
+                chat_id: currentChat.id,
+                role: "assistant",
+                content: assistantContent,
+                kind: assistantKind,
+                sources,
+                compliance,
+                error: assistantError,
+              })
+              .select(MESSAGE_SELECT)
+              .single();
+            if (assistantInsertError || !assistantRow) {
+              send({ type: "error", error: assistantContent });
+              return;
+            }
+            const assistantMessage = mapMessage(assistantRow);
+            send({
+              type: "done",
+              chat: mapChatSummary(currentChat),
+              userMessage,
+              assistantMessage,
+              messages: [...priorMessages, userMessage, assistantMessage],
+            });
+          } catch (inner) {
+            send({
+              type: "error",
+              error: inner instanceof Error ? inner.message : assistantContent,
+            });
+          }
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Request failed";

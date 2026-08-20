@@ -111,10 +111,21 @@ function Metric({
   );
 }
 
+function StreamingCaret() {
+  return (
+    <span
+      className="ml-0.5 inline-block h-[1.15em] w-[2px] animate-pulse bg-brand-blue align-text-bottom"
+      aria-hidden
+    />
+  );
+}
+
 export default function ComplianceResultView({
   data,
+  streaming = false,
 }: {
   data: ComplianceResult;
+  streaming?: boolean;
 }) {
   if (data.needsAuthoritySelection) {
     return (
@@ -158,6 +169,12 @@ export default function ComplianceResultView({
         {data.summary ? (
           <p className="mt-3 text-sm leading-relaxed text-gray-800">
             {data.summary}
+            {streaming ? <StreamingCaret /> : null}
+          </p>
+        ) : streaming ? (
+          <p className="mt-3 text-sm leading-relaxed text-gray-500">
+            Writing analysis…
+            <StreamingCaret />
           </p>
         ) : null}
       </div>
