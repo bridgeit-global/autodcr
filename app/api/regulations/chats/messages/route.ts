@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthedUserClient, isUuid } from "@/app/lib/regulationsRag/chatAuth";
 import {
   DOCUMENT_TEXT_MAX,
+  MAX_PROPOSAL_FILES,
   historyFromMessages,
+  joinExtractedDocuments,
   mapChatSummary,
   mapMessage,
   resolveTurnIntent,
@@ -64,8 +66,9 @@ export async function POST(req: NextRequest) {
     const authorities = normalizeAuthorities(
       formData.get("authorities") ?? formData.get("authority")
     );
-    const file = formData.get("proposal");
-    const hasFile = file instanceof File && file.size > 0;
+    const uploaded = formData
+      .getAll("proposal")
+      .filter((item): item is File => item instanceof File && item.size > 0);
 
     if (!isUuid(projectId)) {
       return NextResponse.json({ error: "A valid projectId is required." }, { status: 400 });
@@ -75,37 +78,51 @@ export async function POST(req: NextRequest) {
     }
 
     let filename: string | null = null;
-    let pdfBuffer: Buffer | null = null;
     let extractedText = "";
     let extractedPages = 0;
+    const hasFile = uploaded.length > 0;
 
-    if (hasFile && file instanceof File) {
-      filename = file.name || "proposal.pdf";
-      const mime = file.type || "";
-      if (mime !== "application/pdf" && !filename.toLowerCase().endsWith(".pdf")) {
-        return NextResponse.json({ error: "Only PDF proposals are supported." }, { status: 400 });
+    if (hasFile) {
+      if (uploaded.length > MAX_PROPOSAL_FILES) {
+        return NextResponse.json(
+          { error: `You can upload up to ${MAX_PROPOSAL_FILES} PDFs at a time.` },
+          { status: 400 }
+        );
       }
       const config = getConfig();
       const maxBytes = config.uploadMaxMb * 1024 * 1024;
-      if (file.size > maxBytes) {
-        return NextResponse.json(
-          { error: `Proposal PDF must be under ${config.uploadMaxMb} MB.` },
-          { status: 400 }
-        );
+      const parts: { filename: string; text: string; pages: number }[] = [];
+      for (const file of uploaded) {
+        const name = file.name || "proposal.pdf";
+        const mime = file.type || "";
+        if (mime !== "application/pdf" && !name.toLowerCase().endsWith(".pdf")) {
+          return NextResponse.json(
+            { error: `Only PDF proposals are supported (${name}).` },
+            { status: 400 }
+          );
+        }
+        if (file.size > maxBytes) {
+          return NextResponse.json(
+            { error: `${name} must be under ${config.uploadMaxMb} MB.` },
+            { status: 400 }
+          );
+        }
+        const extracted = await extractPdf(Buffer.from(await file.arrayBuffer()));
+        const text = extracted.text.trim();
+        if (!text) {
+          return NextResponse.json(
+            {
+              error: `Could not extract text from ${name}. Scanned/image-only PDFs need OCR (not supported yet).`,
+            },
+            { status: 400 }
+          );
+        }
+        parts.push({ filename: name, text, pages: extracted.pages });
       }
-      pdfBuffer = Buffer.from(await file.arrayBuffer());
-      const extracted = await extractPdf(pdfBuffer);
-      extractedText = extracted.text.trim();
-      extractedPages = extracted.pages;
-      if (!extractedText) {
-        return NextResponse.json(
-          {
-            error:
-              "Could not extract text from the proposal PDF. Scanned/image-only PDFs need OCR (not supported yet).",
-          },
-          { status: 400 }
-        );
-      }
+      const combined = joinExtractedDocuments(parts);
+      filename = combined.filename;
+      extractedText = combined.text;
+      extractedPages = combined.pages;
     }
 
     let chat: ChatRecord | null = null;
@@ -148,11 +165,11 @@ export async function POST(req: NextRequest) {
     const storedText = String(chat.document_text || "").trim();
     const intent = resolveTurnIntent({
       question,
-      hasNewFile: Boolean(pdfBuffer),
+      hasNewFile: hasFile,
       hasStoredDocument: Boolean(storedText || extractedText),
     });
 
-    if (intent === "compliance" && !pdfBuffer && !storedText) {
+    if (intent === "compliance" && !extractedText && !storedText) {
       return NextResponse.json(
         { error: "Upload a proposal PDF to run a compliance check." },
         { status: 400 }
@@ -247,12 +264,11 @@ export async function POST(req: NextRequest) {
 
           if (intent === "compliance") {
             compliance = await analyzeCompliance({
-              pdfBuffer,
-              proposalText: pdfBuffer ? undefined : documentText,
+              proposalText: documentText,
               filename: documentFilename,
               authoritiesOverride: scopedAuthorities.length ? scopedAuthorities : null,
               notes,
-              pages: pdfBuffer ? undefined : currentChat.document_pages,
+              pages: extractedPages || currentChat.document_pages,
               onStatus: (text) => send({ type: "status", text }),
               onDelta: (text) => send({ type: "token", text }),
               onPartial: (data) => send({ type: "compliance", compliance: data }),

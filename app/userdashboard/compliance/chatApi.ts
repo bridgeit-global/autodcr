@@ -150,7 +150,8 @@ export async function sendRegulationChatTurn(
     projectId: string;
     chatId?: string;
     question?: string;
-    file?: File | null;
+    files?: File[] | null;
+  file?: File | null;
     authorities: string[];
     notes?: string;
   },
@@ -164,7 +165,11 @@ export async function sendRegulationChatTurn(
   if (params.authorities.length) {
     body.append("authorities", params.authorities.join(","));
   }
-  if (params.file) body.append("proposal", params.file);
+  const uploads = [
+    ...(params.files || []),
+    ...(params.file ? [params.file] : []),
+  ];
+  for (const file of uploads) body.append("proposal", file);
 
   const res = await fetch("/api/regulations/chats/messages", {
     method: "POST",

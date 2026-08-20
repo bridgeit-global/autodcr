@@ -9,6 +9,7 @@ import type {
 } from "./types";
 
 export const DOCUMENT_TEXT_MAX = 80_000;
+export const MAX_PROPOSAL_FILES = 10;
 
 const COMPLIANCE_INTENT =
   /\b(complian(ce|t)?|gap\s*analysis|analy[sz]e(\s+this)?(\s+(proposal|document|pdf))?|run\s+(a\s+)?(compliance\s+)?check|checklist|scrutin[yi])/i;
@@ -36,6 +37,25 @@ export function resolveTurnIntent(params: {
   if (question) return "ask";
   if (params.hasNewFile) return "compliance";
   throw new Error("Type a question, or upload a proposal PDF to analyze.");
+}
+
+export function formatFilenames(names: string[]): string {
+  return names.map((n) => n.trim()).filter(Boolean).join(", ");
+}
+
+export function joinExtractedDocuments(
+  parts: { filename: string; text: string; pages: number }[]
+): { filename: string; text: string; pages: number } {
+  const filename = formatFilenames(parts.map((p) => p.filename));
+  const text = parts
+    .map((p) => {
+      const pageLabel = p.pages === 1 ? "1 page" : `${p.pages} pages`;
+      return `===== ${p.filename} (${pageLabel}) =====\n${p.text.trim()}`;
+    })
+    .filter((block) => block.trim())
+    .join("\n\n");
+  const pages = parts.reduce((sum, p) => sum + p.pages, 0);
+  return { filename, text, pages };
 }
 
 export function titleFromTurn(question: string, filename?: string | null): string {

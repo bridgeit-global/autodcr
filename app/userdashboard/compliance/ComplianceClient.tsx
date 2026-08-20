@@ -33,6 +33,7 @@ import Button from "@/app/components/ui/Button";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
+import { formatFilenames, MAX_PROPOSAL_FILES } from "@/app/lib/regulationsRag/chatStore";
 import type {
   AuthorityWithDocuments,
   ComplianceResult,
@@ -260,7 +261,7 @@ export default function ComplianceClient() {
   const [authorities, setAuthorities] = useState<AuthorityWithDocuments[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notes, setNotes] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -290,7 +291,7 @@ export default function ComplianceClient() {
   const plot = getPlotDetails(selectedProject ?? {});
   const contextPills = plotPills(plot);
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
-  const documentName = file?.name || attachedFilename;
+  const documentName = files[0]?.name || attachedFilename;
 
   const replaceQuery = useCallback(
     (projectId: string, chatId: string | null) => {
@@ -406,7 +407,7 @@ export default function ComplianceClient() {
     setSelectedProjectId(projectId);
     setActiveChatId(null);
     setMessages([]);
-    setFile(null);
+    setFiles([]);
     setAttachedFilename(null);
     setError(null);
     setQuestion("");
@@ -530,7 +531,7 @@ export default function ComplianceClient() {
   function startNewChat() {
     setActiveChatId(null);
     setMessages([]);
-    setFile(null);
+    setFiles([]);
     setAttachedFilename(null);
     setQuestion("");
     setError(null);
@@ -544,35 +545,54 @@ export default function ComplianceClient() {
     inputRef.current?.focus();
   }
 
-  function acceptFile(next: File | undefined | null) {
-    if (!next) return;
-    const okType =
-      next.type === "application/pdf" || next.name.toLowerCase().endsWith(".pdf");
-    if (!okType) {
-      setError("Please upload a PDF file.");
+  function acceptFiles(list: FileList | File[] | null | undefined) {
+    if (!list?.length) return;
+    const incoming = Array.from(list);
+    const rejected = incoming.filter(
+      (next) =>
+        next.type !== "application/pdf" && !next.name.toLowerCase().endsWith(".pdf")
+    );
+    if (rejected.length) {
+      setError("Please upload PDF files only.");
       return;
     }
-    if (next.size > MAX_PDF_BYTES) {
-      setError("PDF must be 25 MB or smaller.");
+    const oversized = incoming.find((next) => next.size > MAX_PDF_BYTES);
+    if (oversized) {
+      setError(`${oversized.name} must be 25 MB or smaller.`);
       return;
     }
-    setError(null);
-    setFile(next);
+    let tooMany = false;
+    setFiles((prev) => {
+      const next = [...prev];
+      for (const file of incoming) {
+        if (next.some((existing) => existing.name === file.name && existing.size === file.size)) {
+          continue;
+        }
+        if (next.length >= MAX_PROPOSAL_FILES) {
+          tooMany = true;
+          break;
+        }
+        next.push(file);
+      }
+      return next;
+    });
+    setError(tooMany ? `You can attach up to ${MAX_PROPOSAL_FILES} PDFs.` : null);
   }
 
   async function send(text = question) {
     if (!selectedProjectId || busy) return;
     const trimmed = text.trim();
-    if (!trimmed && !file) return;
+    if (!trimmed && files.length === 0) return;
 
-    const pendingFile = file;
+    const pendingFiles = files;
+    const pendingLabel = formatFilenames(pendingFiles.map((f) => f.name));
     setBusy(true);
     setError(null);
     streamBufRef.current = "";
     setStreamText("");
     setStreamCompliance(null);
     setStatusText(
-      pendingFile || /complian|analy[sz]e|gap analysis/i.test(trimmed)
+      pendingFiles.length || /complian|analy[sz]e|gap analysis/i.test(trimmed)
         ? "Matching your proposal to regulations…"
         : "Searching the regulation library…"
     );
@@ -583,11 +603,13 @@ export default function ComplianceClient() {
         id: `local-${Date.now()}`,
         chat_id: activeChatId || "local",
         role: "user",
-        content: trimmed || `Analyze this proposal for compliance (${pendingFile?.name || "PDF"})`,
-        kind: pendingFile ? "document" : "text",
+        content:
+          trimmed ||
+          `Analyze this proposal for compliance (${pendingLabel || "PDF"})`,
+        kind: pendingFiles.length ? "document" : "text",
         sources: [],
         compliance: null,
-        filename: pendingFile?.name || null,
+        filename: pendingLabel || null,
         error: false,
         created_at: new Date().toISOString(),
       },
@@ -599,7 +621,7 @@ export default function ComplianceClient() {
           projectId: selectedProjectId,
           chatId: activeChatId || undefined,
           question: trimmed,
-          file: pendingFile,
+          files: pendingFiles,
           authorities: [...selected],
           notes,
         },
@@ -623,7 +645,7 @@ export default function ComplianceClient() {
         }
       );
 
-      setFile(null);
+      setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       skipChatLoadRef.current = true;
       setActiveChatId(result.chat.id);
@@ -684,7 +706,7 @@ export default function ComplianceClient() {
     }
   }
 
-  const canSend = Boolean(selectedProjectId) && !busy && Boolean(question.trim() || file);
+  const canSend = Boolean(selectedProjectId) && !busy && Boolean(question.trim() || files.length);
 
   const historyList = (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -836,7 +858,7 @@ export default function ComplianceClient() {
                   </p>
                 ) : (
                   <p className="mt-0.5 hidden text-sm text-gray-500 sm:block">
-                    Ask CIDCO, MIDC, SRA &amp; MCGM, or upload a proposal PDF to check
+                    Ask CIDCO, MIDC, SRA &amp; MCGM, or upload proposal PDFs to check
                     compliance.
                   </p>
                 )}
@@ -972,8 +994,8 @@ export default function ComplianceClient() {
                   Ask, or check a proposal
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-gray-500">
-                  Upload a PDF to run a compliance check and ask follow-up questions
-                  about the document. Without a file, answers come from the
+                  Upload PDFs to run a compliance check and ask follow-up questions
+                  about the documents. Without files, answers come from the
                   regulation library.
                 </p>
                 <div className="mt-5 flex w-full flex-wrap justify-center gap-2">
@@ -983,7 +1005,7 @@ export default function ComplianceClient() {
                       type="button"
                       disabled={!selectedProjectId || busy}
                       onClick={() => {
-                        if (s.startsWith("Analyze") && !file && !attachedFilename) {
+                        if (s.startsWith("Analyze") && files.length === 0 && !attachedFilename) {
                           fileInputRef.current?.click();
                           setQuestion(s);
                           return;
@@ -1119,27 +1141,47 @@ export default function ComplianceClient() {
                 ref={fileInputRef}
                 type="file"
                 accept="application/pdf,.pdf"
+                multiple
                 disabled={!selectedProjectId || busy}
                 className="sr-only"
-                onChange={(e) => acceptFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  acceptFiles(e.target.files);
+                  e.target.value = "";
+                }}
               />
 
-              {file ? (
-                <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-brand-blue/30 bg-blue-50 px-3 py-1.5 text-xs text-brand-navy">
-                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate font-medium">{file.name}</span>
-                  <span className="text-gray-500">{formatFileSize(file.size)}</span>
-                  <button
-                    type="button"
-                    aria-label="Remove file"
-                    onClick={() => {
-                      setFile(null);
-                      if (fileInputRef.current) fileInputRef.current.value = "";
-                    }}
-                    className="rounded-full p-0.5 hover:bg-white"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+              {files.length ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {files.map((item) => (
+                    <div
+                      key={`${item.name}-${item.size}-${item.lastModified}`}
+                      className="inline-flex max-w-full items-center gap-2 rounded-full border border-brand-blue/30 bg-blue-50 px-3 py-1.5 text-xs text-brand-navy"
+                    >
+                      <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate font-medium">{item.name}</span>
+                      <span className="text-gray-500">{formatFileSize(item.size)}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${item.name}`}
+                        onClick={() => {
+                          setFiles((prev) =>
+                            prev.filter(
+                              (f) =>
+                                !(
+                                  f.name === item.name &&
+                                  f.size === item.size &&
+                                  f.lastModified === item.lastModified
+                                )
+                            )
+                          );
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
+                        className="rounded-full p-0.5 hover:bg-white"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               ) : null}
 
@@ -1148,7 +1190,7 @@ export default function ComplianceClient() {
                   type="button"
                   disabled={!selectedProjectId || busy}
                   onClick={() => fileInputRef.current?.click()}
-                  aria-label="Attach PDF"
+                  aria-label="Attach PDFs"
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 hover:text-brand-navy disabled:opacity-40"
                 >
                   <Paperclip className="h-4 w-4" />
@@ -1164,8 +1206,10 @@ export default function ComplianceClient() {
                     !selectedProjectId
                       ? "Select a project first"
                       : documentName
-                        ? "Ask about this document, or send to run a compliance check"
-                        : "Ask about FSI, setbacks, parking… or attach a PDF"
+                        ? files.length > 1
+                          ? `Ask about these ${files.length} documents, or send to run a compliance check`
+                          : "Ask about this document, or send to run a compliance check"
+                        : "Ask about FSI, setbacks, parking… or attach PDFs"
                   }
                   disabled={!selectedProjectId}
                   className="max-h-32 min-h-11 w-full resize-none bg-transparent px-1 py-2 text-base text-gray-900 outline-none placeholder:text-gray-400 sm:text-sm"
@@ -1184,7 +1228,7 @@ export default function ComplianceClient() {
                 </button>
               </div>
               <p className="mt-2 px-1 text-[11px] text-gray-400">
-                Enter to send · Shift+Enter for a new line · PDF up to 25 MB
+                Enter to send · Shift+Enter for a new line · up to {MAX_PROPOSAL_FILES} PDFs, 25 MB each
               </p>
             </form>
           </div>

@@ -173,6 +173,17 @@ function extractJsonObjectArray(raw: string, key: string): unknown[] {
   return items;
 }
 
+function excerptProposal(text: string, maxChars = 18000): string {
+  const sections = text.split(/\n(?===== )/);
+  if (sections.length <= 1) return text.slice(0, maxChars);
+  const per = Math.max(2000, Math.floor(maxChars / sections.length));
+  return sections
+    .map((section) =>
+      section.length > per ? `${section.slice(0, per).trimEnd()}\n[truncated]` : section
+    )
+    .join("\n\n");
+}
+
 function toSources(hits: SearchHit[]): RagSource[] {
   return hits.slice(0, 20).map((h) => ({
     source: h.source,
@@ -287,7 +298,7 @@ export async function analyzeCompliance({
 
   const proposalExcerpt = [
     notes ? `Project notes from user:\n${notes}\n` : "",
-    proposalText.slice(0, 14000),
+    excerptProposal(proposalText),
   ]
     .filter(Boolean)
     .join("\n");
@@ -357,7 +368,7 @@ Regulation excerpts:
 ${formatContext(hits)}
 
 ---
-Project proposal (${filename}, ~${pages} pages):
+Project proposal documents (${filename}, ~${pages} pages):
 ${proposalExcerpt}`,
       },
     ],
