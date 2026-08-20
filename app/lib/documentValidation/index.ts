@@ -1,6 +1,11 @@
-import { extractDocument, extractDocumentFromMedia } from "./ai";
+import {
+  classifyDocumentType,
+  extractDocument,
+  extractDocumentFromMedia,
+  type ClassifyDocumentResult,
+} from "./ai";
 import { extractTextFromPdfBuffer } from "./extractText";
-import { documents, type DocumentType } from "./registry";
+import { documents, isDocumentType, type DocumentType } from "./registry";
 import type { DocumentDefinition } from "./types";
 import { validateExtractedFields, type ValidationResult } from "./validate";
 import type { z } from "zod";
@@ -10,6 +15,10 @@ export type DocumentValidationResponse = ValidationResult<
 > & {
   documentType: DocumentType;
   documentLabel: string;
+};
+
+export type ClassifyAndValidateResponse = DocumentValidationResponse & {
+  classification: ClassifyDocumentResult;
 };
 
 const IMAGE_TYPES = new Set([
@@ -157,7 +166,67 @@ export async function validateDocumentFile(
   return runValidation(documentType, flattenExtracted(extracted));
 }
 
+/**
+ * Classify an unlabeled file into one of allowedTypes, then extract + validate.
+ */
+export async function classifyAndValidateDocumentFile(
+  buffer: Buffer,
+  allowedTypes: DocumentType[],
+  mediaType: string
+): Promise<ClassifyAndValidateResponse> {
+  if (allowedTypes.length === 0) {
+    throw new Error("At least one allowed document type is required.");
+  }
+
+  if (!isSupportedDocumentMediaType(mediaType)) {
+    throw new Error(
+      `Unsupported file type "${mediaType}". Upload a PDF or image (JPEG/PNG/WebP).`
+    );
+  }
+
+  let documentText = "";
+  if (mediaType === "application/pdf") {
+    try {
+      documentText = await extractTextFromPdfBuffer(buffer);
+    } catch {
+      // Scanned / image-only PDF — classify from media alone.
+    }
+  }
+
+  const classification = await classifyDocumentType(
+    { data: buffer, mediaType },
+    allowedTypes,
+    documentText
+  );
+
+  if (
+    classification.documentType === "unknown" ||
+    !isDocumentType(classification.documentType) ||
+    !allowedTypes.includes(classification.documentType)
+  ) {
+    const expected = allowedTypes
+      .map((id) => documents[id]?.label ?? id)
+      .join(", ");
+    throw new Error(
+      `Could not identify this document. Expected one of: ${expected}. Please upload a clearer file or choose the type manually.`
+    );
+  }
+
+  const result = await validateDocumentFile(
+    buffer,
+    classification.documentType,
+    mediaType
+  );
+
+  return {
+    ...result,
+    classification,
+  };
+}
+
 export type { DocumentDefinition } from "./types";
+export type { ClassifyDocumentResult } from "./ai";
+export { classifyDocumentType } from "./ai";
 export {
   documents,
   resolveDocumentType,

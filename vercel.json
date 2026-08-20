@@ -4,6 +4,14 @@
       "memory": 1024,
       "maxDuration": 60
     },
+    "app/api/classify-and-validate-document/route.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "app/api/classify-document/route.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
     "app/api/application-preview-pdf/route.ts": {
       "memory": 1024,
       "maxDuration": 60

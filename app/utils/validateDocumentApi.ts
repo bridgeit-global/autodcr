@@ -44,16 +44,20 @@ async function parseValidateDocumentResponse(response: Response): Promise<{
   }
 }
 
-export async function validateDocumentFile(
-  file: File,
-  documentType: DocumentType,
-  applicationType?: string
-): Promise<DocumentValidationResult> {
+function assertUploadSize(file: File): void {
   if (file.size > MAX_UPLOAD_BYTES) {
     throw new Error(
       `"${file.name}" is ${formatMb(file.size)} — over the 4.5 MB Vercel upload limit. Compress the PDF and try again.`
     );
   }
+}
+
+export async function validateDocumentFile(
+  file: File,
+  documentType: DocumentType,
+  applicationType?: string
+): Promise<DocumentValidationResult> {
+  assertUploadSize(file);
 
   const formData = new FormData();
   formData.append("file", file);
@@ -71,4 +75,37 @@ export async function validateDocumentFile(
     throw new Error(parsed.error);
   }
   return parsed.data as unknown as DocumentValidationResult;
+}
+
+export type ClassifyAndValidateDocumentResult = DocumentValidationResult & {
+  classification: {
+    documentType: string;
+    confidence: "high" | "medium" | "low";
+  };
+};
+
+/** Classify an unlabeled file, then extract + validate with the detected type. */
+export async function classifyAndValidateDocumentFile(
+  file: File,
+  allowedTypes: DocumentType[]
+): Promise<ClassifyAndValidateDocumentResult> {
+  assertUploadSize(file);
+
+  if (allowedTypes.length === 0) {
+    throw new Error("At least one allowed document type is required.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("allowedTypes", allowedTypes.join(","));
+
+  const response = await fetch("/api/classify-and-validate-document", {
+    method: "POST",
+    body: formData,
+  });
+  const parsed = await parseValidateDocumentResponse(response);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  return parsed.data as unknown as ClassifyAndValidateDocumentResult;
 }

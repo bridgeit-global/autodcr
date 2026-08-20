@@ -6,6 +6,7 @@ import {
   FolderKanban,
   FileStack,
   FileText,
+  IndianRupee,
   ShieldCheck,
   Users,
   type LucideIcon,
@@ -81,6 +82,13 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     label: "Compliance",
     href: "/userdashboard/compliance",
     icon: ShieldCheck,
+    live: true,
+  },
+  {
+    id: "government-fees",
+    label: "Government Fees",
+    href: "/userdashboard/government-fees",
+    icon: IndianRupee,
     live: true,
   },
   {
