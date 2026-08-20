@@ -1,5 +1,6 @@
 import { supabase } from "@/app/utils/supabase";
 import type {
+  ChatMessageReaction,
   ComplianceResult,
   RegulationChatMessage,
   RegulationChatSummary,
@@ -68,6 +69,28 @@ export async function deleteRegulationChat(chatId: string): Promise<void> {
     headers: await authHeaders(),
   });
   if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function setRegulationMessageReaction(
+  messageId: string,
+  reaction: ChatMessageReaction | null
+): Promise<RegulationChatMessage> {
+  const res = await fetch(`/api/regulations/chats/messages/${messageId}`, {
+    method: "PATCH",
+    headers: {
+      ...(await authHeaders()),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ reaction }),
+  });
+  const data = (await res.json()) as {
+    message?: RegulationChatMessage;
+    error?: string;
+  };
+  if (!res.ok || !data.message) {
+    throw new Error(data.error || "Could not save reaction.");
+  }
+  return data.message;
 }
 
 function asTurnResult(data: {
@@ -151,7 +174,7 @@ export async function sendRegulationChatTurn(
     chatId?: string;
     question?: string;
     files?: File[] | null;
-  file?: File | null;
+    file?: File | null;
     authorities: string[];
     notes?: string;
   },

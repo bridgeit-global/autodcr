@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthedUserClient, isUuid } from "@/app/lib/regulationsRag/chatAuth";
-import { mapChatSummary, mapMessage } from "@/app/lib/regulationsRag/chatStore";
+import { mapChatSummary, mapMessage, MESSAGE_SELECT } from "@/app/lib/regulationsRag/chatStore";
 import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
 
 export const runtime = "nodejs";
@@ -34,9 +34,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx) {
 
   const { data: messages, error: messageError } = await auth.client
     .from("regulation_chat_messages")
-    .select(
-      "id, chat_id, role, content, kind, sources, compliance, filename, error, created_at"
-    )
+    .select(MESSAGE_SELECT)
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true });
 

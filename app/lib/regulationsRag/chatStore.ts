@@ -1,6 +1,7 @@
 import type {
   AskHistoryTurn,
   ChatMessageKind,
+  ChatMessageReaction,
   ChatRole,
   ComplianceResult,
   RagSource,
@@ -96,6 +97,9 @@ export function mapChatSummary(row: ChatRow): RegulationChatSummary {
   };
 }
 
+export const MESSAGE_SELECT =
+  "id, chat_id, role, content, kind, sources, compliance, filename, error, reaction, created_at";
+
 type MessageRow = {
   id: string;
   chat_id: string;
@@ -106,6 +110,7 @@ type MessageRow = {
   compliance: unknown;
   filename: string | null;
   error: boolean | null;
+  reaction: string | null;
   created_at: string;
 };
 
@@ -127,6 +132,10 @@ function asCompliance(value: unknown): ComplianceResult | null {
   return value as ComplianceResult;
 }
 
+function asReaction(value: unknown): ChatMessageReaction | null {
+  return value === "like" || value === "unlike" ? value : null;
+}
+
 export function mapMessage(row: MessageRow): RegulationChatMessage {
   return {
     id: row.id,
@@ -138,6 +147,7 @@ export function mapMessage(row: MessageRow): RegulationChatMessage {
     compliance: asCompliance(row.compliance),
     filename: row.filename,
     error: Boolean(row.error),
+    reaction: asReaction(row.reaction),
     created_at: row.created_at,
   };
 }

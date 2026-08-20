@@ -3,6 +3,7 @@ import { getAuthedUserClient, isUuid } from "@/app/lib/regulationsRag/chatAuth";
 import {
   DOCUMENT_TEXT_MAX,
   MAX_PROPOSAL_FILES,
+  MESSAGE_SELECT,
   historyFromMessages,
   joinExtractedDocuments,
   mapChatSummary,
@@ -34,9 +35,6 @@ export const maxDuration = 120;
 
 const CHAT_SELECT =
   "id, project_id, title, authorities, document_filename, document_pages, document_text, created_at, updated_at";
-
-const MESSAGE_SELECT =
-  "id, chat_id, role, content, kind, sources, compliance, filename, error, created_at";
 
 type ChatRecord = {
   id: string;

@@ -36,6 +36,7 @@ import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
 import { formatFilenames, MAX_PROPOSAL_FILES } from "@/app/lib/regulationsRag/chatStore";
 import type {
   AuthorityWithDocuments,
+  ChatMessageReaction,
   ComplianceResult,
   RagSource,
   RegulationChatMessage,
@@ -51,8 +52,10 @@ import {
   getRegulationChat,
   listRegulationChats,
   sendRegulationChatTurn,
+  setRegulationMessageReaction,
 } from "./chatApi";
 import ComplianceResultView from "./ComplianceResultView";
+import MessageActions from "./MessageActions";
 
 type PlotDetails = {
   planningAuthority?: string;
@@ -611,6 +614,7 @@ export default function ComplianceClient() {
         compliance: null,
         filename: pendingLabel || null,
         error: false,
+        reaction: null,
         created_at: new Date().toISOString(),
       },
     ]);
@@ -703,6 +707,28 @@ export default function ComplianceClient() {
       setError(err instanceof Error ? err.message : "Could not delete chat.");
     } finally {
       setDeletingChat(false);
+    }
+  }
+
+  async function reactToMessage(
+    messageId: string,
+    reaction: ChatMessageReaction | null
+  ) {
+    if (messageId.startsWith("local-")) return;
+    const previous = messages.find((m) => m.id === messageId)?.reaction ?? null;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, reaction } : m))
+    );
+    try {
+      const updated = await setRegulationMessageReaction(messageId, reaction);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === updated.id ? { ...m, reaction: updated.reaction } : m))
+      );
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, reaction: previous } : m))
+      );
+      setError(err instanceof Error ? err.message : "Could not save reaction.");
     }
   }
 
@@ -1072,6 +1098,23 @@ export default function ComplianceClient() {
                     )}
                     {m.role === "assistant" && m.kind !== "compliance" && m.sources?.length ? (
                       <Sources sources={m.sources} fullWidth={chatFullWidth} />
+                    ) : null}
+                    {!m.id.startsWith("local-") ? (
+                      <div
+                        className={
+                          m.role === "user"
+                            ? "ml-auto max-w-[92%] sm:max-w-[80%]"
+                            : chatFullWidth
+                              ? "w-full max-w-full"
+                              : "max-w-[92%] sm:max-w-[80%]"
+                        }
+                      >
+                        <MessageActions
+                          message={m}
+                          align={m.role === "user" ? "end" : "start"}
+                          onReact={(reaction) => void reactToMessage(m.id, reaction)}
+                        />
+                      </div>
                     ) : null}
                   </div>
                 ))}

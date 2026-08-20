@@ -118,6 +118,8 @@ export type RegulationChatSummary = {
   updated_at: string;
 };
 
+export type ChatMessageReaction = "like" | "unlike";
+
 export type RegulationChatMessage = {
   id: string;
   chat_id: string;
@@ -128,6 +130,7 @@ export type RegulationChatMessage = {
   compliance: ComplianceResult | null;
   filename: string | null;
   error: boolean;
+  reaction: ChatMessageReaction | null;
   created_at: string;
 };
 

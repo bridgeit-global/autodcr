@@ -368,6 +368,7 @@ export type Database = {
           filename: string | null
           id: string
           kind: string
+          reaction: string | null
           role: string
           sources: Json
         }
@@ -380,6 +381,7 @@ export type Database = {
           filename?: string | null
           id?: string
           kind?: string
+          reaction?: string | null
           role: string
           sources?: Json
         }
@@ -392,6 +394,7 @@ export type Database = {
           filename?: string | null
           id?: string
           kind?: string
+          reaction?: string | null
           role?: string
           sources?: Json
         }
