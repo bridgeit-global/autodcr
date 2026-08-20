@@ -154,6 +154,7 @@ const CadPane = forwardRef<CadViewerHandle, CadPaneProps>(function CadPane(
         ref={iframeRef}
         src="/cad-embed"
         title={label || name || "CAD viewer"}
+        allow="fullscreen"
         className="h-full w-full border-0 bg-white"
       />
       {loading ? (

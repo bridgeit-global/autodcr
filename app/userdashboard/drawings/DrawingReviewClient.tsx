@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowUpRight,
@@ -13,7 +13,9 @@ import {
   History,
   Layers,
   Loader2,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   Minus,
   MinusCircle,
   MousePointer2,
@@ -139,12 +141,15 @@ export default function DrawingReviewClient() {
   const [editDirty, setEditDirty] = useState(false);
   const [activeCadTool, setActiveCadTool] = useState<string>("select");
   const [bufferTick, setBufferTick] = useState(0);
+  const [cadFullscreen, setCadFullscreen] = useState(false);
 
   const buffersRef = useRef<Map<string, ArrayBuffer>>(new Map());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const versionsRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<CadViewerHandle | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const nativeFullscreenRef = useRef(false);
 
   const selectedProject = nonDraftProjects.find((p) => p.id === selectedProjectId) ?? null;
   const projectValue = selectedProject?.id ?? "";
@@ -237,6 +242,75 @@ export default function DrawingReviewClient() {
       setEditDirty(true);
     }
   };
+
+  const notifyCadResize = () => {
+    window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+  };
+
+  const setCadFullscreenMode = useCallback(async (next: boolean) => {
+    setCadFullscreen(next);
+    if (next) {
+      try {
+        await stageRef.current?.requestFullscreen();
+        nativeFullscreenRef.current = document.fullscreenElement === stageRef.current;
+      } catch {
+        nativeFullscreenRef.current = false;
+      }
+      return;
+    }
+    nativeFullscreenRef.current = false;
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // Overlay state is already cleared.
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement === stageRef.current) {
+        nativeFullscreenRef.current = true;
+        setCadFullscreen(true);
+        return;
+      }
+      if (!document.fullscreenElement && nativeFullscreenRef.current) {
+        nativeFullscreenRef.current = false;
+        setCadFullscreen(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    notifyCadResize();
+    const timeout = window.setTimeout(notifyCadResize, 180);
+    if (!cadFullscreen) {
+      return () => window.clearTimeout(timeout);
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.clearTimeout(timeout);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [cadFullscreen]);
+
+  useEffect(() => {
+    if (!cadFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.fullscreenElement) return;
+      if (editing) return;
+      void setCadFullscreenMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cadFullscreen, editing, setCadFullscreenMode]);
 
   useEffect(() => {
     const fromQuery = searchParams.get("projectId")?.trim() || "";
@@ -683,7 +757,12 @@ export default function DrawingReviewClient() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 md:px-4 md:py-4">
+    <div
+      className={[
+        "flex min-h-0 flex-1 flex-col overflow-hidden",
+        cadFullscreen ? "p-0" : "px-3 py-3 md:px-4 md:py-4",
+      ].join(" ")}
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -692,37 +771,67 @@ export default function DrawingReviewClient() {
         onChange={(event) => onPickFiles(event.target.files)}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div
+        ref={stageRef}
+        className={[
+          "flex min-h-0 flex-1 flex-col overflow-hidden bg-white",
+          cadFullscreen
+            ? "fixed inset-0 z-80 rounded-none border-0 shadow-none"
+            : "rounded-2xl border border-gray-200 shadow-sm",
+        ].join(" ")}
+      >
         <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-4 py-3 md:px-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
-                Drawing Review & Comparison
-              </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                Review CAD versions, overlay changes, edit geometry, and leave remarks.
-              </p>
+          {cadFullscreen ? (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-brand-navy">
+                  {activeVersion?.fileName ?? "CAD drawing"}
+                </p>
+                <p className="truncate text-[11px] text-gray-500">
+                  {projectLabel}
+                  {editing ? " · Editing" : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void setCadFullscreenMode(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 hover:text-brand-navy"
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+                Exit fullscreen
+              </button>
             </div>
-            <div className="w-full lg:max-w-sm">
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                Project
-              </label>
-              <CustomSelect
-                value={projectValue}
-                onChange={setSelectedProjectId}
-                options={
-                  projectsLoading
-                    ? []
-                    : nonDraftProjects.map((project) => ({
-                        value: project.id,
-                        label: getProjectLabel(project),
-                      }))
-                }
-                placeholder={projectsLoading ? "Loading projects…" : "Select a project"}
-                disabled={projectsLoading || nonDraftProjects.length === 0}
-              />
+          ) : (
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
+                  Drawing Review & Comparison
+                </h1>
+                <p className="mt-1 text-sm text-gray-500">
+                  Review CAD versions, overlay changes, edit geometry, and leave remarks.
+                </p>
+              </div>
+              <div className="w-full lg:max-w-sm">
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Project
+                </label>
+                <CustomSelect
+                  value={projectValue}
+                  onChange={setSelectedProjectId}
+                  options={
+                    projectsLoading
+                      ? []
+                      : nonDraftProjects.map((project) => ({
+                          value: project.id,
+                          label: getProjectLabel(project),
+                        }))
+                  }
+                  placeholder={projectsLoading ? "Loading projects…" : "Select a project"}
+                  disabled={projectsLoading || nonDraftProjects.length === 0}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-1">
             {toolbarButton(
@@ -753,14 +862,30 @@ export default function DrawingReviewClient() {
               () => void changeMode("edit"),
               mode === "edit"
             )}
-            {toolbarButton("history", "History", <History className="h-3.5 w-3.5" />, () => {
-              setHighlightVersions(true);
-              versionsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-              window.setTimeout(() => setHighlightVersions(false), 1600);
-            })}
+            {!cadFullscreen
+              ? toolbarButton("history", "History", <History className="h-3.5 w-3.5" />, () => {
+                  setHighlightVersions(true);
+                  versionsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                  window.setTimeout(() => setHighlightVersions(false), 1600);
+                })
+              : null}
             {toolbarButton("share", "Share", <Share2 className="h-3.5 w-3.5" />, () => {
               void shareDrawing();
             })}
+            <button
+              type="button"
+              onClick={() => void setCadFullscreenMode(!cadFullscreen)}
+              disabled={!primaryBuffer}
+              className={[
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50",
+                cadFullscreen
+                  ? "bg-blue-50 text-brand-blue ring-1 ring-inset ring-brand-blue/30"
+                  : "text-gray-600 hover:bg-gray-50 hover:text-brand-navy",
+              ].join(" ")}
+            >
+              {cadFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              {cadFullscreen ? "Exit" : "Fullscreen"}
+            </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -883,11 +1008,17 @@ export default function DrawingReviewClient() {
           ) : null}
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)_260px]">
+        <div
+          className={[
+            "grid min-h-0 flex-1 overflow-hidden",
+            cadFullscreen ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_260px]",
+          ].join(" ")}
+        >
           <aside
             ref={versionsRef}
             className={[
               "min-h-0 overflow-y-auto border-b border-gray-100 p-4 lg:border-b-0 lg:border-r",
+              cadFullscreen ? "hidden" : "",
               highlightVersions ? "ring-2 ring-inset ring-brand-blue/40" : "",
             ].join(" ")}
           >
@@ -959,7 +1090,10 @@ export default function DrawingReviewClient() {
 
           <section
             ref={canvasRef}
-            className="relative flex h-full min-h-80 min-w-0 flex-col bg-[#fbfcfe]"
+            className={[
+              "relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#fbfcfe]",
+              cadFullscreen ? "h-full" : "h-full min-h-80",
+            ].join(" ")}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
           >
@@ -974,6 +1108,16 @@ export default function DrawingReviewClient() {
               overlayOpacity={overlayOpacity}
               emptyState={emptyState}
             />
+            {primaryBuffer && !cadFullscreen ? (
+              <button
+                type="button"
+                onClick={() => void setCadFullscreenMode(true)}
+                className="absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-lg bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-brand-navy shadow-sm ring-1 ring-gray-200 hover:bg-white"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+                Fullscreen
+              </button>
+            ) : null}
             {loadingBuffer ? (
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70">
                 <Loader2 className="h-6 w-6 animate-spin text-brand-blue" />
@@ -1017,7 +1161,12 @@ export default function DrawingReviewClient() {
             ) : null}
           </section>
 
-          <aside className="min-h-0 overflow-y-auto border-t border-gray-100 p-4 lg:border-l lg:border-t-0">
+          <aside
+            className={[
+              "min-h-0 overflow-y-auto border-t border-gray-100 p-4 lg:border-l lg:border-t-0",
+              cadFullscreen ? "hidden" : "",
+            ].join(" ")}
+          >
             <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Remarks</h2>
             {remarks.length === 0 ? (
               <p className="mt-3 text-sm text-gray-500">No remarks yet.</p>
@@ -1040,32 +1189,34 @@ export default function DrawingReviewClient() {
           </aside>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-100 px-4 py-3 md:px-5">
-          <button
-            type="button"
-            onClick={() => setRevisionOpen(true)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_SECONDARY}`}
-          >
-            <RotateCcw className="h-4 w-4" />
-            Request Revision
-          </button>
-          <button
-            type="button"
-            onClick={() => setCommentOpen(true)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_SECONDARY}`}
-          >
-            <MessageSquare className="h-4 w-4" />
-            Comment
-          </button>
-          <button
-            type="button"
-            onClick={() => void approveActive()}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
-          >
-            <Check className="h-4 w-4" />
-            Approve
-          </button>
-        </div>
+        {!cadFullscreen ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-100 px-4 py-3 md:px-5">
+            <button
+              type="button"
+              onClick={() => setRevisionOpen(true)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_SECONDARY}`}
+            >
+              <RotateCcw className="h-4 w-4" />
+              Request Revision
+            </button>
+            <button
+              type="button"
+              onClick={() => setCommentOpen(true)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_SECONDARY}`}
+            >
+              <MessageSquare className="h-4 w-4" />
+              Comment
+            </button>
+            <button
+              type="button"
+              onClick={() => void approveActive()}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
+            >
+              <Check className="h-4 w-4" />
+              Approve
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {projectsLoading ? (
@@ -1075,7 +1226,7 @@ export default function DrawingReviewClient() {
       ) : null}
 
       {toast ? (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-brand-navy px-4 py-2 text-xs font-medium text-white shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-90 -translate-x-1/2 rounded-full bg-brand-navy px-4 py-2 text-xs font-medium text-white shadow-lg">
           {toast}
         </div>
       ) : null}
