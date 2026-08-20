@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronDown,
   FileText,
   FolderKanban,
   History,
@@ -166,6 +167,27 @@ function formatChatTime(iso: string) {
   });
 }
 
+function SourceExcerpt({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (!text.trim()) return null;
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-[11px] font-medium text-brand-blue hover:text-brand-navy"
+      >
+        {open ? "Hide excerpt" : "Show excerpt"}
+      </button>
+      {open ? (
+        <p className="mt-1.5 whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-gray-600">
+          {text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function Sources({
   sources,
   fullWidth = false,
@@ -173,32 +195,50 @@ function Sources({
   sources: RagSource[];
   fullWidth?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   if (!sources.length) return null;
+  const visible = sources.slice(0, 6);
   return (
     <div
       className={[
-        "mt-2 space-y-2",
+        "mt-2",
         fullWidth ? "w-full max-w-full" : "max-w-[min(100%,42rem)]",
       ].join(" ")}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-        Sources
-      </p>
-      {sources.slice(0, 6).map((s, i) => (
-        <div
-          key={`${s.source}-${s.page}-${i}`}
-          className="rounded-xl border border-gray-100 bg-white px-3 py-2.5"
-        >
-          <p className="wrap-break-word text-xs font-semibold text-brand-navy">
-            {sourceLabel(s)}
-          </p>
-          {s.snippet ? (
-            <p className="mt-1.5 line-clamp-4 whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-gray-600">
-              {s.snippet}
-            </p>
-          ) : null}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 rounded-lg px-0.5 py-1 text-left hover:bg-slate-50"
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          Sources
+          <span className="ml-1.5 font-normal normal-case tracking-normal">
+            {visible.length}
+          </span>
+        </p>
+        <ChevronDown
+          className={[
+            "h-3.5 w-3.5 text-gray-400 transition-transform",
+            open ? "rotate-180" : "",
+          ].join(" ")}
+        />
+      </button>
+      {open ? (
+        <div className="mt-2 space-y-2">
+          {visible.map((s, i) => (
+            <div
+              key={`${s.source}-${s.page}-${i}`}
+              className="rounded-xl border border-gray-100 bg-white px-3 py-2.5"
+            >
+              <p className="wrap-break-word text-xs font-semibold text-brand-navy">
+                {sourceLabel(s)}
+              </p>
+              {s.snippet ? <SourceExcerpt text={s.snippet} /> : null}
+            </div>
+          ))}
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }
