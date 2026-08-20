@@ -1099,19 +1099,16 @@ export default function ComplianceClient() {
                     {m.role === "assistant" && m.kind !== "compliance" && m.sources?.length ? (
                       <Sources sources={m.sources} fullWidth={chatFullWidth} />
                     ) : null}
-                    {!m.id.startsWith("local-") ? (
+                    {!m.id.startsWith("local-") && m.role === "assistant" ? (
                       <div
                         className={
-                          m.role === "user"
-                            ? "ml-auto max-w-[92%] sm:max-w-[80%]"
-                            : chatFullWidth
-                              ? "w-full max-w-full"
-                              : "max-w-[92%] sm:max-w-[80%]"
+                          chatFullWidth
+                            ? "w-full max-w-full"
+                            : "max-w-[92%] sm:max-w-[80%]"
                         }
                       >
                         <MessageActions
                           message={m}
-                          align={m.role === "user" ? "end" : "start"}
                           onReact={(reaction) => void reactToMessage(m.id, reaction)}
                         />
                       </div>
