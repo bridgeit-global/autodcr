@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { motion } from "framer-motion";
 import { Check, Copy, Share2, ThumbsDown, ThumbsUp } from "lucide-react";
 import type {
   ChatMessageReaction,
@@ -35,6 +36,8 @@ function messagePlainText(message: RegulationChatMessage) {
   return `${attached}${message.content}`.trim();
 }
 
+const popTransition = { duration: 0.45, ease: "easeOut" as const };
+
 export default function MessageActions({
   message,
   align = "start",
@@ -46,6 +49,10 @@ export default function MessageActions({
 }) {
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [pop, setPop] = useState<ChatMessageReaction | null>(null);
+
+  const liked = message.reaction === "like";
+  const unliked = message.reaction === "unlike";
 
   async function copyText() {
     const text = messagePlainText(message);
@@ -93,50 +100,89 @@ export default function MessageActions({
   }
 
   function toggle(next: ChatMessageReaction) {
-    onReact(message.reaction === next ? null : next);
+    const turningOn = message.reaction !== next;
+    setPop(turningOn ? next : null);
+    onReact(turningOn ? next : null);
   }
 
   const btn =
-    "inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-slate-100 hover:text-brand-navy";
+    "inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-slate-100 hover:text-gray-900";
 
   return (
     <div
       className={[
-        "flex items-center gap-0.5",
+        "flex items-center gap-1",
         align === "end" ? "justify-end" : "justify-start",
       ].join(" ")}
     >
-      <button
+      <motion.button
         type="button"
         aria-label="Like"
-        aria-pressed={message.reaction === "like"}
+        aria-pressed={liked}
         onClick={() => toggle("like")}
+        whileTap={{ scale: 0.88 }}
+        animate={
+          pop === "like"
+            ? { scale: [1, 1.35, 0.9, 1.12, 1], rotate: [0, -14, 10, -5, 0] }
+            : { scale: 1, rotate: 0 }
+        }
+        transition={popTransition}
+        onAnimationComplete={() => {
+          if (pop === "like") setPop(null);
+        }}
         className={[
-          btn,
-          message.reaction === "like" ? "bg-blue-50 text-brand-blue" : "",
+          "inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+          liked
+            ? "bg-blue-50 text-brand-blue hover:bg-blue-100"
+            : "text-gray-700 hover:bg-slate-100 hover:text-gray-900",
         ].join(" ")}
       >
-        <ThumbsUp className="h-3.5 w-3.5" />
-      </button>
-      <button
+        <ThumbsUp
+          className="h-[18px] w-[18px]"
+          strokeWidth={liked ? 1.75 : 2.5}
+          fill={liked ? "#2563eb" : "none"}
+          stroke={liked ? "#2563eb" : "currentColor"}
+        />
+      </motion.button>
+      <motion.button
         type="button"
         aria-label="Unlike"
-        aria-pressed={message.reaction === "unlike"}
+        aria-pressed={unliked}
         onClick={() => toggle("unlike")}
+        whileTap={{ scale: 0.88 }}
+        animate={
+          pop === "unlike"
+            ? { scale: [1, 1.35, 0.9, 1.12, 1], rotate: [0, 14, -10, 5, 0] }
+            : { scale: 1, rotate: 0 }
+        }
+        transition={popTransition}
+        onAnimationComplete={() => {
+          if (pop === "unlike") setPop(null);
+        }}
         className={[
-          btn,
-          message.reaction === "unlike" ? "bg-red-50 text-red-600" : "",
+          "inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+          unliked
+            ? "bg-red-50 text-red-500 hover:bg-red-100"
+            : "text-gray-700 hover:bg-slate-100 hover:text-gray-900",
         ].join(" ")}
       >
-        <ThumbsDown className="h-3.5 w-3.5" />
-      </button>
+        <ThumbsDown
+          className="h-[18px] w-[18px]"
+          strokeWidth={unliked ? 1.75 : 2.5}
+          fill={unliked ? "currentColor" : "none"}
+        />
+      </motion.button>
       <button
         type="button"
         aria-label="Copy text"
         onClick={() => void copyText()}
         className={btn}
       >
-        {copied ? <Check className="h-3.5 w-3.5 text-brand-blue" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? (
+          <Check className="h-[18px] w-[18px] text-brand-blue" strokeWidth={2.5} />
+        ) : (
+          <Copy className="h-[18px] w-[18px]" strokeWidth={2.5} />
+        )}
       </button>
       <button
         type="button"
@@ -144,10 +190,10 @@ export default function MessageActions({
         onClick={() => void shareText()}
         className={btn}
       >
-        <Share2 className="h-3.5 w-3.5" />
+        <Share2 className="h-[18px] w-[18px]" strokeWidth={2.5} />
       </button>
       {status ? (
-        <span className="ml-1 text-[11px] font-medium text-gray-400">{status}</span>
+        <span className="ml-1 text-[11px] font-medium text-gray-500">{status}</span>
       ) : null}
     </div>
   );
