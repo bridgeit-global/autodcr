@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "generate-dp2034-fp": "node scripts/fetch-dp2034-fp-static.mjs",
+    "build:reckoner-index": "node scripts/build-ready-reckoner-index.mjs",
+    "seed:reckoner": "node scripts/seed-ready-reckoner.mjs",
     "generate-sql-values": "node scripts/generate-sql-values-from-demo.mjs",
     "copy-cad-workers": "node scripts/copy-cad-workers.mjs",
     "postinstall": "node scripts/copy-cad-workers.mjs",

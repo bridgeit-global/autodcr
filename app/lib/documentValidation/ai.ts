@@ -3,11 +3,28 @@
  */
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateObject, NoObjectGeneratedError } from "ai";
-import type { z } from "zod";
+import { z } from "zod";
 import type { DocumentDefinition } from "./types";
+import type { DocumentType } from "./registry";
 
 const DEFAULT_MODEL = "gemini-flash-latest";
 const MAX_DOCUMENT_TEXT_CHARS = 80_000;
+
+const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
+  aadhaar:
+    "Indian Aadhaar / UIDAI identity card or e-Aadhaar (आधार) — 12-digit Aadhaar number, QR code, UIDAI branding",
+  pan: "Indian PAN card issued by Income Tax Department — Permanent Account Number (10-char alphanumeric), Income Tax Dept / NSDL / Protean branding",
+  "technical-person-license":
+    "Technical person / professional license or registration certificate (architect, surveyor, engineer, COA, municipal license, etc.) — not Aadhaar or PAN",
+  "pr-card":
+    "Property Register Card / PR Card / PRC / मालमत्ता पत्रक — City Survey register with CTS numbers, holder/owner name, area in sq.m.",
+  "dp-remarks":
+    "D.P. Remarks / Development Plan remarks (BMC/MCGM style) — planning authority, zone, ward, DP remarks for a plot",
+  "crz-remarks":
+    "C.R.Z. Remarks / Coastal Regulation Zone remarks — CRZ I/II/III/IV category for a coastal plot",
+  "power-of-attorney":
+    "Power of Attorney (POA) — legal deed granting authority over property (principal / attorney names, property details)",
+};
 
 function getGeminiProvider() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -125,4 +142,103 @@ export async function extractDocumentFromMedia<T extends z.ZodTypeAny>(
     schema: definition.schema,
     messages: [{ role: "user", content }],
   });
+}
+
+export type ClassifyDocumentResult = {
+  documentType: DocumentType | "unknown";
+  confidence: "high" | "medium" | "low";
+};
+
+/**
+ * Classify an identity / registration document into one of the allowed types.
+ */
+export async function classifyDocumentType(
+  media: DocumentMediaInput,
+  allowedTypes: DocumentType[],
+  documentText = ""
+): Promise<ClassifyDocumentResult> {
+  if (allowedTypes.length === 0) {
+    throw new Error("classifyDocumentType requires at least one allowed type.");
+  }
+
+  const typeOptions = [...allowedTypes, "unknown"] as unknown as [
+    string,
+    ...string[],
+  ];
+  const schema = z.object({
+    documentType: z.enum(typeOptions),
+    confidence: z.enum(["high", "medium", "low"]),
+  });
+
+  const typeList = allowedTypes
+    .map((id) => `- "${id}": ${CLASSIFY_TYPE_HINTS[id] ?? id}`)
+    .join("\n");
+
+  const prompt = `You are classifying an Indian municipal, property, or registration document.
+
+Choose exactly one documentType from this list (use the id string only):
+${typeList}
+- "unknown": the document is none of the above, unreadable, or ambiguous
+
+Rules:
+- Prefer the most specific match among the allowed types only.
+- Aadhaar is never PAN and never a professional license.
+- PAN cards show a Permanent Account Number (format like ABCDE1234F).
+- Technical person licenses are professional registration / license certificates (architect, surveyor, structural engineer, etc.).
+- Property Register Card (pr-card) shows CTS / city survey numbers and plot area columns — not DP or CRZ remarks forms.
+- D.P. Remarks are Development Plan remark sheets; C.R.Z. Remarks are Coastal Regulation Zone remark sheets — do not confuse them.
+- Power of Attorney is a legal deed (principal grants power to attorney), not a register card or remarks sheet.
+- If unsure, return "unknown" with low confidence.
+- Do not invent a type that is not in the list.
+
+${documentText.trim() ? `Extracted text (may be partial):\n${truncateDocumentText(documentText).slice(0, 8000)}` : "No extractable text — classify from the attached document image/PDF."}`;
+
+  const google = getGeminiProvider();
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; image: Buffer }
+    | { type: "file"; data: Buffer; mediaType: string }
+  > = [{ type: "text", text: prompt }];
+
+  if (media.mediaType.startsWith("image/")) {
+    content.push({ type: "image", image: media.data });
+  } else {
+    content.push({
+      type: "file",
+      data: media.data,
+      mediaType: media.mediaType,
+    });
+  }
+
+  try {
+    const { object } = await generateObject({
+      maxRetries: 2,
+      temperature: 0,
+      schemaName: "document_classification",
+      schemaDescription: "Classify Indian identity / registration document type",
+      model: google(getModelName()),
+      schema,
+      messages: [{ role: "user", content }],
+    });
+
+    if (!object) {
+      throw new Error("AI classification returned no result.");
+    }
+
+    const documentType =
+      object.documentType === "unknown" ||
+      !allowedTypes.includes(object.documentType as DocumentType)
+        ? "unknown"
+        : (object.documentType as DocumentType);
+
+    return {
+      documentType,
+      confidence: object.confidence,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("classification")) {
+      throw error;
+    }
+    throw formatExtractionError(error, "document classification");
+  }
 }

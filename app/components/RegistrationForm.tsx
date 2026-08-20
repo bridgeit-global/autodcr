@@ -2569,7 +2569,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               <h3 className="text-lg font-semibold text-brand-navy">Identity Documents</h3>
             </div>
             <p className="text-sm text-gray-600 mb-4 ml-11">
-              Upload Aadhaar and PAN to auto-fill your details. These files are submitted with registration and are not asked again below.
+              Upload Aadhaar and PAN together — we’ll detect each document and auto-fill your details. These files are submitted with registration and are not asked again below.
             </p>
             <RegistrationDocumentAutofillStep
               registrationKind="owner"

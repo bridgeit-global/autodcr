@@ -319,6 +319,57 @@ export type Database = {
         }
         Relationships: []
       }
+      ready_reckoner_rates: {
+        Row: {
+          address: string
+          commercial: number
+          created_at: string
+          district_id: string
+          english_village: string
+          id: string
+          industrial: number
+          marathi_village: string
+          office: number
+          open_land: number
+          rate_unit: string
+          residential: number
+          survey_no: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string
+          commercial?: number
+          created_at?: string
+          district_id?: string
+          english_village: string
+          id?: string
+          industrial?: number
+          marathi_village: string
+          office?: number
+          open_land?: number
+          rate_unit?: string
+          residential?: number
+          survey_no: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          commercial?: number
+          created_at?: string
+          district_id?: string
+          english_village?: string
+          id?: string
+          industrial?: number
+          marathi_village?: string
+          office?: number
+          open_land?: number
+          rate_unit?: string
+          residential?: number
+          survey_no?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           application_id: string
