@@ -135,10 +135,21 @@ function formatChatTime(iso: string) {
   });
 }
 
-function Sources({ sources }: { sources: RagSource[] }) {
+function Sources({
+  sources,
+  fullWidth = false,
+}: {
+  sources: RagSource[];
+  fullWidth?: boolean;
+}) {
   if (!sources.length) return null;
   return (
-    <div className="mt-2 max-w-[min(100%,42rem)] space-y-2">
+    <div
+      className={[
+        "mt-2 space-y-2",
+        fullWidth ? "w-full max-w-full" : "max-w-[min(100%,42rem)]",
+      ].join(" ")}
+    >
       <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
         Sources
       </p>
@@ -751,7 +762,12 @@ export default function ComplianceClient() {
                 </div>
               </div>
             ) : (
-              <div className="mx-auto flex max-w-3xl flex-col gap-4">
+              <div
+                className={[
+                  "mx-auto flex w-full flex-col gap-4",
+                  historyVisible ? "max-w-3xl" : "max-w-none",
+                ].join(" ")}
+              >
                 {activeChat?.document_filename || attachedFilename ? (
                   <div className="inline-flex max-w-full items-center gap-2 self-start rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600">
                     <FileText className="h-3.5 w-3.5 shrink-0 text-brand-blue" />
@@ -779,13 +795,16 @@ export default function ComplianceClient() {
                         <p className="whitespace-pre-wrap wrap-break-word">{m.content}</p>
                       </article>
                     ) : m.kind === "compliance" && m.compliance && !m.error ? (
-                      <div className="max-w-full rounded-2xl rounded-bl-md border border-gray-100 bg-white p-4 sm:p-5">
+                      <div className="w-full max-w-full rounded-2xl rounded-bl-md border border-gray-100 bg-white p-4 sm:p-5">
                         <ComplianceResultView data={m.compliance} />
                       </div>
                     ) : (
                       <article
                         className={[
-                          "max-w-[92%] rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[80%]",
+                          "rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm leading-relaxed",
+                          historyVisible
+                            ? "max-w-[92%] sm:max-w-[80%]"
+                            : "w-full max-w-full",
                           m.error ? "bg-red-50 text-red-800" : "bg-white text-gray-800",
                         ].join(" ")}
                       >
@@ -793,13 +812,20 @@ export default function ComplianceClient() {
                       </article>
                     )}
                     {m.role === "assistant" && m.kind !== "compliance" && m.sources?.length ? (
-                      <Sources sources={m.sources} />
+                      <Sources sources={m.sources} fullWidth={!historyVisible} />
                     ) : null}
                   </div>
                 ))}
 
                 {busy ? (
-                  <article className="max-w-[92%] rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm text-gray-500 sm:max-w-[80%]">
+                  <article
+                    className={[
+                      "rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm text-gray-500",
+                      historyVisible
+                        ? "max-w-[92%] sm:max-w-[80%]"
+                        : "w-full max-w-full",
+                    ].join(" ")}
+                  >
                     <p className="flex items-center gap-2">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-blue" />
                       {statusText}
