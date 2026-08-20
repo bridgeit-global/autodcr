@@ -18,6 +18,7 @@ import {
   Maximize2,
   MessageSquarePlus,
   Minimize2,
+  PanelLeft,
   PanelLeftClose,
   Paperclip,
   Send,
@@ -446,14 +447,6 @@ export default function ComplianceClient() {
 
   const chatFullWidth = fullscreen || !historyVisible;
 
-  function toggleHistory() {
-    if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
-      setDesktopHistoryVisible(!historyVisible);
-      return;
-    }
-    setHistoryOpen((open) => !open);
-  }
-
   function startNewChat() {
     setActiveChatId(null);
     setMessages([]);
@@ -600,6 +593,24 @@ export default function ComplianceClient() {
           </button>
           <button
             type="button"
+            onClick={() => void setFullscreenMode(!fullscreen)}
+            aria-pressed={fullscreen}
+            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            className={[
+              "rounded-lg p-1",
+              fullscreen
+                ? "bg-blue-50 text-brand-navy"
+                : "text-gray-400 hover:bg-gray-50 hover:text-gray-700",
+            ].join(" ")}
+          >
+            {fullscreen ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            type="button"
             aria-label="Hide history"
             onClick={() => {
               setDesktopHistoryVisible(false);
@@ -686,87 +697,67 @@ export default function ComplianceClient() {
     >
       <div className="relative z-20 shrink-0 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-brand-blue sm:flex">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-base font-bold text-brand-navy sm:text-lg">
-                Regulation chat
-              </h1>
-              {fullscreen ? (
-                <p className="mt-0.5 text-sm text-gray-500">
-                  Fullscreen · Esc to exit
-                </p>
-              ) : (
-                <p className="mt-0.5 text-sm text-gray-500">
-                  Ask CIDCO, MIDC, SRA &amp; MCGM, or upload a proposal PDF to check
-                  compliance.
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex min-w-0 items-end gap-2">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               type="button"
-              onClick={() => void setFullscreenMode(!fullscreen)}
-              aria-pressed={fullscreen}
-              aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              onClick={() => setHistoryOpen((open) => !open)}
+              aria-pressed={historyOpen}
+              aria-label={historyOpen ? "Hide chat history" : "Show chat history"}
               className={[
-                "inline-flex h-11 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold",
-                fullscreen
-                  ? "border-brand-blue/40 bg-blue-50 text-brand-navy"
-                  : "border-gray-200 bg-white text-gray-700 hover:bg-slate-50",
-              ].join(" ")}
-            >
-              {fullscreen ? (
-                <Minimize2 className="h-4 w-4" />
-              ) : (
-                <Maximize2 className="h-4 w-4" />
-              )}
-              {fullscreen ? "Exit" : "Fullscreen"}
-            </button>
-            <button
-              type="button"
-              onClick={toggleHistory}
-              aria-pressed={historyVisible || historyOpen}
-              aria-label={historyVisible || historyOpen ? "Hide chat history" : "Show chat history"}
-              className={[
-                "inline-flex h-11 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold",
-                historyVisible || historyOpen
+                "inline-flex h-11 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold lg:hidden",
+                historyOpen
                   ? "border-brand-blue/40 bg-blue-50 text-brand-navy"
                   : "border-gray-200 bg-white text-gray-700 hover:bg-slate-50",
               ].join(" ")}
             >
               <History className="h-4 w-4" />
-              History
             </button>
-            <div className="min-w-0 flex-1 lg:w-80 lg:flex-none">
-              <label className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">
-                <FolderKanban className="h-3.5 w-3.5" />
-                Project
-              </label>
-              <CustomSelect
-                value={selectedProjectId}
-                onChange={selectProject}
-                options={
-                  projectsLoading
-                    ? []
-                    : nonDraftProjects.map((project) => ({
-                        value: project.id,
-                        label: getProjectLabel(project),
-                      }))
-                }
-                placeholder={
-                  projectsLoading
-                    ? "Loading projects…"
-                    : nonDraftProjects.length === 0
-                      ? "No submitted projects"
-                      : "Select a project"
-                }
-                disabled={projectsLoading || nonDraftProjects.length === 0}
-              />
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-brand-blue sm:flex">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-bold text-brand-navy sm:text-lg">
+                  Regulation chat
+                </h1>
+                {fullscreen ? (
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Fullscreen · Esc to exit
+                  </p>
+                ) : (
+                  <p className="mt-0.5 hidden text-sm text-gray-500 sm:block">
+                    Ask CIDCO, MIDC, SRA &amp; MCGM, or upload a proposal PDF to check
+                    compliance.
+                  </p>
+                )}
+              </div>
             </div>
+          </div>
+          <div className="min-w-0 lg:w-80 lg:flex-none">
+            <label className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">
+              <FolderKanban className="h-3.5 w-3.5" />
+              Project
+            </label>
+            <CustomSelect
+              value={selectedProjectId}
+              onChange={selectProject}
+              options={
+                projectsLoading
+                  ? []
+                  : nonDraftProjects.map((project) => ({
+                      value: project.id,
+                      label: getProjectLabel(project),
+                    }))
+              }
+              placeholder={
+                projectsLoading
+                  ? "Loading projects…"
+                  : nonDraftProjects.length === 0
+                    ? "No submitted projects"
+                    : "Select a project"
+              }
+              disabled={projectsLoading || nonDraftProjects.length === 0}
+            />
           </div>
         </div>
         {contextPills.length > 0 ? (
@@ -787,11 +778,50 @@ export default function ComplianceClient() {
       <div className="flex min-h-0 flex-1">
         <aside
           className={[
-            "w-72 shrink-0 border-r border-gray-100 bg-white",
-            historyVisible ? "hidden lg:flex lg:flex-col" : "hidden",
+            "hidden shrink-0 flex-col border-r border-gray-100 bg-white transition-[width] duration-200 lg:flex",
+            historyVisible ? "w-72" : "w-12",
           ].join(" ")}
         >
-          {historyList}
+          {historyVisible ? (
+            historyList
+          ) : (
+            <div className="flex flex-col items-center gap-1 py-3">
+              <button
+                type="button"
+                aria-label="Show chat history"
+                onClick={() => setDesktopHistoryVisible(true)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-blue-50 hover:text-brand-navy"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="New chat"
+                onClick={startNewChat}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-blue-50 hover:text-brand-navy"
+              >
+                <MessageSquarePlus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void setFullscreenMode(!fullscreen)}
+                aria-pressed={fullscreen}
+                aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                className={[
+                  "inline-flex h-9 w-9 items-center justify-center rounded-lg",
+                  fullscreen
+                    ? "bg-blue-50 text-brand-navy"
+                    : "text-gray-500 hover:bg-blue-50 hover:text-brand-navy",
+                ].join(" ")}
+              >
+                {fullscreen ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          )}
         </aside>
 
         {historyOpen ? (
