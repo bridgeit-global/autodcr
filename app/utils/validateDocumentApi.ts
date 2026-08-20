@@ -109,3 +109,34 @@ export async function classifyAndValidateDocumentFile(
   }
   return parsed.data as unknown as ClassifyAndValidateDocumentResult;
 }
+
+export type ClassifyDocumentResult = {
+  documentType: string;
+  confidence: "high" | "medium" | "low";
+};
+
+/** Classify an unlabeled file without extracting fields. */
+export async function classifyDocumentFile(
+  file: File,
+  allowedTypes: DocumentType[]
+): Promise<ClassifyDocumentResult> {
+  assertUploadSize(file);
+
+  if (allowedTypes.length === 0) {
+    throw new Error("At least one allowed document type is required.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("allowedTypes", allowedTypes.join(","));
+
+  const response = await fetch("/api/classify-document", {
+    method: "POST",
+    body: formData,
+  });
+  const parsed = await parseValidateDocumentResponse(response);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  return parsed.data as unknown as ClassifyDocumentResult;
+}

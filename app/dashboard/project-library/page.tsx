@@ -2,7 +2,13 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { loadDraft, saveDraft, markPageSaved, isPageSaved, clearPageSaved } from "@/app/utils/draftStorage";
+import {
+  loadDraft,
+  saveDraft,
+  markPageSaved,
+  isPageSaved,
+  clearPageSaved,
+} from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import {
   deleteProjectLibraryFile,
@@ -27,6 +33,8 @@ import {
 import { applyProjectAutofillDrafts } from "@/app/lib/projectDocumentAutofill";
 import { getFieldLabel } from "@/app/lib/documentValidation/fieldLabels";
 import { useProjectLibraryExtraction } from "@/app/hooks/useProjectLibraryExtraction";
+import { classifyDocumentFile } from "@/app/utils/validateDocumentApi";
+import type { DocumentType } from "@/app/lib/documentValidation/registry";
 
 type UploadRecord = {
   id: string;
@@ -46,9 +54,39 @@ type LibrarySnapshot = {
   extraPr: ExtraPrSlot[];
 };
 
+type StagingItem = {
+  id: string;
+  file: File;
+  detectedType: LibraryDocType | null;
+  overrideType: LibraryDocType | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type LibraryDocType =
+  | "pr-card"
+  | "dp-remarks"
+  | "crz-remarks"
+  | "power-of-attorney";
+
 const DOCUMENT_NAMES = PROJECT_LIBRARY_DOCUMENT_NAMES;
 const MAX_FILES = PROJECT_LIBRARY_MAX_FILES;
 const ACCEPTED_TYPES = [".pdf"];
+const MAX_TOTAL_FILES = MAX_FILES + PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS;
+
+const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
+  "pr-card",
+  "dp-remarks",
+  "crz-remarks",
+  "power-of-attorney",
+];
+
+const LABEL_BY_TYPE: Record<LibraryDocType, string> = {
+  "pr-card": DOCUMENT_NAMES[0],
+  "dp-remarks": DOCUMENT_NAMES[1],
+  "crz-remarks": DOCUMENT_NAMES[2],
+  "power-of-attorney": DOCUMENT_NAMES[3],
+};
 
 const createId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -87,113 +125,79 @@ function splitServerUploads(uploadsData: UploadRecord[]) {
   return { fixed, extraPr };
 }
 
+function isLibraryDocType(value: string): value is LibraryDocType {
+  return (LIBRARY_ALLOWED_TYPES as string[]).includes(value);
+}
+
+function effectiveType(item: StagingItem): LibraryDocType | null {
+  return item.overrideType ?? item.detectedType;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function makeUploadRecord(file: File, pathStem: string): UploadRecord {
+  const extension = file.name.split(".").pop() || "pdf";
+  return {
+    id: createId(),
+    name: file.name,
+    url: URL.createObjectURL(file),
+    uploadedAt: new Date().toISOString(),
+    path: `${pathStem}.${extension}`,
+  };
+}
+
 type DocumentRowProps = {
   serial: string;
   label: string;
   upload?: UploadRecord;
   isReadOnlyMode: boolean;
-  onAttach: () => void;
-  onClear?: () => void;
   onPreview: () => void;
-  onRemove?: () => void;
-  rowClassName?: string;
 };
 
-function DocumentRow({
+function AttachedSummaryRow({
   serial,
   label,
   upload,
-  isReadOnlyMode,
-  onAttach,
-  onClear,
   onPreview,
-  onRemove,
-  rowClassName = "bg-white",
 }: DocumentRowProps) {
+  if (!upload) return null;
   return (
-    <tr className={`border-b border-gray-200 last:border-b-0 ${rowClassName}`}>
-      <td className="px-3 py-3 border-r border-gray-200 align-top text-gray-700">{serial}</td>
-      <td className="px-3 py-3 border-r border-gray-200 align-top">
-        <div className="flex items-start justify-between gap-3">
-          <span>{label}</span>
-          {onRemove && !isReadOnlyMode && (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 transition-colors hover:border-red-300 hover:bg-red-100"
-              aria-label="Remove row"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                className="h-3.5 w-3.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M10 11v6M14 11v6" strokeLinecap="round" />
-              </svg>
-              Delete
-            </button>
-          )}
+    <li className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-gray-900">
+            {upload.name}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            Detected as {label}
+            {serial ? ` · ${serial}` : ""}
+          </p>
         </div>
-      </td>
-      <td className="px-3 py-3 border-r border-gray-200 align-top">
-        <div className="flex flex-col items-center gap-1">
-          <button
-            type="button"
-            onClick={onAttach}
-            disabled={isReadOnlyMode}
-            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border border-brand-blue/20 bg-blue-50 hover:bg-blue-100 text-brand-blue leading-none shadow-sm transition-colors ${
-              isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""
-            }`}
-            aria-label="Attach document"
+        <button
+          type="button"
+          onClick={onPreview}
+          className="inline-flex shrink-0 items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-brand-blue shadow-sm"
+          aria-label="Preview document"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
-              <path d="M3 7a2 2 0 0 1 2-2h5.172a2 2 0 0 1 1.414.586l1.828 1.828H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
-            </svg>
-          </button>
-          {upload && !onRemove && onClear && (
-            <button
-              type="button"
-              className={`text-[11px] text-red-600 hover:underline ${
-                isReadOnlyMode ? "cursor-not-allowed opacity-70" : ""
-              }`}
-              onClick={onClear}
-              disabled={isReadOnlyMode}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      </td>
-      <td className="px-3 py-3 text-center align-top">
-        {upload ? (
-          <button
-            type="button"
-            onClick={onPreview}
-            className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-brand-blue hover:text-brand-navy shadow-sm transition-colors cursor-pointer"
-            aria-label="Preview document"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M5 4h9l5 5v11H5z" />
-              <path d="M9 12h6" />
-              <path d="M9 16h3" />
-            </svg>
-          </button>
-        ) : (
-          <span className="text-xs text-gray-400">-</span>
-        )}
-      </td>
-    </tr>
+            <path d="M5 4h9l5 5v11H5z" />
+            <path d="M9 12h6" />
+            <path d="M9 16h3" />
+          </svg>
+        </button>
+      </div>
+    </li>
   );
 }
 
@@ -205,16 +209,26 @@ export default function ProjectLibraryPage() {
   const { isExtracting, runExtraction } = useProjectLibraryExtraction();
   const [uploads, setUploads] = useState<(UploadRecord | undefined)[]>(() =>
     normalizeFixedUploads(
-      loadDraft<(UploadRecord | undefined)[]>("draft-project-library-uploads", Array(MAX_FILES).fill(undefined))
+      loadDraft<(UploadRecord | undefined)[]>(
+        "draft-project-library-uploads",
+        Array(MAX_FILES).fill(undefined)
+      )
     )
   );
-  const [extraPrSlots, setExtraPrSlots] = useState<ExtraPrSlot[]>(() => loadExtraPrSlots());
+  const [extraPrSlots, setExtraPrSlots] = useState<ExtraPrSlot[]>(() =>
+    loadExtraPrSlots()
+  );
+  const [staging, setStaging] = useState<StagingItem[]>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
-  const fixedInputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const extraInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewTitle, setPreviewTitle] = useState<string | undefined>(undefined);
+  const [previewTitle, setPreviewTitle] = useState<string | undefined>(
+    undefined
+  );
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
 
   const markLibraryDirty = () => {
@@ -234,7 +248,8 @@ export default function ProjectLibraryPage() {
 
     void (async () => {
       if (isEditMode && projectData) {
-        const uploadsData = ((projectData.project_library || {}).uploads || []) as UploadRecord[];
+        const uploadsData = ((projectData.project_library || {}).uploads ||
+          []) as UploadRecord[];
         if (uploadsData.length > 0) {
           const { fixed, extraPr } = splitServerUploads(uploadsData);
           if (cancelled) return;
@@ -257,32 +272,72 @@ export default function ProjectLibraryPage() {
         "draft-project-library-uploads",
         Array(MAX_FILES).fill(undefined)
       );
-      const reconciled = normalizeFixedUploads(await reconcileFixedLibraryUploads(draft, MAX_FILES));
+      const reconciled = normalizeFixedUploads(
+        await reconcileFixedLibraryUploads(draft, MAX_FILES)
+      );
       if (cancelled) return;
-
-      setUploads(reconciled);
-      saveDraft("draft-project-library-uploads", reconciled);
 
       const attached = reconciled.filter(Boolean).length;
       const flagged = isPageSaved("saved-project-library");
-      const verified = loadDraft<{ count?: number } | null>("saved-project-library-files", null);
+      const verified = loadDraft<{ count?: number } | null>(
+        "saved-project-library-files",
+        null
+      );
+      const fullySaved =
+        flagged && attached >= MAX_FILES && verified?.count === MAX_FILES;
 
-      if (attached < MAX_FILES || verified?.count !== MAX_FILES) {
+      // Drop unsaved leftover PDFs so preview/list don't show stale files.
+      if (!fullySaved) {
+        for (let i = 0; i < MAX_FILES; i++) {
+          // eslint-disable-next-line no-await-in-loop
+          await deleteProjectLibraryFile(i);
+        }
+        const extras = loadExtraPrSlots();
+        for (const slot of extras) {
+          // eslint-disable-next-line no-await-in-loop
+          await deleteExtraPrCard(slot.id);
+        }
+        if (cancelled) return;
+        setUploads(normalizeFixedUploads([]));
+        setExtraPrSlots([]);
+        saveDraft("draft-project-library-uploads", normalizeFixedUploads([]));
+        saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
         markLibraryDirty();
         return;
       }
 
-      if (flagged) {
-        setIsSaved(true);
-      } else {
-        setIsSaved(false);
-      }
+      setUploads(reconciled);
+      saveDraft("draft-project-library-uploads", reconciled);
+      setIsSaved(true);
     })();
 
     return () => {
       cancelled = true;
     };
   }, [isEditMode, isLoading, projectData]);
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+    setPreviewBlobUrl(null);
+    setPreviewUrl(null);
+    setPreviewTitle(undefined);
+  };
+
+  const clearPreviousAttachments = async () => {
+    closePreview();
+    uploads.forEach((u) => {
+      if (u?.url?.startsWith("blob:")) URL.revokeObjectURL(u.url);
+    });
+    extraPrSlots.forEach((s) => {
+      if (s.upload?.url?.startsWith("blob:")) URL.revokeObjectURL(s.upload.url);
+    });
+    await clearAllLocalFiles();
+    setUploads(normalizeFixedUploads([]));
+    setExtraPrSlots([]);
+    saveDraft("draft-project-library-uploads", normalizeFixedUploads([]));
+    saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+  };
 
   const openPreview = async (
     title: string,
@@ -292,7 +347,7 @@ export default function ProjectLibraryPage() {
     setPreviewTitle(title);
     try {
       const local = await loadBlob();
-      if (local?.blob) {
+      if (local?.blob && local.blob.size > 0) {
         if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
         const freshUrl = URL.createObjectURL(local.blob);
         setPreviewBlobUrl(freshUrl);
@@ -303,151 +358,328 @@ export default function ProjectLibraryPage() {
     } catch (e) {
       console.error("Failed to load local file for preview:", e);
     }
-    if (fallbackUrl) {
+    // Never reuse stale draft blob: URLs from a previous page load.
+    if (fallbackUrl && !fallbackUrl.startsWith("blob:")) {
+      setPreviewBlobUrl(null);
       setPreviewUrl(fallbackUrl);
       setPreviewOpen(true);
+      return;
+    }
+    showAlert({
+      title: "Preview unavailable",
+      message: "No document file is available to preview. Upload the PDFs again.",
+    });
+  };
+
+  const clearAllLocalFiles = async () => {
+    for (let i = 0; i < MAX_FILES; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await deleteProjectLibraryFile(i);
+    }
+    for (const slot of extraPrSlots) {
+      // eslint-disable-next-line no-await-in-loop
+      await deleteExtraPrCard(slot.id);
     }
   };
 
-  const handleFixedFileChange =
-    (index: number) => async (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (isReadOnlyMode) return;
-      const file = event.target.files?.[0];
-      if (!file) return;
+  const applyAssignedFiles = async (
+    items: Array<{ file: File; type: LibraryDocType }>
+  ): Promise<{ error: string | null; extraSlotIds: string[] }> => {
+    const byType: Partial<Record<LibraryDocType, File[]>> = {};
+    for (const item of items) {
+      byType[item.type] = [...(byType[item.type] ?? []), item.file];
+    }
 
-      if (!ACCEPTED_TYPES.some((type) => file.name.toLowerCase().endsWith(type))) {
-        showAlert({ title: "Invalid file type", message: "Only PDF files are supported." });
-        event.target.value = "";
-        return;
-      }
+    const prFiles = byType["pr-card"] ?? [];
+    const dpFiles = byType["dp-remarks"] ?? [];
+    const crzFiles = byType["crz-remarks"] ?? [];
+    const poaFiles = byType["power-of-attorney"] ?? [];
 
-      const safeDocName = (DOCUMENT_NAMES[index] || file.name)
+    if (prFiles.length < 1) {
+      return { error: `Missing ${LABEL_BY_TYPE["pr-card"]}.`, extraSlotIds: [] };
+    }
+    if (dpFiles.length !== 1) {
+      return {
+        error:
+          dpFiles.length === 0
+            ? `Missing ${LABEL_BY_TYPE["dp-remarks"]}.`
+            : `Duplicate ${LABEL_BY_TYPE["dp-remarks"]} files — keep only one.`,
+        extraSlotIds: [],
+      };
+    }
+    if (crzFiles.length !== 1) {
+      return {
+        error:
+          crzFiles.length === 0
+            ? `Missing ${LABEL_BY_TYPE["crz-remarks"]}.`
+            : `Duplicate ${LABEL_BY_TYPE["crz-remarks"]} files — keep only one.`,
+        extraSlotIds: [],
+      };
+    }
+    if (poaFiles.length !== 1) {
+      return {
+        error:
+          poaFiles.length === 0
+            ? `Missing ${LABEL_BY_TYPE["power-of-attorney"]}.`
+            : `Duplicate ${LABEL_BY_TYPE["power-of-attorney"]} files — keep only one.`,
+        extraSlotIds: [],
+      };
+    }
+    if (prFiles.length - 1 > PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS) {
+      return {
+        error: `You can add up to ${PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS} additional PR / PRC cards.`,
+        extraSlotIds: [],
+      };
+    }
+
+    uploads.forEach((u) => {
+      if (u?.url) URL.revokeObjectURL(u.url);
+    });
+    extraPrSlots.forEach((s) => {
+      if (s.upload?.url) URL.revokeObjectURL(s.upload.url);
+    });
+
+    await clearAllLocalFiles();
+
+    const fixedFiles = [
+      prFiles[0]!,
+      dpFiles[0]!,
+      crzFiles[0]!,
+      poaFiles[0]!,
+    ];
+    const nextFixed: (UploadRecord | undefined)[] = [];
+    for (let i = 0; i < MAX_FILES; i++) {
+      const file = fixedFiles[i]!;
+      // eslint-disable-next-line no-await-in-loop
+      await saveProjectLibraryFile(i, file);
+      const safeDocName = (DOCUMENT_NAMES[i] || file.name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 50);
-      const extension = file.name.split(".").pop() || "pdf";
-      const localUrl = URL.createObjectURL(file);
+      nextFixed.push(makeUploadRecord(file, `${safeDocName}-${i + 1}`));
+    }
 
-      try {
-        await saveProjectLibraryFile(index, file);
-      } catch (e) {
-        console.error("Error saving file locally:", e);
-        showAlert({
-          title: "Could not save file",
-          message: "Failed to save document locally. Please try again.",
-        });
-        event.target.value = "";
-        return;
-      }
-
-      const record: UploadRecord = {
-        id: createId(),
-        name: file.name,
-        url: localUrl,
-        uploadedAt: new Date().toISOString(),
-        path: `${safeDocName}-${index + 1}.${extension}`,
-      };
-
-      setUploads((prev) => {
-        const next = [...prev];
-        next[index] = record;
-        return next;
-      });
-      markLibraryDirty();
-    };
-
-  const handleExtraFileChange =
-    (slotId: string) => async (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (isReadOnlyMode) return;
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      if (!ACCEPTED_TYPES.some((type) => file.name.toLowerCase().endsWith(type))) {
-        showAlert({ title: "Invalid file type", message: "Only PDF files are supported." });
-        event.target.value = "";
-        return;
-      }
-
+    const extraFiles = prFiles.slice(1);
+    const nextExtra: ExtraPrSlot[] = [];
+    for (const file of extraFiles) {
+      const slot = createExtraSlot();
+      // eslint-disable-next-line no-await-in-loop
+      await saveExtraPrCard(slot.id, file);
       const safeDocName = PROJECT_LIBRARY_EXTRA_PR_LABEL.toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 50);
-      const extension = file.name.split(".").pop() || "pdf";
-      const localUrl = URL.createObjectURL(file);
+      nextExtra.push({
+        ...slot,
+        upload: makeUploadRecord(
+          file,
+          `${safeDocName}-${slot.id.slice(0, 8)}`
+        ),
+      });
+    }
 
-      try {
-        await saveExtraPrCard(slotId, file);
-      } catch (e) {
-        console.error("Error saving extra PR file locally:", e);
-        showAlert({
-          title: "Could not save file",
-          message: "Failed to save document locally. Please try again.",
-        });
-        event.target.value = "";
-        return;
+    setUploads(nextFixed);
+    setExtraPrSlots(nextExtra);
+    markLibraryDirty();
+    return { error: null, extraSlotIds: nextExtra.map((s) => s.id) };
+  };
+
+  const detectAndAssign = async (
+    items: StagingItem[]
+  ): Promise<{ ok: boolean; extraSlotIds: string[] }> => {
+    const typed = items
+      .map((item) => {
+        const type = effectiveType(item);
+        return type ? { file: item.file, type } : null;
+      })
+      .filter(Boolean) as Array<{ file: File; type: LibraryDocType }>;
+
+    if (typed.length !== items.length) {
+      setDetectError(
+        "Could not detect every document. Set the type manually for unknown files, then try again."
+      );
+      return { ok: false, extraSlotIds: [] };
+    }
+
+    const { error, extraSlotIds } = await applyAssignedFiles(typed);
+    if (error) {
+      setDetectError(error);
+      return { ok: false, extraSlotIds: [] };
+    }
+    setDetectError(null);
+    return { ok: true, extraSlotIds };
+  };
+
+  const classifyStagingItems = async (
+    items: StagingItem[]
+  ): Promise<StagingItem[] | null> => {
+    setIsDetecting(true);
+    setDetectError(null);
+    setStaging((prev) =>
+      prev.map((item) =>
+        items.some((i) => i.id === item.id)
+          ? { ...item, loading: true, error: null }
+          : item
+      )
+    );
+
+    try {
+      const outcomes = await Promise.all(
+        items.map(async (item) => {
+          if (item.overrideType) {
+            return {
+              id: item.id,
+              detectedType: item.overrideType,
+              error: null as string | null,
+            };
+          }
+          try {
+            const result = await classifyDocumentFile(
+              item.file,
+              LIBRARY_ALLOWED_TYPES as DocumentType[]
+            );
+            if (!isLibraryDocType(result.documentType)) {
+              return {
+                id: item.id,
+                detectedType: null,
+                error:
+                  "Could not identify this document. Choose the type manually.",
+              };
+            }
+            return {
+              id: item.id,
+              detectedType: result.documentType,
+              error: null as string | null,
+            };
+          } catch (err) {
+            return {
+              id: item.id,
+              detectedType: null as LibraryDocType | null,
+              error:
+                err instanceof Error ? err.message : "Classification failed.",
+            };
+          }
+        })
+      );
+
+      const nextStaging = items.map((item) => {
+        const outcome = outcomes.find((o) => o.id === item.id);
+        if (!outcome) {
+          return { ...item, loading: false, error: "Classification failed." };
+        }
+        return {
+          ...item,
+          loading: false,
+          detectedType: outcome.detectedType ?? item.detectedType,
+          error: outcome.error,
+        };
+      });
+      setStaging(nextStaging);
+
+      if (outcomes.some((o) => o.error)) {
+        setDetectError(
+          "Some documents could not be identified. Set the type manually, then try Save again."
+        );
+        return null;
       }
 
-      const record: UploadRecord = {
-        id: createId(),
-        name: file.name,
-        url: localUrl,
-        uploadedAt: new Date().toISOString(),
-        path: `${safeDocName}-${slotId.slice(0, 8)}.${extension}`,
-      };
-
-      setExtraPrSlots((prev) =>
-        prev.map((slot) => (slot.id === slotId ? { ...slot, upload: record } : slot))
-      );
-      markLibraryDirty();
-    };
-
-  const handleClearFixed = (index: number) => () => {
-    if (isReadOnlyMode) return;
-    setUploads((prev) => {
-      const next = [...prev];
-      const existing = next[index];
-      if (existing) URL.revokeObjectURL(existing.url);
-      next[index] = undefined;
-      return next;
-    });
-    deleteProjectLibraryFile(index).catch((e) => console.error("Failed to delete local file:", e));
-    const input = fixedInputRefs.current[index];
-    if (input) input.value = "";
-    markLibraryDirty();
+      return nextStaging;
+    } finally {
+      setIsDetecting(false);
+    }
   };
 
-  const handleRemoveExtra = (slotId: string) => () => {
+  const addFiles = (fileList: FileList | File[]) => {
     if (isReadOnlyMode) return;
-    setExtraPrSlots((prev) => {
-      const slot = prev.find((s) => s.id === slotId);
-      if (slot?.upload) URL.revokeObjectURL(slot.upload.url);
-      return prev.filter((s) => s.id !== slotId);
-    });
-    deleteExtraPrCard(slotId).catch((e) => console.error("Failed to delete extra PR file:", e));
-    delete extraInputRefs.current[slotId];
-    markLibraryDirty();
-  };
+    const incoming = Array.from(fileList).filter((file) =>
+      ACCEPTED_TYPES.some((type) => file.name.toLowerCase().endsWith(type))
+    );
 
-  const handleAddExtraPr = () => {
-    if (isReadOnlyMode) return;
-    if (extraPrSlots.length >= PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS) {
+    if (incoming.length === 0) {
       showAlert({
-        title: "Maximum reached",
-        message: `You can add up to ${PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS} additional PR / PRC cards.`,
+        title: "Invalid file type",
+        message: "Only PDF files are supported.",
       });
       return;
     }
-    setExtraPrSlots((prev) => [...prev, createExtraSlot()]);
+
+    const room = Math.max(0, MAX_TOTAL_FILES - staging.length);
+    if (room === 0) {
+      showAlert({
+        title: "Maximum reached",
+        message: `You can attach up to ${MAX_TOTAL_FILES} PDFs (${MAX_FILES} required + up to ${PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS} extra PR / PRC cards).`,
+      });
+      return;
+    }
+
+    const toAdd = incoming.slice(0, room);
+    if (toAdd.length < incoming.length) {
+      showAlert({
+        title: "Some files skipped",
+        message: `Only ${toAdd.length} more file${toAdd.length === 1 ? "" : "s"} could be added (max ${MAX_TOTAL_FILES}).`,
+      });
+    }
+
+    const nextItems: StagingItem[] = toAdd.map((file) => ({
+      id: createId(),
+      file,
+      detectedType: null,
+      overrideType: null,
+      loading: false,
+      error: null,
+    }));
+
+    const append = () => {
+      setStaging((prev) => [...prev, ...nextItems]);
+      setDetectError(null);
+      markLibraryDirty();
+    };
+
+    // First file(s) in a new selection replace any previously saved library PDFs.
+    if (staging.length === 0 && totalAttached > 0) {
+      void clearPreviousAttachments().then(append);
+      return;
+    }
+
+    append();
+  };
+
+  const handleTypeOverride = (id: string, nextType: LibraryDocType | "") => {
+    setStaging((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              overrideType: nextType || null,
+              error: null,
+            }
+          : item
+      )
+    );
+    setDetectError(null);
+  };
+
+  const removeStagingItem = (id: string) => {
+    setStaging((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      if (next.length === 0) {
+        void clearPreviousAttachments();
+      }
+      return next;
+    });
+    setDetectError(null);
+    markLibraryDirty();
   };
 
   const attachedExtraCount = extraPrSlots.filter((s) => s.upload).length;
-  const totalAttached =
-    uploads.filter(Boolean).length + attachedExtraCount;
-
+  const totalAttached = uploads.filter(Boolean).length + attachedExtraCount;
   const attachedRequiredCount = uploads.filter(Boolean).length;
   const showSavedButton =
-    isSaved && attachedRequiredCount >= MAX_FILES && isPageSaved("saved-project-library");
+    isSaved &&
+    attachedRequiredCount >= MAX_FILES &&
+    isPageSaved("saved-project-library") &&
+    staging.length === 0;
 
   useEffect(() => {
     if (attachedRequiredCount < MAX_FILES && isSaved) {
@@ -456,18 +688,55 @@ export default function ProjectLibraryPage() {
   }, [attachedRequiredCount, isSaved]);
 
   const handleSave = async () => {
-    if (isReadOnlyMode || isExtracting) return;
+    if (isReadOnlyMode || isExtracting || isDetecting) return;
+
+    let working = staging;
+    let extraSlotIdsForExtraction: string[] = [];
+
+    if (working.length > 0) {
+      if (working.length < MAX_FILES) {
+        showAlert({
+          title: "More documents needed",
+          message: `Add at least ${MAX_FILES} PDFs (${DOCUMENT_NAMES.join(", ")}). You have ${working.length} so far — you can add them one by one.`,
+        });
+        return;
+      }
+      if (working.length > MAX_TOTAL_FILES) {
+        showAlert({
+          title: "Too many files",
+          message: `Remove extras — maximum is ${MAX_TOTAL_FILES} PDFs.`,
+        });
+        return;
+      }
+
+      const needsClassify = working.some(
+        (item) => !effectiveType(item) || item.error
+      );
+      if (needsClassify) {
+        const classified = await classifyStagingItems(working);
+        if (!classified) return;
+        working = classified;
+      }
+
+      const assigned = await detectAndAssign(working);
+      if (!assigned.ok) return;
+      extraSlotIdsForExtraction = assigned.extraSlotIds;
+    } else {
+      extraSlotIdsForExtraction = extraPrSlots
+        .filter((s) => s.upload)
+        .map((s) => s.id);
+    }
+
     const ok = await hasAllProjectLibraryFiles(MAX_FILES);
     if (!ok) {
       showAlert({
         title: "Project library",
-        message: "Please upload all four required documents before saving the Project Library.",
+        message: `Please upload the ${MAX_FILES} required documents (${DOCUMENT_NAMES.join(", ")}). You can add them one by one or all together — we’ll detect each type automatically.`,
       });
       return;
     }
 
-    const extraSlotIds = extraPrSlots.filter((s) => s.upload).map((s) => s.id);
-    const outcome = await runExtraction(extraSlotIds);
+    const outcome = await runExtraction(extraSlotIdsForExtraction);
 
     if (outcome.primaryPrFailed) {
       const failureLines = outcome.failures
@@ -500,7 +769,9 @@ export default function ProjectLibraryPage() {
     saveDraft("saved-project-library-snapshot", snapshot);
     setIsSaved(true);
 
-    const optionalFailures = outcome.failures.filter((f) => f.label !== "Primary PR / PRC");
+    const optionalFailures = outcome.failures.filter(
+      (f) => f.label !== "Primary PR / PRC"
+    );
     let message =
       "Documents saved. Area Details, Project Details, and Applicant pre-filled — please review.";
     if (attachedExtraCount > 0) {
@@ -509,7 +780,9 @@ export default function ProjectLibraryPage() {
     if (optionalFailures.length > 0) {
       const lines = optionalFailures.map((f) => {
         if (f.error) return `${f.label}: ${f.error}`;
-        const fields = (f.missingFields ?? []).map((field) => getFieldLabel(field)).join(", ");
+        const fields = (f.missingFields ?? [])
+          .map((field) => getFieldLabel(field))
+          .join(", ");
         return `${f.label}: partial extraction (${fields || "some fields missing"})`;
       });
       message = `${message}\n\nSome documents had extraction issues:\n${lines.join("\n")}`;
@@ -549,14 +822,8 @@ export default function ProjectLibraryPage() {
       }`}
     >
       <DocumentPreviewModal
-        open={previewOpen}
-        onClose={() => {
-          setPreviewOpen(false);
-          if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-          setPreviewBlobUrl(null);
-          setPreviewUrl(null);
-          setPreviewTitle(undefined);
-        }}
+        open={previewOpen && Boolean(previewUrl)}
+        onClose={closePreview}
         fileUrl={previewUrl}
         title={previewTitle}
       />
@@ -564,21 +831,22 @@ export default function ProjectLibraryPage() {
       <div>
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <p className="max-w-xl text-sm text-gray-500">
-            Upload project documents for this project. Add extra PR / PRC cards only if your
-            project spans multiple CTS numbers or properties.
+            Upload the {MAX_FILES} required project documents — one at a time or
+            all together. We’ll detect each type and fill project details. Extra
+            PR / PRC cards are optional.
           </p>
           <button
             type="button"
             onClick={handleSave}
-            disabled={isReadOnlyMode || isExtracting}
+            disabled={isReadOnlyMode || isExtracting || isDetecting}
             className={`rounded-lg px-5 py-2 text-sm font-semibold ${
               showSavedButton ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-            } ${isReadOnlyMode || isExtracting ? "cursor-not-allowed opacity-70" : ""}`}
+            } ${isReadOnlyMode || isExtracting || isDetecting ? "cursor-not-allowed opacity-70" : ""}`}
           >
-            {isExtracting ? (
+            {isExtracting || isDetecting ? (
               <span className="inline-flex items-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                Saving & extracting…
+                {isDetecting ? "Detecting…" : "Saving & extracting…"}
               </span>
             ) : showSavedButton ? (
               "Saved"
@@ -588,146 +856,209 @@ export default function ProjectLibraryPage() {
           </button>
         </div>
 
-        <div className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-gray-100">
-            <table className="min-w-full text-sm text-left text-gray-900">
-              <thead className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600">
-                <tr>
-                  <th className="px-3 py-3 border-r border-gray-200 w-20">Sr. No.</th>
-                  <th className="px-3 py-3 border-r border-gray-200">Document&apos;s Name</th>
-                  <th className="px-3 py-3 border-r border-gray-200 w-32 text-center">Attach Here</th>
-                  <th className="px-3 py-3 w-24 text-center">Preview</th>
-                </tr>
-              </thead>
-              <tbody>
-                <DocumentRow
-                  key="fixed-0"
-                  serial="1"
-                  label={DOCUMENT_NAMES[0]}
-                  upload={uploads[0]}
+        {!isReadOnlyMode && (
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (e.dataTransfer.files?.length) {
+                addFiles(e.dataTransfer.files);
+              }
+            }}
+            className={`mb-4 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
+              dragOver
+                ? "border-brand-blue bg-blue-50/60"
+                : "border-gray-200 bg-gray-50/80 hover:border-gray-300"
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_TYPES.join(",")}
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  addFiles(e.target.files);
+                }
+                e.target.value = "";
+              }}
+            />
+            <p className="text-sm font-medium text-gray-800">
+              Drop PDFs here, or{" "}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-brand-blue underline-offset-2 hover:underline"
+              >
+                browse
+              </button>
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Add files one by one or several at once. Need {MAX_FILES}:{" "}
+              {DOCUMENT_NAMES.join(", ")}. Up to{" "}
+              {PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS} extra PR / PRC cards allowed.
+              {staging.length > 0
+                ? ` (${staging.length}/${MAX_TOTAL_FILES} selected)`
+                : ""}
+            </p>
+          </div>
+        )}
+
+        {staging.length > 0 && (
+          <ul className="mb-4 space-y-3">
+            {staging.map((item) => {
+              const type = effectiveType(item);
+              return (
+                <li
+                  key={item.id}
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-3"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="truncate text-sm font-medium text-gray-900">
+                        {item.file.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formatFileSize(item.file.size)}
+                        {item.loading ? " · Detecting…" : ""}
+                      </p>
+                      {item.error && (
+                        <p className="text-xs text-red-600">{item.error}</p>
+                      )}
+                      {!item.loading && !item.error && type && (
+                        <p className="text-xs text-green-700">
+                          Detected as {LABEL_BY_TYPE[type]}
+                          {item.overrideType ? " (manual)" : ""}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <select
+                        value={item.overrideType ?? item.detectedType ?? ""}
+                        disabled={item.loading || isDetecting || isExtracting}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          handleTypeOverride(
+                            item.id,
+                            isLibraryDocType(value) ? value : ""
+                          );
+                        }}
+                        className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                        aria-label={`Document type for ${item.file.name}`}
+                      >
+                        <option value="">
+                          {item.loading ? "Detecting…" : "Set type…"}
+                        </option>
+                        {LIBRARY_ALLOWED_TYPES.map((docType) => (
+                          <option key={docType} value={docType}>
+                            {LABEL_BY_TYPE[docType]}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void openPreview(item.file.name, async () => ({
+                            blob: item.file,
+                          }))
+                        }
+                        className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-brand-blue hover:bg-gray-50"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeStagingItem(item.id)}
+                        disabled={item.loading || isDetecting || isExtracting}
+                        className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {staging.length === 0 && totalAttached > 0 && (
+          <ul className="mb-4 space-y-3">
+            <AttachedSummaryRow
+              serial="1"
+              label={DOCUMENT_NAMES[0]}
+              upload={uploads[0]}
+              isReadOnlyMode={isReadOnlyMode}
+              onPreview={() =>
+                void openPreview(
+                  DOCUMENT_NAMES[0] || uploads[0]?.name || "Document 1",
+                  () => getProjectLibraryFile(0),
+                  uploads[0]?.url
+                )
+              }
+            />
+            {extraPrSlots.map((slot, slotIndex) => (
+              <AttachedSummaryRow
+                key={slot.id}
+                serial={`1.${slotIndex + 1}`}
+                label={PROJECT_LIBRARY_EXTRA_PR_LABEL}
+                upload={slot.upload}
+                isReadOnlyMode={isReadOnlyMode}
+                onPreview={() =>
+                  void openPreview(
+                    `${PROJECT_LIBRARY_EXTRA_PR_LABEL} ${slotIndex + 1}`,
+                    () => getExtraPrCard(slot.id),
+                    slot.upload?.url
+                  )
+                }
+              />
+            ))}
+            {uploads.slice(1).map((upload, offsetIndex) => {
+              const index = offsetIndex + 1;
+              return (
+                <AttachedSummaryRow
+                  key={`fixed-${index}`}
+                  serial={String(index + 1)}
+                  label={DOCUMENT_NAMES[index] || `Document ${index + 1}`}
+                  upload={upload}
                   isReadOnlyMode={isReadOnlyMode}
-                  rowClassName="bg-white"
-                  onAttach={() => fixedInputRefs.current[0]?.click()}
-                  onClear={handleClearFixed(0)}
                   onPreview={() =>
                     void openPreview(
-                      DOCUMENT_NAMES[0] || uploads[0]?.name || "Document 1",
-                      () => getProjectLibraryFile(0),
-                      uploads[0]?.url
+                      DOCUMENT_NAMES[index] ||
+                        upload?.name ||
+                        `Document ${index + 1}`,
+                      () => getProjectLibraryFile(index),
+                      upload?.url
                     )
                   }
                 />
+              );
+            })}
+          </ul>
+        )}
 
-                {extraPrSlots.map((slot, slotIndex) => (
-                  <DocumentRow
-                    key={slot.id}
-                    serial={`1.${slotIndex + 1}`}
-                    label={PROJECT_LIBRARY_EXTRA_PR_LABEL}
-                    upload={slot.upload}
-                    isReadOnlyMode={isReadOnlyMode}
-                    rowClassName="bg-emerald-50/30"
-                    onAttach={() => extraInputRefs.current[slot.id]?.click()}
-                    onRemove={handleRemoveExtra(slot.id)}
-                    onPreview={() =>
-                      void openPreview(
-                        `${PROJECT_LIBRARY_EXTRA_PR_LABEL} ${slotIndex + 1}`,
-                        () => getExtraPrCard(slot.id),
-                        slot.upload?.url
-                      )
-                    }
-                  />
-                ))}
+        {detectError && (
+          <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {detectError}
+          </p>
+        )}
 
-                {!isReadOnlyMode && (
-                  <tr className="border-b border-gray-200 bg-gradient-to-r from-emerald-50/40 to-blue-50/30">
-                    <td colSpan={4} className="px-3 py-3">
-                      <button
-                        type="button"
-                        onClick={handleAddExtraPr}
-                        disabled={extraPrSlots.length >= PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS}
-                        className="group flex w-full items-center justify-center gap-3 rounded-xl border-2 border-dashed border-emerald-200 bg-white/80 px-4 py-3 text-left transition-all hover:border-emerald-400 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 ring-4 ring-emerald-50 transition-colors group-hover:bg-emerald-200">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.5">
-                            <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-                          </svg>
-                        </span>
-                        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-baseline sm:gap-2">
-                          <span className="text-sm font-semibold text-emerald-900">
-                            Add another PR / PRC card
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            For multiple CTS numbers or properties
-                          </span>
-                        </span>
-                      </button>
-                    </td>
-                  </tr>
-                )}
-
-                {uploads.slice(1).map((upload, offsetIndex) => {
-                  const index = offsetIndex + 1;
-                  return (
-                    <DocumentRow
-                      key={`fixed-${index}`}
-                      serial={String(index + 1)}
-                      label={DOCUMENT_NAMES[index] || `Document ${index + 1}`}
-                      upload={upload}
-                      isReadOnlyMode={isReadOnlyMode}
-                      rowClassName={index % 2 === 0 ? "bg-white" : "bg-gray-50/40"}
-                      onAttach={() => fixedInputRefs.current[index]?.click()}
-                      onClear={handleClearFixed(index)}
-                      onPreview={() =>
-                        void openPreview(
-                          DOCUMENT_NAMES[index] || upload?.name || `Document ${index + 1}`,
-                          () => getProjectLibraryFile(index),
-                          upload?.url
-                        )
-                      }
-                    />
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Hidden file inputs */}
-          {uploads.map((_, index) => (
-            <input
-              key={`fixed-input-${index}`}
-              type="file"
-              accept={ACCEPTED_TYPES.join(",")}
-              onChange={handleFixedFileChange(index)}
-              disabled={isReadOnlyMode}
-              ref={(el) => {
-                fixedInputRefs.current[index] = el;
-              }}
-              className="hidden"
-            />
-          ))}
-          {extraPrSlots.map((slot) => (
-            <input
-              key={`extra-input-${slot.id}`}
-              type="file"
-              accept={ACCEPTED_TYPES.join(",")}
-              onChange={handleExtraFileChange(slot.id)}
-              disabled={isReadOnlyMode}
-              ref={(el) => {
-                extraInputRefs.current[slot.id] = el;
-              }}
-              className="hidden"
-            />
-          ))}
-
-          <div className="text-sm text-gray-700">
-            {totalAttached} file{totalAttached === 1 ? "" : "s"} attached
-            {attachedExtraCount > 0 && (
-              <span className="text-gray-500">
-                {" "}
-                (including {attachedExtraCount} additional PR / PRC)
-              </span>
-            )}
-          </div>
+        <div className="text-sm text-gray-700">
+          {staging.length > 0
+            ? `${staging.length} file${staging.length === 1 ? "" : "s"} selected`
+            : `${totalAttached} file${totalAttached === 1 ? "" : "s"} attached`}
+          {staging.length === 0 && attachedExtraCount > 0 && (
+            <span className="text-gray-500">
+              {" "}
+              (including {attachedExtraCount} additional PR / PRC)
+            </span>
+          )}
         </div>
       </div>
     </div>

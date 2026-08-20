@@ -224,6 +224,40 @@ export async function classifyAndValidateDocumentFile(
   };
 }
 
+/**
+ * Classify an unlabeled file without extracting fields (for slot assignment).
+ */
+export async function classifyDocumentFileOnly(
+  buffer: Buffer,
+  allowedTypes: DocumentType[],
+  mediaType: string
+): Promise<ClassifyDocumentResult> {
+  if (allowedTypes.length === 0) {
+    throw new Error("At least one allowed document type is required.");
+  }
+
+  if (!isSupportedDocumentMediaType(mediaType)) {
+    throw new Error(
+      `Unsupported file type "${mediaType}". Upload a PDF or image (JPEG/PNG/WebP).`
+    );
+  }
+
+  let documentText = "";
+  if (mediaType === "application/pdf") {
+    try {
+      documentText = await extractTextFromPdfBuffer(buffer);
+    } catch {
+      // Scanned / image-only PDF — classify from media alone.
+    }
+  }
+
+  return classifyDocumentType(
+    { data: buffer, mediaType },
+    allowedTypes,
+    documentText
+  );
+}
+
 export type { DocumentDefinition } from "./types";
 export type { ClassifyDocumentResult } from "./ai";
 export { classifyDocumentType } from "./ai";
