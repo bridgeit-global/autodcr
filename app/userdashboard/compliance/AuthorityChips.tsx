@@ -12,14 +12,25 @@ type AuthorityChipsProps = {
   authorities: AuthorityChip[];
   selected: Set<string>;
   onToggle: (id: string) => void;
+  compact?: boolean;
 };
 
 export default function AuthorityChips({
   authorities,
   selected,
   onToggle,
+  compact = false,
 }: AuthorityChipsProps) {
   if (!authorities.length) {
+    if (compact) {
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-8 w-20 animate-pulse rounded-full bg-gray-100" />
+          ))}
+        </div>
+      );
+    }
     return (
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
@@ -28,6 +39,44 @@ export default function AuthorityChips({
             className="h-[4.5rem] animate-pulse rounded-xl bg-gray-100"
           />
         ))}
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {authorities.map((a) => {
+          const active = selected.has(a.id);
+          return (
+            <button
+              key={a.id}
+              type="button"
+              title={a.description || a.id}
+              aria-pressed={active}
+              onClick={() => onToggle(a.id)}
+              className={[
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40",
+                active
+                  ? "border-brand-blue bg-blue-50 text-brand-navy"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-brand-blue/40",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "flex h-3.5 w-3.5 items-center justify-center rounded-full border",
+                  active
+                    ? "border-brand-blue bg-brand-blue text-white"
+                    : "border-gray-300 bg-white text-transparent",
+                ].join(" ")}
+              >
+                <Check className="h-2.5 w-2.5" strokeWidth={3} />
+              </span>
+              {a.label}
+            </button>
+          );
+        })}
       </div>
     );
   }

@@ -1,12 +1,13 @@
 import { assertApiKey, getConfig } from "./config";
 import { normalizeAuthorities } from "./regulations";
-import type { AskResult, SearchHit } from "./types";
+import type { AskHistoryTurn, AskResult, SearchHit } from "./types";
 import { embedTexts, getLLM, similaritySearch } from "./vectorstore";
 
-const SYSTEM_PROMPT = `You are a helpful assistant that answers questions using only the provided context from regulation PDF documents.
+const SYSTEM_PROMPT = `You are a helpful assistant that answers questions using only the provided context from regulation PDF documents and, when present, the user's uploaded project document.
 
 Rules:
-- Base your answer strictly on the context below.
+- Base your answer strictly on the regulation excerpts and uploaded document text below.
+- If the user asks about the uploaded document, use that document and cite regulations where they apply.
 - If the context is insufficient, say you don't have enough information in the documents.
 - Cite the source PDF filename(s), authority, and page number(s) when possible.
 - Be concise and accurate. Prefer quoting or paraphrasing regulations carefully.`;
@@ -22,7 +23,19 @@ function formatContext(hits: SearchHit[]): string {
 
 export async function askQuestion(
   question: unknown,
-  { authorities = null }: { authorities?: unknown } = {}
+  {
+    authorities = null,
+    documentText = "",
+    documentFilename = "",
+    notes = "",
+    history = [],
+  }: {
+    authorities?: unknown;
+    documentText?: string;
+    documentFilename?: string;
+    notes?: string;
+    history?: AskHistoryTurn[];
+  } = {}
 ): Promise<AskResult> {
   assertApiKey();
   const q = String(question || "").trim();
@@ -36,7 +49,8 @@ export async function askQuestion(
     authorities: filterAuth.length ? filterAuth : null,
   });
 
-  if (!hits.length) {
+  const doc = String(documentText || "").trim();
+  if (!hits.length && !doc) {
     return {
       answer: filterAuth.length
         ? `No relevant passages were found for authorities: ${filterAuth.join(", ")}.`
@@ -46,6 +60,26 @@ export async function askQuestion(
     };
   }
 
+  const extra: string[] = [];
+  if (notes.trim()) extra.push(`Project notes:\n${notes.trim()}`);
+  if (doc) {
+    const name = documentFilename.trim() || "uploaded-document.pdf";
+    extra.push(`Uploaded project document (${name}):\n${doc.slice(0, 20000)}`);
+  }
+  extra.push(
+    hits.length
+      ? `Regulation excerpts:\n${formatContext(hits)}`
+      : "No matching regulation excerpts were found. Answer from the uploaded document if possible."
+  );
+
+  const prior = history
+    .filter((turn) => turn.content.trim())
+    .slice(-8)
+    .map((turn) => ({
+      role: turn.role === "user" ? ("user" as const) : ("assistant" as const),
+      content: turn.content.slice(0, 4000),
+    }));
+
   const completion = await llm.chat.completions.create({
     model: config.chatModel,
     temperature: 0,
@@ -53,8 +87,9 @@ export async function askQuestion(
     messages: [
       {
         role: "system",
-        content: `${SYSTEM_PROMPT}\n\nContext:\n${formatContext(hits)}`,
+        content: `${SYSTEM_PROMPT}\n\nContext:\n${extra.join("\n\n---\n\n")}`,
       },
+      ...prior,
       { role: "user", content: q },
     ],
   });

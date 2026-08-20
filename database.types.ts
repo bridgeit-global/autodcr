@@ -358,6 +358,103 @@ export type Database = {
         }
         Relationships: []
       }
+      regulation_chat_messages: {
+        Row: {
+          chat_id: string
+          compliance: Json | null
+          content: string
+          created_at: string
+          error: boolean
+          filename: string | null
+          id: string
+          kind: string
+          role: string
+          sources: Json
+        }
+        Insert: {
+          chat_id: string
+          compliance?: Json | null
+          content?: string
+          created_at?: string
+          error?: boolean
+          filename?: string | null
+          id?: string
+          kind?: string
+          role: string
+          sources?: Json
+        }
+        Update: {
+          chat_id?: string
+          compliance?: Json | null
+          content?: string
+          created_at?: string
+          error?: boolean
+          filename?: string | null
+          id?: string
+          kind?: string
+          role?: string
+          sources?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regulation_chat_messages_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "regulation_chats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      regulation_chats: {
+        Row: {
+          authorities: string[]
+          created_at: string
+          document_chars: number | null
+          document_filename: string | null
+          document_pages: number | null
+          document_text: string | null
+          id: string
+          project_id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          authorities?: string[]
+          created_at?: string
+          document_chars?: number | null
+          document_filename?: string | null
+          document_pages?: number | null
+          document_text?: string | null
+          id?: string
+          project_id: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          authorities?: string[]
+          created_at?: string
+          document_chars?: number | null
+          document_filename?: string | null
+          document_pages?: number | null
+          document_text?: string | null
+          id?: string
+          project_id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regulation_chats_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_logs: {
         Row: {
           created_at: string | null

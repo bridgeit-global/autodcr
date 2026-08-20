@@ -85,20 +85,29 @@ function parseJsonContent(raw: string): {
 
 export async function analyzeCompliance({
   pdfBuffer,
+  proposalText: proposalTextIn,
   filename = "proposal.pdf",
   authoritiesOverride = null,
   notes = "",
+  pages: pagesIn,
 }: {
-  pdfBuffer: Buffer;
+  pdfBuffer?: Buffer | null;
+  proposalText?: string;
   filename?: string;
   authoritiesOverride?: unknown;
   notes?: string;
+  pages?: number | null;
 }): Promise<ComplianceResult> {
   assertApiKey();
   assertPinecone();
 
-  const { text, pages } = await extractPdf(pdfBuffer);
-  const proposalText = text.trim();
+  let proposalText = String(proposalTextIn || "").trim();
+  let pages = pagesIn ?? 0;
+  if (pdfBuffer && pdfBuffer.length) {
+    const extracted = await extractPdf(pdfBuffer);
+    proposalText = extracted.text.trim();
+    pages = extracted.pages;
+  }
   if (!proposalText) {
     throw new Error(
       "Could not extract text from the proposal PDF. Scanned/image-only PDFs need OCR (not supported yet)."

@@ -4,8 +4,11 @@ export { askQuestion } from "./rag";
 export { analyzeCompliance } from "./compliance";
 export { ingest } from "./ingest";
 export type {
+  AskHistoryTurn,
   AskResult,
   AuthorityWithDocuments,
   ComplianceResult,
   HealthResult,
+  RegulationChatMessage,
+  RegulationChatSummary,
 } from "./types";

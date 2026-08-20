@@ -103,6 +103,39 @@ export type AskResult = {
   sources: RagSource[];
 };
 
+export type ChatRole = "user" | "assistant";
+
+export type ChatMessageKind = "text" | "ask" | "compliance" | "document";
+
+export type RegulationChatSummary = {
+  id: string;
+  project_id: string;
+  title: string;
+  authorities: string[];
+  document_filename: string | null;
+  document_pages: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RegulationChatMessage = {
+  id: string;
+  chat_id: string;
+  role: ChatRole;
+  content: string;
+  kind: ChatMessageKind;
+  sources: RagSource[];
+  compliance: ComplianceResult | null;
+  filename: string | null;
+  error: boolean;
+  created_at: string;
+};
+
+export type AskHistoryTurn = {
+  role: ChatRole;
+  content: string;
+};
+
 export type ComplianceResult = {
   needsAuthoritySelection: boolean;
   detection: JurisdictionDetection;
