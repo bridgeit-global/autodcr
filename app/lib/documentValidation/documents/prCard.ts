@@ -35,7 +35,7 @@ const FIELD_RULES = `
 
 6. grossPlotArea — Total plot area in sq.m. if a single gross total is shown; else null.
 
-7. planningAuthority, region, zone, ward — ONLY if explicitly printed on this card (e.g. BMC, Western, Zone III, H/W Ward). For standard PR cards without planning data, return null for all four.
+7. planningAuthority, region, zone, ward — ONLY if explicitly printed on this card (e.g. BMC, CIDCO, MIDC, Western, Zone III, H/W Ward). For standard PR cards without planning data, return null for all four.
 
 8. extractsJson — REQUIRED JSON string (not markdown). Array of objects, one per CTS row/subdivision on the card:
    [{ "extractNo": "338/1", "prcArea": "19.00", "ulcArea": "0", "bFormArea": "0", "conveyanceArea": "0", "attorneyArea": "0", "dilrMapArea": "0", "isLeaf": true }]

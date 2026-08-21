@@ -116,6 +116,31 @@ export async function hasAllProjectLibraryFiles(expectedSlots: number): Promise<
   return true;
 }
 
+/** True if at least one fixed slot has a file in IndexedDB. */
+export async function hasAnyProjectLibraryFiles(expectedSlots: number): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  for (let i = 0; i < expectedSlots; i++) {
+    const v = await getProjectLibraryFile(i);
+    if (v?.blob) return true;
+  }
+  return false;
+}
+
+/** Count fixed slots that have a file, plus extras that exist in IndexedDB. */
+export async function countAttachedProjectLibraryFiles(
+  expectedSlots: number,
+  extraSlotIds: string[]
+): Promise<number> {
+  if (typeof window === "undefined") return 0;
+  let count = await countProjectLibraryFilesInIndexedDB(expectedSlots);
+  for (const slotId of extraSlotIds) {
+    // eslint-disable-next-line no-await-in-loop
+    const v = await getExtraPrCard(slotId);
+    if (v?.blob) count += 1;
+  }
+  return count;
+}
+
 export async function clearAllProjectLibraryFiles(expectedSlots: number): Promise<void> {
   if (typeof window === "undefined") return;
   for (let i = 0; i < expectedSlots; i++) {
