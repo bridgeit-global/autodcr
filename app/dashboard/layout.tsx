@@ -423,8 +423,11 @@ function DashboardLayoutContent({
       markPageSaved("saved-project-library");
       const libraryUploads = (verifiedProjectData.project_library as { uploads?: unknown[] })
         ?.uploads;
-      if (Array.isArray(libraryUploads) && libraryUploads.filter(Boolean).length >= PROJECT_LIBRARY_MAX_FILES) {
-        saveDraft("saved-project-library-files", { count: PROJECT_LIBRARY_MAX_FILES });
+      if (Array.isArray(libraryUploads)) {
+        const uploadCount = libraryUploads.filter(Boolean).length;
+        if (uploadCount >= 1) {
+          saveDraft("saved-project-library-files", { count: uploadCount });
+        }
       }
     }
   }

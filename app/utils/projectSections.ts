@@ -54,27 +54,36 @@ export const PROJECT_LIBRARY_PR_CARD_LABEL = PROJECT_LIBRARY_DOCUMENT_NAMES[0];
 export const PROJECT_LIBRARY_EXTRA_PR_LABEL =
   "Additional Property Register Card (PR / PRC)";
 
-/** Cap optional extra PR/PRC uploads (beyond the required first card). */
-export const PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS = 9;
+/** Cap total PR/PRC card uploads (primary + extras). */
+export const PROJECT_LIBRARY_MAX_PR_CARDS = 100;
+
+/** @deprecated Use PROJECT_LIBRARY_MAX_PR_CARDS (total cap). Kept as max extras = total − 1. */
+export const PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS = PROJECT_LIBRARY_MAX_PR_CARDS - 1;
 
 export const PROJECT_LIBRARY_MAX_FILES = PROJECT_LIBRARY_DOCUMENT_NAMES.length;
+
+/** Max other docs (DP / CRZ / POA) — one each, all optional. */
+export const PROJECT_LIBRARY_MAX_OTHER_DOCS = PROJECT_LIBRARY_MAX_FILES - 1;
 
 export const DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY = "draft-project-library-extra-pr-uploads";
 
 export const LIBRARY_GATE_ALERT = {
   title: "Project Library required",
-  message: "Upload and save Project Library first",
+  message: "Upload and save at least one Project Library document first",
 };
 
 export function isProjectLibraryComplete(): boolean {
   if (!isPageSaved("saved-project-library")) return false;
   const fixed = loadDraft<unknown[]>("draft-project-library-uploads", []);
-  if (!Array.isArray(fixed)) return false;
-  const attached = fixed.filter(Boolean).length;
-  if (attached < PROJECT_LIBRARY_MAX_FILES) return false;
-  // Ignore stale saved flags when draft slots exist without backing files.
+  const extraPr = loadDraft<unknown[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+  const fixedAttached = Array.isArray(fixed) ? fixed.filter(Boolean).length : 0;
+  const extraAttached = Array.isArray(extraPr)
+    ? extraPr.filter((s) => s && typeof s === "object" && "upload" in s && (s as { upload?: unknown }).upload).length
+    : 0;
+  if (fixedAttached + extraAttached < 1) return false;
+  // Ignore stale saved flags when no backing files were verified.
   const verified = loadDraft<{ count?: number } | null>("saved-project-library-files", null);
-  return verified?.count === PROJECT_LIBRARY_MAX_FILES;
+  return typeof verified?.count === "number" && verified.count >= 1;
 }
 
 export function shouldGateCreateProjectSections(options: {

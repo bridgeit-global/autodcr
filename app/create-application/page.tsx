@@ -42,6 +42,8 @@ const planningAuthorities: PlanningAuthority[] = [
   { id: "sra", label: "SRA" },
   { id: "mhada", label: "MHADA" },
   { id: "mmrda", label: "MMRDA" },
+  { id: "cidco", label: "CIDCO" },
+  { id: "midc", label: "MIDC" },
 ];
 
 const departments = [
@@ -735,6 +737,8 @@ export default function CreateApplicationPage() {
     sra: "SRA",
     mhada: "MHADA",
     mmrda: "MMRDA",
+    cidco: "CIDCO",
+    midc: "MIDC",
   };
   const selectedAuthorityLabel = authorityLabelMap[selectedAuthority];
 

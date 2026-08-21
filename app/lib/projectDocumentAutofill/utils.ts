@@ -106,12 +106,14 @@ export function sanitizeCtsNumbers(raw: unknown): string[] {
 
 export function normalizePlanningAuthority(
   value: string | null | undefined
-): "BMC" | "SRA" | "MHADA" | "MMRDA" | "" {
+): "BMC" | "SRA" | "MHADA" | "MMRDA" | "CIDCO" | "MIDC" | "" {
   const v = (value ?? "").trim().toUpperCase();
   if (v.includes("BMC") || v.includes("MCGM")) return "BMC";
   if (v.includes("SRA")) return "SRA";
   if (v.includes("MHADA")) return "MHADA";
   if (v.includes("MMRDA")) return "MMRDA";
+  if (v.includes("CIDCO")) return "CIDCO";
+  if (v.includes("MIDC")) return "MIDC";
   return "";
 }
 

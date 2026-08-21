@@ -32,7 +32,7 @@ export type DpRemarks = z.infer<typeof dpRemarksSchema>;
 const FIELD_RULES = `
 Extract from D.P. Remarks / Development Plan remarks (BMC / MCGM style).
 
-1. planningAuthority — e.g. BMC, MMRDA. Usually BMC for Mumbai.
+1. planningAuthority — e.g. BMC, MMRDA, CIDCO, MIDC. Usually BMC for Mumbai.
 
 2. region — Eastern, Western, City (map H/W Ward → Western when document says H/W Ward).
 

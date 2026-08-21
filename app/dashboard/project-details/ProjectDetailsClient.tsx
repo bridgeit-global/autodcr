@@ -49,7 +49,7 @@ type ProjectFormData = {
 };
 
 type SavePlotFormData = {
-  planningAuthority: "BMC" | "SRA" | "MHADA" | "MMRDA" | "";
+  planningAuthority: "BMC" | "SRA" | "MHADA" | "MMRDA" | "CIDCO" | "MIDC" | "";
   projectProponent: string;
   region: string;
   zone: string;
@@ -74,7 +74,14 @@ type SavePlotFormData = {
   }[];
 };
 
-const PLANNING_AUTHORITY_OPTIONS = ["BMC", "SRA", "MHADA", "MMRDA"] as const;
+const PLANNING_AUTHORITY_OPTIONS = [
+  "BMC",
+  "SRA",
+  "MHADA",
+  "MMRDA",
+  "CIDCO",
+  "MIDC",
+] as const;
 
 function normalizePlanningAuthority(v: unknown): SavePlotFormData["planningAuthority"] {
   if (typeof v !== "string") return "";

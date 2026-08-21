@@ -50,6 +50,8 @@ const FIXED_JOBS: Array<Omit<ExtractionJob, "loadBlob"> & { index: number }> = [
   },
 ];
 
+const EXTRACT_CONCURRENCY = 5;
+
 function storedBlobToFile(stored: {
   name: string;
   type: string;
@@ -62,6 +64,31 @@ function storedBlobToFile(stored: {
   });
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const current = nextIndex;
+      nextIndex += 1;
+      results[current] = await fn(items[current]!);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 export function useProjectLibraryExtraction() {
   const [isExtracting, setIsExtracting] = useState(false);
 
@@ -70,22 +97,33 @@ export function useProjectLibraryExtraction() {
       setIsExtracting(true);
 
       try {
-        const jobs: ExtractionJob[] = FIXED_JOBS.map(({ index, ...rest }) => ({
-          ...rest,
-          loadBlob: () => getProjectLibraryFile(index),
-        }));
-
-        for (const slotId of extraPrSlotIds) {
-          jobs.push({
-            slot: "pr-extra",
-            documentType: "pr-card",
+        const candidateJobs: ExtractionJob[] = [
+          ...FIXED_JOBS.map(({ index, ...rest }) => ({
+            ...rest,
+            loadBlob: () => getProjectLibraryFile(index),
+          })),
+          ...extraPrSlotIds.map((slotId) => ({
+            slot: "pr-extra" as const,
+            documentType: "pr-card" as DocumentType,
             label: "Additional PR / PRC",
             loadBlob: () => getExtraPrCard(slotId),
-          });
+          })),
+        ];
+
+        // Only extract slots that actually have a local file (optional docs may be missing).
+        const jobs: ExtractionJob[] = [];
+        for (const job of candidateJobs) {
+          // eslint-disable-next-line no-await-in-loop
+          const stored = await job.loadBlob();
+          if (stored?.blob) {
+            jobs.push(job);
+          }
         }
 
-        const outcomes = await Promise.all(
-          jobs.map(async (job) => {
+        const outcomes = await mapWithConcurrency(
+          jobs,
+          EXTRACT_CONCURRENCY,
+          async (job) => {
             const stored = await job.loadBlob();
             if (!stored?.blob) {
               return {
@@ -120,7 +158,7 @@ export function useProjectLibraryExtraction() {
                 error: err instanceof Error ? err.message : "Validation failed.",
               };
             }
-          })
+          }
         );
 
         const extractions: ProjectLibraryExtraction[] = [];
@@ -128,10 +166,34 @@ export function useProjectLibraryExtraction() {
         let primaryPrFailed = false;
 
         for (const outcome of outcomes) {
-          if (outcome.extraction) {
+          const isPrCard =
+            outcome.job.slot === "pr-primary" || outcome.job.slot === "pr-extra";
+
+          if (outcome.extraction && outcome.extraction.valid) {
             extractions.push(outcome.extraction);
             continue;
           }
+
+          if (outcome.extraction && !outcome.extraction.valid) {
+            if (isPrCard) {
+              if (outcome.job.slot === "pr-primary") primaryPrFailed = true;
+              failures.push({
+                label: outcome.job.label,
+                fileName: outcome.stored?.name ?? outcome.job.label,
+                missingFields: outcome.extraction.missingFields,
+              });
+            } else {
+              // Non-PR optional docs: keep partial extraction for autofill, still note issues.
+              extractions.push(outcome.extraction);
+              failures.push({
+                label: outcome.job.label,
+                fileName: outcome.stored?.name ?? outcome.job.label,
+                missingFields: outcome.extraction.missingFields,
+              });
+            }
+            continue;
+          }
+
           if (outcome.job.slot === "pr-primary") primaryPrFailed = true;
           failures.push({
             label: outcome.job.label,
