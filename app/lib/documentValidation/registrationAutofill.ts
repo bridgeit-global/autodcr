@@ -14,7 +14,15 @@ export type AutofillContext = {
 
 export type AutofillPatch = Record<string, string>;
 
-export type AutofillDocSource = "aadhaar" | "pan" | "technical-person-license";
+export type AutofillDocSource =
+  | "aadhaar"
+  | "pan"
+  | "entity-pan"
+  | "gst-certificate"
+  | "llp-incorporation-certificate"
+  | "signatory-photo"
+  | "signatory-signature"
+  | "technical-person-license";
 
 export type AutofillFieldCandidate = {
   source: AutofillDocSource;
@@ -73,6 +81,9 @@ export type AutofillFiles = {
   aadhaarCardFile?: File | null;
   panCardFile?: File | null;
   licenseCertificateFile?: File | null;
+  authorizedSignatoryPhotoFile?: File | null;
+  authorizedSignatorySignatureFile?: File | null;
+  entityDocuments?: Partial<Record<string, File | null>>;
 };
 
 export type MergeAutofillOptions = {
@@ -83,14 +94,40 @@ export type MergeAutofillOptions = {
 export const AUTOFILL_DOC_SOURCE_LABELS: Record<AutofillDocSource, string> = {
   aadhaar: "Aadhaar",
   pan: "PAN",
+  "entity-pan": "Entity PAN",
+  "gst-certificate": "GST Certificate",
+  "llp-incorporation-certificate": "LLP Incorporation",
+  "signatory-photo": "Signatory Photograph",
+  "signatory-signature": "Signatory Signature",
   "technical-person-license": "License",
 };
 
-const AUTOFILL_DOC_SOURCE_ORDER: AutofillDocSource[] = [
+const BASE_AUTOFILL_DOC_SOURCE_ORDER: AutofillDocSource[] = [
   "aadhaar",
   "pan",
+  "entity-pan",
+  "gst-certificate",
+  "llp-incorporation-certificate",
+  "signatory-photo",
+  "signatory-signature",
   "technical-person-license",
 ];
+
+export function getAutofillDocSourceOrder(
+  context: AutofillContext = {}
+): AutofillDocSource[] {
+  if (context.entityType === "LLP") {
+    return [
+      "gst-certificate",
+      "llp-incorporation-certificate",
+      "entity-pan",
+      "aadhaar",
+      "pan",
+      "technical-person-license",
+    ];
+  }
+  return BASE_AUTOFILL_DOC_SOURCE_ORDER;
+}
 
 const PROFESSION_TO_CONSULTANT_TYPE: Array<{
   patterns: RegExp[];
@@ -204,13 +241,15 @@ function formatAddressDisplay(patch: AutofillPatch): string {
 }
 
 function collectGroupConflicts(
-  patchesBySource: Partial<Record<AutofillDocSource, AutofillPatch>>
+  patchesBySource: Partial<Record<AutofillDocSource, AutofillPatch>>,
+  context: AutofillContext = {}
 ): {
   agreed: AutofillPatch;
   groupConflicts: AutofillGroupConflict[];
 } {
   const agreed: AutofillPatch = {};
   const groupConflicts: AutofillGroupConflict[] = [];
+  const sourceOrder = getAutofillDocSourceOrder(context);
 
   for (const [groupId, config] of Object.entries(AUTOFILL_CONFLICT_GROUPS) as [
     AutofillGroupId,
@@ -218,7 +257,7 @@ function collectGroupConflicts(
   ][]) {
     const candidates: AutofillGroupConflictCandidate[] = [];
 
-    for (const source of AUTOFILL_DOC_SOURCE_ORDER) {
+    for (const source of sourceOrder) {
       const patch = patchesBySource[source];
       if (!patch) continue;
 
@@ -267,18 +306,20 @@ function collectGroupConflicts(
  * name/address groups get one dropdown each; other conflicts are per-field.
  */
 export function collectAutofillConflicts(
-  patchesBySource: Partial<Record<AutofillDocSource, AutofillPatch>>
+  patchesBySource: Partial<Record<AutofillDocSource, AutofillPatch>>,
+  context: AutofillContext = {}
 ): {
   agreed: AutofillPatch;
   conflicts: AutofillFieldConflict[];
   groupConflicts: AutofillGroupConflict[];
 } {
   const { agreed: groupAgreed, groupConflicts } =
-    collectGroupConflicts(patchesBySource);
+    collectGroupConflicts(patchesBySource, context);
 
   const byField = new Map<string, AutofillFieldCandidate[]>();
+  const sourceOrder = getAutofillDocSourceOrder(context);
 
-  for (const source of AUTOFILL_DOC_SOURCE_ORDER) {
+  for (const source of sourceOrder) {
     const patch = patchesBySource[source];
     if (!patch) continue;
     for (const [field, value] of Object.entries(patch)) {
@@ -532,20 +573,196 @@ export function resolveConsultantTypeFromLicense(
   return resolveConsultantTypeFromProfession(haystack);
 }
 
+const MONTH_NAME_TO_NUMBER: Record<string, string> = {
+  jan: "01",
+  january: "01",
+  feb: "02",
+  february: "02",
+  mar: "03",
+  march: "03",
+  apr: "04",
+  april: "04",
+  may: "05",
+  jun: "06",
+  june: "06",
+  jul: "07",
+  july: "07",
+  aug: "08",
+  august: "08",
+  sep: "09",
+  sept: "09",
+  september: "09",
+  oct: "10",
+  october: "10",
+  nov: "11",
+  november: "11",
+  dec: "12",
+  december: "12",
+};
+
+function monthNameToNumber(value: string): string | null {
+  const key = value.trim().toLowerCase();
+  return MONTH_NAME_TO_NUMBER[key] ?? MONTH_NAME_TO_NUMBER[key.slice(0, 3)] ?? null;
+}
+
+const WORD_NUMBERS: Record<string, number> = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  fifth: 5,
+  sixth: 6,
+  seventh: 7,
+  eighth: 8,
+  ninth: 9,
+  tenth: 10,
+  eleventh: 11,
+  twelfth: 12,
+  thirteenth: 13,
+  fourteenth: 14,
+  fifteenth: 15,
+  sixteenth: 16,
+  seventeenth: 17,
+  eighteenth: 18,
+  nineteenth: 19,
+  twentieth: 20,
+  thirtieth: 30,
+  thirtyfirst: 31,
+};
+
+function wordsToDayOrYear(text: string): number | null {
+  const tokens = text
+    .toLowerCase()
+    .replace(/-/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  let total = 0;
+  for (const token of tokens) {
+    const value = WORD_NUMBERS[token];
+    if (value === undefined) return null;
+    total += value;
+  }
+  return total > 0 ? total : null;
+}
+
+function parseWrittenYear(text: string): string | null {
+  const digitYear = text.match(/\b(19|20)\d{2}\b/);
+  if (digitYear) return digitYear[0];
+
+  const lower = text.toLowerCase();
+  const thousandMatch = lower.match(
+    /two\s+thousand(?:\s+and)?\s+([\w\s-]+)/
+  );
+  if (thousandMatch) {
+    const suffix = wordsToDayOrYear(thousandMatch[1]);
+    if (suffix !== null && suffix >= 0 && suffix <= 99) {
+      return String(2000 + suffix);
+    }
+  }
+
+  return null;
+}
+
+function parseWrittenMcaDate(raw: string): string {
+  const lower = raw.toLowerCase();
+
+  let month: string | null = null;
+  for (const [name, num] of Object.entries(MONTH_NAME_TO_NUMBER)) {
+    if (name.length >= 3 && lower.includes(name)) {
+      month = num;
+      break;
+    }
+  }
+  if (!month) return "";
+
+  const year = parseWrittenYear(raw);
+  if (!year) return "";
+
+  let day: number | null = null;
+  const dayOfMatch = lower.match(/([\w\s-]+?)\s+day\s+of/);
+  if (dayOfMatch) {
+    day = wordsToDayOrYear(dayOfMatch[1]);
+  }
+  if (!day) {
+    const digitDay = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
+    if (digitDay) day = Number.parseInt(digitDay[1], 10);
+  }
+  if (!day || day < 1 || day > 31) return "";
+
+  return `${year}-${month}-${String(day).padStart(2, "0")}`;
+}
+
+/** Normalize LLPIN to AAA-XXXX for form validation. */
+export function normalizeLlpin(value: string | null | undefined): string {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+
+  if (/^[A-Z]{3}-[A-Z0-9]{4}$/.test(raw)) return raw;
+
+  const compact = raw.replace(/[^A-Z0-9]/g, "");
+  if (/^[A-Z]{3}[A-Z0-9]{4}$/.test(compact)) {
+    return `${compact.slice(0, 3)}-${compact.slice(3)}`;
+  }
+
+  return raw;
+}
+
 /** Parse printed dates to HTML date input format (YYYY-MM-DD). */
 export function parseDateForInput(value: string | null | undefined): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
 
-  const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(raw);
+  const normalized = raw.replace(/(\d{1,2})(st|nd|rd|th)/gi, "$1");
+
+  const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(normalized);
   if (dmy) {
     const [, d, m, y] = dmy;
     return `${y}-${m!.padStart(2, "0")}-${d!.padStart(2, "0")}`;
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
 
-  return "";
+  const dMonthY = /^(\d{1,2})[\s./-]+([A-Za-z]+)[\s./-]+(\d{4})$/.exec(normalized);
+  if (dMonthY) {
+    const [, d, monthName, y] = dMonthY;
+    const m = monthNameToNumber(monthName);
+    if (m) return `${y}-${m}-${d!.padStart(2, "0")}`;
+  }
+
+  const monthDY = /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/.exec(normalized);
+  if (monthDY) {
+    const [, monthName, d, y] = monthDY;
+    const m = monthNameToNumber(monthName);
+    if (m) return `${y}-${m}-${d!.padStart(2, "0")}`;
+  }
+
+  return parseWrittenMcaDate(raw);
 }
 
 function applyNamePatch(
@@ -626,8 +843,14 @@ export function buildAadhaarAutofillPatch(
   }
 
   applyNamePatch(patch, extracted.name, includeProprietor);
-  applyAddressPatch(patch, extracted.address, registrationKind === "owner");
-  applyCityStatePincodeFromExtracted(patch, extracted, extracted.address);
+
+  const shouldApplyAadhaarAddress =
+    registrationKind !== "owner" || context.entityType === "Individual";
+  if (shouldApplyAadhaarAddress) {
+    applyAddressPatch(patch, extracted.address, registrationKind === "owner");
+    applyCityStatePincodeFromExtracted(patch, extracted, extracted.address);
+  }
+
   applyPhonePatch(patch, extracted.contactNumber);
 
   return patch;
@@ -642,6 +865,65 @@ export function buildPanAutofillPatch(
   }
   applyNamePatch(patch, extracted.name, false);
   applyCityStatePincodeFromExtracted(patch, extracted);
+  return patch;
+}
+
+export function buildEntityPanAutofillPatch(
+  extracted: Record<string, string | null>
+): AutofillPatch {
+  const patch: AutofillPatch = {};
+  if (extracted.panNumber?.trim()) {
+    patch.pan = extracted.panNumber.trim().toUpperCase();
+  }
+  if (extracted.name?.trim()) {
+    patch.entityName = extracted.name.trim();
+  }
+  return patch;
+}
+
+export function buildGstAutofillPatch(
+  extracted: Record<string, string | null>,
+  registrationKind: RegistrationKind
+): AutofillPatch {
+  const patch: AutofillPatch = {};
+  if (extracted.registrationNumber?.trim()) {
+    patch.gstNo = extracted.registrationNumber.trim().toUpperCase();
+  }
+  const legalName =
+    extracted.legalName?.trim() || extracted.tradeName?.trim() || "";
+  if (legalName) {
+    patch.entityName = legalName;
+  }
+  applyAddressPatch(
+    patch,
+    extracted.principalPlaceOfBusiness,
+    registrationKind === "owner"
+  );
+  applyCityStatePincodeFromExtracted(
+    patch,
+    extracted,
+    extracted.principalPlaceOfBusiness
+  );
+  return patch;
+}
+
+export function buildLlpIncorporationAutofillPatch(
+  extracted: Record<string, string | null>
+): AutofillPatch {
+  const patch: AutofillPatch = {};
+  const llpin = normalizeLlpin(extracted.llpin);
+  if (llpin) {
+    patch.llpin = llpin;
+  }
+  if (extracted.entityName?.trim()) {
+    patch.entityName = extracted.entityName.trim();
+  }
+  const incorporationDate =
+    parseDateForInput(extracted.incorporationDate) ||
+    parseDateForInput(extracted.dateOfRegistration);
+  if (incorporationDate) {
+    patch.llpIncorporationDate = incorporationDate;
+  }
   return patch;
 }
 
@@ -770,7 +1052,7 @@ export function getConsultantCertificateFileField(
 }
 
 export function buildAutofillPatch(
-  documentType: "aadhaar" | "pan" | "technical-person-license",
+  documentType: AutofillDocSource,
   extracted: Record<string, string | null>,
   registrationKind: RegistrationKind,
   context: AutofillContext = {}
@@ -780,6 +1062,15 @@ export function buildAutofillPatch(
       return buildAadhaarAutofillPatch(extracted, registrationKind, context);
     case "pan":
       return buildPanAutofillPatch(extracted);
+    case "entity-pan":
+      return buildEntityPanAutofillPatch(extracted);
+    case "gst-certificate":
+      return buildGstAutofillPatch(extracted, registrationKind);
+    case "llp-incorporation-certificate":
+      return buildLlpIncorporationAutofillPatch(extracted);
+    case "signatory-photo":
+    case "signatory-signature":
+      return {};
     case "technical-person-license":
       if (registrationKind !== "consultant") return {};
       return buildLicenseAutofillPatch(

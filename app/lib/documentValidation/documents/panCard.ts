@@ -107,4 +107,15 @@ export const panCard: DocumentDefinition<typeof panCardSchema> = {
   label: "PAN Card",
   schema: panCardSchema,
   buildPrompt: buildPanCardPrompt,
+  validation: {
+    optionalFields: [
+      "fatherName",
+      "dateOfBirth",
+      "signature",
+      "qrCode",
+      "city",
+      "state",
+      "pincode",
+    ],
+  },
 };

@@ -14,6 +14,16 @@ const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
   aadhaar:
     "Indian Aadhaar / UIDAI identity card or e-Aadhaar (आधार) — 12-digit Aadhaar number, QR code, UIDAI branding",
   pan: "Indian PAN card issued by Income Tax Department — Permanent Account Number (10-char alphanumeric), Income Tax Dept / NSDL / Protean branding",
+  "entity-pan":
+    "Entity/firm/LLP PAN card — organization name (not individual), Income Tax Department PAN for company/LLP/partnership",
+  "gst-certificate":
+    "GST Registration Certificate (Form GST REG-06) — GSTIN, Legal Name, Address of Principal Place of Business",
+  "llp-incorporation-certificate":
+    "Certificate of Incorporation for Limited Liability Partnership (LLP) — LLPIN, LLP name, incorporation date from MCA",
+  "signatory-photo":
+    "Standalone passport-style portrait / headshot photo of a person (authorized signatory photograph) — face photo only, NOT a document scan or signature",
+  "signatory-signature":
+    "Standalone handwritten signature image (authorized signatory signature) — cursive sign on plain or dark background, NOT a face photo or full document",
   "technical-person-license":
     "Technical person / professional license or registration certificate (architect, surveyor, engineer, COA, municipal license, etc.) — not Aadhaar or PAN",
   "pr-card":

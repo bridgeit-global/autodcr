@@ -84,9 +84,18 @@ export const FIELD_LABELS: Record<string, string> = {
   applicantType: "Applicant Type",
   applicantName: "Applicant Name",
   applicantAddress: "Applicant Address",
-  panNo: "PAN",
-  principalName: "Principal Name",
-  attorneyName: "Attorney Name",
+  gstNo: "GSTIN",
+  llpin: "LLPIN",
+  llpIncorporationDate: "Date of Registration",
+  dateOfRegistration: "Date of Registration",
+  incorporationDate: "Date of Incorporation",
+  principalPlaceOfBusiness: "Principal Place of Business",
+  registrationNumber: "GSTIN",
+  legalName: "Legal Name",
+  tradeName: "Trade Name",
+  llpCertificate: "Certificate of LLP Incorporation",
+  llpEntityPan: "Entity PAN Card",
+  llpGstCertificate: "GST Registration Certificate",
 };
 
 export function getFieldLabel(key: string): string {

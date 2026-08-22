@@ -26,6 +26,8 @@ const IMAGE_TYPES = new Set([
   "image/jpg",
   "image/png",
   "image/webp",
+  "image/gif",
+  "image/bmp",
 ]);
 
 export function isSupportedDocumentMediaType(mediaType: string): boolean {
@@ -49,14 +51,63 @@ function flattenExtracted(raw: unknown): Record<string, string | null> {
   return out;
 }
 
+/** True when text-path AI returned no usable field values (common for scanned PDFs). */
+function hasMeaningfulExtraction(
+  extracted: Record<string, string | null>
+): boolean {
+  return Object.values(extracted).some(
+    (value) => typeof value === "string" && value.trim().length > 0
+  );
+}
+
+function applySignatoryClassificationRules(
+  documentType: DocumentType,
+  extracted: Record<string, string | null>,
+  validation: ValidationResult<Record<string, string | null>>
+): ValidationResult<Record<string, string | null>> {
+  if (documentType === "signatory-photo") {
+    const ok = (extracted.isPortraitPhoto || "").trim().toLowerCase() === "yes";
+    if (!ok) {
+      return {
+        valid: false,
+        missingFields: validation.missingFields.includes("isPortraitPhoto")
+          ? validation.missingFields
+          : [...validation.missingFields, "isPortraitPhoto"],
+        extracted,
+      };
+    }
+  }
+
+  if (documentType === "signatory-signature") {
+    const ok =
+      (extracted.isHandwrittenSignature || "").trim().toLowerCase() === "yes";
+    if (!ok) {
+      return {
+        valid: false,
+        missingFields: validation.missingFields.includes("isHandwrittenSignature")
+          ? validation.missingFields
+          : [...validation.missingFields, "isHandwrittenSignature"],
+        extracted,
+      };
+    }
+  }
+
+  return validation;
+}
+
 async function runValidation(
   documentType: DocumentType,
   extracted: Record<string, string | null>
 ): Promise<DocumentValidationResponse> {
   const definition = documents[documentType];
-  const validation = validateExtractedFields(
+  const baseValidation = validateExtractedFields(
     extracted,
     definition.validation
+  );
+  const validation = applySignatoryClassificationRules(
+    documentType,
+    extracted,
+    baseValidation
   );
 
   return {
@@ -135,7 +186,13 @@ export async function validateDocumentFile(
           definition as DocumentDefinition<z.ZodTypeAny>,
           documentText
         );
-        return runValidation(documentType, flattenExtracted(extracted));
+        const flat = flattenExtracted(extracted);
+        if (hasMeaningfulExtraction(flat)) {
+          return runValidation(documentType, flat);
+        }
+        console.warn(
+          `[validate-document] Text-path returned empty fields for ${documentType}, trying multimodal`
+        );
       } catch (textError) {
         console.warn(
           `[validate-document] Text-path extraction failed for ${documentType}, trying multimodal:`,

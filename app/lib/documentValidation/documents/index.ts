@@ -36,6 +36,31 @@ export {
   type PowerOfAttorney,
 } from "./powerOfAttorney";
 export {
+  entityPanCard,
+  entityPanCardSchema,
+  type EntityPanCard,
+} from "./entityPanCard";
+export {
+  gstCertificate,
+  gstCertificateSchema,
+  type GstCertificate,
+} from "./gstCertificate";
+export {
+  llpIncorporationCertificate,
+  llpIncorporationCertificateSchema,
+  type LlpIncorporationCertificate,
+} from "./llpIncorporationCertificate";
+export {
+  signatoryPhoto,
+  signatoryPhotoSchema,
+  type SignatoryPhoto,
+} from "./signatoryPhoto";
+export {
+  signatorySignature,
+  signatorySignatureSchema,
+  type SignatorySignature,
+} from "./signatorySignature";
+export {
   prCard,
   prCardSchema,
   type PrCard,

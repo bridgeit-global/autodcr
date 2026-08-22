@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/utils/supabase";
 import { motion, AnimatePresence } from "framer-motion";
@@ -63,6 +63,8 @@ const DOC_CHECKLIST: Record<string, EntityDocumentRequirement[]> = {
     { id: "llpCertificate", label: "LLPIN Allotment / Certificate of Incorporation", required: true, accept: ".pdf" },
     { id: "llpAgreementDoc", label: "LLP Agreement", required: true, accept: ".pdf" },
     { id: "llpResolutionDoc", label: "Resolution / LOA authorising Designated Partner", required: true, accept: ".pdf" },
+    { id: "llpEntityPan", label: "Entity PAN Card", required: true, accept: ".pdf" },
+    { id: "llpGstCertificate", label: "GST Registration Certificate", required: true, accept: ".pdf" },
   ],
   "Trust / Society": [
     { id: "trustRegistrationCert", label: "Registration Certificate (Trust / Society)", required: true, accept: ".pdf" },
@@ -73,6 +75,40 @@ const DOC_CHECKLIST: Record<string, EntityDocumentRequirement[]> = {
   ],
 };
 
+const ENTITY_TYPES_WITH_ENTITY_PAN = new Set(["LLP"]);
+
+const LLP_AUTOFILL_ENTITY_DOC_IDS = new Set([
+  "llpCertificate",
+  "llpEntityPan",
+  "llpGstCertificate",
+]);
+
+function ownerUsesEntityPan(entityType: string): boolean {
+  return ENTITY_TYPES_WITH_ENTITY_PAN.has(entityType);
+}
+
+function isOwnerDocumentsSectionComplete(
+  entityType: string,
+  data: {
+    aadhaarCardFile: File | null;
+    panCardFile: File | null;
+    authorizedSignatoryPhotoFile: File | null;
+    authorizedSignatorySignatureFile: File | null;
+    entityDocuments: Record<string, File | null>;
+  }
+): boolean {
+  if (!entityType) return false;
+  if (!data.aadhaarCardFile) return false;
+  if (!ownerUsesEntityPan(entityType) && !data.panCardFile) return false;
+  if (!data.authorizedSignatoryPhotoFile || !data.authorizedSignatorySignatureFile) {
+    return false;
+  }
+  for (const doc of DOC_CHECKLIST[entityType] || []) {
+    if (!data.entityDocuments[doc.id]) return false;
+  }
+  return true;
+}
+
 const RegistrationForm: React.FC<RegistrationFormProps> = ({
   title = "Registration"
 }) => {
@@ -81,7 +117,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [hasScrolledDeclaration, setHasScrolledDeclaration] = useState(false);
-  const [activeSection, setActiveSection] = useState<string>("section-identity-documents");
+  const [activeSection, setActiveSection] = useState<string>("section-entity-type");
   
   // Letterhead modal state
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState<string | null>(null);
@@ -142,10 +178,10 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   // Track active section using Intersection Observer
   useEffect(() => {
     const sections = [
-      "section-identity-documents",
+      "section-entity-type",
+      "section-documents",
       "section-basic-details",
       "section-registration",
-      "section-documents",
       "section-letterhead",
       "section-login",
       "section-declaration",
@@ -318,6 +354,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const docsForEntity = DOC_CHECKLIST[formData.entityType] || [];
+  const docsForEntityDisplay =
+    formData.entityType === "LLP"
+      ? docsForEntity.filter((doc) => !LLP_AUTOFILL_ENTITY_DOC_IDS.has(doc.id))
+      : docsForEntity;
 
   const composeAddress = (line1: string, line2: string, line3: string): string =>
     [line1, line2, line3].map((v) => v.trim()).filter(Boolean).join("\n");
@@ -349,6 +389,78 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       }
       return updated;
     });
+  };
+
+  const handleEntityTypeChange = (newType: string) => {
+    if (isResumingIncomplete) {
+      return;
+    }
+    const shouldClearAddress =
+      formData.entityType === "Individual" && newType !== "Individual";
+
+    setFormData((prev) => {
+      const prevDocIds = (DOC_CHECKLIST[prev.entityType] || []).map((doc) => doc.id);
+      const clearedEntityDocuments = { ...prev.entityDocuments };
+      for (const id of prevDocIds) {
+        delete clearedEntityDocuments[id];
+      }
+
+      const updated = {
+        ...prev,
+        entityType: newType,
+        entityDocuments: clearedEntityDocuments,
+        aadhaarCardFile: null,
+        panCardFile: null,
+        authorizedSignatoryPhotoFile: null,
+        authorizedSignatorySignatureFile: null,
+        ...(shouldClearAddress
+          ? {
+              addressLine1: "",
+              addressLine2: "",
+              addressLine3: "",
+              city: "",
+              pincode: "",
+              address: "",
+              residentialAddress: "",
+            }
+          : {}),
+      };
+      validateField("entityType", newType, updated);
+      return updated;
+    });
+
+    setErrors((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (
+          key.startsWith("entityDocuments.") ||
+          key === "aadhaarCardFile" ||
+          key === "panCardFile" ||
+          key === "authorizedSignatoryPhotoFile" ||
+          key === "authorizedSignatorySignatureFile"
+        ) {
+          delete next[key];
+        }
+      });
+      if (shouldClearAddress) {
+        delete next.addressLine1;
+        delete next.addressLine2;
+        delete next.addressLine3;
+        delete next.city;
+        delete next.pincode;
+      }
+      return next;
+    });
+
+    if (newType) {
+      window.setTimeout(() => {
+        const element = document.getElementById("section-documents");
+        if (element) {
+          setActiveSection("section-documents");
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 0);
+    }
   };
 
   const handleFileChange = (field: string, file: File | null) => {
@@ -386,6 +498,23 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       if ("panCardFile" in files) {
         merged.panCardFile = files.panCardFile ?? null;
       }
+      if ("authorizedSignatoryPhotoFile" in files) {
+        merged.authorizedSignatoryPhotoFile =
+          files.authorizedSignatoryPhotoFile ?? null;
+      }
+      if ("authorizedSignatorySignatureFile" in files) {
+        merged.authorizedSignatorySignatureFile =
+          files.authorizedSignatorySignatureFile ?? null;
+      }
+      if (files.entityDocuments) {
+        const nextEntityDocuments = { ...prev.entityDocuments };
+        for (const [docId, file] of Object.entries(files.entityDocuments)) {
+          if (file !== undefined) {
+            nextEntityDocuments[docId] = file;
+          }
+        }
+        merged.entityDocuments = nextEntityDocuments;
+      }
       return merged;
     });
     Object.entries(patch).forEach(([field, value]) => {
@@ -393,6 +522,25 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         validateField(field, value);
       }
     });
+    if (files.entityDocuments) {
+      Object.entries(files.entityDocuments).forEach(([docId, file]) => {
+        if (file) {
+          validateField(`entityDocuments.${docId}`, file);
+        }
+      });
+    }
+    if (files.authorizedSignatoryPhotoFile) {
+      validateField(
+        "authorizedSignatoryPhotoFile",
+        files.authorizedSignatoryPhotoFile
+      );
+    }
+    if (files.authorizedSignatorySignatureFile) {
+      validateField(
+        "authorizedSignatorySignatureFile",
+        files.authorizedSignatorySignatureFile
+      );
+    }
   };
 
   const applyResumeFromMetadata = (
@@ -694,10 +842,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const sections = [
-    { id: "section-identity-documents", label: "Identity Documents" },
+    { id: "section-entity-type", label: "Entity Type" },
+    { id: "section-documents", label: "Documents Upload" },
     { id: "section-basic-details", label: "Basic Details" },
     { id: "section-registration", label: "Registration Numbers" },
-    { id: "section-documents", label: "Documents Upload" },
     { id: "section-letterhead", label: "Letterhead" },
     { id: "section-login", label: "Login Setup" },
     { id: "section-declaration", label: "Declaration" },
@@ -725,7 +873,38 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
   const requiredFields = [...profileFields, ...credentialFields, ...loginFields];
 
+  const documentsSectionVisible = !!formData.entityType || isResumingIncomplete;
+
+  const isDocumentsComplete = useMemo(
+    () =>
+      isResumingIncomplete ||
+      isOwnerDocumentsSectionComplete(formData.entityType, formData),
+    [
+      isResumingIncomplete,
+      formData.entityType,
+      formData.aadhaarCardFile,
+      formData.panCardFile,
+      formData.authorizedSignatoryPhotoFile,
+      formData.authorizedSignatorySignatureFile,
+      formData.entityDocuments,
+    ]
+  );
+
+  const otherSectionsUnlocked = isDocumentsComplete;
+
   const scrollToSection = (sectionId: string) => {
+    if (sectionId !== "section-entity-type" && !documentsSectionVisible) {
+      setFormError("Select an entity type first.");
+      return;
+    }
+    if (
+      sectionId !== "section-entity-type" &&
+      sectionId !== "section-documents" &&
+      !otherSectionsUnlocked
+    ) {
+      setFormError("Upload all required documents first.");
+      return;
+    }
     const element = document.getElementById(sectionId);
     if (element) {
       setActiveSection(sectionId);
@@ -817,16 +996,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         }
         break;
       case "authorizedSignatoryPhotoFile":
-        if (!value) error = "Upload photograph";
+        if (!value) error = "Include photograph in Documents Upload";
         break;
       case "authorizedSignatorySignatureFile":
-        if (!value) error = "Upload signature";
+        if (!value) error = "Include signature in Documents Upload";
         break;
       case "aadhaarCardFile":
-        if (!value) error = "Upload Aadhaar Card in Identity Documents";
+        if (!value) error = "Upload Aadhaar Card in Documents Upload";
         break;
       case "panCardFile":
-        if (!value) error = "Upload PAN Card in Identity Documents";
+        if (!ownerUsesEntityPan(data.entityType) && !value) {
+          error = "Upload PAN Card in Documents Upload";
+        }
         break;
       case "letterheadFile":
         if (!value && !existingLetterheadUrl) error = "Upload Letterhead";
@@ -1373,6 +1554,17 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   };
 
   const handleSubmitForm = async () => {
+    if (!documentsSectionVisible) {
+      setFormError("Select an entity type first.");
+      scrollToSection("section-entity-type");
+      return;
+    }
+    if (!otherSectionsUnlocked) {
+      setFormError("Upload all required documents first.");
+      scrollToSection("section-documents");
+      return;
+    }
+
     // Build dynamic required fields based on entity type
     const getDynamicRequiredFields = (): string[] => {
       const baseFields = [
@@ -1390,7 +1582,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "authorizedSignatoryPhotoFile",
         "authorizedSignatorySignatureFile",
         "aadhaarCardFile",
-        "panCardFile",
+        ...(ownerUsesEntityPan(formData.entityType) ? [] : ["panCardFile"]),
         ...(existingLetterheadUrl ? [] : ["letterheadFile"]),
         "userId",
         "password",
@@ -1432,6 +1624,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           "entityDocuments.llpCertificate",
           "entityDocuments.llpAgreementDoc",
           "entityDocuments.llpResolutionDoc",
+          "entityDocuments.llpEntityPan",
+          "entityDocuments.llpGstCertificate",
         ],
         "Trust / Society": [
           "trustRegistrationNo",
@@ -1478,19 +1672,26 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       const errorFields = Object.keys(errors);
       const firstErrorField = errorFields[0];
       if (firstErrorField) {
-        if (firstErrorField.includes('entityType') || firstErrorField.includes('email') || firstErrorField.includes('city')) {
+        if (firstErrorField.includes('entityType')) {
+          scrollToSection("section-entity-type");
+        } else if (firstErrorField.includes('email') || firstErrorField.includes('city')) {
           scrollToSection("section-basic-details");
         } else if (
           firstErrorField === "aadhaarCardFile" ||
-          firstErrorField === "panCardFile"
+          firstErrorField === "panCardFile" ||
+          firstErrorField.startsWith("entityDocuments.") ||
+          firstErrorField.includes("Photo") ||
+          firstErrorField.includes("Signature")
         ) {
-          scrollToSection("section-identity-documents");
+          scrollToSection("section-documents");
         } else if (firstErrorField.includes('RegNo') || firstErrorField.includes('License') || firstErrorField.includes('Accreditation')) {
           scrollToSection("section-registration");
-        } else if (firstErrorField.includes('File') || firstErrorField.includes('Photo') || firstErrorField.includes('Signature')) {
-          scrollToSection("section-documents");
-        } else if (firstErrorField.includes('letterhead')) {
-          scrollToSection("section-letterhead");
+        } else if (firstErrorField.includes('File') || firstErrorField.includes('letterhead')) {
+          if (firstErrorField.includes('letterhead')) {
+            scrollToSection("section-letterhead");
+          } else {
+            scrollToSection("section-documents");
+          }
         } else if (firstErrorField.includes('userId') || firstErrorField.includes('password')) {
           scrollToSection("section-login");
         } else if (firstErrorField.includes('Declaration')) {
@@ -1667,7 +1868,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           uploadedFilePaths.push(result.path);
         }
 
-        // Upload identity documents collected in Identity Documents
+        // Upload identity documents collected in Documents Upload
         if (formData.aadhaarCardFile) {
           const result = await uploadFileToStorageWithPath(
             formData.aadhaarCardFile,
@@ -1786,6 +1987,19 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               'llpResolutionDoc',
               'Resolution / LOA'
             );
+            await uploadEntityDocument(
+              formData.entityDocuments.llpEntityPan,
+              'llpEntityPan',
+              'Entity PAN Card'
+            );
+            await uploadEntityDocument(
+              formData.entityDocuments.llpGstCertificate,
+              'llpGstCertificate',
+              'GST Registration Certificate'
+            );
+            if (!panCardUrl && entityDocumentUrls.llpEntityPan) {
+              panCardUrl = entityDocumentUrls.llpEntityPan;
+            }
             break;
           case "Trust / Society":
             await uploadEntityDocument(
@@ -1890,6 +2104,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             baseData.llp_certificate_url = entityDocumentUrls.llpCertificate || null;
             baseData.llp_agreement_url = entityDocumentUrls.llpAgreementDoc || null;
             baseData.llp_resolution_url = entityDocumentUrls.llpResolutionDoc || null;
+            baseData.llp_entity_pan_url = entityDocumentUrls.llpEntityPan || null;
+            baseData.llp_gst_certificate_url = entityDocumentUrls.llpGstCertificate || null;
             break;
           case "Trust / Society":
             baseData.trust_registration_no = formData.trustRegistrationNo;
@@ -2406,14 +2622,20 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm lg:sticky lg:top-24">
           <div className="mb-4">
             <h2 className="text-lg font-semibold tracking-tight text-brand-navy">{title}</h2>
-            <p className="mt-1 text-xs text-gray-500">Complete each section, then submit.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {otherSectionsUnlocked
+                ? "Complete each section, then submit."
+                : documentsSectionVisible
+                  ? "Upload all required documents to continue."
+                  : "Select an entity type to continue."}
+            </p>
           </div>
 
           {/* Submit Button */}
           <button
             type="button"
             onClick={handleSubmitForm}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !otherSectionsUnlocked}
             className="mb-6 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-blue-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? (
@@ -2434,9 +2656,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           {sections.map((section) => {
             const isActive = activeSection === section.id;
               const sectionIcons: Record<string, React.ReactNode> = {
-                "section-identity-documents": (
+                "section-entity-type": (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                ),
+                "section-documents": (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 ),
                 "section-basic-details": (
@@ -2447,11 +2674,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 "section-registration": (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                ),
-                "section-documents": (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 ),
                 "section-letterhead": (
@@ -2475,11 +2697,22 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             <button
               key={section.id}
               type="button"
+              disabled={
+                (section.id !== "section-entity-type" && !documentsSectionVisible) ||
+                (section.id !== "section-entity-type" &&
+                  section.id !== "section-documents" &&
+                  !otherSectionsUnlocked)
+              }
               onClick={() => scrollToSection(section.id)}
                   className={`flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200 lg:w-full ${
-                  isActive
-                      ? "bg-blue-50 font-medium text-brand-blue"
-                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    (section.id !== "section-entity-type" && !documentsSectionVisible) ||
+                    (section.id !== "section-entity-type" &&
+                      section.id !== "section-documents" &&
+                      !otherSectionsUnlocked)
+                      ? "cursor-not-allowed text-gray-400 opacity-50"
+                      : isActive
+                        ? "bg-blue-50 font-medium text-brand-blue"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   }`}
                 >
                   <span className={isActive ? "text-brand-blue" : "text-gray-400"}>
@@ -2555,30 +2788,116 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         )}
 
         <div className="space-y-6">
-            {/* Identity Documents */}
-          <div id="section-identity-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-identity-documents" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
+            {/* Entity Type */}
+          <div id="section-entity-type" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-entity-type" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
             <div
               className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
-              onClick={() => scrollToSection("section-identity-documents")}
+              onClick={() => scrollToSection("section-entity-type")}
             >
               <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
                 <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-brand-navy">Identity Documents</h3>
+              <h3 className="text-lg font-semibold text-brand-navy">Entity Type</h3>
             </div>
             <p className="text-sm text-gray-600 mb-4 ml-11">
-              Upload Aadhaar and PAN together — we’ll detect each document and auto-fill your details. These files are submitted with registration and are not asked again below.
+              Select your entity type first — this determines which documents and registration fields you will need.
             </p>
-            <RegistrationDocumentAutofillStep
-              registrationKind="owner"
-              entityType={formData.entityType}
-              onAutofill={applyRegistrationAutofill}
-              onContinue={() => scrollToSection("section-basic-details")}
-            />
+            <div className="max-w-md">
+              <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                Entity Type <span className="text-red-600 font-bold">*</span>
+              </label>
+              <CustomSelect
+                value={formData.entityType}
+                onChange={handleEntityTypeChange}
+                options={ENTITY_TYPES.map((type) => ({ value: type, label: type }))}
+                placeholder="Select Entity Type"
+                className="w-full"
+                disabled={isResumingIncomplete}
+              />
+              {errors.entityType && (
+                <p className="text-xs text-red-600 mt-1">{errors.entityType}</p>
+              )}
+            </div>
           </div>
 
+          {documentsSectionVisible && (
+            <div id="section-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-documents" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
+              <div
+                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
+                onClick={() => scrollToSection("section-documents")}
+              >
+                <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
+                  <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-brand-navy">Documents Upload</h3>
+              </div>
+
+              <div className="mb-6">
+                <RegistrationDocumentAutofillStep
+                  key={formData.entityType}
+                  registrationKind="owner"
+                  entityType={formData.entityType}
+                  onAutofill={applyRegistrationAutofill}
+                  onContinue={() => {
+                    if (isDocumentsComplete) {
+                      scrollToSection("section-basic-details");
+                    } else {
+                      setFormError("Upload all required documents to continue.");
+                    }
+                  }}
+                />
+              </div>
+
+              {docsForEntityDisplay.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {docsForEntityDisplay.map((doc) => {
+                  const fieldName = `entityDocuments.${doc.id}`;
+                  const fieldError = errors[fieldName];
+
+                  return (
+                    <div key={doc.id}>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
+                        {doc.label} {doc.required && <span className="text-red-600 font-bold">*</span>}
+                      </label>
+                      <input
+                        type="file"
+                        accept={doc.accept || ".pdf,.jpg,.jpeg,.png"}
+                        onChange={(e) => handleEntityDocumentChange(doc.id, e.target.files?.[0] || null)}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
+                      />
+                      {doc.accept === ".pdf" && (
+                        <p className="text-xs text-gray-500 mt-1">Only .PDF</p>
+                      )}
+                      {formData.entityDocuments[doc.id] && (
+                        <p className="text-xs text-green-600 mt-1">✓ {formData.entityDocuments[doc.id]?.name}</p>
+                      )}
+                      {fieldError && (
+                        <p className="text-xs text-red-600 mt-1">{fieldError}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              )}
+
+              <p className="text-xs text-gray-500 mt-4">
+                Max 10MB per file. PDF files preferred for certificates.
+              </p>
+
+              {!isDocumentsComplete && (
+                <div className="mt-4 p-4 bg-sky-50/70 border border-sky-100 rounded-lg text-sky-800 text-sm">
+                  Upload all required documents above to unlock Basic Details and the remaining sections.
+                </div>
+              )}
+            </div>
+          )}
+
+          {otherSectionsUnlocked && (
+          <>
             {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
             <div 
@@ -2604,24 +2923,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               isResumingIncomplete ? "cursor-not-allowed [&_*]:cursor-not-allowed" : ""
             }`}
           >
-                {/* Row 1 */}
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                    Entity Type <span className="text-red-600 font-bold">*</span>
-            </label>
-              <CustomSelect
-                value={formData.entityType}
-                onChange={(val) => handleInputChange("entityType", val)}
-                options={ENTITY_TYPES.map((type) => ({ value: type, label: type }))}
-                placeholder="Select Entity Type"
-                className="w-full"
-                disabled={isResumingIncomplete}
-              />
-                  {errors.entityType && (
-                    <p className="text-xs text-red-600 mt-1">{errors.entityType}</p>
-                  )}
-        </div>
-
                 {formData.entityType !== "Individual" && (
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-gray-800">
@@ -2640,7 +2941,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 </div>
                 )}
 
-                {/* Row 2 - Name Fields */}
+                {/* Name Fields */}
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     First Name <span className="text-red-600 font-bold">*</span>
@@ -2921,110 +3222,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               >
               {!formData.entityType && (
                 <div className="p-4 bg-sky-50/70 border border-sky-100 rounded-lg text-sky-800 text-sm">
-                  ⚠️ Please select an Entity Type in Basic Details to see the required registration fields.
+                  ⚠️ Please select an Entity Type first to see the required registration fields.
     </div>
               )}
 
               {formData.entityType && renderEntitySpecificFields()}
               </fieldset>
-            </div>
-
-        {/* Documents Upload Section - Dynamic based on Entity Type */}
-            <div id="section-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-documents" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
-              <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
-                onClick={() => scrollToSection("section-documents")}
-              >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
-                  <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-brand-navy">Documents Upload</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-4 ml-11">
-                {formData.entityType
-                  ? `Upload remaining documents for ${formData.entityType}. Aadhaar and PAN are collected in Identity Documents.`
-                  : "Select an Entity Type first"}
-              </p>
-
-              {!formData.entityType && (
-                <div className="p-4 bg-sky-50/70 border border-sky-100 rounded-lg text-sky-800 text-sm">
-                  ⚠️ Please select an Entity Type in Basic Details to see the required documents.
-                </div>
-              )}
-
-              {formData.entityType && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Authorized Signatory Photograph <span className="text-red-600 font-bold">*</span></label>
-                    <input
-                      type="file"
-                      accept=".gif,.jpg,.jpeg,.png,.bmp"
-                      onChange={(e) => handleFileChange("authorizedSignatoryPhotoFile", e.target.files?.[0] || null)}
-                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
-                    {formData.authorizedSignatoryPhotoFile && (
-                      <p className="text-xs text-green-600 mt-1">✓ {formData.authorizedSignatoryPhotoFile.name}</p>
-                    )}
-                    {errors.authorizedSignatoryPhotoFile && (
-                      <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatoryPhotoFile}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Authorized Signatory Signature <span className="text-red-600 font-bold">*</span></label>
-                    <input
-                      type="file"
-                      accept=".gif,.jpg,.jpeg,.png,.bmp"
-                      onChange={(e) => handleFileChange("authorizedSignatorySignatureFile", e.target.files?.[0] || null)}
-                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
-                    {formData.authorizedSignatorySignatureFile && (
-                      <p className="text-xs text-green-600 mt-1">✓ {formData.authorizedSignatorySignatureFile.name}</p>
-                    )}
-                    {errors.authorizedSignatorySignatureFile && (
-                      <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatorySignatureFile}</p>
-                    )}
-                  </div>
-
-                  {/* Entity-specific documents */}
-                  {docsForEntity.map((doc) => {
-                    const fieldName = `entityDocuments.${doc.id}`;
-                    const fieldError = errors[fieldName];
-
-                    return (
-                      <div key={doc.id}>
-                        <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                          {doc.label} {doc.required && <span className="text-red-600 font-bold">*</span>}
-                        </label>
-                        <input
-                          type="file"
-                          accept={doc.accept || ".pdf,.jpg,.jpeg,.png"}
-                          onChange={(e) => handleEntityDocumentChange(doc.id, e.target.files?.[0] || null)}
-                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
-                        />
-                        {doc.accept === ".pdf" && (
-                          <p className="text-xs text-gray-500 mt-1">Only .PDF</p>
-                        )}
-                        {formData.entityDocuments[doc.id] && (
-                          <p className="text-xs text-green-600 mt-1">✓ {formData.entityDocuments[doc.id]?.name}</p>
-                        )}
-                        {fieldError && (
-                          <p className="text-xs text-red-600 mt-1">{fieldError}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {formData.entityType && (
-                <p className="text-xs text-gray-500 mt-4">
-                  Max 10MB per file. PDF files preferred for certificates.
-                </p>
-              )}
             </div>
 
             {/* Letterhead Upload Section */}
@@ -3532,6 +3735,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               )}
           </button>
         </div>
+          </>
+          )}
         </div>
       </div>
     </div>
