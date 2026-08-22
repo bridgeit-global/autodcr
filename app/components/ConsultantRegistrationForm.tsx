@@ -510,6 +510,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       if ("licenseCertificateFile" in files) {
         merged.licenseCertificateFile = files.licenseCertificateFile ?? null;
       }
+      if ("authorizedSignatoryPhotoFile" in files) {
+        merged.authorizedSignatoryPhotoFile =
+          files.authorizedSignatoryPhotoFile ?? null;
+      }
+      if ("authorizedSignatorySignatureFile" in files) {
+        merged.authorizedSignatorySignatureFile =
+          files.authorizedSignatorySignatureFile ?? null;
+      }
 
       if (licenseExtractedRef.current && merged.consultantType) {
         const licensePatch = buildLicenseAutofillPatch(
@@ -532,6 +540,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         validateField(field, value);
       }
     });
+    if (files.authorizedSignatoryPhotoFile) {
+      validateField(
+        "authorizedSignatoryPhotoFile",
+        files.authorizedSignatoryPhotoFile
+      );
+    }
+    if (files.authorizedSignatorySignatureFile) {
+      validateField(
+        "authorizedSignatorySignatureFile",
+        files.authorizedSignatorySignatureFile
+      );
+    }
   };
 
   useEffect(() => {

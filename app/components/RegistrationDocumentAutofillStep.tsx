@@ -22,7 +22,7 @@ import {
 } from "@/app/lib/documentValidation/registrationAutofill";
 
 const ACCEPTED =
-  "application/pdf,image/jpeg,image/jpg,image/png,image/webp";
+  "application/pdf,image/jpeg,image/jpg,image/png,image/webp,image/gif,image/bmp";
 
 const ACCEPTED_MIME = new Set([
   "application/pdf",
@@ -30,6 +30,8 @@ const ACCEPTED_MIME = new Set([
   "image/jpg",
   "image/png",
   "image/webp",
+  "image/gif",
+  "image/bmp",
 ]);
 
 type DocSlot = {
@@ -66,11 +68,47 @@ type RegistrationDocumentAutofillStepProps = {
   onExtractedChange?: (extracted: boolean) => void;
 };
 
-function slotsForKind(kind: RegistrationKind): DocSlot[] {
+function signatorySlots(): DocSlot[] {
+  return [
+    {
+      id: "signatory-photo",
+      label: "Authorized Signatory Photograph",
+      required: true,
+    },
+    {
+      id: "signatory-signature",
+      label: "Authorized Signatory Signature",
+      required: true,
+    },
+  ];
+}
+
+function slotsForKind(kind: RegistrationKind, entityType?: string): DocSlot[] {
+  if (kind === "owner" && entityType === "LLP") {
+    return [
+      { id: "aadhaar", label: "Aadhaar Card", required: true },
+      {
+        id: "llp-incorporation-certificate",
+        label: "Certificate of LLP Incorporation",
+        required: true,
+      },
+      { id: "entity-pan", label: "Entity PAN Card", required: true },
+      {
+        id: "gst-certificate",
+        label: "GST Registration Certificate",
+        required: true,
+      },
+      ...signatorySlots(),
+    ];
+  }
+
   const common: DocSlot[] = [
     { id: "aadhaar", label: "Aadhaar Card", required: true },
-    { id: "pan", label: "PAN Card", required: true },
   ];
+  const skipPersonalPan = kind === "owner" && entityType === "LLP";
+  if (!skipPersonalPan) {
+    common.push({ id: "pan", label: "PAN Card", required: true });
+  }
   if (kind === "consultant") {
     common.push({
       id: "technical-person-license",
@@ -78,8 +116,14 @@ function slotsForKind(kind: RegistrationKind): DocSlot[] {
       required: true,
     });
   }
-  return common;
+  return [...common, ...signatorySlots()];
 }
+
+const ENTITY_DOC_FILE_MAP: Partial<Record<AutofillDocSource, string>> = {
+  "llp-incorporation-certificate": "llpCertificate",
+  "entity-pan": "llpEntityPan",
+  "gst-certificate": "llpGstCertificate",
+};
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -105,10 +149,20 @@ function effectiveType(item: UploadItem): AutofillDocSource | null {
 function toAutofillFiles(
   mapped: Partial<Record<AutofillDocSource, File | null>>
 ): AutofillFiles {
+  const entityDocuments: Record<string, File | null> = {};
+  for (const [source, docId] of Object.entries(ENTITY_DOC_FILE_MAP)) {
+    const file = mapped[source as AutofillDocSource];
+    if (file) entityDocuments[docId] = file;
+  }
+
   return {
     aadhaarCardFile: mapped.aadhaar ?? null,
-    panCardFile: mapped.pan ?? null,
+    panCardFile: mapped.pan ?? mapped["entity-pan"] ?? null,
     licenseCertificateFile: mapped["technical-person-license"] ?? null,
+    authorizedSignatoryPhotoFile: mapped["signatory-photo"] ?? null,
+    authorizedSignatorySignatureFile: mapped["signatory-signature"] ?? null,
+    entityDocuments:
+      Object.keys(entityDocuments).length > 0 ? entityDocuments : undefined,
   };
 }
 
@@ -148,8 +202,8 @@ export default function RegistrationDocumentAutofillStep({
   onExtractedChange,
 }: RegistrationDocumentAutofillStepProps) {
   const docSlots = useMemo(
-    () => slotsForKind(registrationKind),
-    [registrationKind]
+    () => slotsForKind(registrationKind, entityType),
+    [registrationKind, entityType]
   );
   const requiredCount = docSlots.filter((s) => s.required).length;
   const allowedTypes = useMemo(
@@ -187,21 +241,33 @@ export default function RegistrationDocumentAutofillStep({
   >({});
 
   useEffect(() => {
-    const files: AutofillFiles = {
-      aadhaarCardFile: null,
-      panCardFile: null,
-      licenseCertificateFile: null,
-    };
+    const entityDocuments: Record<string, File | null> = {};
+    const files: AutofillFiles = {};
     for (const item of uploads) {
       const type = effectiveType(item);
       if (!type) continue;
       if (type === "aadhaar") files.aadhaarCardFile = item.file;
       else if (type === "pan") files.panCardFile = item.file;
+      else if (type === "entity-pan") files.panCardFile = item.file;
       else if (type === "technical-person-license") {
         files.licenseCertificateFile = item.file;
+      } else if (type === "signatory-photo") {
+        files.authorizedSignatoryPhotoFile = item.file;
+      } else if (type === "signatory-signature") {
+        files.authorizedSignatorySignatureFile = item.file;
+      }
+
+      const entityDocId = ENTITY_DOC_FILE_MAP[type];
+      if (entityDocId) {
+        entityDocuments[entityDocId] = item.file;
       }
     }
-    onAutofill({}, files);
+    if (Object.keys(entityDocuments).length > 0) {
+      files.entityDocuments = entityDocuments;
+    }
+    if (Object.keys(files).length > 0) {
+      onAutofill({}, files);
+    }
     // Keep parent form files in sync with this step so they are submitted once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploads]);
@@ -247,6 +313,14 @@ export default function RegistrationDocumentAutofillStep({
     for (const item of nextUploads) {
       const type = effectiveType(item);
       if (!type || !item.result || item.error) continue;
+      if (!item.result.valid) {
+        setStepError(
+          `${item.file.name} is not a valid ${labelByType[type] ?? type}. Choose the type manually or upload a different file.`
+        );
+        setHasExtracted(false);
+        onExtractedChange?.(false);
+        return false;
+      }
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
       mapped[type] = item.file;
       extractions[type] = item.result.extracted;
@@ -288,7 +362,7 @@ export default function RegistrationDocumentAutofillStep({
       agreed,
       conflicts: nextConflicts,
       groupConflicts: nextGroupConflicts,
-    } = collectAutofillConflicts(patchesBySource);
+    } = collectAutofillConflicts(patchesBySource, { consultantType, entityType });
     const selections = defaultConflictSelections(nextConflicts);
     const groupSelections = defaultGroupConflictSelections(nextGroupConflicts);
 
@@ -320,14 +394,14 @@ export default function RegistrationDocumentAutofillStep({
   const addFiles = (fileList: FileList | File[]) => {
     const incoming = Array.from(fileList).filter((file) => {
       const type = file.type || "";
-      if (!ACCEPTED_MIME.has(type) && !/\.(pdf|jpe?g|png|webp)$/i.test(file.name)) {
+      if (!ACCEPTED_MIME.has(type) && !/\.(pdf|jpe?g|png|webp|gif|bmp)$/i.test(file.name)) {
         return false;
       }
       return true;
     });
 
     if (incoming.length === 0) {
-      setStepError("Please upload PDF or image files (JPEG, PNG, or WebP).");
+      setStepError("Please upload PDF or image files (JPEG, PNG, WebP, GIF, or BMP).");
       return;
     }
 
@@ -408,6 +482,15 @@ export default function RegistrationDocumentAutofillStep({
                 item.file,
                 item.overrideType
               );
+              if (!result.valid) {
+                const label = labelByType[item.overrideType] ?? "document";
+                return {
+                  id: item.id,
+                  detectedType: item.overrideType,
+                  result,
+                  error: `Not a valid ${label}. Upload a different file.`,
+                };
+              }
               return {
                 id: item.id,
                 detectedType: item.overrideType,
@@ -429,6 +512,15 @@ export default function RegistrationDocumentAutofillStep({
                 result: null,
                 error:
                   "Could not identify this document. Choose the type manually.",
+              };
+            }
+            if (!result.valid) {
+              const label = labelByType[detected] ?? "document";
+              return {
+                id: item.id,
+                detectedType: detected,
+                result,
+                error: `Not a valid ${label}. Choose the type manually or upload a different file.`,
               };
             }
             return {
@@ -525,6 +617,25 @@ export default function RegistrationDocumentAutofillStep({
 
     try {
       const result = await validateDocumentFile(item.file, nextType);
+      if (!result.valid) {
+        const label = labelByType[nextType] ?? "document";
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === id
+              ? {
+                  ...u,
+                  overrideType: nextType,
+                  loading: false,
+                  result,
+                  error: `Not a valid ${label}. Upload a different file.`,
+                }
+              : u
+          )
+        );
+        setHasExtracted(false);
+        onExtractedChange?.(false);
+        return;
+      }
       setUploads((prev) => {
         const nextUploads = prev.map((u) =>
           u.id === id
@@ -649,7 +760,7 @@ export default function RegistrationDocumentAutofillStep({
           </button>
         </p>
         <p className="mt-1 text-xs text-gray-500">
-          PDF, JPEG, PNG, or WebP — exactly {requiredCount} documents (
+          PDF, JPEG, PNG, WebP, GIF, or BMP — exactly {requiredCount} documents (
           {docSlots.map((s) => s.label).join(", ")})
         </p>
       </div>
