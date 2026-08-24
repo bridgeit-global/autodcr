@@ -12,24 +12,31 @@ import {
 import { useProjectData } from "@/app/hooks/useProjectData";
 import {
   deleteProjectLibraryFile,
-  deleteExtraPrCard,
+  deleteExtraLibraryDoc,
   getProjectLibraryFile,
-  getExtraPrCard,
+  getExtraLibraryDoc,
   countAttachedProjectLibraryFiles,
   reconcileFixedLibraryUploads,
   saveProjectLibraryFile,
-  saveExtraPrCard,
+  saveExtraLibraryDoc,
+  clearAllExtraDpAttachments,
 } from "@/app/utils/projectLibraryFiles";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
+  DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
+  DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
   DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
   PROJECT_LIBRARY_DOCUMENT_NAMES,
+  PROJECT_LIBRARY_DP_MAP_LABEL,
+  PROJECT_LIBRARY_DP_RL_LABEL,
   PROJECT_LIBRARY_EXTRA_PR_LABEL,
   PROJECT_LIBRARY_MAX_FILES,
-  PROJECT_LIBRARY_MAX_OTHER_DOCS,
-  PROJECT_LIBRARY_MAX_PR_CARDS,
+  PROJECT_LIBRARY_MAX_TOTAL_FILES,
+  classifyProjectLibraryStoragePath,
+  projectLibraryExtraRelativeStem,
+  projectLibraryFixedRelativeStem,
 } from "@/app/utils/projectSections";
 import { applyProjectAutofillDrafts } from "@/app/lib/projectDocumentAutofill";
 import { getFieldLabel } from "@/app/lib/documentValidation/fieldLabels";
@@ -45,14 +52,30 @@ type UploadRecord = {
   path: string;
 };
 
-type ExtraPrSlot = {
+type LibraryDocType =
+  | "pr-card"
+  | "dp-remarks"
+  | "dp-remarks-map"
+  | "dp-remarks-rl"
+  | "crz-remarks"
+  | "power-of-attorney";
+
+type ExtraDocSlot = {
   id: string;
+  type: LibraryDocType;
   upload?: UploadRecord;
+};
+
+type DpAttachments = {
+  map?: UploadRecord;
+  rl?: UploadRecord;
 };
 
 type LibrarySnapshot = {
   fixed: (UploadRecord | undefined)[];
-  extraPr: ExtraPrSlot[];
+  extraPr: ExtraDocSlot[];
+  extraDocs: ExtraDocSlot[];
+  dpAttachments: DpAttachments;
 };
 
 type StagingItem = {
@@ -64,31 +87,48 @@ type StagingItem = {
   error: string | null;
 };
 
-type LibraryDocType =
-  | "pr-card"
-  | "dp-remarks"
-  | "crz-remarks"
-  | "power-of-attorney";
-
 const DOCUMENT_NAMES = PROJECT_LIBRARY_DOCUMENT_NAMES;
 const MAX_FILES = PROJECT_LIBRARY_MAX_FILES;
 const ACCEPTED_TYPES = [".pdf"];
-const MAX_PR_CARDS = PROJECT_LIBRARY_MAX_PR_CARDS;
-const MAX_OTHER_DOCS = PROJECT_LIBRARY_MAX_OTHER_DOCS;
-const MAX_TOTAL_FILES = MAX_PR_CARDS + MAX_OTHER_DOCS;
-
-const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
+const MAX_TOTAL_FILES = PROJECT_LIBRARY_MAX_TOTAL_FILES;
+const EXTRACTABLE_EXTRA_TYPES: LibraryDocType[] = [
   "pr-card",
   "dp-remarks",
   "crz-remarks",
   "power-of-attorney",
 ];
 
+const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
+  "pr-card",
+  "dp-remarks",
+  "dp-remarks-map",
+  "dp-remarks-rl",
+  "crz-remarks",
+  "power-of-attorney",
+];
+
+const DP_TYPE_OPTIONS: LibraryDocType[] = [
+  "dp-remarks",
+  "dp-remarks-map",
+  "dp-remarks-rl",
+];
+
 const LABEL_BY_TYPE: Record<LibraryDocType, string> = {
   "pr-card": DOCUMENT_NAMES[0],
   "dp-remarks": DOCUMENT_NAMES[1],
+  "dp-remarks-map": PROJECT_LIBRARY_DP_MAP_LABEL,
+  "dp-remarks-rl": PROJECT_LIBRARY_DP_RL_LABEL,
   "crz-remarks": DOCUMENT_NAMES[2],
   "power-of-attorney": DOCUMENT_NAMES[3],
+};
+
+const EXTRA_LABEL_BY_TYPE: Record<LibraryDocType, string> = {
+  "pr-card": PROJECT_LIBRARY_EXTRA_PR_LABEL,
+  "dp-remarks": `Additional ${DOCUMENT_NAMES[1]}`,
+  "dp-remarks-map": PROJECT_LIBRARY_DP_MAP_LABEL,
+  "dp-remarks-rl": PROJECT_LIBRARY_DP_RL_LABEL,
+  "crz-remarks": `Additional ${DOCUMENT_NAMES[2]}`,
+  "power-of-attorney": `Additional ${DOCUMENT_NAMES[3]}`,
 };
 
 const createId = () =>
@@ -96,8 +136,12 @@ const createId = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
 
-const createExtraSlot = (upload?: UploadRecord): ExtraPrSlot => ({
+const createExtraSlot = (
+  type: LibraryDocType,
+  upload?: UploadRecord
+): ExtraDocSlot => ({
   id: createId(),
+  type,
   upload,
 });
 
@@ -111,21 +155,120 @@ function normalizeFixedUploads(saved: (UploadRecord | undefined)[]) {
   return saved;
 }
 
-function loadExtraPrSlots(): ExtraPrSlot[] {
-  const saved = loadDraft<ExtraPrSlot[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
-  if (!Array.isArray(saved)) return [];
-  return saved.map((slot) =>
-    slot?.upload
-      ? { id: slot.id || createId(), upload: slot.upload }
-      : createExtraSlot()
-  );
+function splitServerUploads(uploadsData: UploadRecord[]) {
+  const extraDocs: ExtraDocSlot[] = [];
+  const fixed: (UploadRecord | undefined)[] = Array(MAX_FILES).fill(undefined);
+  const leftoverFixed: UploadRecord[] = [];
+
+  for (const upload of uploadsData.filter(Boolean)) {
+    const kind = classifyProjectLibraryStoragePath(
+      upload.path || upload.name || ""
+    );
+    if (!kind) {
+      leftoverFixed.push(upload);
+      continue;
+    }
+    if (kind.role === "extra") {
+      extraDocs.push(createExtraSlot(kind.type, upload));
+      continue;
+    }
+    if (!fixed[kind.slot]) {
+      fixed[kind.slot] = upload;
+    } else {
+      const overflowType: LibraryDocType =
+        kind.slot === 0
+          ? "pr-card"
+          : kind.slot === 1
+            ? "dp-remarks"
+            : kind.slot === 2
+              ? "crz-remarks"
+              : "power-of-attorney";
+      extraDocs.push(createExtraSlot(overflowType, upload));
+    }
+  }
+
+  for (const upload of leftoverFixed) {
+    const emptySlot = fixed.findIndex((slot) => !slot);
+    if (emptySlot === -1) {
+      extraDocs.push(createExtraSlot("pr-card", upload));
+    } else {
+      fixed[emptySlot] = upload;
+    }
+  }
+
+  return {
+    fixed: normalizeFixedUploads(fixed),
+    extraDocs,
+  };
 }
 
-function splitServerUploads(uploadsData: UploadRecord[]) {
-  const fixed = normalizeFixedUploads(uploadsData.slice(0, MAX_FILES));
-  const extraRecords = uploadsData.slice(MAX_FILES).filter(Boolean) as UploadRecord[];
-  const extraPr = extraRecords.map((upload) => createExtraSlot(upload));
-  return { fixed, extraPr };
+function loadExtraDocSlots(): ExtraDocSlot[] {
+  const savedDocs = loadDraft<ExtraDocSlot[]>(
+    DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
+    []
+  );
+  if (Array.isArray(savedDocs) && savedDocs.length > 0) {
+    return savedDocs
+      .filter((slot) => slot?.type && isLibraryDocType(slot.type))
+      .map((slot) => ({
+        id: slot.id || createId(),
+        type: slot.type,
+        upload: slot.upload,
+      }));
+  }
+
+  const extraPr = loadDraft<{ id?: string; upload?: UploadRecord }[]>(
+    DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
+    []
+  );
+  const dp = loadDraft<DpAttachments>(
+    DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
+    {}
+  );
+  const migrated: ExtraDocSlot[] = [];
+  if (Array.isArray(extraPr)) {
+    for (const slot of extraPr) {
+      if (!slot?.upload) continue;
+      migrated.push({
+        id: slot.id || createId(),
+        type: "pr-card",
+        upload: slot.upload,
+      });
+    }
+  }
+  if (dp?.map) {
+    migrated.push({
+      id: "legacy-dp-map",
+      type: "dp-remarks-map",
+      upload: dp.map,
+    });
+  }
+  if (dp?.rl) {
+    migrated.push({
+      id: "legacy-dp-rl",
+      type: "dp-remarks-rl",
+      upload: dp.rl,
+    });
+  }
+  return migrated;
+}
+
+function extrasOfType(slots: ExtraDocSlot[], type: LibraryDocType): ExtraDocSlot[] {
+  return slots.filter((slot) => slot.type === type && slot.upload);
+}
+
+function persistExtraDocs(slots: ExtraDocSlot[]) {
+  saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY, slots);
+  saveDraft(
+    DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
+    extrasOfType(slots, "pr-card")
+  );
+  const maps = extrasOfType(slots, "dp-remarks-map");
+  const rls = extrasOfType(slots, "dp-remarks-rl");
+  saveDraft(DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY, {
+    ...(maps[0]?.upload ? { map: maps[0].upload } : {}),
+    ...(rls[0]?.upload ? { rl: rls[0].upload } : {}),
+  });
 }
 
 function isLibraryDocType(value: string): value is LibraryDocType {
@@ -218,8 +361,8 @@ export default function ProjectLibraryPage() {
       )
     )
   );
-  const [extraPrSlots, setExtraPrSlots] = useState<ExtraPrSlot[]>(() =>
-    loadExtraPrSlots()
+  const [extraDocs, setExtraDocs] = useState<ExtraDocSlot[]>(() =>
+    loadExtraDocSlots()
   );
   const [staging, setStaging] = useState<StagingItem[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
@@ -241,10 +384,6 @@ export default function ProjectLibraryPage() {
   };
 
   useEffect(() => {
-    void deleteProjectLibraryFile(4);
-  }, []);
-
-  useEffect(() => {
     if (isLoading) return;
 
     let cancelled = false;
@@ -254,14 +393,15 @@ export default function ProjectLibraryPage() {
         const uploadsData = ((projectData.project_library || {}).uploads ||
           []) as UploadRecord[];
         if (uploadsData.length > 0) {
-          const { fixed, extraPr } = splitServerUploads(uploadsData);
+          const { fixed, extraDocs: nextExtras } =
+            splitServerUploads(uploadsData);
           if (cancelled) return;
           setUploads(fixed);
-          setExtraPrSlots(extraPr);
+          setExtraDocs(nextExtras);
           saveDraft("draft-project-library-uploads", fixed);
-          saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, extraPr);
+          persistExtraDocs(nextExtras);
           const attachedCount =
-            fixed.filter(Boolean).length + extraPr.filter((s) => s.upload).length;
+            fixed.filter(Boolean).length + nextExtras.filter((s) => s.upload).length;
           if (attachedCount >= 1) {
             markPageSaved("saved-project-library");
             saveDraft("saved-project-library-files", { count: attachedCount });
@@ -283,7 +423,7 @@ export default function ProjectLibraryPage() {
       if (cancelled) return;
 
       const attached = reconciled.filter(Boolean).length;
-      const extras = loadExtraPrSlots();
+      const extras = loadExtraDocSlots();
       const extraAttached = extras.filter((s) => s.upload).length;
       const totalLocal = attached + extraAttached;
       const flagged = isPageSaved("saved-project-library");
@@ -302,21 +442,22 @@ export default function ProjectLibraryPage() {
         }
         for (const slot of extras) {
           // eslint-disable-next-line no-await-in-loop
-          await deleteExtraPrCard(slot.id);
+          await deleteExtraLibraryDoc(slot.id);
         }
+        await clearAllExtraDpAttachments();
         if (cancelled) return;
         setUploads(normalizeFixedUploads([]));
-        setExtraPrSlots([]);
+        setExtraDocs([]);
         saveDraft("draft-project-library-uploads", normalizeFixedUploads([]));
-        saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+        persistExtraDocs([]);
         markLibraryDirty();
         return;
       }
 
       setUploads(reconciled);
-      setExtraPrSlots(extras);
+      setExtraDocs(extras);
       saveDraft("draft-project-library-uploads", reconciled);
-      saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, extras);
+      persistExtraDocs(extras);
       setIsSaved(true);
     })();
 
@@ -338,14 +479,14 @@ export default function ProjectLibraryPage() {
     uploads.forEach((u) => {
       if (u?.url?.startsWith("blob:")) URL.revokeObjectURL(u.url);
     });
-    extraPrSlots.forEach((s) => {
+    extraDocs.forEach((s) => {
       if (s.upload?.url?.startsWith("blob:")) URL.revokeObjectURL(s.upload.url);
     });
     await clearAllLocalFiles();
     setUploads(normalizeFixedUploads([]));
-    setExtraPrSlots([]);
+    setExtraDocs([]);
     saveDraft("draft-project-library-uploads", normalizeFixedUploads([]));
-    saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+    persistExtraDocs([]);
   };
 
   const openPreview = async (
@@ -385,10 +526,11 @@ export default function ProjectLibraryPage() {
       // eslint-disable-next-line no-await-in-loop
       await deleteProjectLibraryFile(i);
     }
-    for (const slot of extraPrSlots) {
+    for (const slot of extraDocs) {
       // eslint-disable-next-line no-await-in-loop
-      await deleteExtraPrCard(slot.id);
+      await deleteExtraLibraryDoc(slot.id);
     }
+    await clearAllExtraDpAttachments();
   };
 
   const applyAssignedFiles = async (
@@ -397,73 +539,42 @@ export default function ProjectLibraryPage() {
     error: string | null;
     extraSlotIds: string[];
     nextFixed: (UploadRecord | undefined)[];
-    nextExtra: ExtraPrSlot[];
+    nextExtra: ExtraDocSlot[];
   }> => {
+    const emptyAssign = {
+      extraSlotIds: [] as string[],
+      nextFixed: [] as (UploadRecord | undefined)[],
+      nextExtra: [] as ExtraDocSlot[],
+    };
     const byType: Partial<Record<LibraryDocType, File[]>> = {};
     for (const item of items) {
       byType[item.type] = [...(byType[item.type] ?? []), item.file];
     }
 
-    const prFiles = byType["pr-card"] ?? [];
-    const dpFiles = byType["dp-remarks"] ?? [];
-    const crzFiles = byType["crz-remarks"] ?? [];
-    const poaFiles = byType["power-of-attorney"] ?? [];
-
     if (items.length < 1) {
-      return {
-        error: "Add at least one document to save.",
-        extraSlotIds: [],
-        nextFixed: [],
-        nextExtra: [],
-      };
+      return { error: "Add at least one document to save.", ...emptyAssign };
     }
-    if (dpFiles.length > 1) {
+    if (items.length > PROJECT_LIBRARY_MAX_TOTAL_FILES) {
       return {
-        error: `Duplicate ${LABEL_BY_TYPE["dp-remarks"]} files — keep only one.`,
-        extraSlotIds: [],
-        nextFixed: [],
-        nextExtra: [],
-      };
-    }
-    if (crzFiles.length > 1) {
-      return {
-        error: `Duplicate ${LABEL_BY_TYPE["crz-remarks"]} files — keep only one.`,
-        extraSlotIds: [],
-        nextFixed: [],
-        nextExtra: [],
-      };
-    }
-    if (poaFiles.length > 1) {
-      return {
-        error: `Duplicate ${LABEL_BY_TYPE["power-of-attorney"]} files — keep only one.`,
-        extraSlotIds: [],
-        nextFixed: [],
-        nextExtra: [],
-      };
-    }
-    if (prFiles.length > MAX_PR_CARDS) {
-      return {
-        error: `You can add up to ${MAX_PR_CARDS} PR / PRC cards.`,
-        extraSlotIds: [],
-        nextFixed: [],
-        nextExtra: [],
+        error: `You can add up to ${PROJECT_LIBRARY_MAX_TOTAL_FILES} files.`,
+        ...emptyAssign,
       };
     }
 
     uploads.forEach((u) => {
       if (u?.url) URL.revokeObjectURL(u.url);
     });
-    extraPrSlots.forEach((s) => {
+    extraDocs.forEach((s) => {
       if (s.upload?.url) URL.revokeObjectURL(s.upload.url);
     });
 
     await clearAllLocalFiles();
 
     const slotFiles: (File | undefined)[] = [
-      prFiles[0],
-      dpFiles[0],
-      crzFiles[0],
-      poaFiles[0],
+      byType["pr-card"]?.[0],
+      byType["dp-remarks"]?.[0],
+      byType["crz-remarks"]?.[0],
+      byType["power-of-attorney"]?.[0],
     ];
     const nextFixed: (UploadRecord | undefined)[] = [];
     for (let i = 0; i < MAX_FILES; i++) {
@@ -474,35 +585,52 @@ export default function ProjectLibraryPage() {
       }
       // eslint-disable-next-line no-await-in-loop
       await saveProjectLibraryFile(i, file);
-      const safeDocName = (DOCUMENT_NAMES[i] || file.name)
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 50);
-      nextFixed.push(makeUploadRecord(file, `${safeDocName}-${i + 1}`));
+      nextFixed.push(makeUploadRecord(file, projectLibraryFixedRelativeStem(i)));
     }
 
-    const extraFiles = prFiles.slice(1);
-    const nextExtra: ExtraPrSlot[] = [];
-    for (const file of extraFiles) {
-      const slot = createExtraSlot();
+    const extraQueue: Array<{ type: LibraryDocType; file: File }> = [
+      ...(byType["pr-card"] ?? []).slice(1).map((file) => ({
+        type: "pr-card" as const,
+        file,
+      })),
+      ...(byType["dp-remarks"] ?? []).slice(1).map((file) => ({
+        type: "dp-remarks" as const,
+        file,
+      })),
+      ...(byType["crz-remarks"] ?? []).slice(1).map((file) => ({
+        type: "crz-remarks" as const,
+        file,
+      })),
+      ...(byType["power-of-attorney"] ?? []).slice(1).map((file) => ({
+        type: "power-of-attorney" as const,
+        file,
+      })),
+      ...(byType["dp-remarks-map"] ?? []).map((file) => ({
+        type: "dp-remarks-map" as const,
+        file,
+      })),
+      ...(byType["dp-remarks-rl"] ?? []).map((file) => ({
+        type: "dp-remarks-rl" as const,
+        file,
+      })),
+    ];
+
+    const nextExtra: ExtraDocSlot[] = [];
+    for (const { type, file } of extraQueue) {
+      const slot = createExtraSlot(type);
       // eslint-disable-next-line no-await-in-loop
-      await saveExtraPrCard(slot.id, file);
-      const safeDocName = PROJECT_LIBRARY_EXTRA_PR_LABEL.toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 50);
+      await saveExtraLibraryDoc(slot.id, file, type);
       nextExtra.push({
         ...slot,
         upload: makeUploadRecord(
           file,
-          `${safeDocName}-${slot.id.slice(0, 8)}`
+          projectLibraryExtraRelativeStem(type, slot.id.slice(0, 8))
         ),
       });
     }
 
     setUploads(nextFixed);
-    setExtraPrSlots(nextExtra);
+    setExtraDocs(nextExtra);
     markLibraryDirty();
     return {
       error: null,
@@ -518,7 +646,7 @@ export default function ProjectLibraryPage() {
     ok: boolean;
     extraSlotIds: string[];
     nextFixed: (UploadRecord | undefined)[];
-    nextExtra: ExtraPrSlot[];
+    nextExtra: ExtraDocSlot[];
   }> => {
     const typed = items
       .map((item) => {
@@ -641,7 +769,7 @@ export default function ProjectLibraryPage() {
     if (room === 0) {
       showAlert({
         title: "Maximum reached",
-        message: `You can attach up to ${MAX_TOTAL_FILES} PDFs (up to ${MAX_PR_CARDS} PR / PRC cards + up to ${MAX_OTHER_DOCS} other documents).`,
+        message: `You can attach up to ${MAX_TOTAL_FILES} PDFs.`,
       });
       return;
     }
@@ -705,7 +833,7 @@ export default function ProjectLibraryPage() {
     markLibraryDirty();
   };
 
-  const attachedExtraCount = extraPrSlots.filter((s) => s.upload).length;
+  const attachedExtraCount = extraDocs.filter((s) => s.upload).length;
   const totalAttached = uploads.filter(Boolean).length + attachedExtraCount;
   const showSavedButton =
     isSaved &&
@@ -723,15 +851,15 @@ export default function ProjectLibraryPage() {
     if (isReadOnlyMode || isExtracting || isDetecting) return;
 
     let working = staging;
-    let extraSlotIdsForExtraction: string[] = [];
+    let extraJobsForExtraction: Array<{ id: string; type: LibraryDocType }> = [];
     let savedFixed = uploads;
-    let savedExtra = extraPrSlots;
+    let savedExtra = extraDocs;
 
     if (working.length > 0) {
       if (working.length > MAX_TOTAL_FILES) {
         showAlert({
           title: "Too many files",
-          message: `Remove extras — maximum is ${MAX_TOTAL_FILES} PDFs (up to ${MAX_PR_CARDS} PR / PRC + ${MAX_OTHER_DOCS} other).`,
+          message: `Remove extras — maximum is ${MAX_TOTAL_FILES} PDFs.`,
         });
         return;
       }
@@ -747,33 +875,32 @@ export default function ProjectLibraryPage() {
 
       const assigned = await detectAndAssign(working);
       if (!assigned.ok) return;
-      extraSlotIdsForExtraction = assigned.extraSlotIds;
+      extraJobsForExtraction = assigned.nextExtra
+        .filter((s) => s.upload && EXTRACTABLE_EXTRA_TYPES.includes(s.type))
+        .map((s) => ({ id: s.id, type: s.type }));
       savedFixed = assigned.nextFixed;
       savedExtra = assigned.nextExtra;
       setStaging([]);
     } else {
-      extraSlotIdsForExtraction = extraPrSlots
-        .filter((s) => s.upload)
-        .map((s) => s.id);
+      extraJobsForExtraction = extraDocs
+        .filter((s) => s.upload && EXTRACTABLE_EXTRA_TYPES.includes(s.type))
+        .map((s) => ({ id: s.id, type: s.type }));
     }
 
     const attachedCount = await countAttachedProjectLibraryFiles(
       MAX_FILES,
-      [
-        ...extraSlotIdsForExtraction,
-        ...savedExtra.filter((s) => s.upload).map((s) => s.id),
-      ].filter((id, index, arr) => arr.indexOf(id) === index)
+      savedExtra.filter((s) => s.upload).map((s) => s.id)
     );
     if (attachedCount < 1) {
       showAlert({
         title: "Project library",
         message:
-          "Upload at least one document (PR / PRC card, D.P. Remarks, C.R.Z. Remarks, or Power of Attorney).",
+          "Upload at least one document (PR / PRC card, D.P. Remarks letter / Map Plan / Road Line Plan, C.R.Z. Remarks, or Power of Attorney).",
       });
       return;
     }
 
-    const outcome = await runExtraction(extraSlotIdsForExtraction);
+    const outcome = await runExtraction(extraJobsForExtraction);
 
     if (outcome.primaryPrFailed) {
       const failureLines = outcome.failures
@@ -820,7 +947,16 @@ export default function ProjectLibraryPage() {
 
     const snapshot: LibrarySnapshot = {
       fixed: savedFixed,
-      extraPr: savedExtra,
+      extraPr: extrasOfType(savedExtra, "pr-card"),
+      extraDocs: savedExtra,
+      dpAttachments: {
+        ...(extrasOfType(savedExtra, "dp-remarks-map")[0]?.upload
+          ? { map: extrasOfType(savedExtra, "dp-remarks-map")[0].upload }
+          : {}),
+        ...(extrasOfType(savedExtra, "dp-remarks-rl")[0]?.upload
+          ? { rl: extrasOfType(savedExtra, "dp-remarks-rl")[0].upload }
+          : {}),
+      },
     };
     const finalCount =
       savedFixed.filter(Boolean).length +
@@ -839,7 +975,7 @@ export default function ProjectLibraryPage() {
     let message =
       "Documents saved. Area Details, Project Details, and Applicant pre-filled — please review.";
     if (extraCount > 0) {
-      message = `Project library saved with ${extraCount} additional PR / PRC card${extraCount === 1 ? "" : "s"}. Area Details, Project Details, and Applicant pre-filled — please review.`;
+      message = `Project library saved with ${extraCount} additional file${extraCount === 1 ? "" : "s"}. Area Details, Project Details, and Applicant pre-filled — please review.`;
     }
     if (optionalFailures.length > 0) {
       const lines = optionalFailures.map((f) => {
@@ -863,8 +999,8 @@ export default function ProjectLibraryPage() {
   }, [uploads]);
 
   useEffect(() => {
-    saveDraft(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, extraPrSlots);
-  }, [extraPrSlots]);
+    persistExtraDocs(extraDocs);
+  }, [extraDocs]);
 
   if (isLoading) {
     return (
@@ -896,8 +1032,9 @@ export default function ProjectLibraryPage() {
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <p className="max-w-xl text-sm text-gray-500">
             Upload any documents you have — all types are optional. We’ll detect
-            each type (PR / PRC, D.P. Remarks, C.R.Z. Remarks, Power of
-            Attorney). Up to {MAX_PR_CARDS} PR / PRC cards allowed.
+            each type (PR / PRC, D.P. Remarks letter / Map Plan / Road Line Plan,
+            C.R.Z. Remarks, Power of Attorney). You can add multiple files of
+            each type (up to {MAX_TOTAL_FILES} PDFs in total).
           </p>
           <button
             type="button"
@@ -965,8 +1102,8 @@ export default function ProjectLibraryPage() {
             </p>
             <p className="mt-1 text-xs text-gray-500">
               Add files one by one or several at once. Types are optional — upload
-              what you have. Up to {MAX_PR_CARDS} PR / PRC cards; one each of
-              D.P. Remarks, C.R.Z. Remarks, Power of Attorney.
+              what you have. Multiple files of each type are allowed (up to{" "}
+              {MAX_TOTAL_FILES} PDFs in total).
               {staging.length > 0
                 ? ` (${staging.length}/${MAX_TOTAL_FILES} selected)`
                 : ""}
@@ -1034,11 +1171,20 @@ export default function ProjectLibraryPage() {
                         <option value="">
                           {item.loading ? "Detecting…" : "Set type…"}
                         </option>
-                        {LIBRARY_ALLOWED_TYPES.map((docType) => (
-                          <option key={docType} value={docType}>
-                            {LABEL_BY_TYPE[docType]}
-                          </option>
-                        ))}
+                        <option value="pr-card">{LABEL_BY_TYPE["pr-card"]}</option>
+                        <optgroup label="D.P. Remarks">
+                          {DP_TYPE_OPTIONS.map((docType) => (
+                            <option key={docType} value={docType}>
+                              {LABEL_BY_TYPE[docType]}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <option value="crz-remarks">
+                          {LABEL_BY_TYPE["crz-remarks"]}
+                        </option>
+                        <option value="power-of-attorney">
+                          {LABEL_BY_TYPE["power-of-attorney"]}
+                        </option>
                       </select>
                       <button
                         type="button"
@@ -1082,43 +1228,126 @@ export default function ProjectLibraryPage() {
                 )
               }
             />
-            {extraPrSlots.map((slot, slotIndex) => (
+            {extrasOfType(extraDocs, "pr-card").map((slot, slotIndex) => (
               <AttachedSummaryRow
                 key={slot.id}
                 serial={`1.${slotIndex + 1}`}
-                label={PROJECT_LIBRARY_EXTRA_PR_LABEL}
+                label={EXTRA_LABEL_BY_TYPE[slot.type]}
                 upload={slot.upload}
                 isReadOnlyMode={isReadOnlyMode}
                 onPreview={() =>
                   void openPreview(
-                    `${PROJECT_LIBRARY_EXTRA_PR_LABEL} ${slotIndex + 1}`,
-                    () => getExtraPrCard(slot.id),
+                    `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                    () => getExtraLibraryDoc(slot.id),
                     slot.upload?.url
                   )
                 }
               />
             ))}
-            {uploads.slice(1).map((upload, offsetIndex) => {
-              const index = offsetIndex + 1;
-              return (
+            <AttachedSummaryRow
+              serial="2"
+              label={DOCUMENT_NAMES[1]}
+              upload={uploads[1]}
+              isReadOnlyMode={isReadOnlyMode}
+              onPreview={() =>
+                void openPreview(
+                  DOCUMENT_NAMES[1] || uploads[1]?.name || "Document 2",
+                  () => getProjectLibraryFile(1),
+                  uploads[1]?.url
+                )
+              }
+            />
+            {(() => {
+              const dpExtras = [
+                ...extrasOfType(extraDocs, "dp-remarks"),
+                ...extrasOfType(extraDocs, "dp-remarks-map"),
+                ...extrasOfType(extraDocs, "dp-remarks-rl"),
+              ];
+              return dpExtras.map((slot, slotIndex) => (
                 <AttachedSummaryRow
-                  key={`fixed-${index}`}
-                  serial={String(index + 1)}
-                  label={DOCUMENT_NAMES[index] || `Document ${index + 1}`}
-                  upload={upload}
+                  key={slot.id}
+                  serial={`2.${slotIndex + 1}`}
+                  label={EXTRA_LABEL_BY_TYPE[slot.type]}
+                  upload={slot.upload}
                   isReadOnlyMode={isReadOnlyMode}
                   onPreview={() =>
                     void openPreview(
-                      DOCUMENT_NAMES[index] ||
-                        upload?.name ||
-                        `Document ${index + 1}`,
-                      () => getProjectLibraryFile(index),
-                      upload?.url
+                      `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                      () => getExtraLibraryDoc(slot.id),
+                      slot.upload?.url
                     )
                   }
                 />
-              );
-            })}
+              ));
+            })()}
+            {uploads[2] || extrasOfType(extraDocs, "crz-remarks").length > 0 ? (
+              <>
+                <AttachedSummaryRow
+                  key="fixed-2"
+                  serial="3"
+                  label={DOCUMENT_NAMES[2]}
+                  upload={uploads[2]}
+                  isReadOnlyMode={isReadOnlyMode}
+                  onPreview={() =>
+                    void openPreview(
+                      DOCUMENT_NAMES[2] || uploads[2]?.name || "Document 3",
+                      () => getProjectLibraryFile(2),
+                      uploads[2]?.url
+                    )
+                  }
+                />
+                {extrasOfType(extraDocs, "crz-remarks").map((slot, slotIndex) => (
+                  <AttachedSummaryRow
+                    key={slot.id}
+                    serial={`3.${slotIndex + 1}`}
+                    label={EXTRA_LABEL_BY_TYPE[slot.type]}
+                    upload={slot.upload}
+                    isReadOnlyMode={isReadOnlyMode}
+                    onPreview={() =>
+                      void openPreview(
+                        `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                        () => getExtraLibraryDoc(slot.id),
+                        slot.upload?.url
+                      )
+                    }
+                  />
+                ))}
+              </>
+            ) : null}
+            {uploads[3] || extrasOfType(extraDocs, "power-of-attorney").length > 0 ? (
+              <>
+                <AttachedSummaryRow
+                  key="fixed-3"
+                  serial="4"
+                  label={DOCUMENT_NAMES[3]}
+                  upload={uploads[3]}
+                  isReadOnlyMode={isReadOnlyMode}
+                  onPreview={() =>
+                    void openPreview(
+                      DOCUMENT_NAMES[3] || uploads[3]?.name || "Document 4",
+                      () => getProjectLibraryFile(3),
+                      uploads[3]?.url
+                    )
+                  }
+                />
+                {extrasOfType(extraDocs, "power-of-attorney").map((slot, slotIndex) => (
+                  <AttachedSummaryRow
+                    key={slot.id}
+                    serial={`4.${slotIndex + 1}`}
+                    label={EXTRA_LABEL_BY_TYPE[slot.type]}
+                    upload={slot.upload}
+                    isReadOnlyMode={isReadOnlyMode}
+                    onPreview={() =>
+                      void openPreview(
+                        `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                        () => getExtraLibraryDoc(slot.id),
+                        slot.upload?.url
+                      )
+                    }
+                  />
+                ))}
+              </>
+            ) : null}
           </ul>
         )}
 
@@ -1129,7 +1358,8 @@ export default function ProjectLibraryPage() {
           {staging.length === 0 && attachedExtraCount > 0 && (
             <span className="text-gray-500">
               {" "}
-              (including {attachedExtraCount} additional PR / PRC)
+              (including {attachedExtraCount} additional file
+              {attachedExtraCount === 1 ? "" : "s"})
             </span>
           )}
         </div>

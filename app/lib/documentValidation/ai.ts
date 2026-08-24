@@ -29,9 +29,13 @@ const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
   "pr-card":
     "Property Register Card / PR Card / PRC / मालमत्ता पत्रक — City Survey register with CTS numbers, holder/owner name, area in sq.m.",
   "dp-remarks":
-    "D.P. Remarks / Development Plan remarks (BMC/MCGM style) — planning authority, zone, ward, DP remarks for a plot",
+    "D.P. Remarks LETTER only (BMC/MCGM Development Plan remarks letter/report) — titled DP 2034 Remarks or Remark_Report, with CTS/zone/reservation table and applicant letter. NOT a map or road-line plan.",
+  "dp-remarks-map":
+    "D.P. Remarks Map Plan — BMC Development Plan BLOCK PLAN / LOCATION PLAN (Map_Report). Esri/ArcGIS map to be read with the DP remarks letter. Not the remarks letter itself, even if the map mentions DP Remarks.",
+  "dp-remarks-rl":
+    "D.P. Remarks Road Line Plan — BMC DP Traffic RoadLines / Survey RoadLines sheet (RL_Report). Companion to the DP remarks letter, not the letter itself.",
   "crz-remarks":
-    "C.R.Z. Remarks / Coastal Regulation Zone remarks — CRZ I/II/III/IV category for a coastal plot",
+    "C.R.Z. Remarks / Coastal Regulation Zone remarks (CZMP) — CRZ I/II/III/IV category for a plot. Includes the remarks letter even when an accompanying site plan is attached. Not a DP Map Plan.",
   "power-of-attorney":
     "Power of Attorney (POA) — legal deed granting authority over property (principal / attorney names, property details)",
 };
@@ -196,7 +200,12 @@ Rules:
 - PAN cards show a Permanent Account Number (format like ABCDE1234F).
 - Technical person licenses are professional registration / license certificates (architect, surveyor, structural engineer, etc.).
 - Property Register Card (pr-card) shows CTS / city survey numbers and plot area columns — not DP or CRZ remarks forms.
-- D.P. Remarks are Development Plan remark sheets; C.R.Z. Remarks are Coastal Regulation Zone remark sheets — do not confuse them.
+- Ignore the original filename; classify only from the document content.
+- If the document is a C.R.Z. / CZMP remarks report (title CRZ Remarks, CRZ I–IV table), type is "crz-remarks" even when later pages include a site plan.
+- "dp-remarks" is only the Development Plan remarks LETTER (tabular remarks / "DP 2034 Remarks" report). Map plans and road-line sheets are not the letter.
+- "dp-remarks-map" is a DP BLOCK PLAN / LOCATION PLAN sheet that is not CRZ and not the remarks letter — even if the map mentions "DP Remarks".
+- "dp-remarks-rl" is a Traffic/Survey RoadLines sheet, not the remarks letter.
+- C.R.Z. Remarks are Coastal Regulation Zone remark sheets — do not classify them as DP remarks or DP maps.
 - Power of Attorney is a legal deed (principal grants power to attorney), not a register card or remarks sheet.
 - If unsure, return "unknown" with low confidence.
 - Do not invent a type that is not in the list.

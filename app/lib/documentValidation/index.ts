@@ -6,8 +6,10 @@ import {
 } from "./ai";
 import { extractTextFromPdfBuffer } from "./extractText";
 import { documents, isDocumentType, type DocumentType } from "./registry";
+import { refineLibraryDocumentType, refineDpRemarksSubtype } from "./dpRemarksSubtype";
 import type { DocumentDefinition } from "./types";
-import { validateExtractedFields, type ValidationResult } from "./validate";
+import { validateExtractedFields } from "./validate";
+import type { ValidationResult } from "./validate";
 import type { z } from "zod";
 
 export type DocumentValidationResponse = ValidationResult<
@@ -256,6 +258,18 @@ export async function classifyAndValidateDocumentFile(
     documentText
   );
 
+  const refinedType = refineLibraryDocumentType(
+    allowedTypes,
+    classification.documentType,
+    documentText
+  );
+  classification.documentType =
+    refinedType === "unknown" ||
+    !isDocumentType(refinedType) ||
+    !allowedTypes.includes(refinedType)
+      ? classification.documentType
+      : refinedType;
+
   if (
     classification.documentType === "unknown" ||
     !isDocumentType(classification.documentType) ||
@@ -308,26 +322,50 @@ export async function classifyDocumentFileOnly(
     }
   }
 
-  return classifyDocumentType(
+  const classification = await classifyDocumentType(
     { data: buffer, mediaType },
     allowedTypes,
     documentText
   );
+
+  const refinedType = refineLibraryDocumentType(
+    allowedTypes,
+    classification.documentType,
+    documentText
+  );
+  if (
+    refinedType !== "unknown" &&
+    isDocumentType(refinedType) &&
+    allowedTypes.includes(refinedType)
+  ) {
+    return {
+      documentType: refinedType,
+      confidence:
+        refinedType === classification.documentType
+          ? classification.confidence
+          : "high",
+    };
+  }
+
+  return classification;
 }
 
-export type { DocumentDefinition } from "./types";
-export type { ClassifyDocumentResult } from "./ai";
-export { classifyDocumentType } from "./ai";
+export { refineLibraryDocumentType, refineDpRemarksSubtype };
+export type { DocumentDefinition };
+export type { ClassifyDocumentResult };
+export { classifyDocumentType };
 export {
   documents,
+  isDocumentType,
+};
+export type { DocumentType };
+export {
   resolveDocumentType,
   resolveDocumentTypeFromApplication,
-  isDocumentType,
   listDocumentTypes,
   getDocumentDefinition,
   getDocumentsForApplication,
-  type DocumentType,
 } from "./registry";
 export { APPLICATION_DOCUMENTS } from "./applications";
 export { getFieldLabel, FIELD_LABELS } from "./fieldLabels";
-export type { ValidationResult } from "./validate";
+export type { ValidationResult };

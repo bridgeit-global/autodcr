@@ -35,8 +35,21 @@ function withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => I
   );
 }
 
+export type ExtraDpKind = "map" | "rl";
+export const EXTRA_DP_KINDS: ExtraDpKind[] = ["map", "rl"];
+
+export type ExtraLibraryDocType =
+  | "pr-card"
+  | "dp-remarks"
+  | "dp-remarks-map"
+  | "dp-remarks-rl"
+  | "crz-remarks"
+  | "power-of-attorney";
+
 const keyForIndex = (index: number) => `slot:${index}`;
 const keyForExtraPr = (slotId: string) => `extra-pr:${slotId}`;
+const keyForExtraDp = (kind: ExtraDpKind) => `extra-dp:${kind}`;
+const keyForExtraDoc = (slotId: string) => `extra-doc:${slotId}`;
 
 export async function saveProjectLibraryFile(index: number, file: File): Promise<void> {
   if (typeof window === "undefined") return;
@@ -135,7 +148,7 @@ export async function countAttachedProjectLibraryFiles(
   let count = await countProjectLibraryFilesInIndexedDB(expectedSlots);
   for (const slotId of extraSlotIds) {
     // eslint-disable-next-line no-await-in-loop
-    const v = await getExtraPrCard(slotId);
+    const v = await getExtraLibraryDoc(slotId);
     if (v?.blob) count += 1;
   }
   return count;
@@ -180,6 +193,88 @@ export async function clearAllExtraPrCards(slotIds: string[]): Promise<void> {
   for (const slotId of slotIds) {
     // eslint-disable-next-line no-await-in-loop
     await deleteExtraPrCard(slotId);
+  }
+}
+
+export async function saveExtraDpAttachment(
+  kind: ExtraDpKind,
+  file: File
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const payload = {
+    name: file.name,
+    type: file.type || "application/pdf",
+    lastModified: file.lastModified,
+    blob: file,
+  };
+  await withStore("readwrite", (store) => store.put(payload, keyForExtraDp(kind)));
+}
+
+export async function getExtraDpAttachment(
+  kind: ExtraDpKind
+): Promise<{ name: string; type: string; lastModified: number; blob: Blob } | null> {
+  if (typeof window === "undefined") return null;
+  const res = await withStore<any | undefined>("readonly", (store) =>
+    store.get(keyForExtraDp(kind))
+  );
+  return res ?? null;
+}
+
+export async function deleteExtraDpAttachment(kind: ExtraDpKind): Promise<void> {
+  if (typeof window === "undefined") return;
+  await withStore("readwrite", (store) => store.delete(keyForExtraDp(kind)));
+}
+
+export async function clearAllExtraDpAttachments(): Promise<void> {
+  if (typeof window === "undefined") return;
+  for (const kind of EXTRA_DP_KINDS) {
+    // eslint-disable-next-line no-await-in-loop
+    await deleteExtraDpAttachment(kind);
+  }
+}
+
+export async function saveExtraLibraryDoc(
+  slotId: string,
+  file: File,
+  libraryType?: ExtraLibraryDocType
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const payload = {
+    name: file.name,
+    type: file.type || "application/pdf",
+    lastModified: file.lastModified,
+    blob: file,
+    libraryType,
+  };
+  await withStore("readwrite", (store) => store.put(payload, keyForExtraDoc(slotId)));
+}
+
+export async function getExtraLibraryDoc(
+  slotId: string
+): Promise<{ name: string; type: string; lastModified: number; blob: Blob } | null> {
+  if (typeof window === "undefined") return null;
+  const fromDoc = await withStore<any | undefined>("readonly", (store) =>
+    store.get(keyForExtraDoc(slotId))
+  );
+  if (fromDoc) return fromDoc;
+  if (slotId === "legacy-dp-map") return getExtraDpAttachment("map");
+  if (slotId === "legacy-dp-rl") return getExtraDpAttachment("rl");
+  return getExtraPrCard(slotId);
+}
+
+export async function deleteExtraLibraryDoc(slotId: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  await withStore("readwrite", (store) => store.delete(keyForExtraDoc(slotId)));
+  await deleteExtraPrCard(slotId);
+  if (slotId === "legacy-dp-map") await deleteExtraDpAttachment("map");
+  if (slotId === "legacy-dp-rl") await deleteExtraDpAttachment("rl");
+}
+
+export async function clearAllExtraLibraryDocs(slotIds: string[]): Promise<void> {
+  if (typeof window === "undefined") return;
+  for (const slotId of slotIds) {
+    // eslint-disable-next-line no-await-in-loop
+    await deleteExtraLibraryDoc(slotId);
   }
 }
 

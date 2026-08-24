@@ -9,7 +9,7 @@ import {
   type ProjectLibraryDocSlot,
 } from "@/app/lib/projectDocumentAutofill";
 import {
-  getExtraPrCard,
+  getExtraLibraryDoc,
   getProjectLibraryFile,
 } from "@/app/utils/projectLibraryFiles";
 import { validateDocumentFile } from "@/app/utils/validateDocumentApi";
@@ -52,6 +52,45 @@ const FIXED_JOBS: Array<Omit<ExtractionJob, "loadBlob"> & { index: number }> = [
 
 const EXTRACT_CONCURRENCY = 5;
 
+const EXTRACTABLE_EXTRA_TYPES = [
+  "pr-card",
+  "dp-remarks",
+  "crz-remarks",
+  "power-of-attorney",
+] as const;
+
+type ExtractableExtraType = (typeof EXTRACTABLE_EXTRA_TYPES)[number];
+
+const EXTRA_JOB_META: Record<
+  ExtractableExtraType,
+  { slot: ProjectLibraryDocSlot; documentType: DocumentType; label: string }
+> = {
+  "pr-card": {
+    slot: "pr-extra",
+    documentType: "pr-card",
+    label: "Additional PR / PRC",
+  },
+  "dp-remarks": {
+    slot: "dp-remarks",
+    documentType: "dp-remarks",
+    label: "Additional D.P. Remarks",
+  },
+  "crz-remarks": {
+    slot: "crz-remarks",
+    documentType: "crz-remarks",
+    label: "Additional C.R.Z. Remarks",
+  },
+  "power-of-attorney": {
+    slot: "power-of-attorney",
+    documentType: "power-of-attorney",
+    label: "Additional Power of Attorney",
+  },
+};
+
+function isExtractableExtraType(value: string): value is ExtractableExtraType {
+  return (EXTRACTABLE_EXTRA_TYPES as readonly string[]).includes(value);
+}
+
 function storedBlobToFile(stored: {
   name: string;
   type: string;
@@ -93,21 +132,32 @@ export function useProjectLibraryExtraction() {
   const [isExtracting, setIsExtracting] = useState(false);
 
   const runExtraction = useCallback(
-    async (extraPrSlotIds: string[]): Promise<ProjectLibraryExtractionOutcome> => {
+    async (
+      extraDocs: Array<{ id: string; type: string }>
+    ): Promise<ProjectLibraryExtractionOutcome> => {
       setIsExtracting(true);
 
       try {
+        const extraJobs: ExtractionJob[] = extraDocs
+          .filter((slot): slot is { id: string; type: ExtractableExtraType } =>
+            isExtractableExtraType(slot.type)
+          )
+          .map((slot) => {
+            const meta = EXTRA_JOB_META[slot.type];
+            return {
+              slot: meta.slot,
+              documentType: meta.documentType,
+              label: meta.label,
+              loadBlob: () => getExtraLibraryDoc(slot.id),
+            };
+          });
+
         const candidateJobs: ExtractionJob[] = [
           ...FIXED_JOBS.map(({ index, ...rest }) => ({
             ...rest,
             loadBlob: () => getProjectLibraryFile(index),
           })),
-          ...extraPrSlotIds.map((slotId) => ({
-            slot: "pr-extra" as const,
-            documentType: "pr-card" as DocumentType,
-            label: "Additional PR / PRC",
-            loadBlob: () => getExtraPrCard(slotId),
-          })),
+          ...extraJobs,
         ];
 
         // Only extract slots that actually have a local file (optional docs may be missing).

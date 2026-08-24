@@ -4,6 +4,8 @@ import {
   architectAppointmentLetter,
   crzRemarks,
   dpRemarks,
+  dpRemarksMap,
+  dpRemarksRl,
   entityPanCard,
   gstCertificate,
   llpIncorporationCertificate,
@@ -27,6 +29,8 @@ export const documents = {
   "signatory-signature": signatorySignature,
   "pr-card": prCard,
   "dp-remarks": dpRemarks,
+  "dp-remarks-map": dpRemarksMap,
+  "dp-remarks-rl": dpRemarksRl,
   "crz-remarks": crzRemarks,
   "power-of-attorney": powerOfAttorney,
 } as const;
