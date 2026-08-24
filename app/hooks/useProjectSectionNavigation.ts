@@ -253,7 +253,7 @@ export function useProjectSectionNavigation() {
           const snapshot = loadDraft<unknown>("saved-project-library-snapshot", null);
           const baseline = loadDraft<unknown>(getBaselineKey(path), null);
           restoreProjectLibraryDraft(
-            snapshot ?? baseline ?? { fixed: [], extraPr: [] }
+            snapshot ?? baseline ?? { fixed: [], extraPr: [], extraDocs: [], dpAttachments: {} }
           );
         },
       };

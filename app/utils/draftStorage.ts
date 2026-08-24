@@ -76,6 +76,8 @@ export function clearProjectDrafts() {
     // Project library
     "draft-project-library-uploads",
     "draft-project-library-extra-pr-uploads",
+    "draft-project-library-dp-attachments",
+    "draft-project-library-extra-docs",
     "saved-project-library",
     "saved-project-library-files",
     "saved-project-library-snapshot",

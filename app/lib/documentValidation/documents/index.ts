@@ -31,6 +31,12 @@ export {
   type DpRemarks,
 } from "./dpRemarks";
 export {
+  dpRemarksMap,
+  dpRemarksRl,
+  dpRemarksAttachmentSchema,
+  type DpRemarksAttachment,
+} from "./dpRemarksAttachments";
+export {
   powerOfAttorney,
   powerOfAttorneySchema,
   type PowerOfAttorney,

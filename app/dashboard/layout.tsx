@@ -11,7 +11,17 @@ import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
 import { useDashboardAlertModal } from "./context/DashboardAlertModalContext";
 import { isPageSaved, loadDraft, saveDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
 import { supabase } from "../utils/supabase";
-import { clearAllProjectLibraryFiles, clearAllExtraPrCards, getExtraPrCard, getProjectLibraryFile } from "../utils/projectLibraryFiles";
+import {
+  clearAllExtraDpAttachments,
+  clearAllExtraLibraryDocs,
+  clearAllExtraPrCards,
+  clearAllProjectLibraryFiles,
+  EXTRA_DP_KINDS,
+  getExtraDpAttachment,
+  getExtraLibraryDoc,
+  getProjectLibraryFile,
+  type ExtraDpKind,
+} from "../utils/projectLibraryFiles";
 import { useProjectData } from "../hooks/useProjectData";
 import { fetchProjectForEdit } from "../utils/fetchProjectForEdit";
 import { buildProjectUpdatePayload, countPayloadSections } from "../utils/projectUpdatePayload";
@@ -35,11 +45,17 @@ import { combineProjectTitleWithProposalNo } from "../utils/projectTitleProposal
 import {
   CREATE_PROJECT_SECTIONS,
   LIBRARY_GATE_ALERT,
+  DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
+  DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
   DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
+  EXTRA_DOC_STORAGE_PREFIX,
   PROJECT_LIBRARY_MAX_FILES,
   PROJECT_LIBRARY_PATH,
   isGatedCreateProjectPath,
+  projectLibraryExtraStoragePath,
+  projectLibraryFixedStoragePath,
   shouldGateCreateProjectSections,
+  type ProjectLibraryExtraDocType,
 } from "../utils/projectSections";
 
 type RequiredPage = {
@@ -61,8 +77,46 @@ type ProjectLibraryUpload = {
   uploadedAt?: string;
 };
 
+function isExtraDocType(value: string): value is ProjectLibraryExtraDocType {
+  return Object.prototype.hasOwnProperty.call(EXTRA_DOC_STORAGE_PREFIX, value);
+}
+
+function loadExtraLibrarySlots(): { id: string; type: ProjectLibraryExtraDocType }[] {
+  const extraDocs = loadDraft<{ id?: string; type?: string }[]>(
+    DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
+    []
+  );
+  if (Array.isArray(extraDocs) && extraDocs.some((slot) => slot?.id)) {
+    return extraDocs
+      .filter((slot): slot is { id: string; type: string } =>
+        Boolean(slot?.id && typeof slot.type === "string")
+      )
+      .filter((slot) => isExtraDocType(slot.type))
+      .map((slot) => ({
+        id: slot.id,
+        type: slot.type as ProjectLibraryExtraDocType,
+      }));
+  }
+
+  const extraPrSlots = loadDraft<{ id: string }[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
+  if (!Array.isArray(extraPrSlots)) return [];
+  return extraPrSlots
+    .filter((slot) => slot?.id)
+    .map((slot) => ({ id: slot.id, type: "pr-card" as const }));
+}
+
 function loadAllProjectLibraryUploadsFromDraft(): unknown[] {
   const fixed = loadDraft("draft-project-library-uploads", []);
+  const extraDocs = loadDraft<{ upload?: ProjectLibraryUpload }[]>(
+    DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
+    []
+  );
+  if (Array.isArray(extraDocs) && extraDocs.length > 0) {
+    return [
+      ...(Array.isArray(fixed) ? fixed.filter(Boolean) : []),
+      ...extraDocs.map((slot) => slot?.upload).filter(Boolean),
+    ];
+  }
   const extraPrSlots = loadDraft<{ id: string; upload?: ProjectLibraryUpload }[]>(
     DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY,
     []
@@ -70,11 +124,22 @@ function loadAllProjectLibraryUploadsFromDraft(): unknown[] {
   const extraUploads = Array.isArray(extraPrSlots)
     ? extraPrSlots.map((slot) => slot?.upload).filter(Boolean)
     : [];
+  const dpAttachments = loadDraft<{ map?: ProjectLibraryUpload; rl?: ProjectLibraryUpload }>(
+    DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
+    {}
+  );
+  const dpUploads = [dpAttachments?.map, dpAttachments?.rl].filter(Boolean);
   return [
     ...(Array.isArray(fixed) ? fixed.filter(Boolean) : []),
     ...extraUploads,
+    ...dpUploads,
   ];
 }
+
+const LEGACY_DP_EXTRA_TYPE: Record<ExtraDpKind, ProjectLibraryExtraDocType> = {
+  map: "dp-remarks-map",
+  rl: "dp-remarks-rl",
+};
 
 async function uploadProjectLibraryFilesToStorage(
   projectId: string
@@ -85,9 +150,8 @@ async function uploadProjectLibraryFilesToStorage(
     // eslint-disable-next-line no-await-in-loop
     const local = await getProjectLibraryFile(i);
     if (!local?.blob) continue;
-    const safeDocName = `document-${i + 1}`;
     const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
-    const path = `${projectId}/project-library/${safeDocName}-${i + 1}.${extension}`;
+    const path = projectLibraryFixedStoragePath(projectId, i, extension);
     // eslint-disable-next-line no-await-in-loop
     const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
       upsert: true,
@@ -106,23 +170,60 @@ async function uploadProjectLibraryFilesToStorage(
     });
   }
 
-  const extraPrSlots = loadDraft<{ id: string }[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
-  if (Array.isArray(extraPrSlots)) {
-    for (let i = 0; i < extraPrSlots.length; i++) {
-      const slot = extraPrSlots[i];
-      if (!slot?.id) continue;
+  const extraSlots = loadExtraLibrarySlots();
+  const extraIndexByType: Partial<Record<ProjectLibraryExtraDocType, number>> = {};
+  for (const slot of extraSlots) {
+    extraIndexByType[slot.type] = (extraIndexByType[slot.type] ?? 0) + 1;
+    const extraIndex = extraIndexByType[slot.type]!;
+    // eslint-disable-next-line no-await-in-loop
+    const local = await getExtraLibraryDoc(slot.id);
+    if (!local?.blob) continue;
+    const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
+    const path = projectLibraryExtraStoragePath(
+      projectId,
+      slot.type,
+      extraIndex,
+      extension
+    );
+    // eslint-disable-next-line no-await-in-loop
+    const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
+      upsert: true,
+      contentType: local.type || "application/pdf",
+    });
+    if (uploadError) {
+      console.error("Error uploading extra library document:", uploadError);
+      continue;
+    }
+    const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
+    uploads.push({
+      name: local.name,
+      path,
+      url: publicData?.publicUrl || "",
+      uploadedAt: new Date().toISOString(),
+    });
+  }
+
+  const extraDocs = loadDraft<unknown[]>(DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY, []);
+  const hasTypedExtras = Array.isArray(extraDocs) && extraDocs.length > 0;
+  if (!hasTypedExtras) {
+    for (const kind of EXTRA_DP_KINDS) {
       // eslint-disable-next-line no-await-in-loop
-      const local = await getExtraPrCard(slot.id);
+      const local = await getExtraDpAttachment(kind);
       if (!local?.blob) continue;
       const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
-      const path = `${projectId}/project-library/extra-pr-${i + 1}.${extension}`;
+      const path = projectLibraryExtraStoragePath(
+        projectId,
+        LEGACY_DP_EXTRA_TYPE[kind],
+        1,
+        extension
+      );
       // eslint-disable-next-line no-await-in-loop
       const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
         upsert: true,
         contentType: local.type || "application/pdf",
       });
       if (uploadError) {
-        console.error("Error uploading extra PR card:", uploadError);
+        console.error(`Error uploading DP ${kind} attachment:`, uploadError);
         continue;
       }
       const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
@@ -140,10 +241,13 @@ async function uploadProjectLibraryFilesToStorage(
 
 async function clearLocalProjectLibraryFiles(): Promise<void> {
   await clearAllProjectLibraryFiles(PROJECT_LIBRARY_MAX_FILES);
+  const extraSlots = loadExtraLibrarySlots();
+  await clearAllExtraLibraryDocs(extraSlots.map((slot) => slot.id));
   const extraPrSlots = loadDraft<{ id: string }[]>(DRAFT_PROJECT_LIBRARY_EXTRA_PR_KEY, []);
   if (Array.isArray(extraPrSlots)) {
     await clearAllExtraPrCards(extraPrSlots.map((slot) => slot.id).filter(Boolean));
   }
+  await clearAllExtraDpAttachments();
 }
 
 function extractProjectIdFromRpc(data: any): string | null {
