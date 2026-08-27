@@ -6,6 +6,7 @@ import {
   FolderKanban,
   FileStack,
   FileText,
+  Library,
   IndianRupee,
   ShieldCheck,
   Users,
@@ -68,6 +69,13 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     label: "Documents",
     href: "/userdashboard/documents",
     icon: FileText,
+    live: true,
+  },
+  {
+    id: "project-library",
+    label: "Project Library",
+    href: "/userdashboard/project-library",
+    icon: Library,
     live: true,
   },
   {
