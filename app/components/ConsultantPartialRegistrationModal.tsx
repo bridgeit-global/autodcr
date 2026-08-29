@@ -1,13 +1,21 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import CustomSelect from "@/app/components/CustomSelect";
+import RegistrationDocumentAutofillStep from "@/app/components/RegistrationDocumentAutofillStep";
 import { supabase } from "@/app/utils/supabase";
+import {
+  buildLicenseAutofillPatch,
+  mergeAutofill,
+  type AutofillFiles,
+  type AutofillPatch,
+} from "@/app/lib/documentValidation/registrationAutofill";
 import {
   CONSULTANT_TYPE_OPTIONS,
   EXTRA_REG_REQUIRED_BY_TYPE,
+  canSkipConsultantIdentityDocExtraction,
   metadataToFormFields,
   normalizePhone,
   REGISTRATION_NUMBER_META_BY_TYPE,
@@ -100,6 +108,83 @@ export default function ConsultantPartialRegistrationModal({
   );
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
   const [hasViewedLetterhead, setHasViewedLetterhead] = useState(false);
+  const [identityExtracted, setIdentityExtracted] = useState(false);
+  const [aadhaarCardFile, setAadhaarCardFile] = useState<File | null>(null);
+  const [panCardFile, setPanCardFile] = useState<File | null>(null);
+  const [licenseCertificateFile, setLicenseCertificateFile] = useState<File | null>(
+    null
+  );
+  const [signatoryPhotoFile, setSignatoryPhotoFile] = useState<File | null>(null);
+  const [signatorySignatureFile, setSignatorySignatureFile] = useState<File | null>(
+    null
+  );
+  const [skippedIdentityDocs, setSkippedIdentityDocs] = useState(false);
+  const licenseExtractedRef = useRef<Record<string, string | null> | null>(null);
+
+  const identitySectionComplete = identityExtracted || skippedIdentityDocs;
+
+  const applyPartialAutofill = (
+    patch: AutofillPatch,
+    files: AutofillFiles,
+    extractions?: Partial<
+      Record<"aadhaar" | "pan" | "technical-person-license", Record<string, string | null>>
+    >,
+    options?: { overwriteKeys?: readonly string[] }
+  ) => {
+    if (extractions?.["technical-person-license"]) {
+      licenseExtractedRef.current = extractions["technical-person-license"];
+    }
+
+    if (files.aadhaarCardFile) setAadhaarCardFile(files.aadhaarCardFile);
+    if (files.panCardFile) setPanCardFile(files.panCardFile);
+    if (files.licenseCertificateFile) {
+      setLicenseCertificateFile(files.licenseCertificateFile);
+    }
+    if (files.authorizedSignatoryPhotoFile) {
+      setSignatoryPhotoFile(files.authorizedSignatoryPhotoFile);
+    }
+    if (files.authorizedSignatorySignatureFile) {
+      setSignatorySignatureFile(files.authorizedSignatorySignatureFile);
+    }
+
+    setFormData((prev) => {
+      let merged = mergeAutofill(prev, patch, options) as FormState;
+      if (patch.addressLine1 || patch.addressLine2 || patch.addressLine3) {
+        merged.addressLine1 = String(merged.addressLine1 || patch.addressLine1 || "");
+        merged.addressLine2 = String(merged.addressLine2 || patch.addressLine2 || "");
+        merged.addressLine3 = String(merged.addressLine3 || patch.addressLine3 || "");
+      }
+
+      if (licenseExtractedRef.current && merged.consultantType) {
+        const licensePatch = buildLicenseAutofillPatch(
+          licenseExtractedRef.current,
+          merged.consultantType,
+          "consultant"
+        );
+        merged = mergeAutofill(merged, licensePatch) as FormState;
+      }
+
+      return merged;
+    });
+
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.identityDocuments;
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!licenseExtractedRef.current || !formData.consultantType) return;
+
+    const licensePatch = buildLicenseAutofillPatch(
+      licenseExtractedRef.current,
+      formData.consultantType,
+      "consultant"
+    );
+
+    setFormData((prev) => mergeAutofill(prev, licensePatch) as FormState);
+  }, [formData.consultantType]);
 
   useEffect(() => {
     setMounted(true);
@@ -119,6 +204,14 @@ export default function ConsultantPartialRegistrationModal({
     setLetterheadPreviewUrl(null);
     setIsLetterheadModalOpen(false);
     setHasViewedLetterhead(false);
+    setIdentityExtracted(false);
+    setAadhaarCardFile(null);
+    setPanCardFile(null);
+    setLicenseCertificateFile(null);
+    setSignatoryPhotoFile(null);
+    setSignatorySignatureFile(null);
+    setSkippedIdentityDocs(false);
+    licenseExtractedRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when modal opens / type changes
   }, [open, consultantType]);
 
@@ -237,6 +330,29 @@ export default function ConsultantPartialRegistrationModal({
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
+
+    if (!skippedIdentityDocs) {
+      if (!identityExtracted) {
+        next.identityDocuments =
+          "Upload and extract identity documents before continuing";
+      }
+      if (!aadhaarCardFile) {
+        next.identityDocuments = "Aadhaar card is required";
+      }
+      if (!panCardFile) {
+        next.identityDocuments = "PAN card is required";
+      }
+      if (!licenseCertificateFile) {
+        next.identityDocuments = "Technical person license is required";
+      }
+      if (!signatoryPhotoFile) {
+        next.identityDocuments = "Authorized signatory photograph is required";
+      }
+      if (!signatorySignatureFile) {
+        next.identityDocuments = "Authorized signatory signature is required";
+      }
+    }
+
     const require = (field: string, label: string) => {
       if (!String(formData[field] || "").trim()) next[field] = `${label} is required`;
     };
@@ -405,9 +521,32 @@ export default function ConsultantPartialRegistrationModal({
       }
 
       const formPayload = new FormData();
-      formPayload.append("payload", JSON.stringify(formData));
+      formPayload.append(
+        "payload",
+        JSON.stringify({
+          ...formData,
+          skipIdentityDocuments: skippedIdentityDocs,
+        })
+      );
       if (letterheadFile) {
         formPayload.append("letterhead", letterheadFile);
+      }
+      if (!skippedIdentityDocs) {
+        if (aadhaarCardFile) {
+          formPayload.append("aadhaar_card", aadhaarCardFile);
+        }
+        if (panCardFile) {
+          formPayload.append("pan_card", panCardFile);
+        }
+        if (licenseCertificateFile) {
+          formPayload.append("license_certificate", licenseCertificateFile);
+        }
+        if (signatoryPhotoFile) {
+          formPayload.append("signatory_photo", signatoryPhotoFile);
+        }
+        if (signatorySignatureFile) {
+          formPayload.append("signatory_signature", signatorySignatureFile);
+        }
       }
 
       const res = await fetch("/api/consultants/partial", {
@@ -470,8 +609,9 @@ export default function ConsultantPartialRegistrationModal({
               Consultant Registration
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              Enter basic details, registration numbers, and letterhead. Login and
-              documents can be completed later on the full registration page.
+              Upload identity documents to auto-fill details, then confirm registration
+              numbers and letterhead. The consultant will only need to set up login and
+              accept the declaration.
             </p>
           </div>
           <button
@@ -522,6 +662,36 @@ export default function ConsultantPartialRegistrationModal({
             </div>
           )}
 
+          {/* Identity Documents */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-black mb-1">
+              Identity Documents
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Upload documents to auto-fill consultant details
+            </p>
+            <RegistrationDocumentAutofillStep
+              registrationKind="consultant"
+              consultantType={formData.consultantType}
+              allowSkipExtraction={canSkipConsultantIdentityDocExtraction()}
+              onSkipExtraction={() => setSkippedIdentityDocs(true)}
+              onAutofill={applyPartialAutofill}
+              onExtractedChange={(extracted) => {
+                setIdentityExtracted(extracted);
+                if (extracted) setSkippedIdentityDocs(false);
+              }}
+              onContinue={() => {
+                const element = document.getElementById("section-basic-details");
+                element?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            />
+            {errors.identityDocuments && (
+              <p className="text-xs text-red-600 mt-2">{errors.identityDocuments}</p>
+            )}
+          </div>
+
+          {identitySectionComplete && (
+          <>
           {/* Basic Details */}
           <div
             id="section-basic-details"
@@ -1319,6 +1489,9 @@ export default function ConsultantPartialRegistrationModal({
               )}
             </div>
           </div>
+
+          </>
+          )}
 
           <div className="flex justify-end gap-3 pb-2">
             <button

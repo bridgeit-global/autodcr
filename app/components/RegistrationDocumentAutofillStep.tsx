@@ -66,6 +66,11 @@ type RegistrationDocumentAutofillStepProps = {
   ) => void;
   onContinue: () => void;
   onExtractedChange?: (extracted: boolean) => void;
+  /** Consultant only: Aadhaar, PAN, and license — no signatory uploads. */
+  skipSignatorySlots?: boolean;
+  /** Dev/testing: show control to skip upload and AI extraction. */
+  allowSkipExtraction?: boolean;
+  onSkipExtraction?: () => void;
 };
 
 function signatorySlots(): DocSlot[] {
@@ -83,7 +88,27 @@ function signatorySlots(): DocSlot[] {
   ];
 }
 
-function slotsForKind(kind: RegistrationKind, entityType?: string): DocSlot[] {
+function consultantIdentitySlots(): DocSlot[] {
+  return [
+    { id: "aadhaar", label: "Aadhaar Card", required: true },
+    { id: "pan", label: "PAN Card", required: true },
+    {
+      id: "technical-person-license",
+      label: "Technical Person License",
+      required: true,
+    },
+  ];
+}
+
+function slotsForKind(
+  kind: RegistrationKind,
+  entityType?: string,
+  skipSignatorySlots = false
+): DocSlot[] {
+  if (kind === "consultant" && skipSignatorySlots) {
+    return consultantIdentitySlots();
+  }
+
   if (kind === "owner" && entityType === "LLP") {
     return [
       { id: "aadhaar", label: "Aadhaar Card", required: true },
@@ -200,10 +225,13 @@ export default function RegistrationDocumentAutofillStep({
   onAutofill,
   onContinue,
   onExtractedChange,
+  skipSignatorySlots = false,
+  allowSkipExtraction = false,
+  onSkipExtraction,
 }: RegistrationDocumentAutofillStepProps) {
   const docSlots = useMemo(
-    () => slotsForKind(registrationKind, entityType),
-    [registrationKind, entityType]
+    () => slotsForKind(registrationKind, entityType, skipSignatorySlots),
+    [registrationKind, entityType, skipSignatorySlots]
   );
   const requiredCount = docSlots.filter((s) => s.required).length;
   const allowedTypes = useMemo(
@@ -713,6 +741,27 @@ export default function RegistrationDocumentAutofillStep({
 
   return (
     <div className="space-y-4">
+      {allowSkipExtraction && !hasExtracted && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-amber-900">
+            Testing only: skip document upload and AI extraction to save API tokens.
+            Fill the remaining fields manually.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setHasExtracted(true);
+              onExtractedChange?.(true);
+              onSkipExtraction?.();
+              onContinue();
+            }}
+            className="shrink-0 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+          >
+            Skip documents (dev)
+          </button>
+        </div>
+      )}
+
       <p className="text-sm text-gray-600 ml-0 md:ml-11 -mt-1 mb-1">
         {helperCopy(docSlots)}
       </p>

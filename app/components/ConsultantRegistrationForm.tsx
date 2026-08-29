@@ -19,6 +19,9 @@ import {
   type AutofillPatch,
 } from "@/app/lib/documentValidation/registrationAutofill";
 import {
+  canSkipConsultantIdentityDocExtraction,
+  getInviteCompletionSectionIds,
+  hasPartialRegistrationDocuments,
   isPartialProfileField,
   metadataToFormFields,
   normalizePhone,
@@ -28,10 +31,12 @@ import { isValidIndianPincode } from "@/app/utils/pincode";
 
 interface ConsultantRegistrationFormProps {
   title?: string;
+  inviteToken?: string;
 }
 
 const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
-  title = "Consultant Registration"
+  title = "Consultant Registration",
+  inviteToken,
 }) => {
   const router = useRouter();
   const [formError, setFormError] = useState("");
@@ -55,6 +60,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
   const [isResumingIncomplete, setIsResumingIncomplete] = useState(false);
   const [identityExtracted, setIdentityExtracted] = useState(false);
+  const [skippedIdentityDocs, setSkippedIdentityDocs] = useState(false);
   const [existingLetterheadUrl, setExistingLetterheadUrl] = useState<string | null>(
     null
   );
@@ -63,6 +69,14 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     email?: string;
     metadata: Record<string, unknown>;
   } | null>(null);
+  const [isInviteCompletion, setIsInviteCompletion] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(Boolean(inviteToken));
+  const [inviteLoadError, setInviteLoadError] = useState<string | null>(null);
+  const [inviteAlreadyComplete, setInviteAlreadyComplete] = useState(false);
+  const [loadedProfileMetadata, setLoadedProfileMetadata] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
@@ -76,6 +90,63 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
       }
     };
   }, [letterheadPreviewUrl]);
+
+  useEffect(() => {
+    if (!inviteToken) return;
+
+    let cancelled = false;
+
+    const loadInviteProfile = async () => {
+      setInviteLoading(true);
+      setInviteLoadError(null);
+      setInviteAlreadyComplete(false);
+
+      try {
+        const params = new URLSearchParams({ token: inviteToken });
+        const res = await fetch(`/api/consultants/complete-invite?${params.toString()}`);
+        const data = await res.json();
+
+        if (cancelled) return;
+
+        if (res.status === 410) {
+          setInviteAlreadyComplete(true);
+          setInviteLoadError(
+            "Your registration is already complete. Please sign in to access your account."
+          );
+          return;
+        }
+
+        if (!res.ok || !data.user_id) {
+          setInviteLoadError(
+            "This link is invalid or has expired. Contact the architect who added you to request a new invite."
+          );
+          return;
+        }
+
+        applyResumeFromMetadata(data.user_id, data.metadata || {}, data.email);
+        setIsInviteCompletion(true);
+        if (hasPartialRegistrationDocuments(data.metadata || {})) {
+          setActiveSection("section-login");
+        }
+      } catch {
+        if (!cancelled) {
+          setInviteLoadError(
+            "Unable to load your registration link. Please try again or contact support."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setInviteLoading(false);
+        }
+      }
+    };
+
+    void loadInviteProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteToken]);
 
   // Lock body scroll when letterhead modal is open
   useEffect(() => {
@@ -99,15 +170,23 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
 
   // Track active section using Intersection Observer
   useEffect(() => {
-    const sections = [
+    const inviteSectionIds = getInviteCompletionSectionIds(loadedProfileMetadata);
+    const preUploadedHiddenSections = new Set(["section-identity-documents"]);
+    const fullSectionIds = [
       "section-identity-documents",
       "section-basic-details",
       "section-registration",
-      "section-documents",
       "section-letterhead",
       "section-login",
       "section-declaration",
     ];
+    const sectionIds =
+      isInviteCompletion || inviteToken
+        ? inviteSectionIds
+        : isResumingIncomplete &&
+            hasPartialRegistrationDocuments(loadedProfileMetadata)
+          ? fullSectionIds.filter((id) => !preUploadedHiddenSections.has(id))
+          : fullSectionIds;
 
     const observerOptions = {
       root: null,
@@ -125,7 +204,7 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
 
     const observer = new IntersectionObserver(observerCallback, observerOptions);
 
-    sections.forEach((sectionId) => {
+    sectionIds.forEach((sectionId) => {
       const element = document.getElementById(sectionId);
       if (element) {
         observer.observe(element);
@@ -133,14 +212,20 @@ const ConsultantRegistrationForm: React.FC<ConsultantRegistrationFormProps> = ({
     });
 
     return () => {
-      sections.forEach((sectionId) => {
+      sectionIds.forEach((sectionId) => {
         const element = document.getElementById(sectionId);
         if (element) {
           observer.unobserve(element);
         }
       });
     };
-  }, [identityExtracted, isResumingIncomplete]);
+  }, [
+    identityExtracted,
+    isResumingIncomplete,
+    isInviteCompletion,
+    inviteToken,
+    loadedProfileMetadata,
+  ]);
 
   const declarationText = `I, the undersigned Developer/Promoter/Owner, hereby solemnly declare and confirm as follows:
 
@@ -353,6 +438,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     setIsEmailVerified(true);
     setIsResumingIncomplete(true);
     setIdentityExtracted(true);
+    setLoadedProfileMetadata(metadata);
     const existingLh = String(metadata.letterhead_url || "").trim();
     setExistingLetterheadUrl(existingLh || null);
     if (existingLh) {
@@ -743,15 +829,39 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     }
   };
 
-  const sections = [
+  const allSections = [
     { id: "section-identity-documents", label: "Identity Documents" },
     { id: "section-basic-details", label: "Basic Details" },
     { id: "section-registration", label: "Registration Numbers" },
-    { id: "section-documents", label: "Documents Upload" },
     { id: "section-letterhead", label: "Letterhead" },
     { id: "section-login", label: "Login Setup" },
     { id: "section-declaration", label: "Declaration" },
   ];
+
+  const inviteSectionIds = getInviteCompletionSectionIds(loadedProfileMetadata);
+
+  const documentsPreUploaded = hasPartialRegistrationDocuments(loadedProfileMetadata);
+
+  const preUploadedHiddenSections = new Set(["section-identity-documents"]);
+
+  const sections = (() => {
+    if (isInviteCompletion || inviteToken) {
+      return allSections.filter((section) => inviteSectionIds.includes(section.id));
+    }
+    if (isResumingIncomplete && documentsPreUploaded) {
+      return allSections.filter(
+        (section) => !preUploadedHiddenSections.has(section.id)
+      );
+    }
+    return allSections;
+  })();
+
+  const otherSectionsUnlocked =
+    isInviteCompletion ||
+    documentsPreUploaded ||
+    skippedIdentityDocs ||
+    identityExtracted ||
+    isResumingIncomplete;
 
   const profileFields: readonly string[] = [
     "consultantType",
@@ -778,8 +888,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
   const loginFields: readonly string[] = ["userId", "password", "confirmPassword", "acceptDeclaration"];
 
   const requiredFields = [...profileFields, ...credentialFields, ...loginFields];
-
-  const otherSectionsUnlocked = identityExtracted || isResumingIncomplete;
 
   const scrollToSection = (sectionId: string) => {
     if (sectionId !== "section-identity-documents" && !otherSectionsUnlocked) {
@@ -1279,6 +1387,34 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
     // Build dynamic required fields based on consultant type
     const getDynamicRequiredFields = (): string[] => {
+      if (isInviteCompletion) {
+        if (hasPartialRegistrationDocuments(loadedProfileMetadata)) {
+          return [
+            "userId",
+            "password",
+            "confirmPassword",
+            "acceptDeclaration",
+          ];
+        }
+        if (skippedIdentityDocs) {
+          return [
+            "userId",
+            "password",
+            "confirmPassword",
+            "acceptDeclaration",
+          ];
+        }
+        return [
+          "aadhaarCardFile",
+          "panCardFile",
+          "licenseCertificateFile",
+          "userId",
+          "password",
+          "confirmPassword",
+          "acceptDeclaration",
+        ];
+      }
+
       const baseFields = [
         "consultantType",
         "email",
@@ -1287,11 +1423,15 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         "addressLine1",
         "alternatePhone",
         "pan",
-        "aadhaarCardFile",
-        "panCardFile",
-        "licenseCertificateFile",
-        "authorizedSignatoryPhotoFile",
-        "authorizedSignatorySignatureFile",
+        ...(documentsPreUploaded || skippedIdentityDocs
+          ? []
+          : [
+              "aadhaarCardFile",
+              "panCardFile",
+              "licenseCertificateFile",
+              "authorizedSignatoryPhotoFile",
+              "authorizedSignatorySignatureFile",
+            ]),
         ...(existingLetterheadUrl ? [] : ["letterheadFile"]),
         "registrationDate",
         "userId",
@@ -1327,13 +1467,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     console.log('Current errors:', errors);
     
     // Check if email and phone are verified
-    if (!isEmailVerified) {
+    if (!isInviteCompletion && !isEmailVerified) {
       setFormError("Please verify your email address before submitting");
       scrollToSection("section-basic-details");
       return;
     }
     
-    if (!isPhoneVerified) {
+    if (!isInviteCompletion && !isPhoneVerified) {
       setFormError("Please verify your phone number before submitting");
       scrollToSection("section-basic-details");
       return;
@@ -1350,13 +1490,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       } else if (
         firstErrorField === "aadhaarCardFile" ||
         firstErrorField === "panCardFile" ||
-        firstErrorField === "licenseCertificateFile"
+        firstErrorField === "licenseCertificateFile" ||
+        firstErrorField === "authorizedSignatoryPhotoFile" ||
+        firstErrorField === "authorizedSignatorySignatureFile"
       ) {
         scrollToSection("section-identity-documents");
       } else if (firstErrorField.includes('RegNo') || firstErrorField.includes('License') || firstErrorField.includes('Accreditation')) {
         scrollToSection("section-registration");
-      } else if (firstErrorField.includes('File') || firstErrorField.includes('Photo') || firstErrorField.includes('Signature')) {
-        scrollToSection("section-documents");
       } else if (firstErrorField.includes('letterhead')) {
         scrollToSection("section-letterhead");
       } else if (firstErrorField.includes('userId') || firstErrorField.includes('password')) {
@@ -1512,7 +1652,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
       try {
         // Upload Signatory Photo
-        if (formData.authorizedSignatoryPhotoFile) {
+        if (!documentsPreUploaded && formData.authorizedSignatoryPhotoFile) {
           const result = await uploadFileToStorageWithPath(
             formData.authorizedSignatoryPhotoFile,
             userId,
@@ -1526,7 +1666,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         }
 
         // Upload Signatory Signature
-        if (formData.authorizedSignatorySignatureFile) {
+        if (!documentsPreUploaded && formData.authorizedSignatorySignatureFile) {
           const result = await uploadFileToStorageWithPath(
             formData.authorizedSignatorySignatureFile,
             userId,
@@ -1540,7 +1680,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         }
 
         // Upload identity documents collected in Identity Documents
-        if (formData.aadhaarCardFile) {
+        if (!documentsPreUploaded && formData.aadhaarCardFile) {
           const result = await uploadFileToStorageWithPath(
             formData.aadhaarCardFile,
             userId,
@@ -1553,7 +1693,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           uploadedFilePaths.push(result.path);
         }
 
-        if (formData.panCardFile) {
+        if (!documentsPreUploaded && formData.panCardFile) {
           const result = await uploadFileToStorageWithPath(
             formData.panCardFile,
             userId,
@@ -1582,10 +1722,25 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           letterheadUrl = existingLetterheadUrl;
         }
 
-        const certificateInfo = resolveConsultantCertificateUpload(
-          formData.consultantType,
-          formData as unknown as Record<string, unknown>
-        );
+        if (documentsPreUploaded && loadedProfileMetadata) {
+          aadhaarCardUrl = String(loadedProfileMetadata.aadhaar_card_url || "") || null;
+          panCardUrl = String(loadedProfileMetadata.pan_card_url || "") || null;
+          certificateUrl =
+            String(loadedProfileMetadata.license_certificate_url || "") || null;
+          authorizedSignatoryPhotoUrl =
+            String(loadedProfileMetadata.authorized_signatory_photo_url || "") || null;
+          authorizedSignatorySignatureUrl =
+            String(loadedProfileMetadata.authorized_signatory_signature_url || "") ||
+            null;
+        }
+
+        const certificateInfo =
+          !documentsPreUploaded
+            ? resolveConsultantCertificateUpload(
+                formData.consultantType,
+                formData as unknown as Record<string, unknown>
+              )
+            : null;
         if (certificateInfo) {
           const result = await uploadFileToStorageWithPath(
             certificateInfo.file,
@@ -1643,7 +1798,9 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             registration_date: formData.registrationDate,
             declaration_accepted: formData.acceptDeclaration,
             registration_status: 'complete',
-            status: 'pending'
+            status: 'pending',
+            completion_token_hash: null,
+            completion_token_expires_at: null,
         };
 
         // Add type-specific fields
@@ -1804,9 +1961,13 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           <div className="mb-4">
             <h2 className="text-lg font-semibold tracking-tight text-brand-navy">{title}</h2>
             <p className="mt-1 text-xs text-gray-500">
-              {otherSectionsUnlocked
-                ? "Complete each section, then submit."
-                : "Upload and extract identity documents to continue."}
+              {isInviteCompletion
+                ? documentsPreUploaded
+                  ? "Set up login credentials and accept the declaration."
+                  : "Complete identity documents, login setup, and declaration."
+                : otherSectionsUnlocked
+                  ? "Complete each section, then submit."
+                  : "Upload and extract identity documents to continue."}
             </p>
           </div>
           
@@ -1814,7 +1975,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           <button
             type="button"
             onClick={handleSubmitForm}
-            disabled={isSubmitting || !otherSectionsUnlocked}
+            disabled={
+              isSubmitting ||
+              !otherSectionsUnlocked ||
+              inviteLoading ||
+              Boolean(inviteLoadError && !isInviteCompletion)
+            }
             className="mb-6 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-blue-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? (
@@ -1848,11 +2014,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                 "section-registration": (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                ),
-                "section-documents": (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 ),
                 "section-letterhead": (
@@ -1949,7 +2110,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
         )}
 
-        {isResumingIncomplete && (
+        {isResumingIncomplete && !isInviteCompletion && (
           <div className="mb-6 p-4 border border-sky-100 bg-sky-50/70 rounded-lg text-brand-navy text-sm">
             Resuming incomplete registration. Basic details, registration numbers
             {hasExistingLetterhead ? ", and letterhead" : ""} are read-only.
@@ -1958,8 +2119,50 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </div>
         )}
 
+        {isResumingIncomplete && documentsPreUploaded && !isInviteCompletion && (
+          <div className="mb-6 p-4 border border-emerald-100 bg-emerald-50/70 rounded-lg text-brand-navy text-sm">
+            Your profile and documents were saved when you were added to a project.
+            Complete login setup and declaration to finish registration.
+          </div>
+        )}
+
+        {isInviteCompletion && (
+          <div className="mb-6 p-4 border border-emerald-100 bg-emerald-50/70 rounded-lg text-brand-navy text-sm">
+            {documentsPreUploaded
+              ? "Your profile and identity documents were saved by the project team. Set up your login credentials and accept the declaration to finish registration."
+              : "Your basic profile details were pre-filled by the project team. Complete identity documents, set up your login credentials, and accept the declaration to finish registration."}
+          </div>
+        )}
+
+        {inviteLoading && (
+          <div className="mb-6 p-4 border border-gray-200 bg-white rounded-lg text-gray-700 text-sm flex items-center gap-3">
+            <svg className="animate-spin h-5 w-5 text-brand-blue" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Loading your registration profile...
+          </div>
+        )}
+
+        {inviteLoadError && !isInviteCompletion && (
+          <div className="mb-6 p-4 border border-red-200 bg-red-50 rounded-lg space-y-3">
+            <p className="font-medium text-red-800">{inviteLoadError}</p>
+            {inviteAlreadyComplete && (
+              <button
+                type="button"
+                onClick={() => router.push("/login")}
+                className="bg-brand-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-blue-hover"
+              >
+                Go to Sign In
+              </button>
+            )}
+          </div>
+        )}
+
+        {(!inviteToken || isInviteCompletion) && (
         <div className="space-y-6">
           {/* Identity Documents */}
+          {!(documentsPreUploaded && (isInviteCompletion || isResumingIncomplete)) && (
           <div id="section-identity-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-identity-documents" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
             <div
               className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
@@ -1975,19 +2178,31 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             <RegistrationDocumentAutofillStep
               registrationKind="consultant"
               consultantType={formData.consultantType}
+              allowSkipExtraction={
+                canSkipConsultantIdentityDocExtraction() &&
+                !documentsPreUploaded
+              }
+              onSkipExtraction={() => setSkippedIdentityDocs(true)}
               onAutofill={applyRegistrationAutofill}
-              onExtractedChange={setIdentityExtracted}
+              onExtractedChange={(extracted) => {
+                setIdentityExtracted(extracted);
+                if (extracted) setSkippedIdentityDocs(false);
+              }}
               onContinue={() => {
-                const element = document.getElementById("section-basic-details");
+                const nextSectionId = isInviteCompletion
+                  ? "section-login"
+                  : "section-basic-details";
+                const element = document.getElementById(nextSectionId);
                 if (element) {
-                  setActiveSection("section-basic-details");
+                  setActiveSection(nextSectionId);
                   element.scrollIntoView({ behavior: "smooth", block: "start" });
                 }
               }}
             />
           </div>
+          )}
 
-          {otherSectionsUnlocked && (
+          {otherSectionsUnlocked && !isInviteCompletion && (
           <>
           {/* Basic Details Section */}
           <div id="section-basic-details" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 ${activeSection === "section-basic-details" ? "shadow-md ring-2 ring-brand-blue/20" : "shadow-sm"}`}>
@@ -2869,75 +3084,6 @@ I hereby declare that I have read, understood, and agree to comply with all the 
 
             </div>
 
-        {/* Documents Upload Section */}
-            <div id="section-documents" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-documents" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
-              <div 
-                className="flex items-center gap-3 mb-2 cursor-pointer hover:text-brand-blue transition-colors"
-                onClick={() => scrollToSection("section-documents")}
-              >
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-lg">
-                  <svg className="w-5 h-5 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-brand-navy">Documents Upload</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-4 ml-11">
-                Upload photograph and signature. Aadhaar, PAN, and Technical Person License are collected in Identity Documents.
-              </p>
-
-              <div className="mb-4 rounded-lg border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-sky-800">
-                {formData.aadhaarCardFile && formData.panCardFile && formData.licenseCertificateFile ? (
-                  <p>
-                    Identity documents already attached: Aadhaar, PAN, and Technical Person License.
-                  </p>
-                ) : (
-                  <p>
-                    Please upload Aadhaar, PAN, and Technical Person License in Identity Documents first.
-                  </p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Authorized Signatory Photograph <span className="text-red-600 font-bold">*</span></label>
-                  <input
-                    type="file"
-                    accept=".gif,.jpg,.jpeg,.png,.bmp"
-                      onChange={(e) => handleFileChange("authorizedSignatoryPhotoFile", e.target.files?.[0] || null)}
-                    className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
-                  />
-                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
-                  {formData.authorizedSignatoryPhotoFile && (
-                      <p className="text-xs text-green-600 mt-1">✓ {formData.authorizedSignatoryPhotoFile.name}</p>
-                  )}
-                  {errors.authorizedSignatoryPhotoFile && (
-                    <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatoryPhotoFile}</p>
-                  )}
-                </div>
-                <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Authorized Signatory Signature <span className="text-red-600 font-bold">*</span></label>
-                  <input
-                    type="file"
-                    accept=".gif,.jpg,.jpeg,.png,.bmp"
-                      onChange={(e) => handleFileChange("authorizedSignatorySignatureFile", e.target.files?.[0] || null)}
-                    className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
-                  />
-                    <p className="text-xs text-gray-500 mt-1">Only .GIF, .JPG, .PNG, .BMP (max 100x120px)</p>
-                  {formData.authorizedSignatorySignatureFile && (
-                      <p className="text-xs text-green-600 mt-1">✓ {formData.authorizedSignatorySignatureFile.name}</p>
-                    )}
-                  {errors.authorizedSignatorySignatureFile && (
-                    <p className="text-xs text-red-600 mt-1">{errors.authorizedSignatorySignatureFile}</p>
-                  )}
-                  </div>
-              </div>
-
-              <p className="text-xs text-gray-500 mt-4">
-                Max 10MB per file. JPG, PNG, GIF, or BMP.
-              </p>
-            </div>
-
             {/* Letterhead Upload Section */}
             <div id="section-letterhead" className={`scroll-mt-24 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-shadow duration-300 ${activeSection === "section-letterhead" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
               <div 
@@ -3089,6 +3235,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               )}
             </div>
 
+          </>
+          )}
+
+          {otherSectionsUnlocked && (
+          <>
             {/* Login Setup Section */}
             <div id="section-login" className={`scroll-mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 transition-all duration-300 shadow-sm ${activeSection === "section-login" ? "shadow-md ring-2 ring-brand-blue/20" : ""}`}>
               <div 
@@ -3446,6 +3597,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           </>
           )}
         </div>
+        )}
         </div>
       </div>
 

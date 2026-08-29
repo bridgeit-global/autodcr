@@ -1,6 +1,49 @@
 /** Shared consultant registration helpers for partial create, lookup, and resume. */
 
+import { getAppBaseUrl } from "@/app/utils/applicationDeepLink";
+
 export const NEW_USER_SENTINEL = "__new_user__";
+
+/** Metadata keys for invite completion link (hash stored, never raw token). */
+export const COMPLETION_TOKEN_HASH_META_KEY = "completion_token_hash";
+export const COMPLETION_TOKEN_EXPIRES_META_KEY = "completion_token_expires_at";
+export const COMPLETION_TOKEN_TTL_DAYS = 14;
+
+export function buildConsultantCompletionUrl(token: string): string {
+  const base = getAppBaseUrl();
+  const params = new URLSearchParams({ token });
+  return `${base}/consultant/complete?${params.toString()}`;
+}
+
+/** Dev/testing: allow skipping identity doc upload + AI extraction (saves API tokens). */
+export function canSkipConsultantIdentityDocExtraction(): boolean {
+  if (process.env.NODE_ENV !== "production") return true;
+  return (
+    process.env.NEXT_PUBLIC_ALLOW_SKIP_CONSULTANT_IDENTITY_DOCS === "true"
+  );
+}
+
+export function canSkipConsultantIdentityDocExtractionServer(): boolean {
+  if (process.env.NODE_ENV !== "production") return true;
+  return process.env.ALLOW_SKIP_CONSULTANT_IDENTITY_DOCS === "true";
+}
+
+export function getCompletionTokenExpiryIso(
+  ttlDays = COMPLETION_TOKEN_TTL_DAYS
+): string {
+  const expires = new Date();
+  expires.setDate(expires.getDate() + ttlDays);
+  return expires.toISOString();
+}
+
+export function isCompletionTokenExpired(
+  expiresAt: string | null | undefined
+): boolean {
+  if (!expiresAt) return true;
+  const parsed = Date.parse(String(expiresAt));
+  if (Number.isNaN(parsed)) return true;
+  return parsed < Date.now();
+}
 
 export const CONSULTANT_TYPE_OPTIONS = [
   "Architect",
@@ -383,4 +426,60 @@ export const PARTIAL_PROFILE_LOCKED_FIELDS = new Set([
 
 export function isPartialProfileField(field: string): boolean {
   return PARTIAL_PROFILE_LOCKED_FIELDS.has(field);
+}
+
+const CONSULTANT_CERTIFICATE_URL_KEYS = [
+  "license_certificate_url",
+  "coa_certificate_url",
+  "structural_license_url",
+  "lbs_certificate_url",
+  "mep_experience_url",
+  "phe_accreditation_url",
+  "fire_noc_url",
+  "landscape_certificate_url",
+  "pmc_certificate_url",
+  "lab_registration_url",
+  "env_certificate_url",
+  "town_planner_certificate_url",
+] as const;
+
+/** True when partial registration already uploaded core identity documents. */
+export function hasPartialIdentityDocuments(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  if (!meta) return false;
+  const aadhaar = String(meta.aadhaar_card_url || "").trim();
+  const pan = String(meta.pan_card_url || "").trim();
+  if (!aadhaar || !pan) return false;
+  return CONSULTANT_CERTIFICATE_URL_KEYS.some((key) =>
+    Boolean(String(meta[key] || "").trim())
+  );
+}
+
+/** True when partial registration includes all documents (identity + signatory). */
+export function hasPartialRegistrationDocuments(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  if (!meta || !hasPartialIdentityDocuments(meta)) return false;
+  return Boolean(
+    String(meta.authorized_signatory_photo_url || "").trim() &&
+      String(meta.authorized_signatory_signature_url || "").trim()
+  );
+}
+
+export const INVITE_SECTION_IDENTITY = "section-identity-documents";
+export const INVITE_SECTION_LOGIN = "section-login";
+export const INVITE_SECTION_DECLARATION = "section-declaration";
+
+export function getInviteCompletionSectionIds(
+  meta?: Record<string, unknown> | null
+): string[] {
+  if (hasPartialRegistrationDocuments(meta)) {
+    return [INVITE_SECTION_LOGIN, INVITE_SECTION_DECLARATION];
+  }
+  return [
+    INVITE_SECTION_IDENTITY,
+    INVITE_SECTION_LOGIN,
+    INVITE_SECTION_DECLARATION,
+  ];
 }
