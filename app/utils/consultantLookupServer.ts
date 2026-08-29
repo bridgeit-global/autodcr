@@ -1,8 +1,14 @@
+import { createHash, randomBytes } from "crypto";
 import { createClient, type User } from "@supabase/supabase-js";
 import {
+  COMPLETION_TOKEN_EXPIRES_META_KEY,
+  COMPLETION_TOKEN_HASH_META_KEY,
+  COMPLETION_TOKEN_TTL_DAYS,
+  getCompletionTokenExpiryIso,
   getPhoneFromMetadata,
   getRegistrationCompleteness,
   getRegistrationNumberFromMetadata,
+  isCompletionTokenExpired,
   normalizePhone,
   normalizeRegNo,
   REGISTRATION_NUMBER_META_BY_TYPE,
@@ -209,6 +215,58 @@ export async function findOwnerByEmail(
     }
   }
   return null;
+}
+
+export function generateCompletionToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashCompletionToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export async function findConsultantByCompletionToken(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  token: string
+): Promise<
+  | (ConsultantLookupMatch & { reason?: never })
+  | { reason: "invalid" | "expired" | "complete" }
+> {
+  const normalized = String(token || "").trim();
+  if (!normalized) return { reason: "invalid" };
+
+  const tokenHash = hashCompletionToken(normalized);
+  const users = await listAllAuthUsers(admin);
+
+  for (const user of users) {
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const storedHash = String(meta[COMPLETION_TOKEN_HASH_META_KEY] || "").trim();
+    if (!storedHash || storedHash !== tokenHash) continue;
+
+    const status = getRegistrationCompleteness(meta);
+    if (status === "complete") {
+      return { reason: "complete" };
+    }
+
+    const expiresAt = String(meta[COMPLETION_TOKEN_EXPIRES_META_KEY] || "");
+    if (isCompletionTokenExpired(expiresAt)) {
+      return { reason: "expired" };
+    }
+
+    return toMatch(user);
+  }
+
+  return { reason: "invalid" };
+}
+
+export function buildCompletionTokenMetadata(
+  token: string,
+  ttlDays = COMPLETION_TOKEN_TTL_DAYS
+): Record<string, string> {
+  return {
+    [COMPLETION_TOKEN_HASH_META_KEY]: hashCompletionToken(token),
+    [COMPLETION_TOKEN_EXPIRES_META_KEY]: getCompletionTokenExpiryIso(ttlDays),
+  };
 }
 
 /** Finds the login User ID for a registered email address (username recovery). */

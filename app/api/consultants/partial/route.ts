@@ -5,19 +5,80 @@ import {
   findConsultantByEmail,
   findConsultantByPhone,
   findConsultantByRegistrationNumber,
+  generateCompletionToken,
+  buildCompletionTokenMetadata,
 } from "@/app/utils/consultantLookupServer";
 import {
   buildPartialConsultantMetadata,
+  buildConsultantCompletionUrl,
+  canSkipConsultantIdentityDocExtractionServer,
   EXTRA_REG_REQUIRED_BY_TYPE,
   getPrimaryRegNoFromPayload,
   normalizePhone,
   REGISTRATION_NUMBER_META_BY_TYPE,
   type PartialConsultantPayload,
 } from "@/app/utils/consultantRegistrationShared";
+import { sendConsultantCompletionInviteEmail } from "@/app/utils/email";
 import {
   getSupabasePublicAnonKey,
   getSupabasePublicUrl,
 } from "@/app/utils/supabaseEnv";
+
+const CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE: Record<string, string> = {
+  Architect: "coa_certificate",
+  "Structural Engineer": "structural_license",
+  "Licensed Surveyor": "lbs_certificate",
+  "MEP Consultant": "mep_experience",
+  Plumber: "phe_accreditation",
+  "Fire Consultant": "fire_noc",
+  "Landscape Consultant": "landscape_certificate",
+  "PMC / Project Manager": "pmc_certificate",
+  "Geotechnical Consultant": "lab_registration",
+  "Environmental Consultant": "env_certificate",
+  "Town Planner": "town_planner_certificate",
+};
+
+const CONSULTANT_CERTIFICATE_URL_BY_TYPE: Record<string, string> = {
+  Architect: "coa_certificate_url",
+  "Structural Engineer": "structural_license_url",
+  "Licensed Surveyor": "lbs_certificate_url",
+  "MEP Consultant": "mep_experience_url",
+  Plumber: "phe_accreditation_url",
+  "Fire Consultant": "fire_noc_url",
+  "Landscape Consultant": "landscape_certificate_url",
+  "PMC / Project Manager": "pmc_certificate_url",
+  "Geotechnical Consultant": "lab_registration_url",
+  "Environmental Consultant": "env_certificate_url",
+  "Town Planner": "town_planner_certificate_url",
+};
+
+async function uploadConsultantDocument(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  userId: string,
+  file: File,
+  storageBaseName: string
+): Promise<{ url: string; path: string }> {
+  const fileExt = file.name.split(".").pop()?.toLowerCase() || "pdf";
+  const storagePath = `${userId}/${storageBaseName}.${fileExt === "jpeg" ? "jpg" : fileExt}`;
+  const arrayBuffer = await file.arrayBuffer();
+  const { error: uploadError } = await admin.storage
+    .from("consultant-documents")
+    .upload(storagePath, arrayBuffer, {
+      contentType: file.type || "application/octet-stream",
+      upsert: true,
+      cacheControl: "3600",
+    });
+
+  if (uploadError) {
+    throw new Error(`Failed to upload ${storageBaseName}`);
+  }
+
+  const { data: urlData } = admin.storage
+    .from("consultant-documents")
+    .getPublicUrl(storagePath);
+
+  return { url: urlData.publicUrl, path: storagePath };
+}
 
 function requiredString(value: unknown, label: string): string {
   const v = String(value ?? "").trim();
@@ -28,6 +89,11 @@ function requiredString(value: unknown, label: string): string {
 async function parseRequestBody(request: NextRequest): Promise<{
   body: Record<string, unknown>;
   letterheadFile: File | null;
+  aadhaarFile: File | null;
+  panFile: File | null;
+  licenseFile: File | null;
+  signatoryPhotoFile: File | null;
+  signatorySignatureFile: File | null;
 }> {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
@@ -40,11 +106,45 @@ async function parseRequestBody(request: NextRequest): Promise<{
     const letterhead = form.get("letterhead");
     const letterheadFile =
       letterhead && typeof letterhead !== "string" ? (letterhead as File) : null;
-    return { body, letterheadFile };
+    const aadhaar = form.get("aadhaar_card");
+    const aadhaarFile =
+      aadhaar && typeof aadhaar !== "string" ? (aadhaar as File) : null;
+    const pan = form.get("pan_card");
+    const panFile = pan && typeof pan !== "string" ? (pan as File) : null;
+    const license = form.get("license_certificate");
+    const licenseFile =
+      license && typeof license !== "string" ? (license as File) : null;
+    const signatoryPhoto = form.get("signatory_photo");
+    const signatoryPhotoFile =
+      signatoryPhoto && typeof signatoryPhoto !== "string"
+        ? (signatoryPhoto as File)
+        : null;
+    const signatorySignature = form.get("signatory_signature");
+    const signatorySignatureFile =
+      signatorySignature && typeof signatorySignature !== "string"
+        ? (signatorySignature as File)
+        : null;
+    return {
+      body,
+      letterheadFile,
+      aadhaarFile,
+      panFile,
+      licenseFile,
+      signatoryPhotoFile,
+      signatorySignatureFile,
+    };
   }
 
   const body = (await request.json()) as Record<string, unknown>;
-  return { body, letterheadFile: null };
+  return {
+    body,
+    letterheadFile: null,
+    aadhaarFile: null,
+    panFile: null,
+    licenseFile: null,
+    signatoryPhotoFile: null,
+    signatorySignatureFile: null,
+  };
 }
 
 /**
@@ -78,7 +178,52 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { body, letterheadFile } = await parseRequestBody(request);
+    const {
+      body,
+      letterheadFile,
+      aadhaarFile,
+      panFile,
+      licenseFile,
+      signatoryPhotoFile,
+      signatorySignatureFile,
+    } = await parseRequestBody(request);
+
+    const skipIdentityDocuments =
+      body.skipIdentityDocuments === true &&
+      canSkipConsultantIdentityDocExtractionServer();
+
+    if (!skipIdentityDocuments) {
+      if (!aadhaarFile || aadhaarFile.size === 0) {
+        return NextResponse.json(
+          { error: "Aadhaar card document is required" },
+          { status: 400 }
+        );
+      }
+      if (!panFile || panFile.size === 0) {
+        return NextResponse.json(
+          { error: "PAN card document is required" },
+          { status: 400 }
+        );
+      }
+      if (!licenseFile || licenseFile.size === 0) {
+        return NextResponse.json(
+          { error: "Technical person license document is required" },
+          { status: 400 }
+        );
+      }
+      if (!signatoryPhotoFile || signatoryPhotoFile.size === 0) {
+        return NextResponse.json(
+          { error: "Authorized signatory photograph is required" },
+          { status: 400 }
+        );
+      }
+      if (!signatorySignatureFile || signatorySignatureFile.size === 0) {
+        return NextResponse.json(
+          { error: "Authorized signatory signature is required" },
+          { status: 400 }
+        );
+      }
+    }
 
     if (!letterheadFile || letterheadFile.size === 0) {
       return NextResponse.json(
@@ -278,59 +423,148 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = created.user.id;
-    const fileExt =
-      letterheadFile.name.split(".").pop()?.toLowerCase() || "png";
-    const storagePath = `${userId}/letterhead.${fileExt === "jpeg" ? "jpg" : fileExt}`;
+    const uploadedPaths: string[] = [];
 
-    const arrayBuffer = await letterheadFile.arrayBuffer();
-    const { error: uploadError } = await admin.storage
-      .from("consultant-documents")
-      .upload(storagePath, arrayBuffer, {
-        contentType: letterheadFile.type || "image/png",
-        upsert: true,
-        cacheControl: "3600",
+    try {
+      const letterheadUpload = await uploadConsultantDocument(
+        admin,
+        userId,
+        letterheadFile,
+        "letterhead"
+      );
+      uploadedPaths.push(letterheadUpload.path);
+
+      let metadataWithDocuments: Record<string, unknown> = {
+        ...metadata,
+        letterhead_url: letterheadUpload.url,
+      };
+
+      if (!skipIdentityDocuments) {
+        const aadhaarUpload = await uploadConsultantDocument(
+          admin,
+          userId,
+          aadhaarFile!,
+          "aadhaar_card"
+        );
+        uploadedPaths.push(aadhaarUpload.path);
+
+        const panUpload = await uploadConsultantDocument(
+          admin,
+          userId,
+          panFile!,
+          "pan_card"
+        );
+        uploadedPaths.push(panUpload.path);
+
+        const certStorageType =
+          CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE[consultantType] ??
+          "license_certificate";
+        const licenseUpload = await uploadConsultantDocument(
+          admin,
+          userId,
+          licenseFile!,
+          certStorageType
+        );
+        uploadedPaths.push(licenseUpload.path);
+
+        const signatoryPhotoUpload = await uploadConsultantDocument(
+          admin,
+          userId,
+          signatoryPhotoFile!,
+          "signatory_photo"
+        );
+        uploadedPaths.push(signatoryPhotoUpload.path);
+
+        const signatorySignatureUpload = await uploadConsultantDocument(
+          admin,
+          userId,
+          signatorySignatureFile!,
+          "signatory_signature"
+        );
+        uploadedPaths.push(signatorySignatureUpload.path);
+
+        const certUrlKey =
+          CONSULTANT_CERTIFICATE_URL_BY_TYPE[consultantType] ??
+          "license_certificate_url";
+
+        metadataWithDocuments = {
+          ...metadataWithDocuments,
+          aadhaar_card_url: aadhaarUpload.url,
+          pan_card_url: panUpload.url,
+          license_certificate_url: licenseUpload.url,
+          [certUrlKey]: licenseUpload.url,
+          authorized_signatory_photo_url: signatoryPhotoUpload.url,
+          authorized_signatory_signature_url: signatorySignatureUpload.url,
+          identity_documents_uploaded: true,
+        };
+      }
+
+      const completionToken = generateCompletionToken();
+      const tokenMetadata = buildCompletionTokenMetadata(completionToken);
+      const metadataWithToken = {
+        ...metadataWithDocuments,
+        ...tokenMetadata,
+      };
+
+      const { error: metaError } = await admin.auth.admin.updateUserById(userId, {
+        user_metadata: metadataWithToken,
       });
 
-    if (uploadError) {
-      console.error("[consultants/partial] letterhead upload", uploadError);
+      if (metaError) {
+        throw new Error("Failed to save consultant profile metadata");
+      }
+
+      const callerMeta = (caller.user_metadata || {}) as Record<string, unknown>;
+      const callerFirst = String(callerMeta.first_name || "").trim();
+      const callerLast = String(callerMeta.last_name || "").trim();
+      const invitedByName =
+        [callerFirst, callerLast].filter(Boolean).join(" ") ||
+        String(callerMeta.entity_name || "").trim() ||
+        undefined;
+      const consultantName =
+        [firstName, String(body.middleName || "").trim(), lastName]
+          .filter(Boolean)
+          .join(" ") || email;
+
+      const emailResult = await sendConsultantCompletionInviteEmail({
+        to: email,
+        consultantName,
+        consultantType,
+        completionUrl: buildConsultantCompletionUrl(completionToken),
+        invitedByName,
+      });
+
+      if (!emailResult.success) {
+        console.warn(
+          "[consultants/partial] invite email failed:",
+          emailResult.error
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        user_id: userId,
+        email: created.user.email,
+        metadata: metadataWithToken,
+        message: "Partial consultant created",
+        inviteEmailSent: emailResult.success,
+      });
+    } catch (uploadErr) {
+      console.error("[consultants/partial] document upload", uploadErr);
+      if (uploadedPaths.length > 0) {
+        await admin.storage.from("consultant-documents").remove(uploadedPaths);
+      }
       await admin.auth.admin.deleteUser(userId);
       return NextResponse.json(
-        { error: "Failed to upload letterhead. Please try again." },
+        {
+          error:
+            uploadErr instanceof Error
+              ? uploadErr.message
+              : "Failed to upload documents. Please try again.",
+        },
         { status: 500 }
       );
     }
-
-    const { data: urlData } = admin.storage
-      .from("consultant-documents")
-      .getPublicUrl(storagePath);
-    const letterheadUrl = urlData.publicUrl;
-
-    const metadataWithLetterhead = {
-      ...metadata,
-      letterhead_url: letterheadUrl,
-    };
-
-    const { error: metaError } = await admin.auth.admin.updateUserById(userId, {
-      user_metadata: metadataWithLetterhead,
-    });
-
-    if (metaError) {
-      console.error("[consultants/partial] metadata update", metaError);
-      await admin.storage.from("consultant-documents").remove([storagePath]);
-      await admin.auth.admin.deleteUser(userId);
-      return NextResponse.json(
-        { error: "Failed to save letterhead on profile. Please try again." },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      user_id: userId,
-      email: created.user.email,
-      metadata: metadataWithLetterhead,
-      message: "Partial consultant created",
-    });
   } catch (err) {
     console.error("[consultants/partial]", err);
     const message = err instanceof Error ? err.message : "Internal server error";

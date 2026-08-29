@@ -363,6 +363,99 @@ export async function sendApplicationStatusEmail(params: {
   }
 }
 
+export async function sendConsultantCompletionInviteEmail(params: {
+  to: string;
+  consultantName: string;
+  consultantType: string;
+  completionUrl: string;
+  invitedByName?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { to, consultantName, consultantType, completionUrl, invitedByName } =
+    params;
+
+  const subject = "Complete your Draft Desk consultant registration";
+  const inviterLine = invitedByName
+    ? `<strong>${escapeHtml(invitedByName)}</strong> has added you as a <strong>${escapeHtml(consultantType)}</strong> consultant on Draft Desk.`
+    : `You have been added as a <strong>${escapeHtml(consultantType)}</strong> consultant on Draft Desk.`;
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background-color:#059669;padding:28px 32px;">
+              <h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">Complete Your Registration</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
+                Dear ${escapeHtml(consultantName)},
+              </p>
+              <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">
+                ${inviterLine} Your basic profile details have already been saved.
+              </p>
+              <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">
+                To finish setting up your account, please set up your login credentials and accept the declaration.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+                <tr>
+                  <td style="background-color:#059669;border-radius:8px;">
+                    <a href="${completionUrl}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
+                      Complete Registration
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 16px;color:#6b7280;font-size:13px;line-height:1.5;">
+                This link expires in 14 days. If you did not expect this email, you can safely ignore it.
+              </p>
+              <p style="margin:0;color:#9ca3af;font-size:12px;line-height:1.5;word-break:break-all;">
+                Or copy this link: ${escapeHtml(completionUrl)}
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;">
+              <p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">
+                This is an automated notification. Please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  try {
+    await transporter.sendMail({
+      from: formatFromHeader(),
+      to,
+      subject,
+      html,
+    });
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown email error";
+    console.error(
+      `[email] Failed to send consultant completion invite to ${to}:`,
+      message
+    );
+    return { success: false, error: message };
+  }
+}
+
 export async function sendUsernameRecoveryEmail(params: {
   to: string;
   userId: string;
