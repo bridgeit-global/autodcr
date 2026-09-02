@@ -1,4 +1,11 @@
 import { assertApiKey, getConfig } from "./config";
+import {
+  isReasoningChatModel,
+  streamChatCompletion,
+  streamDeltaContent,
+  stripReasoningMarkup,
+  visibleModelText,
+} from "./llm";
 import { normalizeAuthorities } from "./regulations";
 import type { AskHistoryTurn, AskResult, SearchHit } from "./types";
 import { embedTexts, getLLM, similaritySearch } from "./vectorstore";
@@ -88,11 +95,12 @@ export async function askQuestion(
     }));
 
   onStatus?.("Writing answer…");
-  const completion = await llm.chat.completions.create({
-    model: config.chatModel,
-    temperature: 0,
-    max_tokens: config.maxTokens,
-    stream: true,
+  const askMaxTokens = isReasoningChatModel(config.chatModel)
+    ? Math.max(config.maxTokens, 2048)
+    : config.maxTokens;
+  const completion = await streamChatCompletion({
+    temperature: 0.2,
+    max_tokens: askMaxTokens,
     messages: [
       {
         role: "system",
@@ -104,15 +112,20 @@ export async function askQuestion(
   });
 
   let answer = "";
+  let streamedLen = 0;
   for await (const chunk of completion) {
-    const delta = chunk.choices[0]?.delta?.content || "";
+    const delta = streamDeltaContent(chunk);
     if (!delta) continue;
     answer += delta;
-    onDelta?.(delta);
+    const visible = stripReasoningMarkup(visibleModelText(answer));
+    if (visible.length > streamedLen) {
+      onDelta?.(visible.slice(streamedLen));
+      streamedLen = visible.length;
+    }
   }
 
   return {
-    answer: answer.trim() || "No answer generated.",
+    answer: stripReasoningMarkup(visibleModelText(answer)) || "No answer generated.",
     authorities: filterAuth,
     sources: hits.map((h) => ({
       source: h.source,

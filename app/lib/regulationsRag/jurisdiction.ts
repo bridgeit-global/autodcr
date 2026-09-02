@@ -1,7 +1,6 @@
-import { getConfig } from "./config";
+import { createChatCompletion, isReasoningChatModel, parseModelJsonObject } from "./llm";
 import { AUTHORITIES, normalizeAuthorities } from "./regulations";
 import type { JurisdictionDetection } from "./types";
-import { getLLM } from "./vectorstore";
 
 const KEYWORD_RULES: { authority: string; patterns: RegExp[] }[] = [
   {
@@ -87,20 +86,17 @@ export async function detectJurisdiction(
 
   if (useLlm && excerpt.trim()) {
     try {
-      const config = getConfig();
-      const llm = getLLM();
       const labels = AUTHORITIES.map((a) => `${a.id} (${a.label})`).join(", ");
-      const completion = await llm.chat.completions.create({
-        model: config.chatModel,
-        temperature: 0,
-        max_tokens: 400,
+      const completion = await createChatCompletion({
+        temperature: 0.2,
+        max_tokens: isReasoningChatModel() ? 1024 : 400,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
             content: `You identify which Indian planning authorities apply to a real-estate / development project proposal.
 Valid authority ids: ${labels}.
-Return JSON: { "authorities": ["cidco"], "confidence": "high"|"medium"|"low", "rationale": "..." }
+Return JSON only: { "authorities": ["cidco"], "confidence": "high"|"medium"|"low", "rationale": "..." }
 Pick only authorities clearly supported by the text. Prefer specific agencies (CIDCO/MIDC/SRA) over stamp_duty alone.`,
           },
           {
@@ -110,7 +106,7 @@ Pick only authorities clearly supported by the text. Prefer specific agencies (C
         ],
       });
       const raw = completion.choices[0]?.message?.content || "{}";
-      const parsed = JSON.parse(raw) as {
+      const parsed = parseModelJsonObject(raw) as {
         authorities?: unknown;
         confidence?: string;
         rationale?: string;

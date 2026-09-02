@@ -1,5 +1,12 @@
 import { assertApiKey, assertPinecone, getConfig } from "./config";
 import { detectJurisdiction, resolveAuthorities } from "./jurisdiction";
+import {
+  isReasoningChatModel,
+  parseModelJsonObject,
+  streamChatCompletion,
+  streamDeltaContent,
+  visibleModelText,
+} from "./llm";
 import { extractPdf } from "./pdf";
 import { AUTHORITIES } from "./regulations";
 import type {
@@ -200,24 +207,21 @@ function parseJsonContent(raw: string): {
   checklist?: ChecklistItem[];
   gaps?: ComplianceGap[];
 } {
-  const text = String(raw || "").trim();
-  try {
-    return JSON.parse(text) as {
-      summary?: string;
-      checklist?: ChecklistItem[];
-      gaps?: ComplianceGap[];
-    };
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      return JSON.parse(match[0]) as {
-        summary?: string;
-        checklist?: ChecklistItem[];
-        gaps?: ComplianceGap[];
-      };
-    }
+  const parsed = parseModelJsonObject(raw) as {
+    summary?: string;
+    checklist?: ChecklistItem[];
+    gaps?: ComplianceGap[];
+  };
+  if (!parsed || typeof parsed !== "object") {
     throw new Error("Model did not return valid JSON for compliance analysis.");
   }
+  return parsed;
+}
+
+function complianceMaxTokens(): number {
+  const config = getConfig();
+  if (!isReasoningChatModel(config.chatModel)) return config.complianceMaxTokens;
+  return Math.max(config.complianceMaxTokens, 6144);
 }
 
 export async function analyzeCompliance({
@@ -282,7 +286,6 @@ export async function analyzeCompliance({
     return missing;
   }
 
-  const config = getConfig();
   const llm = getLLM();
   onStatus?.("Matching your proposal to regulations…");
   const hits = await retrieveRegulations(llm, resolved.authorities);
@@ -318,11 +321,9 @@ export async function analyzeCompliance({
   onPartial?.(draft);
   onStatus?.("Writing compliance analysis…");
 
-  const completion = await llm.chat.completions.create({
-    model: config.chatModel,
-    temperature: 0,
-    max_tokens: config.complianceMaxTokens,
-    stream: true,
+  const completion = await streamChatCompletion({
+    temperature: 0.2,
+    max_tokens: complianceMaxTokens(),
     response_format: { type: "json_object" },
     messages: [
       {
@@ -330,6 +331,8 @@ export async function analyzeCompliance({
         content: `You are a planning-regulation compliance analyst for Maharashtra / Mumbai region projects.
 Use ONLY the regulation excerpts provided. Do not invent clauses.
 Compare the project proposal to the regulations for authorities: ${authorityLabels}.
+
+Reply with a single JSON object only. No markdown fences, no preamble, no reasoning in the output.
 
 Return JSON with this shape:
 {
@@ -380,19 +383,20 @@ ${proposalExcerpt}`,
   let gapCount = 0;
 
   for await (const chunk of completion) {
-    const delta = chunk.choices[0]?.delta?.content || "";
+    const delta = streamDeltaContent(chunk);
     if (!delta) continue;
     raw += delta;
 
-    const summary = extractJsonString(raw, "summary");
+    const visible = visibleModelText(raw);
+    const summary = extractJsonString(visible, "summary");
     if (summary && summary.value.length > summaryLen) {
       onDelta?.(summary.value.slice(summaryLen));
       summaryLen = summary.value.length;
       draft.summary = summary.value;
     }
 
-    const checklist = extractJsonObjectArray(raw, "checklist") as ChecklistItem[];
-    const gaps = extractJsonObjectArray(raw, "gaps") as ComplianceGap[];
+    const checklist = extractJsonObjectArray(visible, "checklist") as ChecklistItem[];
+    const gaps = extractJsonObjectArray(visible, "gaps") as ComplianceGap[];
     if (checklist.length !== checkCount || gaps.length !== gapCount) {
       checkCount = checklist.length;
       gapCount = gaps.length;
@@ -408,13 +412,19 @@ ${proposalExcerpt}`,
     gaps?: ComplianceGap[];
   };
   try {
-    parsed = parseJsonContent(raw || "{}");
+    parsed = parseJsonContent(visibleModelText(raw) || "{}");
   } catch {
     parsed = {
       summary: draft.summary,
       checklist: draft.checklist,
       gaps: draft.gaps,
     };
+  }
+
+  if (!parsed.summary && !draft.summary && !(parsed.checklist || []).length) {
+    throw new Error(
+      "The model returned an empty compliance analysis. Try sending the PDF again."
+    );
   }
 
   const checklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];
