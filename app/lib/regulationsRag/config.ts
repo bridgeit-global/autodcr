@@ -92,7 +92,7 @@ export function getConfig(): RagConfig {
     chatModel:
       process.env.CHAT_MODEL ||
       process.env.OPENAI_CHAT_MODEL ||
-      "z-ai/glm-5.3-flash",
+      "openai/gpt-4o-mini",
     embedModel:
       process.env.EMBED_MODEL ||
       process.env.OPENAI_EMBED_MODEL ||
