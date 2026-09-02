@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { DocumentDefinition } from "./types";
 import type { DocumentType } from "./registry";
 
-const DEFAULT_MODEL = "z-ai/glm-5.3-flash";
+const DEFAULT_MODEL = "google/gemini-2.5-flash";
 const MAX_DOCUMENT_TEXT_CHARS = 80_000;
 
 const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
