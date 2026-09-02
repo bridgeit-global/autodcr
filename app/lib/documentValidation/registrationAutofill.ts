@@ -138,7 +138,11 @@ const PROFESSION_TO_CONSULTANT_TYPE: Array<{
     consultantType: "Architect",
   },
   {
-    patterns: [/\bstructural engineer/i, /\bstructural\b/i],
+    patterns: [/\bsite supervisor/i],
+    consultantType: "Site Supervisor",
+  },
+  {
+    patterns: [/\bstructural engineer/i],
     consultantType: "Structural Engineer",
   },
   {
@@ -560,6 +564,11 @@ export function resolveConsultantTypeFromLicense(
   const coaNo = extracted.coaCertificateNumber?.trim() || "";
   if (/^CA\//i.test(coaNo)) return "Architect";
 
+  const certNo = extracted.certificateNumber?.trim() || "";
+  if (/^STR\//i.test(certNo)) return "Structural Engineer";
+
+  if (extracted.grade?.trim()) return "Site Supervisor";
+
   const haystack = [
     extracted.profession,
     extracted.certificateNumber,
@@ -930,6 +939,7 @@ export function buildLlpIncorporationAutofillPatch(
 const CONSULTANT_CERTIFICATE_FILE_BY_TYPE: Record<string, string> = {
   Architect: "coaCertificateFile",
   "Structural Engineer": "structuralLicenseFile",
+  "Site Supervisor": "siteSupervisorLicenseFile",
   "Licensed Surveyor": "lbsCertificateFile",
   "MEP Consultant": "mepExperienceFile",
   Plumber: "pheAccreditationFile",
@@ -944,6 +954,7 @@ const CONSULTANT_CERTIFICATE_FILE_BY_TYPE: Record<string, string> = {
 const CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE: Record<string, string> = {
   Architect: "coa_certificate",
   "Structural Engineer": "structural_license",
+  "Site Supervisor": "site_supervisor_license",
   "Licensed Surveyor": "lbs_certificate",
   "MEP Consultant": "mep_experience",
   Plumber: "phe_accreditation",
@@ -986,6 +997,55 @@ function firstExpiryField(consultantType: string): string | null {
   );
 }
 
+/** Parse end date from validity range strings like "01.04.2026 To 31.03.2031". */
+export function parseValidityEndDate(
+  extracted: Record<string, string | null>
+): string {
+  const endRaw = extracted.validityEndDate?.trim();
+  if (endRaw) {
+    const parsed = parseDateForInput(endRaw);
+    if (parsed) return parsed;
+  }
+
+  const rangeRaw = extracted.validityDate?.trim() || "";
+  const rangeMatch = rangeRaw.match(
+    /\b(?:to|upto|up to|-)\s*(\d{1,2}[./-]\d{1,2}[./-]\d{4})\s*$/i
+  );
+  if (rangeMatch?.[1]) {
+    const parsed = parseDateForInput(rangeMatch[1]);
+    if (parsed) return parsed;
+  }
+
+  const singleParsed = parseDateForInput(rangeRaw);
+  if (singleParsed) return singleParsed;
+
+  return parseDateForInput(extracted.coaLicenseExpiryDate);
+}
+
+function resolveLicenseRegistrationNumber(
+  effectiveType: string,
+  extracted: Record<string, string | null>
+): string {
+  if (effectiveType === "Architect") {
+    return (
+      extracted.coaCertificateNumber?.trim() ||
+      extracted.certificateNumber?.trim() ||
+      ""
+    );
+  }
+  return extracted.certificateNumber?.trim() || "";
+}
+
+function normalizeSiteSupervisorGrade(raw: string | null | undefined): string {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const romanMatch = value.match(/\b(I{1,3}|IV|V)\b/i);
+  if (romanMatch) return romanMatch[1]!.toUpperCase();
+  const gradeMatch = value.match(/grade\s*:?\s*([IVX]+|\d+)/i);
+  if (gradeMatch) return gradeMatch[1]!.toUpperCase();
+  return value.toUpperCase();
+}
+
 export function buildLicenseAutofillPatch(
   extracted: Record<string, string | null>,
   consultantType?: string,
@@ -1004,9 +1064,7 @@ export function buildLicenseAutofillPatch(
 
   if (effectiveType) {
     const regMapping = REGISTRATION_NUMBER_META_BY_TYPE[effectiveType];
-    const regNo =
-      extracted.coaCertificateNumber?.trim() ||
-      extracted.certificateNumber?.trim();
+    const regNo = resolveLicenseRegistrationNumber(effectiveType, extracted);
 
     if (regMapping && regNo) {
       patch[regMapping.formField] = regNo;
@@ -1021,10 +1079,19 @@ export function buildLicenseAutofillPatch(
 
     const expiryField = firstExpiryField(effectiveType);
     const expiryDate =
-      parseDateForInput(extracted.validityDate) ||
-      parseDateForInput(extracted.coaLicenseExpiryDate);
+      effectiveType === "Architect"
+        ? parseDateForInput(extracted.validityDate) ||
+          parseDateForInput(extracted.coaLicenseExpiryDate)
+        : parseValidityEndDate(extracted);
     if (expiryField && expiryDate) {
       patch[expiryField] = expiryDate;
+    }
+
+    if (effectiveType === "Site Supervisor") {
+      const grade = normalizeSiteSupervisorGrade(extracted.grade);
+      if (grade) {
+        patch.siteSupervisorGrade = grade;
+      }
     }
   }
 

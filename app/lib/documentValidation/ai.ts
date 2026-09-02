@@ -1,13 +1,13 @@
 /**
- * Generic AI extraction engine using Vercel AI SDK + Google Gemini.
+ * Generic AI extraction engine using Vercel AI SDK + OpenRouter.
  */
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import type { DocumentDefinition } from "./types";
 import type { DocumentType } from "./registry";
 
-const DEFAULT_MODEL = "gemini-flash-latest";
+const DEFAULT_MODEL = "z-ai/glm-5.3-flash";
 const MAX_DOCUMENT_TEXT_CHARS = 80_000;
 
 const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
@@ -40,20 +40,29 @@ const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
     "Power of Attorney (POA) — legal deed granting authority over property (principal / attorney names, property details)",
 };
 
-function getGeminiProvider() {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getDocumentLlmProvider() {
+  const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
     throw new Error(
-      "GEMINI_API_KEY is not set. Add it to .env.local. Get a key at https://aistudio.google.com/apikey"
+      "OPENROUTER_API_KEY is not set. Add it to .env.local. Get a key at https://openrouter.ai/keys"
     );
   }
 
-  return createGoogleGenerativeAI({ apiKey });
+  return createOpenAI({
+    apiKey,
+    baseURL:
+      process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+    headers: {
+      "HTTP-Referer":
+        process.env.OPENROUTER_SITE_URL ?? "http://localhost:3000",
+      "X-Title": process.env.OPENROUTER_SITE_NAME ?? "autodcr",
+    },
+  });
 }
 
 function getModelName(): string {
-  return process.env.GEMINI_MODEL ?? DEFAULT_MODEL;
+  return process.env.DOCUMENT_LLM_MODEL ?? DEFAULT_MODEL;
 }
 
 export function truncateDocumentText(documentText: string): string {
@@ -109,11 +118,11 @@ export async function extractDocument<T extends z.ZodTypeAny>(
   definition: DocumentDefinition<T>,
   documentText: string
 ): Promise<z.infer<T>> {
-  const google = getGeminiProvider();
+  const provider = getDocumentLlmProvider();
   const prompt = definition.buildPrompt(truncateDocumentText(documentText));
 
   return runGenerateObject(definition, {
-    model: google(getModelName()),
+    model: provider(getModelName()),
     schema: definition.schema,
     prompt,
   });
@@ -132,7 +141,7 @@ export async function extractDocumentFromMedia<T extends z.ZodTypeAny>(
   media: DocumentMediaInput,
   documentText = ""
 ): Promise<z.infer<T>> {
-  const google = getGeminiProvider();
+  const provider = getDocumentLlmProvider();
   const prompt = definition.buildPrompt(truncateDocumentText(documentText));
 
   const content: Array<
@@ -152,7 +161,7 @@ export async function extractDocumentFromMedia<T extends z.ZodTypeAny>(
   }
 
   return runGenerateObject(definition, {
-    model: google(getModelName()),
+    model: provider(getModelName()),
     schema: definition.schema,
     messages: [{ role: "user", content }],
   });
@@ -212,7 +221,7 @@ Rules:
 
 ${documentText.trim() ? `Extracted text (may be partial):\n${truncateDocumentText(documentText).slice(0, 8000)}` : "No extractable text — classify from the attached document image/PDF."}`;
 
-  const google = getGeminiProvider();
+  const provider = getDocumentLlmProvider();
   const content: Array<
     | { type: "text"; text: string }
     | { type: "image"; image: Buffer }
@@ -235,7 +244,7 @@ ${documentText.trim() ? `Extracted text (may be partial):\n${truncateDocumentTex
       temperature: 0,
       schemaName: "document_classification",
       schemaDescription: "Classify Indian identity / registration document type",
-      model: google(getModelName()),
+      model: provider(getModelName()),
       schema,
       messages: [{ role: "user", content }],
     });

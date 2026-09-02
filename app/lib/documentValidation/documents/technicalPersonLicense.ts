@@ -8,11 +8,14 @@ export const technicalPersonLicenseSchema = z.object({
   coaLicenseExpiryDate: z.string().nullable(),
   approvalDate: z.string().nullable(),
   validityDate: z.string().nullable(),
+  validityStartDate: z.string().nullable(),
+  validityEndDate: z.string().nullable(),
   technicalPersonName: z.string().nullable(),
   organizationName: z.string().nullable(),
   address: z.string().nullable(),
   applicationDate: z.string().nullable(),
   profession: z.string().nullable(),
+  grade: z.string().nullable(),
   regulationNumber: z.string().nullable(),
   city: z.string().nullable(),
   state: z.string().nullable(),
@@ -32,159 +35,140 @@ export type TechnicalPersonLicense = z.infer<
 >;
 
 const FIELD_RULES = `
-This document is typically titled similar to:
-"License Registration of Technical Person"
-issued by "Government of Maharashtra" and/or
-"Town Planning & Valuation Department".
+This document may be one of THREE formats. Identify which format applies and extract accordingly.
+
+FORMAT A — Maharashtra TP&V "License Registration of Technical Person"
+Issued by Government of Maharashtra / Town Planning & Valuation Department.
+
+FORMAT B — BMC/MCGM "Structural Engineer License"
+Issued by Brihanmumbai Municipal Corporation, Office Of City Engineer.
+Title contains "Structural Engineer License".
+
+FORMAT C — BMC/MCGM "Site Supervisor License"
+Issued by Brihanmumbai Municipal Corporation, Office Of City Engineer.
+Title contains "Site Supervisor License".
+
+---
 
 1. certificateNumber
-- Extract the license / registration / certificate number of this technical person license.
-- Often near labels such as "Certificate No.", "License No.", "Registration No.", or "No.".
-- Preserve exact characters and formatting.
-Example:
-TP/ARCH/2024/12345
+- Extract the license / registration / certificate number.
+- FORMAT A: near "Certificate No.", "License No.", "Registration No." (state license, NOT COA).
+  Example: TP/ARCH/2024/12345
+- FORMAT B: near "License No." — often starts with STR/
+  Example: STR/G/42
+- FORMAT C: near "License No." — often numeric
+  Example: 840006731
 
-2. coaCertificateNumber
-- Extract the Council of Architecture (COA) certificate / registration number if present.
-- Often near labels such as "COA", "COA Registration", "COA Certificate No.", or "CA/…".
-- Do not confuse with the state license certificateNumber.
-Example:
-CA/2020/12345
+2. coaCertificateNumber (FORMAT A only — return null for FORMAT B/C)
+- Council of Architecture (COA) certificate / registration number if present.
+- Near "COA", "COA Registration", "COA Certificate No.", or "CA/…".
+- Do not confuse with certificateNumber.
+Example: CA/2020/12345
 
-3. coaLicenseExpiryDate
-- Extract the COA license / registration validity or expiry date if present.
-- Often near "COA Valid Upto", "COA Expiry", or similar.
-- Preserve the date exactly as written. Do not normalize.
-Example:
-31/12/2026
+3. coaLicenseExpiryDate (FORMAT A only — return null for FORMAT B/C)
+- COA license validity or expiry date if present.
+- Near "COA Valid Upto", "COA Expiry".
+Example: 31/12/2026
 
 4. approvalDate
-- Extract the date the license / registration was approved or issued.
-- Often near "Approved on", "Date of Approval", "Issued on", or the approval stamp date.
-- Preserve exactly as written.
-Example:
-15/03/2024
+- Date the license was approved, issued, or granted.
+- FORMAT A: near "Approved on", "Date of Approval", "Issued on".
+- FORMAT B/C: near "Date." or "Date :" at top of certificate (issue date, NOT validity range).
+Example: 29.04.2026 or 15/03/2024
 
 5. validityDate
-- Extract the validity / expiry date of THIS technical person license (not COA, unless they are the same and only one date exists with a clear "valid upto" for the license).
-- Often near "Valid upto", "Validity", "Valid till".
-- Preserve exactly as written.
-Example:
-14/03/2029
+- Single validity / expiry date when only one date is given (FORMAT A).
+- For FORMAT B/C with a date range, put the FULL range string here AND also split into validityStartDate / validityEndDate.
+Example: 14/03/2029 or 01.04.2026 To 31.03.2031
 
-6. technicalPersonName
-- Extract the full name of the technical person / licensee.
-- Often near "Name", "Name of Technical Person", "Shri/Smt".
+6. validityStartDate (FORMAT B/C — return null for FORMAT A unless a range is present)
+- Start date of license validity period when a range is printed.
+- From "License Validity:" block or "valid from … To …" text.
+Example: 01.04.2026
+
+7. validityEndDate (FORMAT B/C — return null for FORMAT A unless a range is present)
+- End date of license validity period when a range is printed.
+- From "License Validity:" block or "valid from … To …" / "granted up to" text.
+Example: 31.03.2031
+
+8. technicalPersonName
+- Full name of the technical person / licensee.
+- FORMAT A: near "Name", "Name of Technical Person", "Shri/Smt".
+- FORMAT B: near "Structural Engineer's Name :".
+- FORMAT C: near "Site Supervisor's Name :".
 - Do not use the signatory name.
-Example:
-Riyaz Shamsuddin Ansari
+Example: Vikas V. Gokhale
 
-7. organizationName
-- Extract the firm / company / organization name if present.
-- Often near "Organization", "Firm", "Company", "Name of Firm".
+9. organizationName
+- Firm / company / organization name if present (FORMAT A mainly).
 - If absent, return null.
-Example:
-ABC Architects Pvt. Ltd.
 
-8. address
-- Extract the full address of the technical person / organization as written.
-- Include all address lines that clearly belong to the address block.
-- Prefer joining multi-line address with newlines.
-Example:
-F-53, Kohinoor City Mall, Kirol Road, Kurla (W), Mumbai-400070
+10. address
+- Full address of the technical person as written in the address block.
+- Include all address lines. Prefer joining multi-line address with newlines.
+Example: 13, Anupam Society Panch Pakhadi, Nawpada, Thane 602
 
-9. applicationDate
-- Extract the application / applied-on date if present.
-- Often near "Application Date", "Date of Application", "Applied on".
-- Preserve exactly as written.
-Example:
-01/02/2024
+11. applicationDate (FORMAT A mainly — return null for FORMAT B/C unless present)
+- Application / applied-on date if present.
 
-10. profession
-- Extract the profession / category of technical person.
-- Map to the closest of: Architect, Structural Engineer, Licensed Surveyor,
+12. profession
+- Map to the closest of: Architect, Structural Engineer, Site Supervisor, Licensed Surveyor,
   MEP Consultant, Plumber, Fire Consultant, Landscape Consultant,
-  PMC / Project Manager, Geotechnical Consultant, Environmental Consultant,
-  Town Planner.
-- Often near "Profession", "Category", "Licensed as", "License for".
-Example:
-Architect
+  PMC / Project Manager, Geotechnical Consultant, Environmental Consultant, Town Planner.
+- FORMAT A: near "Profession", "Category", "Licensed as".
+- FORMAT B: set to "Structural Engineer" (from document title).
+- FORMAT C: set to "Site Supervisor" (from document title).
+Example: Architect
 
-11. regulationNumber
-- Extract the regulation / rule / section reference under which the license is granted, if present.
-- Often near "Regulation", "Rule", "u/s", "under".
-Example:
-Regulation 5(3)
+13. grade (FORMAT C only — return null for FORMAT A/B unless present)
+- Site Supervisor grade/class if printed.
+- Near "Grade :" label.
+Example: II
 
-12. city
-- Extract the city / town / locality of the technical person / organization address ONLY if
-  explicitly printed on the document (address block or City label).
-- Do NOT use officeLocation as a substitute unless it is clearly the holder's city.
-- Preserve exactly as written. Do not invent from external geography.
-- If not present or not confidently identifiable, return null.
-Example:
-Mumbai
+14. regulationNumber
+- Regulation / rule / section reference if present (FORMAT A mainly).
 
-13. state
-- Extract the state name ONLY if explicitly present or clearly printed as the issuing /
-  address state on the certificate.
-- Preserve exactly as written. Do not assume Maharashtra just because of the department title
-  unless the state name itself is printed.
-Example:
-Maharashtra
+15. city
+- City / town from address block ONLY if explicitly printed.
+- If not present, return null.
 
-14. pincode
-- Extract a 6-digit Indian PIN / postal code ONLY if it is explicitly printed on the document
-  (often in the address block).
-- Preserve digits exactly as written. Do not invent a PIN.
-- If not present or not confidently identifiable, return null.
-Example:
-400070
+16. state
+- State name ONLY if explicitly printed on the certificate.
 
-15. signatoryName
-- Extract the name of the approving / signing officer.
-- Usually near the signature block at the bottom.
-- Do not use the technical person's name.
-Example:
-S. K. Patil
+17. pincode
+- 6-digit Indian PIN if explicitly printed in the address block.
 
-16. signatoryDesignation
-- Extract the designation of the signing officer.
-- Often near or under the signatory name (e.g. Director, Joint Director, Town Planner).
-Example:
-Director of Town Planning
+18. signatoryName
+- Name of approving / signing officer (FORMAT A mainly). Return null for system-generated BMC certificates.
 
-17. department
-- Extract the department name.
-- Often "Town Planning & Valuation Department" or similar printed header/footer text.
-Example:
-Town Planning & Valuation Department
+19. signatoryDesignation
+- Designation of signing officer (FORMAT A mainly).
 
-18. officeLocation
-- Extract the office / city location of the issuing office if present.
-- Often near the signatory block or letterhead (e.g. Pune, Mumbai, Nagpur).
-- This is the ISSUING office location — distinct from city when both appear.
-Example:
-Pune
+20. department
+- Department name from header/footer if present.
 
-19. qrCode
-- If a QR code is clearly visible on the certificate, return exactly: present
-- Do not invent decoded QR payload text unless that payload is also printed as readable text.
-- If no QR code is clearly visible, return null.
+21. officeLocation
+- Issuing office location if present (e.g. Wadala, Mumbai).
+
+22. qrCode
+- If a QR code is clearly visible, return exactly: present
+- Otherwise return null.
 
 SPECIAL INSTRUCTIONS
 
-- Distinguish certificateNumber (state license) from coaCertificateNumber (COA).
-- Distinguish validityDate (this license) from coaLicenseExpiryDate (COA).
+- Identify document format first (A, B, or C) using the title/header.
+- For FORMAT B/C: coaCertificateNumber, coaLicenseExpiryDate, organizationName, signatoryName must be null unless clearly printed.
+- Distinguish certificateNumber (license no.) from coaCertificateNumber (COA, Architect only).
+- Distinguish approvalDate (issue date) from validityEndDate (license expiry).
+- For BMC validity ranges like "01.04.2026 To 31.03.2031", populate validityDate with the full range AND split into validityStartDate and validityEndDate.
 - Distinguish technicalPersonName from signatoryName.
-- Distinguish city (holder/organization address) from officeLocation (issuing office).
-- city / state / pincode must come from printed text only — never from external knowledge.
 - Preserve all values exactly as written. Never guess. If unsure, return null.
 `;
 
 function buildTechnicalPersonLicensePrompt(documentText: string): string {
   return wrapDocumentPrompt({
-    task: 'a "Government of Maharashtra - Town Planning & Valuation Department - License Registration of Technical Person" certificate',
+    task:
+      'a professional license certificate — either (A) Maharashtra TP&V "License Registration of Technical Person", (B) BMC "Structural Engineer License", or (C) BMC "Site Supervisor License"',
     fieldRules: FIELD_RULES,
     documentText:
       documentText.trim() ||
@@ -199,4 +183,33 @@ export const technicalPersonLicense: DocumentDefinition<
   label: "Technical Person License Certificate",
   schema: technicalPersonLicenseSchema,
   buildPrompt: buildTechnicalPersonLicensePrompt,
+  validation: {
+    optionalFields: [
+      "coaCertificateNumber",
+      "coaLicenseExpiryDate",
+      "organizationName",
+      "applicationDate",
+      "regulationNumber",
+      "signatoryName",
+      "signatoryDesignation",
+      "department",
+      "officeLocation",
+      "qrCode",
+      "city",
+      "state",
+      "pincode",
+      "grade",
+      "validityStartDate",
+    ],
+    alternativeFieldGroups: [
+      {
+        fields: ["validityDate", "validityEndDate"],
+        missingLabel: "validityDate",
+      },
+      {
+        fields: ["approvalDate", "applicationDate"],
+        missingLabel: "approvalDate",
+      },
+    ],
+  },
 };

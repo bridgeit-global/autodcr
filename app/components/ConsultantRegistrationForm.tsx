@@ -321,6 +321,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     qualification: "",
     professionalIndemnityInsurance: "",
     majorProjectsList: "",
+
+    // Site Supervisor fields
+    siteSupervisorLicenseNo: "",
+    siteSupervisorGrade: "",
+    siteSupervisorValidity: "",
+    siteSupervisorLicenseFile: null as File | null,
     
     // Licensed Surveyor fields
     lbsLicenseNo: "",
@@ -1074,6 +1080,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         break;
       case "coaCertificateFile":
       case "structuralLicenseFile":
+      case "siteSupervisorLicenseFile":
       case "lbsCertificateFile":
       case "mepExperienceFile":
       case "pheAccreditationFile":
@@ -1089,8 +1096,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         if (!value) {
           error = "Structural Engineer License No is required";
         } else {
-          // Structural License format: Alphanumeric, typically MCGM/XXXX or UDD/XXXX or similar
-          const structuralRegex = /^[A-Z]{2,10}\/?[A-Z0-9]{4,15}$/i;
+          // Structural License format: Alphanumeric, e.g. STR/G/42 or MCGM/12345
+          const structuralRegex = /^[A-Z0-9/]{4,20}$/i;
           if (!structuralRegex.test(value as string)) {
             error = "Enter valid license format (e.g., MCGM/12345 or UDD/2020/123)";
           }
@@ -1106,6 +1113,33 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           today.setHours(0, 0, 0, 0);
           if (selected < today) {
             error = "License issue date cannot be in the past";
+          }
+        }
+        break;
+      // Site Supervisor
+      case "siteSupervisorLicenseNo":
+        if (!value) {
+          error = "Site Supervisor License No is required";
+        } else {
+          const siteSupervisorRegex = /^[A-Z0-9/]{4,20}$/i;
+          if (!siteSupervisorRegex.test(value as string)) {
+            error = "Enter valid license number (e.g., 840006731 or STR/G/42)";
+          }
+        }
+        break;
+      case "siteSupervisorGrade":
+        if (!value) error = "Grade is required";
+        break;
+      case "siteSupervisorValidity":
+        if (!value) {
+          error = "Validity end date is required";
+        } else {
+          const selected = new Date(value as string);
+          selected.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selected < today) {
+            error = "Validity end date cannot be in the past";
           }
         }
         break;
@@ -1443,6 +1477,11 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       const typeSpecificFields: Record<string, string[]> = {
         "Architect": ["coaRegNo", "coaExpiryDate"],
         "Structural Engineer": ["structuralLicenseNo", "structuralValidity"],
+        "Site Supervisor": [
+          "siteSupervisorLicenseNo",
+          "siteSupervisorGrade",
+          "siteSupervisorValidity",
+        ],
         "Licensed Surveyor": ["lbsLicenseNo", "competencyClass", "lbsExpiryDate"],
         "MEP Consultant": ["electricalLicenseNo", "electricalExpiryDate"],
         "Plumber": ["plumberLicenseNo", "plumberExpiryDate"],
@@ -1815,6 +1854,12 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             baseData.structural_validity = formData.structuralValidity;
             baseData.qualification = formData.qualification;
             baseData.structural_license_url = certificateUrl;
+            break;
+          case "Site Supervisor":
+            baseData.site_supervisor_license_no = formData.siteSupervisorLicenseNo;
+            baseData.site_supervisor_grade = formData.siteSupervisorGrade;
+            baseData.site_supervisor_validity = formData.siteSupervisorValidity;
+            baseData.site_supervisor_license_url = certificateUrl;
             break;
           case "Licensed Surveyor":
             baseData.lbs_license_no = formData.lbsLicenseNo;
@@ -2240,6 +2285,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     options={[
                       { value: "Architect", label: "Architect" },
                       { value: "Structural Engineer", label: "Structural Engineer" },
+                      { value: "Site Supervisor", label: "Site Supervisor" },
                       { value: "Licensed Surveyor", label: "Licensed Surveyor" },
                       { value: "MEP Consultant", label: "MEP Consultant" },
                       { value: "Plumber", label: "Plumber" },
@@ -2657,6 +2703,66 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                     />
                   </div>
                     </div>
+              )}
+
+              {/* Site Supervisor */}
+              {formData.consultantType === "Site Supervisor" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Site Supervisor License No. (MCGM) <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      value={formData.siteSupervisorLicenseNo}
+                      onChange={(e) => handleInputChange("siteSupervisorLicenseNo", e.target.value)}
+                      onBlur={() => lookupRegistrationUniqueness("siteSupervisorLicenseNo")}
+                      className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
+                      placeholder="Enter license number"
+                    />
+                    {errors.siteSupervisorLicenseNo && (
+                      <p className="text-xs text-red-600 mt-1">{errors.siteSupervisorLicenseNo}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Registration Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.registrationDate}
+                      onChange={(e) => handleInputChange("registrationDate", e.target.value)}
+                      className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
+                    />
+                    {errors.registrationDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.registrationDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Grade <span className="text-red-600 font-bold">*</span></label>
+                    <CustomSelect
+                      value={formData.siteSupervisorGrade}
+                      onChange={(val) => handleInputChange("siteSupervisorGrade", val)}
+                      options={[
+                        { value: "I", label: "Grade I" },
+                        { value: "II", label: "Grade II" },
+                        { value: "III", label: "Grade III" },
+                      ]}
+                      placeholder="Select Grade"
+                      className="w-full"
+                    />
+                    {errors.siteSupervisorGrade && (
+                      <p className="text-xs text-red-600 mt-1">{errors.siteSupervisorGrade}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Validity End Date <span className="text-red-600 font-bold">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.siteSupervisorValidity}
+                      onChange={(e) => handleInputChange("siteSupervisorValidity", e.target.value)}
+                      className="h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
+                    />
+                    {errors.siteSupervisorValidity && (
+                      <p className="text-xs text-red-600 mt-1">{errors.siteSupervisorValidity}</p>
+                    )}
+                  </div>
+                </div>
               )}
 
               {/* Licensed Surveyor */}

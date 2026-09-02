@@ -17,7 +17,7 @@ function messageFromPlatformBody(text: string): string {
     return "Document extraction timed out. Try a smaller PDF, or ask your admin to raise the function timeout on Vercel.";
   }
   if (/An error occurred/i.test(compact)) {
-    return "The extraction server failed before returning a result. Confirm GEMINI_API_KEY is set in Vercel Production, and that each PDF is under 4.5 MB.";
+    return "The extraction server failed before returning a result. Confirm OPENROUTER_API_KEY is set in Vercel Production, and that each PDF is under 4.5 MB.";
   }
   return compact.slice(0, 240) || "Could not validate this document.";
 }
