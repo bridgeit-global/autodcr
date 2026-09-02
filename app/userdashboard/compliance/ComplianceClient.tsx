@@ -667,6 +667,10 @@ export default function ComplianceClient() {
         filename: pendingLabel || null,
         error: false,
         reaction: null,
+        model: null,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
         created_at: new Date().toISOString(),
       },
     ]);

@@ -2,10 +2,12 @@ import type { ChatLlmOptions } from "./chatModels";
 import { assertApiKey, assertPinecone, getConfig } from "./config";
 import { detectJurisdiction, resolveAuthorities } from "./jurisdiction";
 import {
+  addUsage,
   isReasoningChatModel,
   parseModelJsonObject,
   streamChatCompletion,
   streamDeltaContent,
+  usageFromCompletion,
   visibleModelText,
 } from "./llm";
 import { extractPdf } from "./pdf";
@@ -14,6 +16,7 @@ import type {
   ChecklistItem,
   ComplianceGap,
   ComplianceResult,
+  LlmUsage,
   RagSource,
   SearchHit,
 } from "./types";
@@ -266,7 +269,10 @@ export async function analyzeCompliance({
   }
 
   onStatus?.("Detecting planning authority…");
-  const detection = await detectJurisdiction(proposalText, { llm: llmOptions });
+  const { detection, usage: detectionUsage } = await detectJurisdiction(proposalText, {
+    llm: llmOptions,
+  });
+  let usage: LlmUsage | null = detectionUsage;
   const resolved = resolveAuthorities({
     override: authoritiesOverride,
     detected: detection.detected,
@@ -283,6 +289,8 @@ export async function analyzeCompliance({
       gaps: [],
       sources: [],
       proposal: { filename, pages, chars: proposalText.length },
+      model: llmOptions?.model || getConfig().chatModel,
+      usage,
     };
     onDelta?.(missing.summary);
     onPartial?.(missing);
@@ -320,6 +328,8 @@ export async function analyzeCompliance({
     gaps: [],
     sources: toSources(hits),
     proposal: { filename, pages, chars: proposalText.length },
+    model: llmOptions?.model || getConfig().chatModel,
+    usage,
   };
   onPartial?.(draft);
   onStatus?.("Writing compliance analysis…");
@@ -389,6 +399,8 @@ ${proposalExcerpt}`,
   let gapCount = 0;
 
   for await (const chunk of completion) {
+    const chunkUsage = usageFromCompletion(chunk.usage);
+    if (chunkUsage) usage = addUsage(detectionUsage, chunkUsage);
     const delta = streamDeltaContent(chunk);
     if (!delta) continue;
     raw += delta;
@@ -451,5 +463,6 @@ ${proposalExcerpt}`,
     summary: parsed.summary || draft.summary || "",
     checklist,
     gaps,
+    usage,
   };
 }

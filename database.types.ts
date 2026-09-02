@@ -412,6 +412,7 @@ export type Database = {
       regulation_chat_messages: {
         Row: {
           chat_id: string
+          completion_tokens: number | null
           compliance: Json | null
           content: string
           created_at: string
@@ -419,12 +420,16 @@ export type Database = {
           filename: string | null
           id: string
           kind: string
+          model: string | null
+          prompt_tokens: number | null
           reaction: string | null
           role: string
           sources: Json
+          total_tokens: number | null
         }
         Insert: {
           chat_id: string
+          completion_tokens?: number | null
           compliance?: Json | null
           content?: string
           created_at?: string
@@ -432,12 +437,16 @@ export type Database = {
           filename?: string | null
           id?: string
           kind?: string
+          model?: string | null
+          prompt_tokens?: number | null
           reaction?: string | null
           role: string
           sources?: Json
+          total_tokens?: number | null
         }
         Update: {
           chat_id?: string
+          completion_tokens?: number | null
           compliance?: Json | null
           content?: string
           created_at?: string
@@ -445,9 +454,12 @@ export type Database = {
           filename?: string | null
           id?: string
           kind?: string
+          model?: string | null
+          prompt_tokens?: number | null
           reaction?: string | null
           role?: string
           sources?: Json
+          total_tokens?: number | null
         }
         Relationships: [
           {

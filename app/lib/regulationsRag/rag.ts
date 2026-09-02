@@ -5,10 +5,11 @@ import {
   streamChatCompletion,
   streamDeltaContent,
   stripReasoningMarkup,
+  usageFromCompletion,
   visibleModelText,
 } from "./llm";
 import { normalizeAuthorities } from "./regulations";
-import type { AskHistoryTurn, AskResult, SearchHit } from "./types";
+import type { AskHistoryTurn, AskResult, LlmUsage, SearchHit } from "./types";
 import { embedTexts, getLLM, similaritySearch } from "./vectorstore";
 
 const SYSTEM_PROMPT = `You are a helpful assistant that answers questions using only the provided context from regulation PDF documents and, when present, the user's uploaded project document.
@@ -74,6 +75,8 @@ export async function askQuestion(
       answer,
       sources: [],
       authorities: filterAuth,
+      model: llmOptions?.model || config.chatModel,
+      usage: null,
     };
   }
 
@@ -120,7 +123,10 @@ export async function askQuestion(
 
   let answer = "";
   let streamedLen = 0;
+  let usage: LlmUsage | null = null;
   for await (const chunk of completion) {
+    const chunkUsage = usageFromCompletion(chunk.usage);
+    if (chunkUsage) usage = chunkUsage;
     const delta = streamDeltaContent(chunk);
     if (!delta) continue;
     answer += delta;
@@ -134,6 +140,8 @@ export async function askQuestion(
   return {
     answer: stripReasoningMarkup(visibleModelText(answer)) || "No answer generated.",
     authorities: filterAuth,
+    model: chatModel,
+    usage,
     sources: hits.map((h) => ({
       source: h.source,
       page: h.page ?? null,

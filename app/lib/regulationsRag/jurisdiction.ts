@@ -1,7 +1,7 @@
 import type { ChatLlmOptions } from "./chatModels";
-import { createChatCompletion, isReasoningChatModel, parseModelJsonObject } from "./llm";
+import { createChatCompletion, isReasoningChatModel, parseModelJsonObject, usageFromCompletion } from "./llm";
 import { AUTHORITIES, normalizeAuthorities } from "./regulations";
-import type { JurisdictionDetection } from "./types";
+import type { JurisdictionDetection, LlmUsage } from "./types";
 
 const KEYWORD_RULES: { authority: string; patterns: RegExp[] }[] = [
   {
@@ -72,7 +72,7 @@ function keywordDetect(text: string): { authority: string; score: number }[] {
 export async function detectJurisdiction(
   proposalText: string,
   { useLlm = true, llm }: { useLlm?: boolean; llm?: Partial<ChatLlmOptions> } = {}
-): Promise<JurisdictionDetection> {
+): Promise<{ detection: JurisdictionDetection; usage: LlmUsage | null }> {
   const excerpt = String(proposalText || "").slice(0, 12000);
   const keywordHits = keywordDetect(excerpt);
   let detected = keywordHits.map((h) => h.authority);
@@ -84,6 +84,7 @@ export async function detectJurisdiction(
   let rationale = detected.length
     ? `Matched keywords for: ${detected.join(", ")}`
     : "No clear authority keywords found in the proposal text.";
+  let usage: LlmUsage | null = null;
 
   if (useLlm && excerpt.trim()) {
     try {
@@ -109,6 +110,7 @@ Pick only authorities clearly supported by the text. Prefer specific agencies (C
         },
         llm ? { ...llm, thinking: false } : llm
       );
+      usage = usageFromCompletion(completion.usage);
       const raw = completion.choices[0]?.message?.content || "{}";
       const parsed = parseModelJsonObject(raw) as {
         authorities?: unknown;
@@ -131,10 +133,13 @@ Pick only authorities clearly supported by the text. Prefer specific agencies (C
   }
 
   return {
-    detected,
-    confidence,
-    rationale,
-    keywordHits,
+    detection: {
+      detected,
+      confidence,
+      rationale,
+      keywordHits,
+    },
+    usage,
   };
 }
 

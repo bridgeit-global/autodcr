@@ -7,6 +7,7 @@ import type {
   ChatMessageReaction,
   RegulationChatMessage,
 } from "@/app/lib/regulationsRag/types";
+import { getChatModel } from "@/app/lib/regulationsRag/chatModels";
 
 function messagePlainText(message: RegulationChatMessage) {
   if (message.kind === "compliance" && message.compliance) {
@@ -37,6 +38,29 @@ function messagePlainText(message: RegulationChatMessage) {
 }
 
 const popTransition = { duration: 0.45, ease: "easeOut" as const };
+
+function modelLabel(id: string | null) {
+  if (!id) return null;
+  return getChatModel(id)?.label || id.split("/").pop() || id;
+}
+
+function formatTokens(n: number) {
+  return new Intl.NumberFormat().format(n);
+}
+
+function usageLabel(message: RegulationChatMessage) {
+  const model = modelLabel(message.model);
+  const total =
+    message.totalTokens != null ? `${formatTokens(message.totalTokens)} tokens` : null;
+  const text = [model, total].filter(Boolean).join(" · ");
+  if (!text) return null;
+  const parts: string[] = [];
+  if (message.promptTokens != null) parts.push(`${formatTokens(message.promptTokens)} prompt`);
+  if (message.completionTokens != null) {
+    parts.push(`${formatTokens(message.completionTokens)} completion`);
+  }
+  return { text, title: parts.length ? parts.join(" · ") : text };
+}
 
 export default function MessageActions({
   message,
@@ -105,13 +129,14 @@ export default function MessageActions({
     onReact(turningOn ? next : null);
   }
 
+  const usage = usageLabel(message);
   const btn =
     "inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-slate-100 hover:text-gray-900";
 
   return (
     <div
       className={[
-        "flex items-center gap-1",
+        "flex flex-wrap items-center gap-1",
         align === "end" ? "justify-end" : "justify-start",
       ].join(" ")}
     >
@@ -194,6 +219,14 @@ export default function MessageActions({
       </button>
       {status ? (
         <span className="ml-1 text-[11px] font-medium text-gray-500">{status}</span>
+      ) : null}
+      {usage ? (
+        <span
+          title={usage.title}
+          className="ml-1.5 text-[11px] font-medium text-gray-400"
+        >
+          {usage.text}
+        </span>
       ) : null}
     </div>
   );

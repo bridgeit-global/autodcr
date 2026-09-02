@@ -12,9 +12,10 @@ import {
   type ReasoningEffort,
 } from "./chatModels";
 import { getConfig } from "./config";
+import type { LlmUsage } from "./types";
 import { getLLM } from "./vectorstore";
 
-export type { ChatLlmOptions, ReasoningEffort };
+export type { ChatLlmOptions, LlmUsage, ReasoningEffort };
 
 type StreamParams = OpenAI.ChatCompletionCreateParamsStreaming;
 type NonStreamParams = OpenAI.ChatCompletionCreateParamsNonStreaming;
@@ -82,6 +83,37 @@ function providerExtras(
   return { reasoning };
 }
 
+export function usageFromCompletion(
+  usage:
+    | {
+        prompt_tokens?: number | null;
+        completion_tokens?: number | null;
+        total_tokens?: number | null;
+      }
+    | null
+    | undefined
+): LlmUsage | null {
+  if (!usage) return null;
+  const promptTokens = Number(usage.prompt_tokens || 0);
+  const completionTokens = Number(usage.completion_tokens || 0);
+  const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens);
+  if (!promptTokens && !completionTokens && !totalTokens) return null;
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+export function addUsage(
+  a: LlmUsage | null | undefined,
+  b: LlmUsage | null | undefined
+): LlmUsage | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
+
 export function stripReasoningMarkup(text: string): string {
   return String(text || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -142,6 +174,7 @@ function withModelOptions(
     model,
     ...(typeof max === "number" ? { max_completion_tokens: max } : {}),
     ...extras,
+    ...(params.stream ? { stream_options: { include_usage: true } } : {}),
   };
 }
 

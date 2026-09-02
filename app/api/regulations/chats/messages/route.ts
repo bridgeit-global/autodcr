@@ -8,6 +8,8 @@ import {
   joinExtractedDocuments,
   mapChatSummary,
   mapMessage,
+  messageLlmFields,
+  complianceForStore,
   resolveTurnIntent,
   titleFromTurn,
   userMessageText,
@@ -26,6 +28,7 @@ import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
 import type {
   ChatMessageKind,
   ComplianceResult,
+  LlmUsage,
   RagSource,
   RegulationChatMessage,
 } from "@/app/lib/regulationsRag/types";
@@ -256,6 +259,7 @@ export async function POST(req: NextRequest) {
         let sources: RagSource[] = [];
         let compliance: ComplianceResult | null = null;
         let assistantError = false;
+        let usage: LlmUsage | null = null;
 
         try {
           send({
@@ -285,6 +289,7 @@ export async function POST(req: NextRequest) {
                 ? "Select an authority and try again."
                 : "Compliance analysis complete.");
             sources = compliance.sources || [];
+            usage = compliance.usage || null;
           } else {
             const asked = await askQuestion(question, {
               authorities: scopedAuthorities,
@@ -299,6 +304,7 @@ export async function POST(req: NextRequest) {
             assistantKind = "ask";
             assistantContent = asked.answer;
             sources = asked.sources || [];
+            usage = asked.usage || null;
           }
 
           const { data: assistantRow, error: assistantInsertError } = await auth.client
@@ -309,8 +315,9 @@ export async function POST(req: NextRequest) {
               content: assistantContent,
               kind: assistantKind,
               sources,
-              compliance,
+              compliance: complianceForStore(compliance),
               error: assistantError,
+              ...messageLlmFields(llm.model, usage),
             })
             .select(MESSAGE_SELECT)
             .single();
@@ -348,8 +355,9 @@ export async function POST(req: NextRequest) {
                 content: assistantContent,
                 kind: assistantKind,
                 sources,
-                compliance,
+                compliance: complianceForStore(compliance),
                 error: assistantError,
+                ...messageLlmFields(llm.model, usage),
               })
               .select(MESSAGE_SELECT)
               .single();

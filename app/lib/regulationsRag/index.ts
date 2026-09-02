@@ -9,6 +9,7 @@ export type {
   AuthorityWithDocuments,
   ComplianceResult,
   HealthResult,
+  LlmUsage,
   RegulationChatMessage,
   RegulationChatSummary,
 } from "./types";

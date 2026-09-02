@@ -97,10 +97,18 @@ export type JurisdictionDetection = {
   keywordHits: { authority: string; score: number }[];
 };
 
+export type LlmUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+};
+
 export type AskResult = {
   answer: string;
   authorities: string[];
   sources: RagSource[];
+  model?: string | null;
+  usage?: LlmUsage | null;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -131,6 +139,10 @@ export type RegulationChatMessage = {
   filename: string | null;
   error: boolean;
   reaction: ChatMessageReaction | null;
+  model: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
   created_at: string;
 };
 
@@ -154,6 +166,8 @@ export type ComplianceResult = {
     pages: number;
     chars: number;
   };
+  model?: string | null;
+  usage?: LlmUsage | null;
 };
 
 export type HealthResult = {

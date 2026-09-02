@@ -98,7 +98,7 @@ export function mapChatSummary(row: ChatRow): RegulationChatSummary {
 }
 
 export const MESSAGE_SELECT =
-  "id, chat_id, role, content, kind, sources, compliance, filename, error, reaction, created_at";
+  "id, chat_id, role, content, kind, sources, compliance, filename, error, reaction, model, prompt_tokens, completion_tokens, total_tokens, created_at";
 
 type MessageRow = {
   id: string;
@@ -111,6 +111,10 @@ type MessageRow = {
   filename: string | null;
   error: boolean | null;
   reaction: string | null;
+  model?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
   created_at: string;
 };
 
@@ -136,6 +140,10 @@ function asReaction(value: unknown): ChatMessageReaction | null {
   return value === "like" || value === "unlike" ? value : null;
 }
 
+function asTokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export function mapMessage(row: MessageRow): RegulationChatMessage {
   return {
     id: row.id,
@@ -148,8 +156,30 @@ export function mapMessage(row: MessageRow): RegulationChatMessage {
     filename: row.filename,
     error: Boolean(row.error),
     reaction: asReaction(row.reaction),
+    model: row.model || null,
+    promptTokens: asTokenCount(row.prompt_tokens),
+    completionTokens: asTokenCount(row.completion_tokens),
+    totalTokens: asTokenCount(row.total_tokens),
     created_at: row.created_at,
   };
+}
+
+export function messageLlmFields(
+  model: string | undefined,
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null | undefined
+) {
+  return {
+    model: model || null,
+    prompt_tokens: usage?.promptTokens ?? null,
+    completion_tokens: usage?.completionTokens ?? null,
+    total_tokens: usage?.totalTokens ?? null,
+  };
+}
+
+export function complianceForStore(compliance: ComplianceResult | null) {
+  if (!compliance) return null;
+  const { usage: _usage, model: _model, ...rest } = compliance;
+  return rest;
 }
 
 export function historyFromMessages(messages: RegulationChatMessage[]): AskHistoryTurn[] {
