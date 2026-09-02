@@ -1,3 +1,4 @@
+import type { ChatLlmOptions } from "./chatModels";
 import { createChatCompletion, isReasoningChatModel, parseModelJsonObject } from "./llm";
 import { AUTHORITIES, normalizeAuthorities } from "./regulations";
 import type { JurisdictionDetection } from "./types";
@@ -70,7 +71,7 @@ function keywordDetect(text: string): { authority: string; score: number }[] {
 
 export async function detectJurisdiction(
   proposalText: string,
-  { useLlm = true }: { useLlm?: boolean } = {}
+  { useLlm = true, llm }: { useLlm?: boolean; llm?: Partial<ChatLlmOptions> } = {}
 ): Promise<JurisdictionDetection> {
   const excerpt = String(proposalText || "").slice(0, 12000);
   const keywordHits = keywordDetect(excerpt);
@@ -87,24 +88,27 @@ export async function detectJurisdiction(
   if (useLlm && excerpt.trim()) {
     try {
       const labels = AUTHORITIES.map((a) => `${a.id} (${a.label})`).join(", ");
-      const completion = await createChatCompletion({
-        temperature: 0.2,
-        max_tokens: isReasoningChatModel() ? 1024 : 400,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `You identify which Indian planning authorities apply to a real-estate / development project proposal.
+      const completion = await createChatCompletion(
+        {
+          temperature: 0.2,
+          max_tokens: isReasoningChatModel(llm?.model) ? 1024 : 400,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: `You identify which Indian planning authorities apply to a real-estate / development project proposal.
 Valid authority ids: ${labels}.
 Return JSON only: { "authorities": ["cidco"], "confidence": "high"|"medium"|"low", "rationale": "..." }
 Pick only authorities clearly supported by the text. Prefer specific agencies (CIDCO/MIDC/SRA) over stamp_duty alone.`,
-          },
-          {
-            role: "user",
-            content: `Proposal excerpt:\n${excerpt}`,
-          },
-        ],
-      });
+            },
+            {
+              role: "user",
+              content: `Proposal excerpt:\n${excerpt}`,
+            },
+          ],
+        },
+        llm ? { ...llm, thinking: false } : llm
+      );
       const raw = completion.choices[0]?.message?.content || "{}";
       const parsed = parseModelJsonObject(raw) as {
         authorities?: unknown;

@@ -1,3 +1,4 @@
+import type { ChatLlmOptions } from "./chatModels";
 import { assertApiKey, assertPinecone, getConfig } from "./config";
 import { detectJurisdiction, resolveAuthorities } from "./jurisdiction";
 import {
@@ -218,9 +219,9 @@ function parseJsonContent(raw: string): {
   return parsed;
 }
 
-function complianceMaxTokens(): number {
+function complianceMaxTokens(model?: string): number {
   const config = getConfig();
-  if (!isReasoningChatModel(config.chatModel)) return config.complianceMaxTokens;
+  if (!isReasoningChatModel(model || config.chatModel)) return config.complianceMaxTokens;
   return Math.max(config.complianceMaxTokens, 6144);
 }
 
@@ -231,6 +232,7 @@ export async function analyzeCompliance({
   authoritiesOverride = null,
   notes = "",
   pages: pagesIn,
+  llmOptions,
   onStatus,
   onDelta,
   onPartial,
@@ -241,6 +243,7 @@ export async function analyzeCompliance({
   authoritiesOverride?: unknown;
   notes?: string;
   pages?: number | null;
+  llmOptions?: Partial<ChatLlmOptions>;
   onStatus?: (text: string) => void;
   onDelta?: (text: string) => void;
   onPartial?: (data: ComplianceResult) => void;
@@ -263,7 +266,7 @@ export async function analyzeCompliance({
   }
 
   onStatus?.("Detecting planning authority…");
-  const detection = await detectJurisdiction(proposalText);
+  const detection = await detectJurisdiction(proposalText, { llm: llmOptions });
   const resolved = resolveAuthorities({
     override: authoritiesOverride,
     detected: detection.detected,
@@ -321,14 +324,15 @@ export async function analyzeCompliance({
   onPartial?.(draft);
   onStatus?.("Writing compliance analysis…");
 
-  const completion = await streamChatCompletion({
-    temperature: 0.2,
-    max_tokens: complianceMaxTokens(),
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `You are a planning-regulation compliance analyst for Maharashtra / Mumbai region projects.
+  const completion = await streamChatCompletion(
+    {
+      temperature: 0.2,
+      max_tokens: complianceMaxTokens(llmOptions?.model),
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `You are a planning-regulation compliance analyst for Maharashtra / Mumbai region projects.
 Use ONLY the regulation excerpts provided. Do not invent clauses.
 Compare the project proposal to the regulations for authorities: ${authorityLabels}.
 
@@ -361,10 +365,10 @@ Return JSON with this shape:
 Cover FSI/FAR, setbacks/margins, parking, height, open space, approvals/NOCs, fire/safety, environment, and documentation where the excerpts allow.
 Mark status "unclear" when the proposal is silent or excerpts are insufficient.
 Prefer citing circulars when they amend base regulations.`,
-      },
-      {
-        role: "user",
-        content: `Authorities in scope: ${authorityLabels}
+        },
+        {
+          role: "user",
+          content: `Authorities in scope: ${authorityLabels}
 Detection rationale: ${detection.rationale}
 
 Regulation excerpts:
@@ -373,9 +377,11 @@ ${formatContext(hits)}
 ---
 Project proposal documents (${filename}, ~${pages} pages):
 ${proposalExcerpt}`,
-      },
-    ],
-  });
+        },
+      ],
+    },
+    llmOptions ? { ...llmOptions, thinking: false } : llmOptions
+  );
 
   let raw = "";
   let summaryLen = 0;

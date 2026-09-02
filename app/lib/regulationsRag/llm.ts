@@ -1,39 +1,85 @@
 import type OpenAI from "openai";
+import {
+  effortToThinkingBudget,
+  getChatModel,
+  modelSupportsReasoning,
+  modelSupportsThinking,
+  modelSupportsThinkingBudget,
+  parseChatModelId,
+  parseReasoningEffort,
+  parseThinking,
+  type ChatLlmOptions,
+  type ReasoningEffort,
+} from "./chatModels";
 import { getConfig } from "./config";
 import { getLLM } from "./vectorstore";
 
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
+export type { ChatLlmOptions, ReasoningEffort };
 
 type StreamParams = OpenAI.ChatCompletionCreateParamsStreaming;
 type NonStreamParams = OpenAI.ChatCompletionCreateParamsNonStreaming;
 
 export function isReasoningChatModel(model = getConfig().chatModel): boolean {
-  const m = model.toLowerCase();
-  return (
-    /glm-?5|glm-4\.[5-9]|glm-4-/.test(m) ||
-    /deepseek-r1|qwq|qwen3/.test(m) ||
-    /(^|\/)(o1|o3|o4|gpt-5)/.test(m) ||
-    /grok/.test(m)
-  );
+  return modelSupportsReasoning(model);
 }
 
-function reasoningEffort(): ReasoningEffort {
-  const raw = String(process.env.CHAT_REASONING_EFFORT || "")
-    .toLowerCase()
-    .trim();
-  if (raw === "low" || raw === "medium" || raw === "high" || raw === "max") {
-    return raw;
-  }
-  return "low";
+export function envReasoningEffort(): ReasoningEffort {
+  return parseReasoningEffort(process.env.CHAT_REASONING_EFFORT) || "low";
 }
 
-function providerExtras(): Record<string, unknown> {
-  if (!isReasoningChatModel()) return {};
-  const effort = reasoningEffort();
+export function resolveChatLlmOptions(
+  input: {
+    model?: unknown;
+    reasoningEffort?: unknown;
+    thinking?: unknown;
+  } = {}
+): ChatLlmOptions {
+  const config = getConfig();
+  const model = parseChatModelId(input.model) || config.chatModel;
+  const spec = getChatModel(model);
+  const supportsReason = spec?.reasoning ?? modelSupportsReasoning(model);
+  const supportsThinking = spec?.thinking ?? modelSupportsThinking(model);
   return {
-    reasoning_effort: effort,
-    reasoning: { effort, exclude: true },
+    model,
+    reasoningEffort: supportsReason
+      ? parseReasoningEffort(input.reasoningEffort) || envReasoningEffort()
+      : "none",
+    thinking: supportsThinking ? Boolean(parseThinking(input.thinking) ?? false) : false,
   };
+}
+
+function providerExtras(
+  model: string,
+  options?: Partial<ChatLlmOptions>
+): Record<string, unknown> {
+  const spec = getChatModel(model);
+  const supportsReason = spec?.reasoning ?? modelSupportsReasoning(model);
+  const supportsThinking = spec?.thinking ?? modelSupportsThinking(model);
+  if (!supportsReason && !supportsThinking) return {};
+
+  const effort = options?.reasoningEffort ?? envReasoningEffort();
+  const thinking = Boolean(options?.thinking);
+  const enabled = thinking || (supportsReason && effort !== "none");
+  if (!enabled) {
+    return {
+      reasoning: { enabled: false, effort: "none", exclude: true },
+    };
+  }
+
+  // OpenRouter/AI Gateway: only one of reasoning.effort or reasoning.max_tokens.
+  const useTokenBudget = modelSupportsThinkingBudget(model);
+  const reasoning: Record<string, unknown> = {
+    exclude: !thinking,
+  };
+  if (useTokenBudget) {
+    reasoning.max_tokens = effortToThinkingBudget(effort);
+  } else if (supportsReason && effort !== "none") {
+    reasoning.effort = effort;
+  } else {
+    reasoning.enabled = true;
+  }
+
+  return { reasoning };
 }
 
 export function stripReasoningMarkup(text: string): string {
@@ -73,29 +119,46 @@ export function parseModelJsonObject(raw: string): unknown {
   }
 }
 
-function withModelOptions(params: Record<string, unknown>): Record<string, unknown> {
+function withModelOptions(
+  params: Record<string, unknown>,
+  options?: Partial<ChatLlmOptions>
+): Record<string, unknown> {
   const config = getConfig();
-  const max = params.max_tokens ?? params.max_completion_tokens;
+  const model =
+    options?.model || (params.model as string | undefined) || config.chatModel;
+  const extras = providerExtras(model, options);
+  const requestedMax = params.max_tokens ?? params.max_completion_tokens;
+  const thinkingBudget =
+    typeof (extras.reasoning as { max_tokens?: number } | undefined)?.max_tokens ===
+    "number"
+      ? (extras.reasoning as { max_tokens: number }).max_tokens
+      : 0;
+  const max =
+    typeof requestedMax === "number"
+      ? Math.max(requestedMax, thinkingBudget ? thinkingBudget + 2048 : requestedMax)
+      : requestedMax;
   return {
     ...params,
-    model: (params.model as string | undefined) || config.chatModel,
+    model,
     ...(typeof max === "number" ? { max_completion_tokens: max } : {}),
-    ...providerExtras(),
+    ...extras,
   };
 }
 
 export function createChatCompletion(
-  params: Omit<NonStreamParams, "model"> & { model?: string }
+  params: Omit<NonStreamParams, "model"> & { model?: string },
+  options?: Partial<ChatLlmOptions>
 ) {
   return getLLM().chat.completions.create(
-    withModelOptions({ ...params, stream: false }) as unknown as NonStreamParams
+    withModelOptions({ ...params, stream: false }, options) as unknown as NonStreamParams
   );
 }
 
 export function streamChatCompletion(
-  params: Omit<StreamParams, "model" | "stream"> & { model?: string }
+  params: Omit<StreamParams, "model" | "stream"> & { model?: string },
+  options?: Partial<ChatLlmOptions>
 ) {
   return getLLM().chat.completions.create(
-    withModelOptions({ ...params, stream: true }) as unknown as StreamParams
+    withModelOptions({ ...params, stream: true }, options) as unknown as StreamParams
   );
 }

@@ -177,6 +177,9 @@ export async function sendRegulationChatTurn(
     file?: File | null;
     authorities: string[];
     notes?: string;
+    model?: string;
+    reasoningEffort?: string;
+    thinking?: boolean;
   },
   handlers: ChatTurnHandlers = {}
 ): Promise<ChatTurnResult> {
@@ -185,6 +188,11 @@ export async function sendRegulationChatTurn(
   if (params.chatId) body.append("chatId", params.chatId);
   if (params.question?.trim()) body.append("question", params.question.trim());
   if (params.notes?.trim()) body.append("notes", params.notes.trim());
+  if (params.model) body.append("model", params.model);
+  if (params.reasoningEffort) body.append("reasoningEffort", params.reasoningEffort);
+  if (typeof params.thinking === "boolean") {
+    body.append("thinking", params.thinking ? "on" : "off");
+  }
   if (params.authorities.length) {
     body.append("authorities", params.authorities.join(","));
   }

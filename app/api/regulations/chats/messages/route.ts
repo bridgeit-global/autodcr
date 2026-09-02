@@ -19,6 +19,7 @@ import {
   getConfig,
   ragErrorStatus,
 } from "@/app/lib/regulationsRag/config";
+import { resolveChatLlmOptions } from "@/app/lib/regulationsRag/llm";
 import { extractPdf } from "@/app/lib/regulationsRag/pdf";
 import { askQuestion } from "@/app/lib/regulationsRag/rag";
 import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
@@ -61,6 +62,11 @@ export async function POST(req: NextRequest) {
     const chatIdRaw = String(formData.get("chatId") || "").trim();
     const question = String(formData.get("question") || "").trim();
     const notes = String(formData.get("notes") || "").trim();
+    const llm = resolveChatLlmOptions({
+      model: formData.get("model"),
+      reasoningEffort: formData.get("reasoningEffort"),
+      thinking: formData.get("thinking"),
+    });
     const authorities = normalizeAuthorities(
       formData.get("authorities") ?? formData.get("authority")
     );
@@ -267,6 +273,7 @@ export async function POST(req: NextRequest) {
               authoritiesOverride: scopedAuthorities.length ? scopedAuthorities : null,
               notes,
               pages: extractedPages || currentChat.document_pages,
+              llmOptions: llm,
               onStatus: (text) => send({ type: "status", text }),
               onDelta: (text) => send({ type: "token", text }),
               onPartial: (data) => send({ type: "compliance", compliance: data }),
@@ -285,6 +292,7 @@ export async function POST(req: NextRequest) {
               documentFilename,
               notes,
               history: historyFromMessages(priorMessages),
+              llmOptions: llm,
               onStatus: (text) => send({ type: "status", text }),
               onDelta: (text) => send({ type: "token", text }),
             });

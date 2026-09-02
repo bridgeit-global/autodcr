@@ -32,6 +32,15 @@ import CustomSelect from "@/app/components/CustomSelect";
 import Button from "@/app/components/ui/Button";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import {
+  CHAT_MODELS,
+  DEFAULT_CHAT_MODEL,
+  parseReasoningEffort,
+  parseThinking,
+  withServerDefaultModel,
+  type ChatModelOption,
+  type ReasoningEffort,
+} from "@/app/lib/regulationsRag/chatModels";
 import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
 import { formatFilenames, MAX_PROPOSAL_FILES } from "@/app/lib/regulationsRag/chatStore";
 import type {
@@ -56,6 +65,7 @@ import {
 } from "./chatApi";
 import ComplianceResultView from "./ComplianceResultView";
 import MessageActions from "./MessageActions";
+import ModelOptionsBar from "./ModelOptionsBar";
 
 type PlotDetails = {
   planningAuthority?: string;
@@ -67,6 +77,9 @@ type PlotDetails = {
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
 const HISTORY_VISIBLE_KEY = "regulation-chat-history-visible";
+const CHAT_MODEL_KEY = "regulation-chat-model";
+const CHAT_REASON_KEY = "regulation-chat-reasoning";
+const CHAT_THINKING_KEY = "regulation-chat-thinking";
 
 const SUGGESTIONS = [
   "Analyze this proposal for compliance",
@@ -274,6 +287,11 @@ export default function ComplianceClient() {
   const [deletingChat, setDeletingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachedFilename, setAttachedFilename] = useState<string | null>(null);
+  const [chatModels, setChatModels] = useState<ChatModelOption[]>(CHAT_MODELS);
+  const [chatModel, setChatModel] = useState(DEFAULT_CHAT_MODEL);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("low");
+  const [thinking, setThinking] = useState(false);
+  const storedModelRef = useRef<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -327,9 +345,43 @@ export default function ComplianceClient() {
       if (window.localStorage.getItem(HISTORY_VISIBLE_KEY) === "0") {
         setHistoryVisible(false);
       }
+      const storedModel = window.localStorage.getItem(CHAT_MODEL_KEY)?.trim() || "";
+      const storedReason = parseReasoningEffort(window.localStorage.getItem(CHAT_REASON_KEY));
+      const storedThinking = parseThinking(window.localStorage.getItem(CHAT_THINKING_KEY));
+      storedModelRef.current = storedModel || null;
+      if (storedModel) setChatModel(storedModel);
+      if (storedReason) setReasoningEffort(storedReason);
+      if (typeof storedThinking === "boolean") setThinking(storedThinking);
     } catch {
       /* ignore */
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/regulations/health")
+      .then((res) => res.json())
+      .then((data: { model?: string }) => {
+        if (cancelled) return;
+        const catalog = withServerDefaultModel(data.model);
+        setChatModels(catalog);
+        setChatModel((prev) => {
+          const stored = storedModelRef.current;
+          if (stored && catalog.some((item) => item.id === stored)) return stored;
+          const serverModel = data.model?.trim() || "";
+          if (serverModel && catalog.some((item) => item.id === serverModel)) {
+            return serverModel;
+          }
+          if (catalog.some((item) => item.id === prev)) return prev;
+          return catalog[0]?.id || DEFAULT_CHAT_MODEL;
+        });
+      })
+      .catch(() => {
+        /* keep the local catalog */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -628,6 +680,9 @@ export default function ComplianceClient() {
           files: pendingFiles,
           authorities: [...selected],
           notes,
+          model: chatModel,
+          reasoningEffort,
+          thinking,
         },
         {
           onStatus: setStatusText,
@@ -1267,6 +1322,38 @@ export default function ComplianceClient() {
                   )}
                 </button>
               </div>
+              <ModelOptionsBar
+                model={chatModel}
+                reasoningEffort={reasoningEffort}
+                thinking={thinking}
+                models={chatModels}
+                disabled={!selectedProjectId || busy}
+                onModelChange={(id) => {
+                  storedModelRef.current = id;
+                  setChatModel(id);
+                  try {
+                    window.localStorage.setItem(CHAT_MODEL_KEY, id);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                onReasoningChange={(effort) => {
+                  setReasoningEffort(effort);
+                  try {
+                    window.localStorage.setItem(CHAT_REASON_KEY, effort);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                onThinkingChange={(next) => {
+                  setThinking(next);
+                  try {
+                    window.localStorage.setItem(CHAT_THINKING_KEY, next ? "on" : "off");
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
               <p className="mt-2 px-1 text-[11px] text-gray-400">
                 Enter to send · Shift+Enter for a new line · up to {MAX_PROPOSAL_FILES} PDFs, 25 MB each
               </p>

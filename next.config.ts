@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import path from "path";
+
+const projectRoot = path.join(__dirname);
 
 const nextConfig: NextConfig = {
 	// Allow HMR /_next/* when opening the dev app via LAN IP (not only localhost).
@@ -50,9 +53,12 @@ const nextConfig: NextConfig = {
 			},
 		],
 	},
-	// Turbopack configuration - empty config to silence the warning
+	// Pin the workspace to this repo so a stray ~/package-lock.json is not treated as the root.
+	outputFileTracingRoot: projectRoot,
 	// The dynamic import with ssr: false in RegistrationForm handles the canvas module issue
-	turbopack: {},
+	turbopack: {
+		root: projectRoot,
+	},
 	// Exclude native modules from client-side bundling
 	webpack: (config, { isServer }) => {
 		config.resolve.alias = {

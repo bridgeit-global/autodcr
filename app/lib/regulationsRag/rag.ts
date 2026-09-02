@@ -1,3 +1,4 @@
+import type { ChatLlmOptions } from "./chatModels";
 import { assertApiKey, getConfig } from "./config";
 import {
   isReasoningChatModel,
@@ -36,6 +37,7 @@ export async function askQuestion(
     documentFilename = "",
     notes = "",
     history = [],
+    llmOptions,
     onStatus,
     onDelta,
   }: {
@@ -44,6 +46,7 @@ export async function askQuestion(
     documentFilename?: string;
     notes?: string;
     history?: AskHistoryTurn[];
+    llmOptions?: Partial<ChatLlmOptions>;
     onStatus?: (text: string) => void;
     onDelta?: (text: string) => void;
   } = {}
@@ -95,21 +98,25 @@ export async function askQuestion(
     }));
 
   onStatus?.("Writing answer…");
-  const askMaxTokens = isReasoningChatModel(config.chatModel)
+  const chatModel = llmOptions?.model || config.chatModel;
+  const askMaxTokens = isReasoningChatModel(chatModel)
     ? Math.max(config.maxTokens, 2048)
     : config.maxTokens;
-  const completion = await streamChatCompletion({
-    temperature: 0.2,
-    max_tokens: askMaxTokens,
-    messages: [
-      {
-        role: "system",
-        content: `${SYSTEM_PROMPT}\n\nContext:\n${extra.join("\n\n---\n\n")}`,
-      },
-      ...prior,
-      { role: "user", content: q },
-    ],
-  });
+  const completion = await streamChatCompletion(
+    {
+      temperature: 0.2,
+      max_tokens: askMaxTokens,
+      messages: [
+        {
+          role: "system",
+          content: `${SYSTEM_PROMPT}\n\nContext:\n${extra.join("\n\n---\n\n")}`,
+        },
+        ...prior,
+        { role: "user", content: q },
+      ],
+    },
+    llmOptions
+  );
 
   let answer = "";
   let streamedLen = 0;
