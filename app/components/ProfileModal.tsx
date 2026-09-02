@@ -234,6 +234,8 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
         return { label: "COA Reg No:", value: userMetadata.coa_reg_no || "" };
       } else if (consultantType === "Structural Engineer") {
         return { label: "Structural License No:", value: userMetadata.structural_license_no || "" };
+      } else if (consultantType === "Site Supervisor") {
+        return { label: "Site Supervisor License No:", value: userMetadata.site_supervisor_license_no || "" };
       } else if (consultantType === "Licensed Surveyor") {
         return { label: "LBS License No:", value: userMetadata.lbs_license_no || "" };
       } else if (consultantType === "MEP Consultant") {

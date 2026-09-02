@@ -48,6 +48,7 @@ export function isCompletionTokenExpired(
 export const CONSULTANT_TYPE_OPTIONS = [
   "Architect",
   "Structural Engineer",
+  "Site Supervisor",
   "Licensed Surveyor",
   "MEP Consultant",
   "Plumber",
@@ -71,6 +72,11 @@ export const REGISTRATION_NUMBER_META_BY_TYPE: Record<
     formField: "structuralLicenseNo",
     metaKey: "structural_license_no",
     label: "Structural Engineer License No.",
+  },
+  "Site Supervisor": {
+    formField: "siteSupervisorLicenseNo",
+    metaKey: "site_supervisor_license_no",
+    label: "Site Supervisor License No.",
   },
   "Licensed Surveyor": {
     formField: "lbsLicenseNo",
@@ -123,6 +129,7 @@ export const REGISTRATION_NUMBER_META_BY_TYPE: Record<
 export const EXTRA_REG_REQUIRED_BY_TYPE: Record<string, string[]> = {
   Architect: ["coaExpiryDate"],
   "Structural Engineer": ["structuralValidity"],
+  "Site Supervisor": ["siteSupervisorGrade", "siteSupervisorValidity"],
   "Licensed Surveyor": ["competencyClass", "lbsExpiryDate"],
   "MEP Consultant": ["electricalExpiryDate"],
   Plumber: ["plumberExpiryDate"],
@@ -214,6 +221,9 @@ export type PartialConsultantPayload = {
   structuralLicenseNo?: string;
   structuralValidity?: string;
   qualification?: string;
+  siteSupervisorLicenseNo?: string;
+  siteSupervisorGrade?: string;
+  siteSupervisorValidity?: string;
   lbsLicenseNo?: string;
   competencyClass?: string;
   lbsExpiryDate?: string;
@@ -277,6 +287,11 @@ export function buildPartialConsultantMetadata(
       base.structural_license_no = data.structuralLicenseNo;
       base.structural_validity = data.structuralValidity;
       base.qualification = data.qualification || null;
+      break;
+    case "Site Supervisor":
+      base.site_supervisor_license_no = data.siteSupervisorLicenseNo;
+      base.site_supervisor_grade = data.siteSupervisorGrade;
+      base.site_supervisor_validity = data.siteSupervisorValidity;
       break;
     case "Licensed Surveyor":
       base.lbs_license_no = data.lbsLicenseNo;
@@ -346,6 +361,9 @@ export function metadataToFormFields(
     structuralLicenseNo: String(meta.structural_license_no || ""),
     structuralValidity: String(meta.structural_validity || ""),
     qualification: String(meta.qualification || ""),
+    siteSupervisorLicenseNo: String(meta.site_supervisor_license_no || ""),
+    siteSupervisorGrade: String(meta.site_supervisor_grade || ""),
+    siteSupervisorValidity: String(meta.site_supervisor_validity || ""),
     lbsLicenseNo: String(meta.lbs_license_no || ""),
     competencyClass: String(meta.competency_class || ""),
     lbsExpiryDate: String(meta.lbs_expiry_date || ""),
@@ -400,6 +418,9 @@ export const PARTIAL_PROFILE_LOCKED_FIELDS = new Set([
   "structuralLicenseNo",
   "structuralValidity",
   "qualification",
+  "siteSupervisorLicenseNo",
+  "siteSupervisorGrade",
+  "siteSupervisorValidity",
   "lbsLicenseNo",
   "competencyClass",
   "lbsExpiryDate",
@@ -432,6 +453,7 @@ const CONSULTANT_CERTIFICATE_URL_KEYS = [
   "license_certificate_url",
   "coa_certificate_url",
   "structural_license_url",
+  "site_supervisor_license_url",
   "lbs_certificate_url",
   "mep_experience_url",
   "phe_accreditation_url",

@@ -27,6 +27,7 @@ import {
 const CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE: Record<string, string> = {
   Architect: "coa_certificate",
   "Structural Engineer": "structural_license",
+  "Site Supervisor": "site_supervisor_license",
   "Licensed Surveyor": "lbs_certificate",
   "MEP Consultant": "mep_experience",
   Plumber: "phe_accreditation",
@@ -41,6 +42,7 @@ const CONSULTANT_CERTIFICATE_STORAGE_BY_TYPE: Record<string, string> = {
 const CONSULTANT_CERTIFICATE_URL_BY_TYPE: Record<string, string> = {
   Architect: "coa_certificate_url",
   "Structural Engineer": "structural_license_url",
+  "Site Supervisor": "site_supervisor_license_url",
   "Licensed Surveyor": "lbs_certificate_url",
   "MEP Consultant": "mep_experience_url",
   Plumber: "phe_accreditation_url",
