@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthedUserClient, isUuid } from "@/app/lib/regulationsRag/chatAuth";
 import {
   DOCUMENT_TEXT_MAX,
-  MAX_PROPOSAL_FILES,
   MESSAGE_SELECT,
   historyFromMessages,
   joinExtractedDocuments,
@@ -22,7 +21,10 @@ import {
   ragErrorStatus,
 } from "@/app/lib/regulationsRag/config";
 import { resolveChatLlmOptions } from "@/app/lib/regulationsRag/llm";
-import { extractPdf } from "@/app/lib/regulationsRag/pdf";
+import {
+  extractProposalsFromForm,
+  removeProposalUploads,
+} from "@/app/lib/regulationsRag/proposalUpload";
 import { askQuestion } from "@/app/lib/regulationsRag/rag";
 import { normalizeAuthorities } from "@/app/lib/regulationsRag/regulations";
 import type {
@@ -73,9 +75,6 @@ export async function POST(req: NextRequest) {
     const authorities = normalizeAuthorities(
       formData.get("authorities") ?? formData.get("authority")
     );
-    const uploaded = formData
-      .getAll("proposal")
-      .filter((item): item is File => item instanceof File && item.size > 0);
 
     if (!isUuid(projectId)) {
       return NextResponse.json({ error: "A valid projectId is required." }, { status: 400 });
@@ -84,49 +83,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid chat id." }, { status: 400 });
     }
 
+    const config = getConfig();
+    const extracted = await extractProposalsFromForm({
+      formData,
+      projectId,
+      client: auth.client,
+      maxBytes: config.uploadMaxMb * 1024 * 1024,
+      uploadMaxMb: config.uploadMaxMb,
+    });
+    await removeProposalUploads(auth.client, extracted.storagePaths).catch(() => undefined);
+    if (!extracted.ok) {
+      return NextResponse.json({ error: extracted.error }, { status: extracted.status });
+    }
+
     let filename: string | null = null;
     let extractedText = "";
     let extractedPages = 0;
-    const hasFile = uploaded.length > 0;
-
+    const hasFile = extracted.parts.length > 0;
     if (hasFile) {
-      if (uploaded.length > MAX_PROPOSAL_FILES) {
-        return NextResponse.json(
-          { error: `You can upload up to ${MAX_PROPOSAL_FILES} PDFs at a time.` },
-          { status: 400 }
-        );
-      }
-      const config = getConfig();
-      const maxBytes = config.uploadMaxMb * 1024 * 1024;
-      const parts: { filename: string; text: string; pages: number }[] = [];
-      for (const file of uploaded) {
-        const name = file.name || "proposal.pdf";
-        const mime = file.type || "";
-        if (mime !== "application/pdf" && !name.toLowerCase().endsWith(".pdf")) {
-          return NextResponse.json(
-            { error: `Only PDF proposals are supported (${name}).` },
-            { status: 400 }
-          );
-        }
-        if (file.size > maxBytes) {
-          return NextResponse.json(
-            { error: `${name} must be under ${config.uploadMaxMb} MB.` },
-            { status: 400 }
-          );
-        }
-        const extracted = await extractPdf(Buffer.from(await file.arrayBuffer()));
-        const text = extracted.text.trim();
-        if (!text) {
-          return NextResponse.json(
-            {
-              error: `Could not extract text from ${name}. Scanned/image-only PDFs need OCR (not supported yet).`,
-            },
-            { status: 400 }
-          );
-        }
-        parts.push({ filename: name, text, pages: extracted.pages });
-      }
-      const combined = joinExtractedDocuments(parts);
+      const combined = joinExtractedDocuments(extracted.parts);
       filename = combined.filename;
       extractedText = combined.text;
       extractedPages = combined.pages;

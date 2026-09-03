@@ -5,6 +5,11 @@ import type {
   RegulationChatMessage,
   RegulationChatSummary,
 } from "@/app/lib/regulationsRag/types";
+import {
+  DIRECT_PROPOSAL_UPLOAD_MAX_BYTES,
+  PROPOSAL_STORAGE_BUCKET,
+  regulationChatProposalPath,
+} from "@/app/lib/regulationsRag/proposalUploadShared";
 
 export type ChatTurnResult = {
   chat: RegulationChatSummary;
@@ -27,6 +32,9 @@ async function authHeaders(): Promise<HeadersInit> {
 }
 
 async function readError(res: Response): Promise<string> {
+  if (res.status === 413) {
+    return "These PDFs are too large for the server. Try fewer files, or compress each PDF and try again.";
+  }
   try {
     const data = (await res.json()) as { error?: string };
     return data.error || res.statusText || "Request failed";
@@ -168,6 +176,48 @@ async function readNdjsonTurn(
   return acc.result;
 }
 
+async function removeClientUploads(paths: string[]): Promise<void> {
+  if (!paths.length) return;
+  await supabase.storage.from(PROPOSAL_STORAGE_BUCKET).remove(paths);
+}
+
+async function attachProposalFiles(
+  body: FormData,
+  projectId: string,
+  files: File[],
+  handlers: ChatTurnHandlers
+): Promise<string[]> {
+  if (!files.length) return [];
+
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  if (totalBytes <= DIRECT_PROPOSAL_UPLOAD_MAX_BYTES) {
+    for (const file of files) body.append("proposal", file);
+    return [];
+  }
+
+  handlers.onStatus?.("Uploading documents…");
+  const uploadedPaths: string[] = [];
+  try {
+    for (const file of files) {
+      const path = regulationChatProposalPath(projectId, file.name);
+      const { error } = await supabase.storage.from(PROPOSAL_STORAGE_BUCKET).upload(path, file, {
+        upsert: false,
+        contentType: file.type || "application/pdf",
+      });
+      if (error) {
+        throw new Error(`Could not upload ${file.name}: ${error.message}`);
+      }
+      uploadedPaths.push(path);
+      body.append("proposalPath", path);
+      body.append("proposalName", file.name);
+    }
+    return uploadedPaths;
+  } catch (err) {
+    await removeClientUploads(uploadedPaths).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function sendRegulationChatTurn(
   params: {
     projectId: string;
@@ -200,27 +250,37 @@ export async function sendRegulationChatTurn(
     ...(params.files || []),
     ...(params.file ? [params.file] : []),
   ];
-  for (const file of uploads) body.append("proposal", file);
-
-  const res = await fetch("/api/regulations/chats/messages", {
-    method: "POST",
-    headers: await authHeaders(),
+  const uploadedPaths = await attachProposalFiles(
     body,
-  });
+    params.projectId,
+    uploads,
+    handlers
+  );
 
-  const contentType = res.headers.get("content-type") || "";
-  if (!res.ok) throw new Error(await readError(res));
+  try {
+    const res = await fetch("/api/regulations/chats/messages", {
+      method: "POST",
+      headers: await authHeaders(),
+      body,
+    });
 
-  if (res.body && !contentType.includes("application/json")) {
-    return readNdjsonTurn(res, handlers);
+    const contentType = res.headers.get("content-type") || "";
+    if (!res.ok) throw new Error(await readError(res));
+
+    if (res.body && !contentType.includes("application/json")) {
+      return await readNdjsonTurn(res, handlers);
+    }
+
+    const data = (await res.json()) as {
+      chat?: RegulationChatSummary;
+      messages?: RegulationChatMessage[];
+      userMessage?: RegulationChatMessage;
+      assistantMessage?: RegulationChatMessage;
+      error?: string;
+    };
+    return asTurnResult(data);
+  } catch (err) {
+    await removeClientUploads(uploadedPaths).catch(() => undefined);
+    throw err;
   }
-
-  const data = (await res.json()) as {
-    chat?: RegulationChatSummary;
-    messages?: RegulationChatMessage[];
-    userMessage?: RegulationChatMessage;
-    assistantMessage?: RegulationChatMessage;
-    error?: string;
-  };
-  return asTurnResult(data);
 }

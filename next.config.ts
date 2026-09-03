@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
 		serverActions: {
 			bodySizeLimit: "25mb",
 		},
+		// Local/proxy only. Vercel Functions still reject bodies over 4.5 MB (HTTP 413).
 		proxyClientMaxBodySize: "25mb",
 	},
 	// @sparticuz/chromium binary must be explicitly included so Vercel's file-tracing
