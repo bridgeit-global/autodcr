@@ -98,10 +98,10 @@ export type PartialOwnerPayload = {
   middleName?: string;
   lastName: string;
   email: string;
-  city: string;
-  pincode: string;
+  city?: string;
+  pincode?: string;
   alternatePhone: string;
-  pan: string;
+  pan?: string;
   gstNo?: string;
   addressLine1: string;
   addressLine2?: string;
@@ -167,8 +167,8 @@ export function buildPartialOwnerMetadata(
     last_name: data.lastName,
     role: "Owner",
     email: data.email,
-    city: data.city,
-    pincode: data.pincode,
+    city: data.city || null,
+    pincode: data.pincode || null,
     address: fullAddress,
     address_line1: data.addressLine1 || null,
     address_line2: data.addressLine2 || null,
@@ -183,38 +183,76 @@ export function buildPartialOwnerMetadata(
 
   switch (data.entityType) {
     case "Proprietorship":
-      base.full_name_proprietor = data.fullNameProprietor || null;
-      base.proprietorship_registration_no = data.proprietorshipRegistrationNo;
-      base.proprietorship_registration_date = data.proprietorshipRegistrationDate;
+      if (data.fullNameProprietor) {
+        base.full_name_proprietor = data.fullNameProprietor;
+      }
+      if (data.proprietorshipRegistrationNo) {
+        base.proprietorship_registration_no = data.proprietorshipRegistrationNo;
+      }
+      if (data.proprietorshipRegistrationDate) {
+        base.proprietorship_registration_date =
+          data.proprietorshipRegistrationDate;
+      }
       break;
     case "Individual":
-      base.proprietorship_registration_no = data.proprietorshipRegistrationNo;
-      base.proprietorship_registration_date = data.proprietorshipRegistrationDate;
+      if (data.proprietorshipRegistrationNo) {
+        base.proprietorship_registration_no = data.proprietorshipRegistrationNo;
+      }
+      if (data.proprietorshipRegistrationDate) {
+        base.proprietorship_registration_date =
+          data.proprietorshipRegistrationDate;
+      }
       break;
     case "Partnership Firm":
-      base.firm_registration_no = data.firmRegistrationNo;
-      base.partnership_registration_date = data.partnershipRegistrationDate;
-      base.number_of_partners = data.numberOfPartners || null;
+      if (data.firmRegistrationNo) {
+        base.firm_registration_no = data.firmRegistrationNo;
+      }
+      if (data.partnershipRegistrationDate) {
+        base.partnership_registration_date = data.partnershipRegistrationDate;
+      }
+      if (data.numberOfPartners) {
+        base.number_of_partners = data.numberOfPartners;
+      }
       break;
     case "Pvt. Ltd. / Ltd. Company":
-      base.cin = data.cin;
-      base.roc_registration_date = data.rocRegistrationDate;
-      base.number_of_directors = data.numberOfDirectors || null;
+      if (data.cin) base.cin = data.cin;
+      if (data.rocRegistrationDate) {
+        base.roc_registration_date = data.rocRegistrationDate;
+      }
+      if (data.numberOfDirectors) {
+        base.number_of_directors = data.numberOfDirectors;
+      }
       break;
     case "LLP":
-      base.llpin = data.llpin;
-      base.llp_incorporation_date = data.llpIncorporationDate;
-      base.number_of_designated_partners = data.numberOfDesignatedPartners || null;
+      if (data.llpin) base.llpin = data.llpin;
+      if (data.llpIncorporationDate) {
+        base.llp_incorporation_date = data.llpIncorporationDate;
+      }
+      if (data.numberOfDesignatedPartners) {
+        base.number_of_designated_partners = data.numberOfDesignatedPartners;
+      }
       break;
     case "Trust / Society":
-      base.trust_registration_no = data.trustRegistrationNo;
-      base.trust_registration_date = data.trustRegistrationDate;
-      base.number_of_trustees = data.numberOfTrustees || null;
+      if (data.trustRegistrationNo) {
+        base.trust_registration_no = data.trustRegistrationNo;
+      }
+      if (data.trustRegistrationDate) {
+        base.trust_registration_date = data.trustRegistrationDate;
+      }
+      if (data.numberOfTrustees) {
+        base.number_of_trustees = data.numberOfTrustees;
+      }
       break;
     case "Govt. / PSU / Local Body":
-      base.department_name = data.departmentName || null;
-      base.govt_registration_no = data.govtRegistrationNo;
-      base.govt_registration_date = data.govtRegistrationDate;
+      if (data.departmentName) {
+        base.department_name = data.departmentName;
+      }
+      if (data.govtRegistrationNo) {
+        base.govt_registration_no = data.govtRegistrationNo;
+      }
+      if (data.govtRegistrationDate) {
+        base.govt_registration_date = data.govtRegistrationDate;
+      }
       break;
   }
 
@@ -267,34 +305,8 @@ export const PARTIAL_OWNER_LOCKED_FIELDS = new Set([
   "middleName",
   "lastName",
   "email",
-  "city",
-  "pincode",
   "alternatePhone",
-  "pan",
-  "gstNo",
-  "address",
   "addressLine1",
-  "addressLine2",
-  "addressLine3",
-  "fullNameProprietor",
-  "proprietorshipRegistrationNo",
-  "proprietorshipRegistrationDate",
-  "firmRegistrationNo",
-  "partnershipRegistrationDate",
-  "numberOfPartners",
-  "cin",
-  "rocRegistrationDate",
-  "numberOfDirectors",
-  "llpin",
-  "llpIncorporationDate",
-  "numberOfDesignatedPartners",
-  "trustRegistrationNo",
-  "trustRegistrationDate",
-  "numberOfTrustees",
-  "departmentName",
-  "govtRegistrationNo",
-  "govtRegistrationDate",
-  "letterheadFile",
 ]);
 
 export function isPartialOwnerField(field: string): boolean {
