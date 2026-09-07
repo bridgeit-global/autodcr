@@ -62,7 +62,7 @@ export const PROJECT_LIBRARY_MAX_EXTRA_PR_CARDS = PROJECT_LIBRARY_MAX_PR_CARDS -
 
 export const PROJECT_LIBRARY_MAX_FILES = PROJECT_LIBRARY_DOCUMENT_NAMES.length;
 
-/** Overall cap on Project Library PDFs of every type. */
+/** @deprecated No longer enforced — Project Library PDF uploads are unlimited. */
 export const PROJECT_LIBRARY_MAX_TOTAL_FILES = 100;
 
 /** @deprecated Use PROJECT_LIBRARY_MAX_TOTAL_FILES. */

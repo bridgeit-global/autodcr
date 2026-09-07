@@ -33,7 +33,6 @@ import {
   PROJECT_LIBRARY_DP_RL_LABEL,
   PROJECT_LIBRARY_EXTRA_PR_LABEL,
   PROJECT_LIBRARY_MAX_FILES,
-  PROJECT_LIBRARY_MAX_TOTAL_FILES,
   classifyProjectLibraryStoragePath,
   projectLibraryExtraRelativeStem,
   projectLibraryFixedRelativeStem,
@@ -90,7 +89,12 @@ type StagingItem = {
 const DOCUMENT_NAMES = PROJECT_LIBRARY_DOCUMENT_NAMES;
 const MAX_FILES = PROJECT_LIBRARY_MAX_FILES;
 const ACCEPTED_TYPES = [".pdf"];
-const MAX_TOTAL_FILES = PROJECT_LIBRARY_MAX_TOTAL_FILES;
+const FIXED_TYPE_TO_SLOT: Partial<Record<LibraryDocType, number>> = {
+  "pr-card": 0,
+  "dp-remarks": 1,
+  "crz-remarks": 2,
+  "power-of-attorney": 3,
+};
 const EXTRACTABLE_EXTRA_TYPES: LibraryDocType[] = [
   "pr-card",
   "dp-remarks",
@@ -285,6 +289,11 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Normalize filename for duplicate checks (case-insensitive). */
+function fileIdentityKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 function makeUploadRecord(file: File, pathStem: string): UploadRecord {
   const extension = file.name.split(".").pop() || "pdf";
   return {
@@ -474,21 +483,6 @@ export default function ProjectLibraryPage() {
     setPreviewTitle(undefined);
   };
 
-  const clearPreviousAttachments = async () => {
-    closePreview();
-    uploads.forEach((u) => {
-      if (u?.url?.startsWith("blob:")) URL.revokeObjectURL(u.url);
-    });
-    extraDocs.forEach((s) => {
-      if (s.upload?.url?.startsWith("blob:")) URL.revokeObjectURL(s.upload.url);
-    });
-    await clearAllLocalFiles();
-    setUploads(normalizeFixedUploads([]));
-    setExtraDocs([]);
-    saveDraft("draft-project-library-uploads", normalizeFixedUploads([]));
-    persistExtraDocs([]);
-  };
-
   const openPreview = async (
     title: string,
     loadBlob: () => Promise<{ blob: Blob } | null | undefined>,
@@ -521,18 +515,6 @@ export default function ProjectLibraryPage() {
     });
   };
 
-  const clearAllLocalFiles = async () => {
-    for (let i = 0; i < MAX_FILES; i++) {
-      // eslint-disable-next-line no-await-in-loop
-      await deleteProjectLibraryFile(i);
-    }
-    for (const slot of extraDocs) {
-      // eslint-disable-next-line no-await-in-loop
-      await deleteExtraLibraryDoc(slot.id);
-    }
-    await clearAllExtraDpAttachments();
-  };
-
   const applyAssignedFiles = async (
     items: Array<{ file: File; type: LibraryDocType }>
   ): Promise<{
@@ -546,77 +528,44 @@ export default function ProjectLibraryPage() {
       nextFixed: [] as (UploadRecord | undefined)[],
       nextExtra: [] as ExtraDocSlot[],
     };
-    const byType: Partial<Record<LibraryDocType, File[]>> = {};
-    for (const item of items) {
-      byType[item.type] = [...(byType[item.type] ?? []), item.file];
-    }
 
     if (items.length < 1) {
       return { error: "Add at least one document to save.", ...emptyAssign };
     }
-    if (items.length > PROJECT_LIBRARY_MAX_TOTAL_FILES) {
-      return {
-        error: `You can add up to ${PROJECT_LIBRARY_MAX_TOTAL_FILES} files.`,
-        ...emptyAssign,
-      };
+
+    const nextFixed = normalizeFixedUploads([...uploads]);
+    const nextExtra = [...extraDocs];
+    const newExtraSlotIds: string[] = [];
+    const attachedNames = new Set<string>();
+    for (const upload of nextFixed) {
+      if (upload?.name) attachedNames.add(fileIdentityKey(upload.name));
+    }
+    for (const slot of nextExtra) {
+      if (slot.upload?.name) {
+        attachedNames.add(fileIdentityKey(slot.upload.name));
+      }
     }
 
-    uploads.forEach((u) => {
-      if (u?.url) URL.revokeObjectURL(u.url);
-    });
-    extraDocs.forEach((s) => {
-      if (s.upload?.url) URL.revokeObjectURL(s.upload.url);
-    });
-
-    await clearAllLocalFiles();
-
-    const slotFiles: (File | undefined)[] = [
-      byType["pr-card"]?.[0],
-      byType["dp-remarks"]?.[0],
-      byType["crz-remarks"]?.[0],
-      byType["power-of-attorney"]?.[0],
-    ];
-    const nextFixed: (UploadRecord | undefined)[] = [];
-    for (let i = 0; i < MAX_FILES; i++) {
-      const file = slotFiles[i];
-      if (!file) {
-        nextFixed.push(undefined);
+    let addedCount = 0;
+    for (const { file, type } of items) {
+      const nameKey = fileIdentityKey(file.name);
+      if (attachedNames.has(nameKey)) {
         continue;
       }
-      // eslint-disable-next-line no-await-in-loop
-      await saveProjectLibraryFile(i, file);
-      nextFixed.push(makeUploadRecord(file, projectLibraryFixedRelativeStem(i)));
-    }
 
-    const extraQueue: Array<{ type: LibraryDocType; file: File }> = [
-      ...(byType["pr-card"] ?? []).slice(1).map((file) => ({
-        type: "pr-card" as const,
-        file,
-      })),
-      ...(byType["dp-remarks"] ?? []).slice(1).map((file) => ({
-        type: "dp-remarks" as const,
-        file,
-      })),
-      ...(byType["crz-remarks"] ?? []).slice(1).map((file) => ({
-        type: "crz-remarks" as const,
-        file,
-      })),
-      ...(byType["power-of-attorney"] ?? []).slice(1).map((file) => ({
-        type: "power-of-attorney" as const,
-        file,
-      })),
-      ...(byType["dp-remarks-map"] ?? []).map((file) => ({
-        type: "dp-remarks-map" as const,
-        file,
-      })),
-      ...(byType["dp-remarks-rl"] ?? []).map((file) => ({
-        type: "dp-remarks-rl" as const,
-        file,
-      })),
-    ];
+      const slotIndex = FIXED_TYPE_TO_SLOT[type];
+      if (slotIndex !== undefined && !nextFixed[slotIndex]) {
+        // eslint-disable-next-line no-await-in-loop
+        await saveProjectLibraryFile(slotIndex, file);
+        nextFixed[slotIndex] = makeUploadRecord(
+          file,
+          projectLibraryFixedRelativeStem(slotIndex)
+        );
+        attachedNames.add(nameKey);
+        addedCount += 1;
+        continue;
+      }
 
-    const nextExtra: ExtraDocSlot[] = [];
-    for (const { type, file } of extraQueue) {
       const slot = createExtraSlot(type);
       // eslint-disable-next-line no-await-in-loop
       await saveExtraLibraryDoc(slot.id, file, type);
@@ -627,6 +576,16 @@ export default function ProjectLibraryPage() {
           projectLibraryExtraRelativeStem(type, slot.id.slice(0, 8))
         ),
       });
+      newExtraSlotIds.push(slot.id);
+      attachedNames.add(nameKey);
+      addedCount += 1;
+    }
+
+    if (addedCount === 0) {
+      return {
+        error: "This document is already added. Choose a different file.",
+        ...emptyAssign,
+      };
     }
 
     setUploads(nextFixed);
@@ -634,7 +593,7 @@ export default function ProjectLibraryPage() {
     markLibraryDirty();
     return {
       error: null,
-      extraSlotIds: nextExtra.map((s) => s.id),
+      extraSlotIds: newExtraSlotIds,
       nextFixed,
       nextExtra,
     };
@@ -765,24 +724,46 @@ export default function ProjectLibraryPage() {
       return;
     }
 
-    const room = Math.max(0, MAX_TOTAL_FILES - staging.length);
-    if (room === 0) {
-      showAlert({
-        title: "Maximum reached",
-        message: `You can attach up to ${MAX_TOTAL_FILES} PDFs.`,
-      });
-      return;
+    const existingKeys = new Set<string>();
+    for (const upload of uploads) {
+      if (upload?.name) existingKeys.add(fileIdentityKey(upload.name));
+    }
+    for (const slot of extraDocs) {
+      if (slot.upload?.name) {
+        existingKeys.add(fileIdentityKey(slot.upload.name));
+      }
+    }
+    for (const item of staging) {
+      existingKeys.add(fileIdentityKey(item.file.name));
     }
 
-    const toAdd = incoming.slice(0, room);
-    if (toAdd.length < incoming.length) {
+    const uniqueIncoming: File[] = [];
+    const duplicateNames: string[] = [];
+
+    for (const file of incoming) {
+      const nameKey = fileIdentityKey(file.name);
+      if (existingKeys.has(nameKey)) {
+        duplicateNames.push(file.name);
+        continue;
+      }
+      existingKeys.add(nameKey);
+      uniqueIncoming.push(file);
+    }
+
+    if (duplicateNames.length > 0) {
+      const uniqueDupes = [...new Set(duplicateNames)];
       showAlert({
-        title: "Some files skipped",
-        message: `Only ${toAdd.length} more file${toAdd.length === 1 ? "" : "s"} could be added (max ${MAX_TOTAL_FILES}).`,
+        title: "Duplicate document",
+        message:
+          uniqueDupes.length === 1
+            ? `"${uniqueDupes[0]}" is already added. Choose a different file.`
+            : `These files are already added and were skipped: ${uniqueDupes.join(", ")}.`,
       });
     }
 
-    const nextItems: StagingItem[] = toAdd.map((file) => ({
+    if (uniqueIncoming.length === 0) return;
+
+    const nextItems: StagingItem[] = uniqueIncoming.map((file) => ({
       id: createId(),
       file,
       detectedType: null,
@@ -791,19 +772,9 @@ export default function ProjectLibraryPage() {
       error: null,
     }));
 
-    const append = () => {
-      setStaging((prev) => [...prev, ...nextItems]);
-      setDetectError(null);
-      markLibraryDirty();
-    };
-
-    // First file(s) in a new selection replace any previously saved library PDFs.
-    if (staging.length === 0 && totalAttached > 0) {
-      void clearPreviousAttachments().then(append);
-      return;
-    }
-
-    append();
+    setStaging((prev) => [...prev, ...nextItems]);
+    setDetectError(null);
+    markLibraryDirty();
   };
 
   const handleTypeOverride = (id: string, nextType: LibraryDocType | "") => {
@@ -822,13 +793,7 @@ export default function ProjectLibraryPage() {
   };
 
   const removeStagingItem = (id: string) => {
-    setStaging((prev) => {
-      const next = prev.filter((item) => item.id !== id);
-      if (next.length === 0) {
-        void clearPreviousAttachments();
-      }
-      return next;
-    });
+    setStaging((prev) => prev.filter((item) => item.id !== id));
     setDetectError(null);
     markLibraryDirty();
   };
@@ -856,14 +821,6 @@ export default function ProjectLibraryPage() {
     let savedExtra = extraDocs;
 
     if (working.length > 0) {
-      if (working.length > MAX_TOTAL_FILES) {
-        showAlert({
-          title: "Too many files",
-          message: `Remove extras — maximum is ${MAX_TOTAL_FILES} PDFs.`,
-        });
-        return;
-      }
-
       const needsClassify = working.some(
         (item) => !effectiveType(item) || item.error
       );
@@ -875,8 +832,14 @@ export default function ProjectLibraryPage() {
 
       const assigned = await detectAndAssign(working);
       if (!assigned.ok) return;
+      const newExtraIds = new Set(assigned.extraSlotIds);
       extraJobsForExtraction = assigned.nextExtra
-        .filter((s) => s.upload && EXTRACTABLE_EXTRA_TYPES.includes(s.type))
+        .filter(
+          (s) =>
+            s.upload &&
+            newExtraIds.has(s.id) &&
+            EXTRACTABLE_EXTRA_TYPES.includes(s.type)
+        )
         .map((s) => ({ id: s.id, type: s.type }));
       savedFixed = assigned.nextFixed;
       savedExtra = assigned.nextExtra;
@@ -1034,7 +997,7 @@ export default function ProjectLibraryPage() {
             Upload any documents you have — all types are optional. We’ll detect
             each type (PR / PRC, D.P. Remarks letter / Map Plan / Road Line Plan,
             C.R.Z. Remarks, Power of Attorney). You can add multiple files of
-            each type (up to {MAX_TOTAL_FILES} PDFs in total).
+            each type.
           </p>
           <button
             type="button"
@@ -1102,11 +1065,8 @@ export default function ProjectLibraryPage() {
             </p>
             <p className="mt-1 text-xs text-gray-500">
               Add files one by one or several at once. Types are optional — upload
-              what you have. Multiple files of each type are allowed (up to{" "}
-              {MAX_TOTAL_FILES} PDFs in total).
-              {staging.length > 0
-                ? ` (${staging.length}/${MAX_TOTAL_FILES} selected)`
-                : ""}
+              what you have. Multiple files of each type are allowed.
+              {staging.length > 0 ? ` (${staging.length} selected)` : ""}
             </p>
           </div>
         )}
@@ -1118,102 +1078,7 @@ export default function ProjectLibraryPage() {
           </div>
         )}
 
-        {staging.length > 0 && (
-          <ul className="mb-4 space-y-3">
-            {[...staging]
-              .sort((a, b) => Number(Boolean(b.error)) - Number(Boolean(a.error)))
-              .map((item) => {
-              const type = effectiveType(item);
-              return (
-                <li
-                  key={item.id}
-                  className={`rounded-xl border bg-white px-4 py-3 ${
-                    item.error
-                      ? "border-red-300 ring-1 ring-red-100"
-                      : "border-gray-200"
-                  }`}
-                >
-                  {item.error && (
-                    <p className="mb-2 text-xs font-medium text-red-700">
-                      {item.error}
-                    </p>
-                  )}
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="truncate text-sm font-medium text-gray-900">
-                        {item.file.name}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {formatFileSize(item.file.size)}
-                        {item.loading ? " · Detecting…" : ""}
-                      </p>
-                      {!item.loading && !item.error && type && (
-                        <p className="text-xs text-green-700">
-                          Detected as {LABEL_BY_TYPE[type]}
-                          {item.overrideType ? " (manual)" : ""}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <select
-                        value={item.overrideType ?? item.detectedType ?? ""}
-                        disabled={item.loading || isDetecting || isExtracting}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          handleTypeOverride(
-                            item.id,
-                            isLibraryDocType(value) ? value : ""
-                          );
-                        }}
-                        className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
-                        aria-label={`Document type for ${item.file.name}`}
-                      >
-                        <option value="">
-                          {item.loading ? "Detecting…" : "Set type…"}
-                        </option>
-                        <option value="pr-card">{LABEL_BY_TYPE["pr-card"]}</option>
-                        <optgroup label="D.P. Remarks">
-                          {DP_TYPE_OPTIONS.map((docType) => (
-                            <option key={docType} value={docType}>
-                              {LABEL_BY_TYPE[docType]}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <option value="crz-remarks">
-                          {LABEL_BY_TYPE["crz-remarks"]}
-                        </option>
-                        <option value="power-of-attorney">
-                          {LABEL_BY_TYPE["power-of-attorney"]}
-                        </option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void openPreview(item.file.name, async () => ({
-                            blob: item.file,
-                          }))
-                        }
-                        className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-brand-blue hover:bg-gray-50"
-                      >
-                        Preview
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeStagingItem(item.id)}
-                        disabled={item.loading || isDetecting || isExtracting}
-                        className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {staging.length === 0 && totalAttached > 0 && (
+        {totalAttached > 0 && (
           <ul className="mb-4 space-y-3">
             <AttachedSummaryRow
               serial="1"
@@ -1351,11 +1216,109 @@ export default function ProjectLibraryPage() {
           </ul>
         )}
 
+        {staging.length > 0 && (
+          <ul className="mb-4 space-y-3">
+            {[...staging]
+              .sort((a, b) => Number(Boolean(b.error)) - Number(Boolean(a.error)))
+              .map((item) => {
+              const type = effectiveType(item);
+              return (
+                <li
+                  key={item.id}
+                  className={`rounded-xl border bg-white px-4 py-3 ${
+                    item.error
+                      ? "border-red-300 ring-1 ring-red-100"
+                      : "border-gray-200"
+                  }`}
+                >
+                  {item.error && (
+                    <p className="mb-2 text-xs font-medium text-red-700">
+                      {item.error}
+                    </p>
+                  )}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="truncate text-sm font-medium text-gray-900">
+                        {item.file.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formatFileSize(item.file.size)}
+                        {item.loading ? " · Detecting…" : ""}
+                        {" · Pending save"}
+                      </p>
+                      {!item.loading && !item.error && type && (
+                        <p className="text-xs text-green-700">
+                          Detected as {LABEL_BY_TYPE[type]}
+                          {item.overrideType ? " (manual)" : ""}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <select
+                        value={item.overrideType ?? item.detectedType ?? ""}
+                        disabled={item.loading || isDetecting || isExtracting}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          handleTypeOverride(
+                            item.id,
+                            isLibraryDocType(value) ? value : ""
+                          );
+                        }}
+                        className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                        aria-label={`Document type for ${item.file.name}`}
+                      >
+                        <option value="">
+                          {item.loading ? "Detecting…" : "Set type…"}
+                        </option>
+                        <option value="pr-card">{LABEL_BY_TYPE["pr-card"]}</option>
+                        <optgroup label="D.P. Remarks">
+                          {DP_TYPE_OPTIONS.map((docType) => (
+                            <option key={docType} value={docType}>
+                              {LABEL_BY_TYPE[docType]}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <option value="crz-remarks">
+                          {LABEL_BY_TYPE["crz-remarks"]}
+                        </option>
+                        <option value="power-of-attorney">
+                          {LABEL_BY_TYPE["power-of-attorney"]}
+                        </option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void openPreview(item.file.name, async () => ({
+                            blob: item.file,
+                          }))
+                        }
+                        className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-brand-blue hover:bg-gray-50"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeStagingItem(item.id)}
+                        disabled={item.loading || isDetecting || isExtracting}
+                        className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
         <div className="text-sm text-gray-700">
-          {staging.length > 0
-            ? `${staging.length} file${staging.length === 1 ? "" : "s"} selected`
-            : `${totalAttached} file${totalAttached === 1 ? "" : "s"} attached`}
-          {staging.length === 0 && attachedExtraCount > 0 && (
+          {totalAttached > 0 && staging.length > 0
+            ? `${totalAttached} attached · ${staging.length} selected`
+            : staging.length > 0
+              ? `${staging.length} file${staging.length === 1 ? "" : "s"} selected`
+              : `${totalAttached} file${totalAttached === 1 ? "" : "s"} attached`}
+          {attachedExtraCount > 0 && (
             <span className="text-gray-500">
               {" "}
               (including {attachedExtraCount} additional file
