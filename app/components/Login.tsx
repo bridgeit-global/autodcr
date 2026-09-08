@@ -10,6 +10,7 @@ import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
 import { supabase } from "../utils/supabase";
 import { sanitizeReturnUrl } from "@/app/utils/applicationDeepLink";
+import { setSessionExpiresAt } from "@/app/utils/sessionTimeout";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
 import CaptchaBox, { generateCaptchaValue } from "./ui/CaptchaBox";
@@ -51,17 +52,6 @@ const Login = ({ slides }: HeroSectionProps) => {
   useEffect(() => {
     router.prefetch("/userdashboard");
     router.prefetch(returnUrl);
-  }, [router, returnUrl]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (cancelled || !session?.access_token) return;
-      router.replace(returnUrl);
-    });
-    return () => {
-      cancelled = true;
-    };
   }, [router, returnUrl]);
 
   const regenerateCaptcha = () => {
@@ -121,6 +111,7 @@ const Login = ({ slides }: HeroSectionProps) => {
       localStorage.setItem("consultantId", authData.user.id);
       localStorage.setItem("consultantUserId", row.user_id || data.username);
       localStorage.setItem("consultantType", row.consultant_type || "");
+      setSessionExpiresAt();
 
       const jwtMeta =
         authData.user.user_metadata && typeof authData.user.user_metadata === "object"

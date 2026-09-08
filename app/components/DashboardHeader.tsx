@@ -8,6 +8,7 @@ import ProfileModal from "./ProfileModal";
 import DscSignerInstallModal from "./DscSignerInstallModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { TEXT_BRAND, TEXT_CAPTION, TEXT_NAV } from "@/app/utils/typography";
+import { clearSessionExpiresAt } from "@/app/utils/sessionTimeout";
 
 interface DashboardHeaderProps {
   sessionTime: string;
@@ -84,7 +85,8 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
       
       // Clear user metadata from context
       clearUserMetadata();
-      
+      clearSessionExpiresAt();
+
       // Clear known auth/session keys and any Supabase session cache keys.
       const explicitSessionKeys = [
         "consultantId",
@@ -115,6 +117,7 @@ const DashboardHeader = ({ sessionTime }: DashboardHeaderProps) => {
     } catch (error) {
       console.error('Error during logout:', error);
       // Still leave the session even if the sign-out call failed
+      clearSessionExpiresAt();
       router.push('/login');
     }
   };
