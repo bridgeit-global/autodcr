@@ -8,8 +8,10 @@ import { useUserMetadata } from "@/app/contexts/UserContext";
 import ChangePasswordModal from "@/app/components/ChangePasswordModal";
 import ProfileModal from "@/app/components/ProfileModal";
 import DscSignerInstallModal from "@/app/components/DscSignerInstallModal";
+import { clearSessionExpiresAt } from "@/app/utils/sessionTimeout";
 import { AppSidebarMobileTrigger } from "./AppSidebar";
 import NotificationBell from "./NotificationBell";
+import SessionTimer from "./SessionTimer";
 
 type AppHeaderProps = {
   title: string;
@@ -76,6 +78,7 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
     try {
       await supabase.auth.signOut({ scope: "global" });
       clearUserMetadata();
+      clearSessionExpiresAt();
       ["consultantId", "consultantUserId", "consultantType", "userMetadata"].forEach((key) =>
         localStorage.removeItem(key)
       );
@@ -95,6 +98,7 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
       router.push("/login");
     } catch (error) {
       console.error("Error during logout:", error);
+      clearSessionExpiresAt();
       router.push("/login");
     }
   };
@@ -113,6 +117,7 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
           </h1>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
+            <SessionTimer onExpire={() => void handleLogout()} />
             <NotificationBell />
 
             <div className="relative" ref={userMenuRef}>

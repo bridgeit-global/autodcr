@@ -40,7 +40,6 @@ import {
   type OwnerApplicantMeta,
 } from "../utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "../utils/ownerApplicantRoster";
-import { sanitizeReturnUrl } from "../utils/applicationDeepLink";
 import { combineProjectTitleWithProposalNo } from "../utils/projectTitleProposal";
 import {
   CREATE_PROJECT_SECTIONS,
@@ -433,30 +432,7 @@ function DashboardLayoutContent({
   const mode = searchParams.get("mode");
   const isReadOnlyMode = mode === "readonly";
   const selectedApplication = searchParams.get("selectedApplication");
-  const [authState, setAuthState] = useState<
-    "checking" | "authenticated" | "unauthenticated"
-  >("checking");
 
-  useEffect(() => {
-    let cancelled = false;
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (cancelled) return;
-      if (!session?.access_token) {
-        const qs = searchParams.toString();
-        const returnPath = sanitizeReturnUrl(
-          qs ? `${pathname}?${qs}` : pathname
-        );
-        router.replace(`/login?returnUrl=${encodeURIComponent(returnPath)}`);
-        setAuthState("unauthenticated");
-        return;
-      }
-      setAuthState("authenticated");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [pathname, router, searchParams]);
-  
   // Use useProjectData hook to verify project actually exists
   const { projectData: verifiedProjectData, isLoading: isProjectDataLoading, error: projectDataError } =
     useProjectData();
@@ -488,14 +464,13 @@ function DashboardLayoutContent({
   }, []);
 
   useEffect(() => {
-    if (authState !== "authenticated") return;
     if (!shouldGateCreateProjectSections({ isEditMode, isReadOnlyMode })) return;
     if (!isGatedCreateProjectPath(pathname)) return;
 
     const qs = searchParams.toString();
     showAlert(LIBRARY_GATE_ALERT);
     router.replace(qs ? `${PROJECT_LIBRARY_PATH}?${qs}` : PROJECT_LIBRARY_PATH);
-  }, [authState, isEditMode, isReadOnlyMode, pathname, router, searchParams, showAlert]);
+  }, [isEditMode, isReadOnlyMode, pathname, router, searchParams, showAlert]);
 
   // Pre-mark sections that already have meaningful data for draft projects.
   // Runs synchronously during render (not in useEffect) so that child components
@@ -1254,14 +1229,6 @@ function DashboardLayoutContent({
       setIsSubmittingProject(false);
     }
   };
-
-  if (authState === "checking" || authState === "unauthenticated") {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-surface">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
-      </div>
-    );
-  }
 
   const shellTitle = isReadOnlyMode
     ? selectedApplication || "Application"

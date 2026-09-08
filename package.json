@@ -29,6 +29,7 @@
     "@signpdf/placeholder-pdf-lib": "^3.3.0",
     "@signpdf/placeholder-plain": "^3.3.0",
     "@sparticuz/chromium": "^148.0.0",
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.86.0",
     "ai": "^7.0.55",
     "canvas": "^3.2.0",
