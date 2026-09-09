@@ -71,6 +71,8 @@ export const FIELD_LABELS: Record<string, string> = {
   propertyAddress: "Property Address",
   landmark: "Landmark",
   proposedCtsNumber: "CTS Number(s)",
+  sacNo: "SAC Number(s)",
+  validUpTo: "Valid Up To",
   grossPlotArea: "Gross Plot Area",
   planningAuthority: "Planning Authority",
   region: "Region",

@@ -44,7 +44,9 @@ export type ExtraLibraryDocType =
   | "dp-remarks-map"
   | "dp-remarks-rl"
   | "crz-remarks"
-  | "power-of-attorney";
+  | "power-of-attorney"
+  | "assessment-department"
+  | "airport-authority-of-india";
 
 const keyForIndex = (index: number) => `slot:${index}`;
 const keyForExtraPr = (slotId: string) => `extra-pr:${slotId}`;
@@ -93,6 +95,7 @@ export type ProjectLibraryUploadMeta = {
   url: string;
   uploadedAt: string;
   path: string;
+  expiryDate?: string;
 };
 
 /** Keep draft metadata only for slots that still have a file in IndexedDB. */
@@ -115,6 +118,7 @@ export async function reconcileFixedLibraryUploads(
             url: draftSlot?.url ?? "",
             uploadedAt: draftSlot?.uploadedAt ?? new Date().toISOString(),
             path: draftSlot?.path ?? `document-${i + 1}.pdf`,
+            ...(draftSlot?.expiryDate ? { expiryDate: draftSlot.expiryDate } : {}),
           };
   }
   return next;

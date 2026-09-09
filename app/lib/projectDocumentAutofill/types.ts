@@ -5,7 +5,9 @@ export type ProjectLibraryDocSlot =
   | "pr-extra"
   | "dp-remarks"
   | "crz-remarks"
-  | "power-of-attorney";
+  | "power-of-attorney"
+  | "assessment-department"
+  | "airport-authority-of-india";
 
 export type ProjectLibraryExtraction = {
   slot: ProjectLibraryDocSlot;
@@ -14,6 +16,11 @@ export type ProjectLibraryExtraction = {
   valid: boolean;
   missingFields: string[];
   extracted: Record<string, string | null>;
+  /** Fixed library slot index when extracted from a primary upload. */
+  fixedIndex?: number;
+  /** Extra doc slot id when extracted from an extra upload. */
+  extraSlotId?: string;
+  fileName?: string;
 };
 
 export type AreaExtractRow = {

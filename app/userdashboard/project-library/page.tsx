@@ -18,6 +18,8 @@ type FolderSection =
   | "dp-remarks"
   | "crz-remarks"
   | "power-of-attorney"
+  | "assessment-department"
+  | "airport-authority-of-india"
   | "other";
 
 type LibraryUpload = {
@@ -25,6 +27,7 @@ type LibraryUpload = {
   path?: string;
   url?: string;
   uploadedAt?: string;
+  expiryDate?: string;
 };
 
 type LibraryRow = {
@@ -44,6 +47,8 @@ const FOLDER_LABELS: Record<FolderSection, string> = {
   "dp-remarks": PROJECT_LIBRARY_DOCUMENT_NAMES[1],
   "crz-remarks": PROJECT_LIBRARY_DOCUMENT_NAMES[2],
   "power-of-attorney": PROJECT_LIBRARY_DOCUMENT_NAMES[3],
+  "assessment-department": PROJECT_LIBRARY_DOCUMENT_NAMES[4],
+  "airport-authority-of-india": PROJECT_LIBRARY_DOCUMENT_NAMES[5],
   other: "Other",
 };
 
@@ -52,6 +57,8 @@ const FOLDER_FILTERS: FolderSection[] = [
   "dp-remarks",
   "crz-remarks",
   "power-of-attorney",
+  "assessment-department",
+  "airport-authority-of-india",
 ];
 
 function folderSectionFromPath(path: string): FolderSection {
@@ -62,6 +69,8 @@ function folderSectionFromPath(path: string): FolderSection {
     if (kind.slot === 1) return "dp-remarks";
     if (kind.slot === 2) return "crz-remarks";
     if (kind.slot === 3) return "power-of-attorney";
+    if (kind.slot === 4) return "assessment-department";
+    if (kind.slot === 5) return "airport-authority-of-india";
     return "other";
   }
   if (kind.type === "pr-card") return "pr-card";
@@ -74,6 +83,8 @@ function folderSectionFromPath(path: string): FolderSection {
   }
   if (kind.type === "crz-remarks") return "crz-remarks";
   if (kind.type === "power-of-attorney") return "power-of-attorney";
+  if (kind.type === "assessment-department") return "assessment-department";
+  if (kind.type === "airport-authority-of-india") return "airport-authority-of-india";
   return "other";
 }
 

@@ -42,6 +42,16 @@ export {
   type PowerOfAttorney,
 } from "./powerOfAttorney";
 export {
+  assessmentDepartment,
+  assessmentDepartmentSchema,
+  type AssessmentDepartment,
+} from "./assessmentDepartment";
+export {
+  airportAuthorityOfIndia,
+  airportAuthorityOfIndiaSchema,
+  type AirportAuthorityOfIndia,
+} from "./airportAuthorityOfIndia";
+export {
   entityPanCard,
   entityPanCardSchema,
   type EntityPanCard,

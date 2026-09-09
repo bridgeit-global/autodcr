@@ -16,6 +16,8 @@ import {
   pickString,
   sanitizeCtsNumbers,
   splitCtsNumbers,
+  sanitizeSacNumbers,
+  splitSacNumbers,
   villageDivisionLetterFromCts,
 } from "./utils";
 
@@ -102,6 +104,20 @@ function ctsFromPrExtractions(extractions: ProjectLibraryExtraction[]): string[]
     }
   }
 
+  return [...numbers];
+}
+
+function sacFromAssessmentExtractions(
+  extractions: ProjectLibraryExtraction[]
+): string[] {
+  const numbers = new Set<string>();
+  for (const extraction of extractions.filter(
+    (e) => e.documentType === "assessment-department"
+  )) {
+    for (const sac of splitSacNumbers(extraction.extracted.sacNo)) {
+      numbers.add(sac);
+    }
+  }
   return [...numbers];
 }
 
@@ -222,6 +238,12 @@ function supplementSavePlot(
 
   if (next.proposedCtsNumber) {
     next.proposedCtsNumber = sanitizeCtsNumbers(next.proposedCtsNumber);
+  }
+
+  const assessmentSacs = sacFromAssessmentExtractions(docs);
+  if (assessmentSacs.length) {
+    const existing = sanitizeSacNumbers(next.sacNo);
+    next.sacNo = [...new Set([...existing, ...assessmentSacs])];
   }
 
   return next;

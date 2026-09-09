@@ -104,6 +104,64 @@ export function sanitizeCtsNumbers(raw: unknown): string[] {
   return splitCtsNumbers(typeof raw === "string" ? raw : String(raw ?? ""));
 }
 
+const SAC_PATTERN = /[A-Z]{2}\d{13}/gi;
+const SAC_FULL = /^[A-Z]{2}\d{13}$/;
+
+export function isValidSacNumber(value: string): boolean {
+  return SAC_FULL.test(value);
+}
+
+/** Pull SAC / Prop A/C numbers (2 letters + 13 digits) from free text. */
+export function splitSacNumbers(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const matches = raw.toUpperCase().match(SAC_PATTERN) ?? [];
+  return [...new Set(matches.filter((m) => isValidSacNumber(m)))];
+}
+
+/** Normalize SAC arrays/strings from drafts or AI extraction. */
+export function sanitizeSacNumbers(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return [
+      ...new Set(
+        raw.flatMap((item) =>
+          typeof item === "string" ? splitSacNumbers(item) : splitSacNumbers(String(item ?? ""))
+        )
+      ),
+    ];
+  }
+  return splitSacNumbers(typeof raw === "string" ? raw : String(raw ?? ""));
+}
+
+/** Normalize a validity/expiry date to DD-MM-YYYY when parseable. */
+export function normalizeExpiryDate(raw: string | null | undefined): string {
+  const v = (raw ?? "").trim();
+  if (!v) return "";
+
+  const dmy = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (dmy) {
+    const day = dmy[1]!.padStart(2, "0");
+    const month = dmy[2]!.padStart(2, "0");
+    const year = dmy[3]!;
+    return `${day}-${month}-${year}`;
+  }
+
+  const ymd = v.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (ymd) {
+    const year = ymd[1]!;
+    const month = ymd[2]!.padStart(2, "0");
+    const day = ymd[3]!.padStart(2, "0");
+    return `${day}-${month}-${year}`;
+  }
+
+  // Fallback: pull first DD-MM-YYYY-like token from free text.
+  const embedded = v.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if (embedded) {
+    return normalizeExpiryDate(embedded[0]);
+  }
+
+  return "";
+}
+
 export function normalizePlanningAuthority(
   value: string | null | undefined
 ): "BMC" | "SRA" | "MHADA" | "MMRDA" | "CIDCO" | "MIDC" | "" {

@@ -2,6 +2,8 @@ import { getDocumentIdsForApplication } from "./applications";
 import {
   aadhaarCard,
   architectAppointmentLetter,
+  airportAuthorityOfIndia,
+  assessmentDepartment,
   crzRemarks,
   dpRemarks,
   dpRemarksMap,
@@ -33,6 +35,8 @@ export const documents = {
   "dp-remarks-rl": dpRemarksRl,
   "crz-remarks": crzRemarks,
   "power-of-attorney": powerOfAttorney,
+  "assessment-department": assessmentDepartment,
+  "airport-authority-of-india": airportAuthorityOfIndia,
 } as const;
 
 export type DocumentType = keyof typeof documents;
