@@ -391,8 +391,10 @@ export default function DocumentPreviewModal({
   const downloadPdfUrl =
     fileUrl ?? (saveCompleted && storedPdfDownloadUrl ? storedPdfDownloadUrl : null);
   const showDownloadPdf = Boolean(downloadPdfUrl);
+  // Compact (w-fit) only when real preview content is present. Loading/error
+  // without content must use the full modal width or the dialog collapses to a thin strip.
   const useCompactPreviewLayout =
-    isHtmlPreview || isStoredPdfPreview || (!hasContent && (isLoading || Boolean(loadError)));
+    hasContent && (isHtmlPreview || isStoredPdfPreview);
   const saveUiBusy = Boolean(isSaving);
   const previewReloadBusy = Boolean(isLoading && hasContent);
 
@@ -645,11 +647,11 @@ export default function DocumentPreviewModal({
 
             <div className="flex-1 overflow-auto p-3 bg-gray-50">
               {isLoading && !hasContent ? (
-                <div className="flex min-h-[600px] items-center justify-center text-sm text-gray-500">
-                  Generating preview…
+                <div className="flex min-h-[600px] w-full items-center justify-center text-sm text-gray-500">
+                  Loading preview…
                 </div>
               ) : loadError ? (
-                <div className="flex min-h-[600px] items-center justify-center px-6 text-center text-sm text-red-600">
+                <div className="flex min-h-[600px] w-full items-center justify-center px-6 text-center text-sm text-red-600">
                   {loadError}
                 </div>
               ) : htmlContent && !fileUrl ? (

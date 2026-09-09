@@ -155,7 +155,17 @@ async function uploadProjectLibraryFilesToStorage(
     const local = await getProjectLibraryFile(i);
     if (!local?.blob) continue;
     const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
-    const path = projectLibraryFixedStoragePath(projectId, i, extension);
+    const draftMeta = Array.isArray(draftFixed) ? draftFixed[i] : undefined;
+    const draftRel = draftMeta?.path
+      ?.trim()
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/");
+    const path =
+      draftRel &&
+      !draftRel.includes("project-library/") &&
+      !draftRel.startsWith("blob:")
+        ? `${projectId}/project-library/${draftRel}`
+        : projectLibraryFixedStoragePath(projectId, i, extension);
     // eslint-disable-next-line no-await-in-loop
     const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
       upsert: true,
@@ -166,7 +176,6 @@ async function uploadProjectLibraryFilesToStorage(
       continue;
     }
     const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
-    const draftMeta = Array.isArray(draftFixed) ? draftFixed[i] : undefined;
     uploads.push({
       name: local.name,
       path,
@@ -189,12 +198,25 @@ async function uploadProjectLibraryFilesToStorage(
     const local = await getExtraLibraryDoc(slot.id);
     if (!local?.blob) continue;
     const extension = (local.name.split(".").pop() || "pdf").toLowerCase();
-    const path = projectLibraryExtraStoragePath(
-      projectId,
-      slot.type,
-      extraIndex,
-      extension
-    );
+    const draftExtra = Array.isArray(draftExtraDocs)
+      ? draftExtraDocs.find((s) => s?.id === slot.id)
+      : undefined;
+    // Prefer draft relative stem so DB path matches the object key (UUID extras).
+    const draftRel = draftExtra?.upload?.path
+      ?.trim()
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/");
+    const path =
+      draftRel &&
+      !draftRel.includes("project-library/") &&
+      !draftRel.startsWith("blob:")
+        ? `${projectId}/project-library/${draftRel}`
+        : projectLibraryExtraStoragePath(
+            projectId,
+            slot.type,
+            extraIndex,
+            extension
+          );
     // eslint-disable-next-line no-await-in-loop
     const { error: uploadError } = await supabase.storage.from("project-library").upload(path, local.blob, {
       upsert: true,
@@ -205,9 +227,6 @@ async function uploadProjectLibraryFilesToStorage(
       continue;
     }
     const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
-    const draftExtra = Array.isArray(draftExtraDocs)
-      ? draftExtraDocs.find((s) => s?.id === slot.id)
-      : undefined;
     uploads.push({
       name: local.name,
       path,
