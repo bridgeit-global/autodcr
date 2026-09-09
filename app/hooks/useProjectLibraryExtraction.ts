@@ -30,6 +30,8 @@ type ExtractionJob = {
   slot: ProjectLibraryDocSlot;
   documentType: DocumentType;
   label: string;
+  fixedIndex?: number;
+  extraSlotId?: string;
   loadBlob: () => Promise<{
     name: string;
     type: string;
@@ -48,6 +50,18 @@ const FIXED_JOBS: Array<Omit<ExtractionJob, "loadBlob"> & { index: number }> = [
     documentType: "power-of-attorney",
     label: "Power of Attorney",
   },
+  {
+    index: 4,
+    slot: "assessment-department",
+    documentType: "assessment-department",
+    label: "Assessment Department",
+  },
+  {
+    index: 5,
+    slot: "airport-authority-of-india",
+    documentType: "airport-authority-of-india",
+    label: "Airport Authority of India",
+  },
 ];
 
 const EXTRACT_CONCURRENCY = 5;
@@ -57,6 +71,8 @@ const EXTRACTABLE_EXTRA_TYPES = [
   "dp-remarks",
   "crz-remarks",
   "power-of-attorney",
+  "assessment-department",
+  "airport-authority-of-india",
 ] as const;
 
 type ExtractableExtraType = (typeof EXTRACTABLE_EXTRA_TYPES)[number];
@@ -84,6 +100,16 @@ const EXTRA_JOB_META: Record<
     slot: "power-of-attorney",
     documentType: "power-of-attorney",
     label: "Additional Power of Attorney",
+  },
+  "assessment-department": {
+    slot: "assessment-department",
+    documentType: "assessment-department",
+    label: "Additional Assessment Department",
+  },
+  "airport-authority-of-india": {
+    slot: "airport-authority-of-india",
+    documentType: "airport-authority-of-india",
+    label: "Additional Airport Authority of India",
   },
 };
 
@@ -148,6 +174,7 @@ export function useProjectLibraryExtraction() {
               slot: meta.slot,
               documentType: meta.documentType,
               label: meta.label,
+              extraSlotId: slot.id,
               loadBlob: () => getExtraLibraryDoc(slot.id),
             };
           });
@@ -155,6 +182,7 @@ export function useProjectLibraryExtraction() {
         const candidateJobs: ExtractionJob[] = [
           ...FIXED_JOBS.map(({ index, ...rest }) => ({
             ...rest,
+            fixedIndex: index,
             loadBlob: () => getProjectLibraryFile(index),
           })),
           ...extraJobs,
@@ -197,6 +225,9 @@ export function useProjectLibraryExtraction() {
                   valid: result.valid,
                   missingFields: result.missingFields,
                   extracted: result.extracted,
+                  fixedIndex: job.fixedIndex,
+                  extraSlotId: job.extraSlotId,
+                  fileName: stored.name,
                 },
                 error: null as string | null,
               };

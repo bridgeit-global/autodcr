@@ -74,6 +74,7 @@ type ProjectLibraryUpload = {
   path?: string;
   url?: string;
   uploadedAt?: string;
+  expiryDate?: string;
 };
 
 function isExtraDocType(value: string): value is ProjectLibraryExtraDocType {
@@ -144,6 +145,10 @@ async function uploadProjectLibraryFilesToStorage(
   projectId: string
 ): Promise<ProjectLibraryUpload[]> {
   const uploads: ProjectLibraryUpload[] = [];
+  const draftFixed = loadDraft<(ProjectLibraryUpload | undefined)[]>(
+    "draft-project-library-uploads",
+    []
+  );
 
   for (let i = 0; i < PROJECT_LIBRARY_MAX_FILES; i++) {
     // eslint-disable-next-line no-await-in-loop
@@ -161,15 +166,21 @@ async function uploadProjectLibraryFilesToStorage(
       continue;
     }
     const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
+    const draftMeta = Array.isArray(draftFixed) ? draftFixed[i] : undefined;
     uploads.push({
       name: local.name,
       path,
       url: publicData?.publicUrl || "",
       uploadedAt: new Date().toISOString(),
+      ...(draftMeta?.expiryDate ? { expiryDate: draftMeta.expiryDate } : {}),
     });
   }
 
   const extraSlots = loadExtraLibrarySlots();
+  const draftExtraDocs = loadDraft<{ id?: string; upload?: ProjectLibraryUpload }[]>(
+    DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
+    []
+  );
   const extraIndexByType: Partial<Record<ProjectLibraryExtraDocType, number>> = {};
   for (const slot of extraSlots) {
     extraIndexByType[slot.type] = (extraIndexByType[slot.type] ?? 0) + 1;
@@ -194,11 +205,17 @@ async function uploadProjectLibraryFilesToStorage(
       continue;
     }
     const { data: publicData } = supabase.storage.from("project-library").getPublicUrl(path);
+    const draftExtra = Array.isArray(draftExtraDocs)
+      ? draftExtraDocs.find((s) => s?.id === slot.id)
+      : undefined;
     uploads.push({
       name: local.name,
       path,
       url: publicData?.publicUrl || "",
       uploadedAt: new Date().toISOString(),
+      ...(draftExtra?.upload?.expiryDate
+        ? { expiryDate: draftExtra.upload.expiryDate }
+        : {}),
     });
   }
 

@@ -38,6 +38,7 @@ import {
   projectLibraryFixedRelativeStem,
 } from "@/app/utils/projectSections";
 import { applyProjectAutofillDrafts } from "@/app/lib/projectDocumentAutofill";
+import { normalizeExpiryDate } from "@/app/lib/projectDocumentAutofill/utils";
 import { getFieldLabel } from "@/app/lib/documentValidation/fieldLabels";
 import { useProjectLibraryExtraction } from "@/app/hooks/useProjectLibraryExtraction";
 import { classifyDocumentFile } from "@/app/utils/validateDocumentApi";
@@ -49,6 +50,7 @@ type UploadRecord = {
   url: string;
   uploadedAt: string;
   path: string;
+  expiryDate?: string;
 };
 
 type LibraryDocType =
@@ -57,7 +59,9 @@ type LibraryDocType =
   | "dp-remarks-map"
   | "dp-remarks-rl"
   | "crz-remarks"
-  | "power-of-attorney";
+  | "power-of-attorney"
+  | "assessment-department"
+  | "airport-authority-of-india";
 
 type ExtraDocSlot = {
   id: string;
@@ -94,12 +98,16 @@ const FIXED_TYPE_TO_SLOT: Partial<Record<LibraryDocType, number>> = {
   "dp-remarks": 1,
   "crz-remarks": 2,
   "power-of-attorney": 3,
+  "assessment-department": 4,
+  "airport-authority-of-india": 5,
 };
 const EXTRACTABLE_EXTRA_TYPES: LibraryDocType[] = [
   "pr-card",
   "dp-remarks",
   "crz-remarks",
   "power-of-attorney",
+  "assessment-department",
+  "airport-authority-of-india",
 ];
 
 const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
@@ -109,6 +117,8 @@ const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
   "dp-remarks-rl",
   "crz-remarks",
   "power-of-attorney",
+  "assessment-department",
+  "airport-authority-of-india",
 ];
 
 const DP_TYPE_OPTIONS: LibraryDocType[] = [
@@ -124,6 +134,8 @@ const LABEL_BY_TYPE: Record<LibraryDocType, string> = {
   "dp-remarks-rl": PROJECT_LIBRARY_DP_RL_LABEL,
   "crz-remarks": DOCUMENT_NAMES[2],
   "power-of-attorney": DOCUMENT_NAMES[3],
+  "assessment-department": DOCUMENT_NAMES[4],
+  "airport-authority-of-india": DOCUMENT_NAMES[5],
 };
 
 const EXTRA_LABEL_BY_TYPE: Record<LibraryDocType, string> = {
@@ -133,6 +145,8 @@ const EXTRA_LABEL_BY_TYPE: Record<LibraryDocType, string> = {
   "dp-remarks-rl": PROJECT_LIBRARY_DP_RL_LABEL,
   "crz-remarks": `Additional ${DOCUMENT_NAMES[2]}`,
   "power-of-attorney": `Additional ${DOCUMENT_NAMES[3]}`,
+  "assessment-department": `Additional ${DOCUMENT_NAMES[4]}`,
+  "airport-authority-of-india": `Additional ${DOCUMENT_NAMES[5]}`,
 };
 
 const createId = () =>
@@ -186,7 +200,11 @@ function splitServerUploads(uploadsData: UploadRecord[]) {
             ? "dp-remarks"
             : kind.slot === 2
               ? "crz-remarks"
-              : "power-of-attorney";
+              : kind.slot === 3
+                ? "power-of-attorney"
+                : kind.slot === 4
+                  ? "assessment-department"
+                  : "airport-authority-of-india";
       extraDocs.push(createExtraSlot(overflowType, upload));
     }
   }
@@ -908,6 +926,42 @@ export default function ProjectLibraryPage() {
       applyProjectAutofillDrafts(outcome.autofill);
     }
 
+    // Attach Valid-up-to as expiryDate on Airport Authority of India upload objects.
+    const aaiExtractions = outcome.extractions.filter(
+      (e) => e.documentType === "airport-authority-of-india"
+    );
+    if (aaiExtractions.length > 0) {
+      const nextFixed = [...savedFixed];
+      let nextExtra = savedExtra.map((slot) => ({ ...slot }));
+      for (const extraction of aaiExtractions) {
+        const expiryDate = normalizeExpiryDate(extraction.extracted.validUpTo);
+        if (!expiryDate) continue;
+        if (
+          typeof extraction.fixedIndex === "number" &&
+          nextFixed[extraction.fixedIndex]
+        ) {
+          nextFixed[extraction.fixedIndex] = {
+            ...nextFixed[extraction.fixedIndex]!,
+            expiryDate,
+          };
+          continue;
+        }
+        if (extraction.extraSlotId) {
+          nextExtra = nextExtra.map((slot) =>
+            slot.id === extraction.extraSlotId && slot.upload
+              ? { ...slot, upload: { ...slot.upload, expiryDate } }
+              : slot
+          );
+        }
+      }
+      savedFixed = nextFixed;
+      savedExtra = nextExtra;
+      setUploads(normalizeFixedUploads(nextFixed));
+      setExtraDocs(nextExtra);
+      persistExtraDocs(nextExtra);
+      saveDraft("draft-project-library-uploads", nextFixed);
+    }
+
     const snapshot: LibrarySnapshot = {
       fixed: savedFixed,
       extraPr: extrasOfType(savedExtra, "pr-card"),
@@ -1213,6 +1267,80 @@ export default function ProjectLibraryPage() {
                 ))}
               </>
             ) : null}
+            {uploads[4] ||
+            extrasOfType(extraDocs, "assessment-department").length > 0 ? (
+              <>
+                <AttachedSummaryRow
+                  key="fixed-4"
+                  serial="5"
+                  label={DOCUMENT_NAMES[4]}
+                  upload={uploads[4]}
+                  isReadOnlyMode={isReadOnlyMode}
+                  onPreview={() =>
+                    void openPreview(
+                      DOCUMENT_NAMES[4] || uploads[4]?.name || "Document 5",
+                      () => getProjectLibraryFile(4),
+                      uploads[4]?.url
+                    )
+                  }
+                />
+                {extrasOfType(extraDocs, "assessment-department").map(
+                  (slot, slotIndex) => (
+                    <AttachedSummaryRow
+                      key={slot.id}
+                      serial={`5.${slotIndex + 1}`}
+                      label={EXTRA_LABEL_BY_TYPE[slot.type]}
+                      upload={slot.upload}
+                      isReadOnlyMode={isReadOnlyMode}
+                      onPreview={() =>
+                        void openPreview(
+                          `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                          () => getExtraLibraryDoc(slot.id),
+                          slot.upload?.url
+                        )
+                      }
+                    />
+                  )
+                )}
+              </>
+            ) : null}
+            {uploads[5] ||
+            extrasOfType(extraDocs, "airport-authority-of-india").length > 0 ? (
+              <>
+                <AttachedSummaryRow
+                  key="fixed-5"
+                  serial="6"
+                  label={DOCUMENT_NAMES[5]}
+                  upload={uploads[5]}
+                  isReadOnlyMode={isReadOnlyMode}
+                  onPreview={() =>
+                    void openPreview(
+                      DOCUMENT_NAMES[5] || uploads[5]?.name || "Document 6",
+                      () => getProjectLibraryFile(5),
+                      uploads[5]?.url
+                    )
+                  }
+                />
+                {extrasOfType(extraDocs, "airport-authority-of-india").map(
+                  (slot, slotIndex) => (
+                    <AttachedSummaryRow
+                      key={slot.id}
+                      serial={`6.${slotIndex + 1}`}
+                      label={EXTRA_LABEL_BY_TYPE[slot.type]}
+                      upload={slot.upload}
+                      isReadOnlyMode={isReadOnlyMode}
+                      onPreview={() =>
+                        void openPreview(
+                          `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                          () => getExtraLibraryDoc(slot.id),
+                          slot.upload?.url
+                        )
+                      }
+                    />
+                  )
+                )}
+              </>
+            ) : null}
           </ul>
         )}
 
@@ -1283,6 +1411,12 @@ export default function ProjectLibraryPage() {
                         </option>
                         <option value="power-of-attorney">
                           {LABEL_BY_TYPE["power-of-attorney"]}
+                        </option>
+                        <option value="assessment-department">
+                          {LABEL_BY_TYPE["assessment-department"]}
+                        </option>
+                        <option value="airport-authority-of-india">
+                          {LABEL_BY_TYPE["airport-authority-of-india"]}
                         </option>
                       </select>
                       <button

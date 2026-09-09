@@ -1,7 +1,7 @@
 import { loadDraft, saveDraft } from "@/app/utils/draftStorage";
 import type { ProjectAutofillResult } from "./types";
 import { notifyProjectAutofillApplied } from "./hydration";
-import { enrichSavePlotLocation, sanitizeCtsNumbers } from "./utils";
+import { enrichSavePlotLocation, sanitizeCtsNumbers, sanitizeSacNumbers } from "./utils";
 
 const SAVE_PLOT_DEFAULTS = {
   planningAuthority: "",
@@ -77,19 +77,33 @@ export function applyProjectAutofillDrafts(autofill: ProjectAutofillResult): voi
     : typeof rawCts === "string" && rawCts
       ? [rawCts]
       : [];
+  const existingSac = sanitizeSacNumbers(existingSavePlot.sacNo);
 
   const hasSavePlotAutofill = Object.keys(autofill.savePlot).length > 0;
   const savePlotDraft = enrichSavePlotLocation(
     mergeDefined(
       hasSavePlotAutofill
-        ? { ...SAVE_PLOT_DEFAULTS, proposedCtsNumber: normalizedCts.length ? normalizedCts : [] }
-        : { ...SAVE_PLOT_DEFAULTS, ...existingSavePlot, proposedCtsNumber: normalizedCts },
+        ? {
+            ...SAVE_PLOT_DEFAULTS,
+            proposedCtsNumber: normalizedCts.length ? normalizedCts : [],
+            sacNo: existingSac,
+          }
+        : {
+            ...SAVE_PLOT_DEFAULTS,
+            ...existingSavePlot,
+            proposedCtsNumber: normalizedCts,
+            sacNo: existingSac,
+          },
       autofill.savePlot
     )
   );
   if (savePlotDraft.proposedCtsNumber) {
     savePlotDraft.proposedCtsNumber = sanitizeCtsNumbers(savePlotDraft.proposedCtsNumber);
   }
+  const incomingSac = sanitizeSacNumbers(autofill.savePlot.sacNo);
+  savePlotDraft.sacNo = [
+    ...new Set([...sanitizeSacNumbers(savePlotDraft.sacNo), ...incomingSac, ...existingSac]),
+  ];
   saveDraft("draft-project-details-save-plot", savePlotDraft);
 
   const existingProject = loadDraft<Record<string, unknown>>(

@@ -47,6 +47,8 @@ export const PROJECT_LIBRARY_DOCUMENT_NAMES = [
   "D.P. Remarks",
   "C.R.Z. Remarks",
   "Power of Attorney",
+  "Assessment Department",
+  "Airport Authority of India",
 ] as const;
 
 export const PROJECT_LIBRARY_PR_CARD_LABEL = PROJECT_LIBRARY_DOCUMENT_NAMES[0];
@@ -85,7 +87,9 @@ export type ProjectLibraryExtraDocType =
   | "dp-remarks-map"
   | "dp-remarks-rl"
   | "crz-remarks"
-  | "power-of-attorney";
+  | "power-of-attorney"
+  | "assessment-department"
+  | "airport-authority-of-india";
 
 export const EXTRA_DOC_STORAGE_PREFIX: Record<ProjectLibraryExtraDocType, string> = {
   "pr-card": "extra-pr",
@@ -94,6 +98,8 @@ export const EXTRA_DOC_STORAGE_PREFIX: Record<ProjectLibraryExtraDocType, string
   "dp-remarks-rl": "extra-dp-rl",
   "crz-remarks": "extra-crz-remarks",
   "power-of-attorney": "extra-power-of-attorney",
+  "assessment-department": "extra-assessment-department",
+  "airport-authority-of-india": "extra-airport-authority-of-india",
 };
 
 export const PROJECT_LIBRARY_STORAGE_FOLDERS = {
@@ -101,6 +107,8 @@ export const PROJECT_LIBRARY_STORAGE_FOLDERS = {
   "dp-remarks": "dp-remarks",
   "crz-remarks": "crz-remarks",
   "power-of-attorney": "power-of-attorney",
+  "assessment-department": "assessment-department",
+  "airport-authority-of-india": "airport-authority-of-india",
 } as const;
 
 const FIXED_SLOT_RELATIVE_STEM: Record<number, string> = {
@@ -108,6 +116,8 @@ const FIXED_SLOT_RELATIVE_STEM: Record<number, string> = {
   1: "dp-remarks/letter",
   2: "crz-remarks/primary",
   3: "power-of-attorney/primary",
+  4: "assessment-department/primary",
+  5: "airport-authority-of-india/primary",
 };
 
 const EXTRA_RELATIVE_STEM: Record<ProjectLibraryExtraDocType, string> = {
@@ -117,6 +127,8 @@ const EXTRA_RELATIVE_STEM: Record<ProjectLibraryExtraDocType, string> = {
   "dp-remarks-rl": "dp-remarks/road-line",
   "crz-remarks": "crz-remarks/extra",
   "power-of-attorney": "power-of-attorney/extra",
+  "assessment-department": "assessment-department/extra",
+  "airport-authority-of-india": "airport-authority-of-india/extra",
 };
 
 export type ProjectLibraryStorageKind =
@@ -195,6 +207,14 @@ export function classifyProjectLibraryStoragePath(
     if (stem === "primary") return { role: "fixed", slot: 3 };
     return { role: "extra", type: "power-of-attorney" };
   }
+  if (folder === PROJECT_LIBRARY_STORAGE_FOLDERS["assessment-department"]) {
+    if (stem === "primary") return { role: "fixed", slot: 4 };
+    return { role: "extra", type: "assessment-department" };
+  }
+  if (folder === PROJECT_LIBRARY_STORAGE_FOLDERS["airport-authority-of-india"]) {
+    if (stem === "primary") return { role: "fixed", slot: 5 };
+    return { role: "extra", type: "airport-authority-of-india" };
+  }
 
   if (stem.startsWith("extra-pr")) return { role: "extra", type: "pr-card" };
   if (stem.startsWith("extra-dp-remarks")) return { role: "extra", type: "dp-remarks" };
@@ -208,12 +228,18 @@ export function classifyProjectLibraryStoragePath(
   if (stem.startsWith("extra-power-of-attorney")) {
     return { role: "extra", type: "power-of-attorney" };
   }
+  if (stem.startsWith("extra-assessment-department")) {
+    return { role: "extra", type: "assessment-department" };
+  }
+  if (stem.startsWith("extra-airport-authority-of-india")) {
+    return { role: "extra", type: "airport-authority-of-india" };
+  }
 
-  const documentMatch = stem.match(/^document-([1-4])(?:-\1)?$/);
+  const documentMatch = stem.match(/^document-([1-6])(?:-\1)?$/);
   if (documentMatch) {
     return { role: "fixed", slot: Number(documentMatch[1]) - 1 };
   }
-  const documentPrefix = stem.match(/^document-([1-4])\b/);
+  const documentPrefix = stem.match(/^document-([1-6])\b/);
   if (documentPrefix) {
     return { role: "fixed", slot: Number(documentPrefix[1]) - 1 };
   }

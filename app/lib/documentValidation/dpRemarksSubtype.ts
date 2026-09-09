@@ -5,6 +5,8 @@ const DP_LETTER = "dp-remarks";
 const DP_MAP = "dp-remarks-map";
 const DP_RL = "dp-remarks-rl";
 const PR = "pr-card";
+const ASSESSMENT = "assessment-department";
+const AAI = "airport-authority-of-india";
 
 function allowedHas(allowedTypes: readonly string[], id: string): boolean {
   return allowedTypes.includes(id);
@@ -12,6 +14,43 @@ function allowedHas(allowedTypes: readonly string[], id: string): boolean {
 
 function head(text: string, n = 2500): string {
   return text.slice(0, n);
+}
+
+/** Airport Authority of India / SNCR NOC or height clearance. */
+export function isAirportAuthorityOfIndiaText(documentText: string): boolean {
+  const t = documentText;
+  const h = head(t);
+  const aai =
+    /\bAirport\s+Authority\s+of\s+India\b/i.test(h) ||
+    /\bAAI\b/.test(h) ||
+    /\bSNCR\b/i.test(t);
+  const validUpTo =
+    /\bValid\s*up\s*to\b/i.test(t) ||
+    /\bValid\s*Upto\b/i.test(t) ||
+    /\bValidity\b/i.test(h);
+  return aai || (/\bSNCR\b/i.test(t) && validUpTo);
+}
+
+/** BMC Assessment & Collection — No Dues, Annexure A, SAC/Prop A/C docs. */
+export function isAssessmentDepartmentText(documentText: string): boolean {
+  if (isAirportAuthorityOfIndiaText(documentText)) return false;
+  const t = documentText;
+  const h = head(t);
+  const dept =
+    /\bASSESSMENT\s*(?:AND|&)\s*COLLECTION\s*(?:DEPT\.?|DEPARTMENT)\b/i.test(h) ||
+    /\bASSESSMENT\s*(?:AND|&)\s*COLLECTION\b/i.test(h);
+  const noDues =
+    /\bNo\s+dues?\s+certificate\b/i.test(t) ||
+    /\bNo\s+Property\s+tax\s+dues\b/i.test(t) ||
+    /\bProp\s*A\/C\s*No\.?\b/i.test(t);
+  const annexure =
+    /\bAnnexure\s*[\"']?A[\"']?\b/i.test(h) &&
+    (/\bCapital\s+Value\b/i.test(t) || /\bSAC\s*NO\s*:/i.test(t));
+  const sacLabeled =
+    /\bSAC\s*No\.?\b/i.test(t) ||
+    /\bSACNo\b/i.test(t) ||
+    /\bSAC\s*NO\s*:/i.test(t);
+  return dept || noDues || annexure || (sacLabeled && dept);
 }
 
 /** CRZ remarks letter/report — not a DP map, even if later pages are a plan. */
@@ -38,7 +77,12 @@ export function isDpRemarksLetterText(documentText: string): boolean {
 }
 
 export function isDpMapPlanText(documentText: string): boolean {
-  if (isCrzRemarksText(documentText) || isDpRemarksLetterText(documentText)) {
+  if (
+    isAirportAuthorityOfIndiaText(documentText) ||
+    isAssessmentDepartmentText(documentText) ||
+    isCrzRemarksText(documentText) ||
+    isDpRemarksLetterText(documentText)
+  ) {
     return false;
   }
   return (
@@ -48,7 +92,12 @@ export function isDpMapPlanText(documentText: string): boolean {
 }
 
 export function isDpRoadLineText(documentText: string): boolean {
-  if (isCrzRemarksText(documentText) || isDpRemarksLetterText(documentText)) {
+  if (
+    isAirportAuthorityOfIndiaText(documentText) ||
+    isAssessmentDepartmentText(documentText) ||
+    isCrzRemarksText(documentText) ||
+    isDpRemarksLetterText(documentText)
+  ) {
     return false;
   }
   return (
@@ -59,6 +108,8 @@ export function isDpRoadLineText(documentText: string): boolean {
 
 export function isPrCardText(documentText: string): boolean {
   if (
+    isAirportAuthorityOfIndiaText(documentText) ||
+    isAssessmentDepartmentText(documentText) ||
     isCrzRemarksText(documentText) ||
     isDpRemarksLetterText(documentText) ||
     isDpMapPlanText(documentText)
@@ -74,6 +125,8 @@ export function isPrCardText(documentText: string): boolean {
 function typeFromText(documentText: string): DocumentType | null {
   const text = documentText.replace(/\u0000/g, " ");
   if (!text.trim()) return null;
+  if (isAirportAuthorityOfIndiaText(text)) return AAI;
+  if (isAssessmentDepartmentText(text)) return ASSESSMENT;
   if (isCrzRemarksText(text)) return CRZ;
   if (isDpRoadLineText(text)) return DP_RL;
   if (isDpMapPlanText(text)) return DP_MAP;
