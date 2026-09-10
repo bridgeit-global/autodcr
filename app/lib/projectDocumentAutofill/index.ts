@@ -19,7 +19,9 @@ export function buildProjectAutofillFromExtractions(
   const areaTotals = computeAreaTotals(areaPlots);
   const savePlot = mergeSavePlot(extractions);
   if (areaTotals.totalLeaseArea > 0) {
-    savePlot.grossPlotArea = String(areaTotals.totalLeaseArea);
+    // Collapse float noise (e.g. 592.9999999999999 → 593) to match Area Details display
+    const rounded = Math.round(areaTotals.totalLeaseArea * 100) / 100;
+    savePlot.grossPlotArea = String(rounded);
   }
   const projectInfo = mergeProjectInfo(extractions);
   const applicant = mergeApplicant(extractions);

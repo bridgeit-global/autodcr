@@ -103,3 +103,9 @@ export const FIELD_LABELS: Record<string, string> = {
 export function getFieldLabel(key: string): string {
   return FIELD_LABELS[key] ?? key;
 }
+
+/** Strip trailing " Ward" for UI when the field label is already "Ward". */
+export function formatWardDisplayValue(value: string): string {
+  const stripped = value.replace(/\s+Ward$/i, "").trim();
+  return stripped || value;
+}

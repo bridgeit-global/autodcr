@@ -16,7 +16,7 @@ import CustomSelect from "@/app/components/CustomSelect";
 import type { DocumentValidationResult } from "@/app/components/DocumentValidationResultModal";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
-import { getFieldLabel } from "@/app/lib/documentValidation/fieldLabels";
+import { getFieldLabel, formatWardDisplayValue } from "@/app/lib/documentValidation/fieldLabels";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import {
   buildApplicationDetailsPath,
@@ -347,7 +347,9 @@ function DocumentGeneratorContent() {
       setValidationResult(response.result);
       const next: Record<string, string> = {};
       for (const [key, value] of Object.entries(response.result.extracted)) {
-        next[key] = value ?? "";
+        const text = value ?? "";
+        next[key] =
+          key === "ward" && text ? formatWardDisplayValue(text) : text;
       }
       setEditableFields(next);
     } finally {
