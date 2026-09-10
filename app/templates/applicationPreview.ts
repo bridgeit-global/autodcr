@@ -1,5 +1,6 @@
 "use client";
 
+import { formatWardDisplayValue } from "@/app/lib/documentValidation/fieldLabels";
 import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
 import {
   addressLinesFromApplicantRecord,
@@ -1066,7 +1067,7 @@ export function buildDetailsFieldRowsForUi(
     rows.push({
       key,
       label: labelForPdfFieldKey(key, templateType),
-      value,
+      value: key === "project_Ward." ? formatWardDisplayValue(value) : value,
     });
   };
 
