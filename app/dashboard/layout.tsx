@@ -35,6 +35,7 @@ import {
   ensureArchitectInApplicantRoster,
   ensureOwnerInApplicantRoster,
   readSessionUserMetaFromStorage,
+  resolveApplicantsForOwnerValidation,
   validateOwnerForArchitectProject,
   type ApplicantLike,
   type OwnerApplicantMeta,
@@ -547,6 +548,25 @@ function DashboardLayoutContent({
     }
   }
 
+  // Seed applicant draft for any loaded project so Update Project owner checks
+  // match the saved roster even if Applicant Details was not re-opened.
+  const seededApplicantDraftRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!verifiedProjectData?.id) return;
+    if (seededApplicantDraftRef.current === verifiedProjectData.id) return;
+    seededApplicantDraftRef.current = verifiedProjectData.id;
+
+    const existingDraft = loadDraft<unknown[]>("draft-applicant-details-applicants", []);
+    if (Array.isArray(existingDraft) && existingDraft.length > 0) return;
+
+    const savedApplicants = (
+      verifiedProjectData.applicant_details as { applicants?: unknown[] } | undefined
+    )?.applicants;
+    if (Array.isArray(savedApplicants) && savedApplicants.length > 0) {
+      saveDraft("draft-applicant-details-applicants", savedApplicants);
+    }
+  }, [verifiedProjectData]);
+
   // Clear all project drafts when leaving the dashboard (unmount)
   useEffect(() => {
     return () => {
@@ -765,15 +785,23 @@ function DashboardLayoutContent({
       const isArchitectCreate =
         canCreateProjectAsArchitect(meta) && !isActuallyEditMode;
       let ownerUserIdForCreate: string | null = null;
-      if (isArchitectCreate) {
-        const applicantsList = loadDraft("draft-applicant-details-applicants", []);
+      if (isArchitectCreate || (canCreateProjectAsArchitect(meta) && isActuallyEditMode)) {
+        const draftApplicants = loadDraft(
+          "draft-applicant-details-applicants",
+          []
+        ) as ApplicantLike[];
+        const resolvedApplicants = resolveApplicantsForOwnerValidation(
+          draftApplicants,
+          verifiedProjectData
+        );
+        if (
+          !applicantRosterHasOwner(draftApplicants) &&
+          applicantRosterHasOwner(resolvedApplicants)
+        ) {
+          saveDraft("draft-applicant-details-applicants", resolvedApplicants);
+        }
         const ownerCheck = validateOwnerForArchitectProject(
-          applicantsList as Array<{
-            user_id?: string;
-            userId?: string;
-            applicantType?: string;
-            applicant_type?: string;
-          }>,
+          resolvedApplicants,
           sessionUserId
         );
         if (!ownerCheck.ok) {
@@ -782,22 +810,6 @@ function DashboardLayoutContent({
           return;
         }
         ownerUserIdForCreate = ownerCheck.ownerUserId;
-      } else if (canCreateProjectAsArchitect(meta) && isActuallyEditMode) {
-        const applicantsList = loadDraft("draft-applicant-details-applicants", []);
-        const ownerCheck = validateOwnerForArchitectProject(
-          applicantsList as Array<{
-            user_id?: string;
-            userId?: string;
-            applicantType?: string;
-            applicant_type?: string;
-          }>,
-          sessionUserId
-        );
-        if (!ownerCheck.ok) {
-          setSubmitError(ownerCheck.message);
-          showAlert({ title: "Owner required", message: ownerCheck.message });
-          return;
-        }
       }
 
       let finalProjectId: string | null = null;
@@ -1086,32 +1098,18 @@ function DashboardLayoutContent({
       const isArchitectCreate =
         canCreateProjectAsArchitect(meta) && !isActuallyEditMode;
       let ownerUserIdForCreate: string | null = null;
-      if (isArchitectCreate) {
-        const ownerCheck = validateOwnerForArchitectProject(
-          applicantsList as Array<{
-            user_id?: string;
-            userId?: string;
-            applicantType?: string;
-            applicant_type?: string;
-          }>,
-          userId
+      if (isArchitectCreate || (canCreateProjectAsArchitect(meta) && isActuallyEditMode)) {
+        const resolvedApplicants = resolveApplicantsForOwnerValidation(
+          applicantsList as ApplicantLike[],
+          existingData
         );
-        if (!ownerCheck.ok) {
-          setSubmitError(ownerCheck.message);
-          showAlert({ title: "Owner required", message: ownerCheck.message });
-          return;
+        if (
+          !applicantRosterHasOwner(applicantsList as ApplicantLike[]) &&
+          applicantRosterHasOwner(resolvedApplicants)
+        ) {
+          saveDraft("draft-applicant-details-applicants", resolvedApplicants);
         }
-        ownerUserIdForCreate = ownerCheck.ownerUserId;
-      } else if (canCreateProjectAsArchitect(meta) && isActuallyEditMode) {
-        const ownerCheck = validateOwnerForArchitectProject(
-          applicantsList as Array<{
-            user_id?: string;
-            userId?: string;
-            applicantType?: string;
-            applicant_type?: string;
-          }>,
-          userId
-        );
+        const ownerCheck = validateOwnerForArchitectProject(resolvedApplicants, userId);
         if (!ownerCheck.ok) {
           setSubmitError(ownerCheck.message);
           showAlert({ title: "Owner required", message: ownerCheck.message });

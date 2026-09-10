@@ -64,7 +64,6 @@ function savePlotPatchFromExtracted(
     assign("villageName", normalizeVillageForWard(ward, `BANDRA-${villageLetter}`));
   }
   assign("grossPlotArea", pickString(extracted.grossPlotArea));
-  assign("roadName", pickString(extracted.roadName));
   assign("dpZone", normalizeDpZoneForForm(extracted.dpZone));
 
   const cts = splitCtsNumbers(extracted.proposedCtsNumber);
@@ -187,7 +186,6 @@ function supplementSavePlot(
     );
   }
 
-  assignIfEmpty("roadName", pickFromExtractions(docs, (e) => e.roadName));
   assignIfEmpty(
     "dpZone",
     normalizeDpZoneForForm(pickFromExtractions(docs, (e) => e.dpZone))

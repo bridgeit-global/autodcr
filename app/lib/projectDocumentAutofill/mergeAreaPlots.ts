@@ -1,6 +1,5 @@
 import type { AreaExtractRow, AreaPlotRow, ProjectLibraryExtraction } from "./types";
 import {
-  hasLocationData,
   isLeafRow,
   leaseAreaOf,
   parseExtractsJson,
@@ -64,7 +63,7 @@ function plotFromPrExtraction(
     plotNumber: String(plotNumber),
     plotName: pickString(extracted.plotName, extracted.villageName),
     ownerName: pickString(extracted.ownerName),
-    type: hasLocationData(extracted) ? "PRC" : "",
+    type: "PRC",
     extractCount: String(extracts.length),
     area: prcTotal > 0 ? prcTotal.toString() : "",
     extracts,

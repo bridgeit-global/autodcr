@@ -492,8 +492,15 @@ export default function ApplicantDetailsPage() {
       console.log("[Applicant Details] Applicants list from backend:", applicantsList);
       
       if (applicantsList.length > 0) {
+        const projectOwnerId =
+          typeof projectData.user_id === "string" ? projectData.user_id.trim() : "";
         const orderedApplicants = sortApplicantsOwnerFirst(
-          mapStoredApplicantsToRows(applicantsList)
+          mapStoredApplicantsToRows(applicantsList).map((row) => {
+            if (!isOwnerApplicantType(row.applicantType)) return row;
+            if (row.user_id?.trim()) return row;
+            if (!projectOwnerId) return row;
+            return { ...row, user_id: projectOwnerId };
+          })
         );
         console.log("[Applicant Details] Mapped applicants:", orderedApplicants);
         setApplicants(orderedApplicants);
