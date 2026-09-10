@@ -118,6 +118,7 @@ export function isPrCardText(documentText: string): boolean {
   }
   return (
     (/मालम/.test(documentText) && /भूमापन/.test(documentText)) ||
+    /मालमत्ता\s*पत्रक/.test(documentText) ||
     /\bProperty Register Card\b/i.test(documentText)
   );
 }

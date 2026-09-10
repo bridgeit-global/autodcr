@@ -436,6 +436,58 @@ export function validateOwnerForArchitectProject(
   return { ok: true, ownerUserId };
 }
 
+/**
+ * Resolve the applicant roster for architect owner checks / submit.
+ * Prefers the local draft when it already has a linked Owner; otherwise falls back to
+ * saved project applicant_details and projects.user_id so Update Project does not
+ * false-positive when the UI shows an Owner but the draft was empty/stale.
+ */
+export function resolveApplicantsForOwnerValidation(
+  draftApplicants: ApplicantLike[] | null | undefined,
+  projectData?: {
+    user_id?: string | null;
+    applicant_details?: { applicants?: unknown[] | null } | null;
+  } | null
+): ApplicantLike[] {
+  const draft = Array.isArray(draftApplicants) ? draftApplicants : [];
+  if (applicantRosterHasOwner(draft)) {
+    return draft;
+  }
+
+  const fromProject = Array.isArray(projectData?.applicant_details?.applicants)
+    ? (projectData.applicant_details.applicants as ApplicantLike[])
+    : [];
+  if (applicantRosterHasOwner(fromProject)) {
+    return fromProject;
+  }
+
+  const projectOwnerId =
+    typeof projectData?.user_id === "string" ? projectData.user_id.trim() : "";
+  if (!projectOwnerId) {
+    return draft.length ? draft : fromProject;
+  }
+
+  const source = draft.length ? draft : fromProject;
+  const ownerIndex = source.findIndex((row) =>
+    isOwnerApplicantType(String(row.applicantType || row.applicant_type || ""))
+  );
+
+  if (ownerIndex >= 0) {
+    return source.map((row, index) => {
+      if (index !== ownerIndex) return row;
+      const existingId = (row.user_id || row.userId || "").toString().trim();
+      if (existingId) return row;
+      return { ...row, user_id: projectOwnerId };
+    });
+  }
+
+  if (source.length) {
+    return [{ applicantType: "Owner", user_id: projectOwnerId }, ...source];
+  }
+
+  return [{ applicantType: "Owner", user_id: projectOwnerId }];
+}
+
 export function readSessionUserMetaFromStorage(): SessionUserMeta {
   if (typeof window === "undefined") {
     return { role: "", consultant_type: "" };
