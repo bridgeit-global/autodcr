@@ -1942,9 +1942,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       console.log('Registration successful:', { userId: userId, metadata: userMetadata });
       setSubmitSuccess(true);
       
-      // Send the new user to sign in after 2 seconds
-      setTimeout(() => {
-        router.push('/login');
+      // Clear OTP/session so /login is not bounced to the dashboard by middleware
+      setTimeout(async () => {
+        try {
+          await supabase.auth.signOut({ scope: "local" });
+        } catch (signOutError) {
+          console.error("Post-registration sign out failed:", signOutError);
+        }
+        router.push("/login");
       }, 2000);
 
     } catch (err) {

@@ -328,6 +328,10 @@ const Login = ({ slides }: HeroSectionProps) => {
                     Owner
                   </Link>
                   {" · "}
+                  <Link href="/developer" className="font-medium text-brand-blue hover:text-brand-blue-hover">
+                    Developer
+                  </Link>
+                  {" · "}
                   <Link href="/consultant" className="font-medium text-brand-blue hover:text-brand-blue-hover">
                     Consultant
                   </Link>

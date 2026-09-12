@@ -13,6 +13,7 @@ import {
   templateTypeToPdfTokenSuffix,
 } from "@/app/utils/consultantTemplateTokens";
 import { resolveConsultantMetadata } from "@/app/utils/resolveConsultantMetadata";
+import { isOwnerApplicantType } from "@/app/utils/projectAccess";
 import { createClient } from "@supabase/supabase-js";
 
 type EnrichOpts = {
@@ -151,8 +152,8 @@ export async function enrichConsultantAppointmentFields(
       (a as { applicantType?: string; applicant_type?: string }).applicantType ||
         (a as { applicant_type?: string }).applicant_type ||
         ""
-    ).toLowerCase();
-    return type.includes("owner");
+    );
+    return isOwnerApplicantType(type);
   }) as Record<string, unknown> | undefined;
   const primaryCityPincode = pickCityPincodeFromRecord(primaryApplicant);
   const architectCityPincode = pickCityPincodeFromRecord(architectApplicant);

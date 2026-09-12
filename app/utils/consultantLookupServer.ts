@@ -139,9 +139,24 @@ export async function findConsultantByEmail(
   return null;
 }
 
+function isPrincipalAccountRole(
+  role: string,
+  meta?: Record<string, unknown>,
+  allowedRoles?: readonly string[]
+): boolean {
+  const allowed = allowedRoles?.length
+    ? allowedRoles
+    : (["Owner", "Developer"] as const);
+  if (role) return allowed.includes(role);
+  // Do not treat phone/email OTP stub users (no role, no entity) as principals.
+  // Legacy/partial rows may lack role but still have entity_type from registration.
+  return Boolean(meta && String(meta.entity_type || "").trim());
+}
+
 export async function findOwnerByPhone(
   admin: ReturnType<typeof createServiceRoleClient>,
-  phone: string
+  phone: string,
+  allowedRoles?: readonly string[]
 ): Promise<ConsultantLookupMatch | null> {
   const normalized = normalizePhone(phone);
   if (normalized.length !== 10) return null;
@@ -150,11 +165,15 @@ export async function findOwnerByPhone(
   for (const user of users) {
     const meta = (user.user_metadata || {}) as Record<string, unknown>;
     const role = String(meta.role || "");
-    if (role && role !== "Owner") continue;
+    if (!isPrincipalAccountRole(role, meta, allowedRoles)) continue;
 
     const metaPhone = getPhoneFromMetadata(meta);
     const authPhone = normalizePhone(user.phone || "");
-    if (metaPhone === normalized || authPhone === normalized) {
+    // Prefer metadata phone; auth.phone alone often belongs to OTP stub users.
+    if (metaPhone === normalized) {
+      return toMatch(user);
+    }
+    if (authPhone === normalized && role) {
       return toMatch(user);
     }
   }
@@ -164,7 +183,8 @@ export async function findOwnerByPhone(
 export async function findOwnerByRegistrationNumber(
   admin: ReturnType<typeof createServiceRoleClient>,
   registrationNumber: string,
-  entityType?: string
+  entityType?: string,
+  allowedRoles?: readonly string[]
 ): Promise<ConsultantLookupMatch | null> {
   const normalized = normalizeRegNo(registrationNumber);
   if (!normalized) return null;
@@ -173,11 +193,22 @@ export async function findOwnerByRegistrationNumber(
   for (const user of users) {
     const meta = (user.user_metadata || {}) as Record<string, unknown>;
     const role = String(meta.role || "");
-    if (role && role !== "Owner") continue;
+    if (!isPrincipalAccountRole(role, meta, allowedRoles)) continue;
 
     if (entityType) {
       const mapping = OWNER_REGISTRATION_META_BY_TYPE[entityType];
       if (!mapping) continue;
+      // Only collide with principals that use the same registration-number field
+      // (or the same entity type). Avoid matching OTP/partial stubs or unrelated types.
+      const theirType = String(meta.entity_type || "").trim();
+      const theirMapping = theirType
+        ? OWNER_REGISTRATION_META_BY_TYPE[theirType]
+        : undefined;
+      if (theirType && theirType !== entityType) {
+        if (!theirMapping || theirMapping.metaKey !== mapping.metaKey) {
+          continue;
+        }
+      }
       const value = normalizeRegNo(String(meta[mapping.metaKey] || ""));
       if (value && value === normalized) {
         return toMatch(user);
@@ -195,7 +226,8 @@ export async function findOwnerByRegistrationNumber(
 
 export async function findOwnerByEmail(
   admin: ReturnType<typeof createServiceRoleClient>,
-  email: string
+  email: string,
+  allowedRoles?: readonly string[]
 ): Promise<ConsultantLookupMatch | null> {
   const normalized = String(email || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -204,7 +236,7 @@ export async function findOwnerByEmail(
   for (const user of users) {
     const meta = (user.user_metadata || {}) as Record<string, unknown>;
     const role = String(meta.role || "");
-    if (role && role !== "Owner") continue;
+    if (!isPrincipalAccountRole(role, meta, allowedRoles)) continue;
 
     const userEmail = (user.email || "").trim().toLowerCase();
     const metaEmail = String(meta.email || "")

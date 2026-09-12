@@ -17,13 +17,51 @@ import {
 import {
   isPartialOwnerField,
   normalizePhone,
+  OWNER_DOC_CHECKLIST,
+  OWNER_LLP_AUTOFILL_ENTITY_DOC_IDS,
   OWNER_REGISTRATION_META_BY_TYPE,
   ownerMetadataToFormFields,
+  ownerUsesEntityPan,
+  isOwnerDocumentsSectionComplete,
 } from "@/app/utils/ownerRegistrationShared";
 import { isValidIndianPincode } from "@/app/utils/pincode";
+import { getPhoneFromMetadata } from "@/app/utils/consultantRegistrationShared";
 
-interface RegistrationFormProps {
-  title?: string;
+type PrincipalLookupMatch = {
+  status?: string;
+  user_id?: string;
+  email?: string;
+  metadata?: Record<string, unknown>;
+};
+
+/** True when lookup hit belongs to someone else (not this form's verified/self identity). */
+function isForeignPrincipalMatch(
+  match: PrincipalLookupMatch | null | undefined,
+  opts: {
+    verifiedUserId: string | null;
+    email: string;
+    phone: string;
+  }
+): boolean {
+  const matchUserId = String(match?.user_id || "").trim();
+  if (!matchUserId) return false;
+  if (opts.verifiedUserId && matchUserId === opts.verifiedUserId) return false;
+
+  const status = String(match?.status || "").toLowerCase();
+  // Incomplete with same email/phone is the caller's own resume — not a conflict.
+  if (status === "incomplete") {
+    const matchEmail = String(match?.email || match?.metadata?.email || "")
+      .trim()
+      .toLowerCase();
+    const formEmail = opts.email.trim().toLowerCase();
+    if (formEmail && matchEmail && formEmail === matchEmail) return false;
+
+    const matchPhone = getPhoneFromMetadata(match?.metadata || {});
+    const formPhone = normalizePhone(opts.phone);
+    if (formPhone.length === 10 && matchPhone === formPhone) return false;
+  }
+
+  return true;
 }
 
 const ENTITY_TYPES = [
@@ -36,83 +74,17 @@ const ENTITY_TYPES = [
   "Govt. / PSU / Local Body",
 ];
 
-type EntityDocumentRequirement = {
-  id: string;
-  label: string;
-  required?: boolean;
-  accept?: string;
-};
-
-const DOC_CHECKLIST: Record<string, EntityDocumentRequirement[]> = {
-  Proprietorship: [
-    { id: "individualUtility", label: "Recent Utility Bill / Address Proof", accept: ".pdf" },
-  ],
-  Individual: [
-    { id: "individualUtility", label: "Recent Utility Bill / Address Proof", accept: ".pdf" },
-  ],
-  "Partnership Firm": [
-    { id: "partnershipDeed", label: "Partnership Deed", required: true, accept: ".pdf" },
-    { id: "partnershipCert", label: "Firm Registration Certificate", required: true, accept: ".pdf" },
-  ],
-  "Pvt. Ltd. / Ltd. Company": [
-    { id: "companyIncorporationCert", label: "Certificate of Incorporation", required: true, accept: ".pdf" },
-    { id: "companyMoaAoa", label: "MoA & AoA (single compiled PDF)", required: true, accept: ".pdf" },
-    { id: "companyBoardResolution", label: "Board Resolution authorising signatory", required: true, accept: ".pdf" },
-  ],
-  LLP: [
-    { id: "llpCertificate", label: "LLPIN Allotment / Certificate of Incorporation", required: true, accept: ".pdf" },
-    { id: "llpAgreementDoc", label: "LLP Agreement", required: true, accept: ".pdf" },
-    { id: "llpResolutionDoc", label: "Resolution / LOA authorising Designated Partner", required: true, accept: ".pdf" },
-    { id: "llpEntityPan", label: "Entity PAN Card", required: true, accept: ".pdf" },
-    { id: "llpGstCertificate", label: "GST Registration Certificate", required: true, accept: ".pdf" },
-  ],
-  "Trust / Society": [
-    { id: "trustRegistrationCert", label: "Registration Certificate (Trust / Society)", required: true, accept: ".pdf" },
-    { id: "trustDeedDoc", label: "Trust Deed / Bye-laws", required: true, accept: ".pdf" },
-  ],
-  "Govt. / PSU / Local Body": [
-    { id: "govOrder", label: "Government Order / Office Order authorising officer", required: true, accept: ".pdf" },
-  ],
-};
-
-const ENTITY_TYPES_WITH_ENTITY_PAN = new Set(["LLP"]);
-
-const LLP_AUTOFILL_ENTITY_DOC_IDS = new Set([
-  "llpCertificate",
-  "llpEntityPan",
-  "llpGstCertificate",
-]);
-
-function ownerUsesEntityPan(entityType: string): boolean {
-  return ENTITY_TYPES_WITH_ENTITY_PAN.has(entityType);
-}
-
-function isOwnerDocumentsSectionComplete(
-  entityType: string,
-  data: {
-    aadhaarCardFile: File | null;
-    panCardFile: File | null;
-    authorizedSignatoryPhotoFile: File | null;
-    authorizedSignatorySignatureFile: File | null;
-    entityDocuments: Record<string, File | null>;
-  }
-): boolean {
-  if (!entityType) return false;
-  if (!data.aadhaarCardFile) return false;
-  if (!ownerUsesEntityPan(entityType) && !data.panCardFile) return false;
-  if (!data.authorizedSignatoryPhotoFile || !data.authorizedSignatorySignatureFile) {
-    return false;
-  }
-  for (const doc of DOC_CHECKLIST[entityType] || []) {
-    if (!data.entityDocuments[doc.id]) return false;
-  }
-  return true;
+interface RegistrationFormProps {
+  title?: string;
+  accountRole?: "Owner" | "Developer";
 }
 
 const RegistrationForm: React.FC<RegistrationFormProps> = ({
-  title = "Registration"
+  title = "Registration",
+  accountRole = "Owner",
 }) => {
   const router = useRouter();
+  const registrationKind = accountRole === "Developer" ? "developer" : "owner";
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -353,10 +325,10 @@ I hereby declare that I have read, understood, and agree to comply with all the 
     acceptDeclaration: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const docsForEntity = DOC_CHECKLIST[formData.entityType] || [];
+  const docsForEntity = OWNER_DOC_CHECKLIST[formData.entityType] || [];
   const docsForEntityDisplay =
     formData.entityType === "LLP"
-      ? docsForEntity.filter((doc) => !LLP_AUTOFILL_ENTITY_DOC_IDS.has(doc.id))
+      ? docsForEntity.filter((doc) => !OWNER_LLP_AUTOFILL_ENTITY_DOC_IDS.has(doc.id))
       : docsForEntity;
 
   const composeAddress = (line1: string, line2: string, line3: string): string =>
@@ -399,7 +371,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       formData.entityType === "Individual" && newType !== "Individual";
 
     setFormData((prev) => {
-      const prevDocIds = (DOC_CHECKLIST[prev.entityType] || []).map((doc) => doc.id);
+      const prevDocIds = (OWNER_DOC_CHECKLIST[prev.entityType] || []).map((doc) => doc.id);
       const clearedEntityDocuments = { ...prev.entityDocuments };
       for (const id of prevDocIds) {
         delete clearedEntityDocuments[id];
@@ -645,17 +617,37 @@ I hereby declare that I have read, understood, and agree to comply with all the 
           entityType: formData.entityType,
         }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as PrincipalLookupMatch;
       if (
         (data.status === "incomplete" || data.status === "complete") &&
-        data.user_id &&
-        data.user_id !== verifiedUserId
+        isForeignPrincipalMatch(data, {
+          verifiedUserId,
+          email: formData.email,
+          phone: formData.alternatePhone,
+        })
       ) {
         setErrors((prev) => ({
           ...prev,
           [mapping.formField]: "This registration number is already registered",
         }));
         setFormError("This registration number is already registered");
+        return;
+      }
+      // Own incomplete row — keep going with that auth user id
+      if (
+        data.status === "incomplete" &&
+        data.user_id &&
+        (!verifiedUserId || verifiedUserId !== data.user_id)
+      ) {
+        setVerifiedUserId(data.user_id);
+      }
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[mapping.formField];
+        return next;
+      });
+      if (formError === "This registration number is already registered") {
+        setFormError("");
       }
     } catch {
       // non-blocking on blur
@@ -1483,8 +1475,8 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         if (field.startsWith("entityDocuments.")) {
           const docId = field.replace("entityDocuments.", "");
           if (!value) {
-            // Check if this document is required based on DOC_CHECKLIST
-            const docsForEntity = DOC_CHECKLIST[formData.entityType] || [];
+            // Check if this document is required based on OWNER_DOC_CHECKLIST
+            const docsForEntity = OWNER_DOC_CHECKLIST[formData.entityType] || [];
             const docRequirement = docsForEntity.find(doc => doc.id === docId);
             if (docRequirement?.required) {
               error = `Upload ${docRequirement.label}`;
@@ -1710,12 +1702,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: formData.alternatePhone }),
       });
-      const phoneLookup = await phoneLookupRes.json();
+      const phoneLookup = (await phoneLookupRes.json()) as PrincipalLookupMatch;
       if (
-        phoneLookup.status === "complete" ||
-        (phoneLookup.status === "incomplete" &&
-          phoneLookup.user_id &&
-          phoneLookup.user_id !== verifiedUserId)
+        (phoneLookup.status === "complete" || phoneLookup.status === "incomplete") &&
+        isForeignPrincipalMatch(phoneLookup, {
+          verifiedUserId,
+          email: formData.email,
+          phone: formData.alternatePhone,
+        })
       ) {
         setFormError(
           phoneLookup.status === "complete"
@@ -1726,8 +1720,18 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         scrollToSection("section-basic-details");
         return;
       }
+      if (
+        phoneLookup.status === "incomplete" &&
+        phoneLookup.user_id &&
+        (!verifiedUserId || verifiedUserId !== phoneLookup.user_id)
+      ) {
+        setVerifiedUserId(phoneLookup.user_id);
+      }
 
       const regMapping = OWNER_REGISTRATION_META_BY_TYPE[formData.entityType];
+      let effectiveVerifiedUserId =
+        (phoneLookup.status === "incomplete" && phoneLookup.user_id) ||
+        verifiedUserId;
       if (regMapping) {
         const regNo = String(
           (formData as Record<string, unknown>)[regMapping.formField] || ""
@@ -1741,16 +1745,28 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               entityType: formData.entityType,
             }),
           });
-          const regLookup = await regLookupRes.json();
+          const regLookup = (await regLookupRes.json()) as PrincipalLookupMatch;
           if (
             (regLookup.status === "incomplete" || regLookup.status === "complete") &&
-            regLookup.user_id &&
-            regLookup.user_id !== verifiedUserId
+            isForeignPrincipalMatch(regLookup, {
+              verifiedUserId: effectiveVerifiedUserId,
+              email: formData.email,
+              phone: formData.alternatePhone,
+            })
           ) {
             setFormError("This registration number is already registered");
             setIsSubmitting(false);
             scrollToSection("section-registration");
             return;
+          }
+          if (
+            regLookup.status === "incomplete" &&
+            regLookup.user_id &&
+            (!effectiveVerifiedUserId ||
+              effectiveVerifiedUserId !== regLookup.user_id)
+          ) {
+            setVerifiedUserId(regLookup.user_id);
+            effectiveVerifiedUserId = regLookup.user_id;
           }
         }
       }
@@ -1774,20 +1790,20 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       }
 
       // User was created during email OTP verification - set their password
-      if (!verifiedUserId) {
+      if (!effectiveVerifiedUserId) {
         setFormError('Email verification is required. Please verify your email address first.');
         setIsSubmitting(false);
         scrollToSection("section-basic-details");
         return;
       }
       
-      console.log('Using verified user ID from email OTP:', verifiedUserId);
-      const userId = verifiedUserId;
+      console.log('Using verified user ID from email OTP:', effectiveVerifiedUserId);
+      const userId = effectiveVerifiedUserId;
       
       // Update the user's password using edge function
       const { data: updateData, error: updateError } = await supabase.functions.invoke('update-user-password', {
         body: {
-          userId: verifiedUserId,
+          userId: effectiveVerifiedUserId,
           password: formData.password,
           metadata: {
             entity_type: formData.entityType,
@@ -1796,7 +1812,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             middle_name: formData.middleName || null,
             last_name: formData.lastName,
             user_id: formData.userId,
-            role: 'Owner',
+            role: accountRole,
             status: 'pending'
           }
         }
@@ -2045,7 +2061,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
             middle_name: formData.middleName || null,
             last_name: formData.lastName,
           user_id: formData.userId,
-          role: 'Owner',
+          role: accountRole,
             email: formData.email,
             city: formData.city,
             pincode: formData.pincode,
@@ -2135,7 +2151,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
         },
         body: JSON.stringify({ 
           user_id: userId, 
-          role: 'Owner',
+          role: accountRole,
           metadata: userMetadata
         }),
       });
@@ -2153,9 +2169,14 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       console.log('Registration successful:', { userId: userId, metadata: userMetadata });
       setSubmitSuccess(true);
       
-      // Send the new user to sign in after 2 seconds
-      setTimeout(() => {
-        router.push('/login');
+      // Clear OTP/session so /login is not bounced to the dashboard by middleware
+      setTimeout(async () => {
+        try {
+          await supabase.auth.signOut({ scope: "local" });
+        } catch (signOutError) {
+          console.error("Post-registration sign out failed:", signOutError);
+        }
+        router.push("/login");
       }, 2000);
 
     } catch (err) {
@@ -2839,7 +2860,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
               <div className="mb-6">
                 <RegistrationDocumentAutofillStep
                   key={formData.entityType}
-                  registrationKind="owner"
+                  registrationKind={registrationKind}
                   entityType={formData.entityType}
                   onAutofill={applyRegistrationAutofill}
                   onContinue={() => {

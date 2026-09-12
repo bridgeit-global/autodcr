@@ -60,20 +60,31 @@ function mapOwnerDirectoryRow(row: Record<string, unknown>): OwnerApplicantMeta 
   };
 }
 
-/** Load owner profile from the directory RPC for roster seeding. */
+/** Load owner/developer profile from the directory RPC for roster seeding. */
 export async function fetchOwnerApplicantMeta(
   ownerUserId: string
 ): Promise<OwnerApplicantMeta | null> {
   const id = ownerUserId.trim();
   if (!id) return null;
-  const { data, error } = await supabase.rpc("get_owners");
-  if (error || !data) return null;
-  const row = (data as Record<string, unknown>[]).find(
-    (entry) => pickText(entry.user_id) === id
-  );
+
+  const loadByRole = async (role: string) => {
+    const { data, error } = await supabase.rpc("get_owners", { p_role: role });
+    if (error || !data) return null;
+    return (data as Record<string, unknown>[]).find(
+      (entry) => pickText(entry.user_id) === id
+    );
+  };
+
+  let row = await loadByRole("owner");
+  let principalRole: "Owner" | "Developer" = "Owner";
+  if (!row) {
+    row = await loadByRole("developer");
+    if (row) principalRole = "Developer";
+  }
   if (!row) return null;
 
   let meta = mapOwnerDirectoryRow(row);
+  meta = { ...meta, role: principalRole };
 
   // Directory RPC may omit city/pincode/address lines — fill from auth metadata.
   if (!meta.city || !meta.pincode || !meta.address_line1) {
@@ -89,20 +100,22 @@ export async function fetchOwnerApplicantMeta(
       if (res.ok) {
         const payload = (await res.json()) as { metadata?: Record<string, unknown> };
         const userMeta = payload.metadata || {};
+        const roleFromMeta = String(userMeta.role || "").trim();
+        if (roleFromMeta === "Developer") principalRole = "Developer";
         meta = {
           ...meta,
           ...mapOwnerDirectoryRow({ ...row, user_metadata: userMeta }),
+          role: principalRole,
         };
       }
     } catch {
       /* keep RPC-only meta */
     }
   }
-
   return meta;
 }
 
-/** Add projects.user_id as Owner on the roster when absent (fetches profile if needed). */
+/** Add projects.user_id as Owner/Developer on the roster when absent (fetches profile if needed). */
 export async function ensureProjectOwnerOnRoster(
   roster: { applicants?: unknown[] },
   ownerUserId: string,

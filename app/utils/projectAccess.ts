@@ -36,8 +36,51 @@ export function sameUserId(
   return x.length > 0 && y.length > 0 && x === y;
 }
 
+export type PrincipalApplicantLabel = "Owner" | "Developer";
+
+export function normalizePrincipalApplicantType(
+  type: string | null | undefined
+): PrincipalApplicantLabel | null {
+  const t = (type || "").trim().toLowerCase();
+  if (t === "owner" || t.includes("owner")) return "Owner";
+  if (t === "developer") return "Developer";
+  return null;
+}
+
+/** True for Owner or Developer project principal rows. */
 export function isOwnerApplicantType(type: string): boolean {
-  return type.toLowerCase().includes("owner");
+  return normalizePrincipalApplicantType(type) !== null;
+}
+
+export function isDeveloperApplicantType(type: string): boolean {
+  return normalizePrincipalApplicantType(type) === "Developer";
+}
+
+/** Resolve display label from roster; defaults to Owner when no principal is present. */
+export function primaryApplicantLabelFromRoster(
+  applicants: ApplicantLike[] | null | undefined
+): PrincipalApplicantLabel {
+  if (!applicants?.length) return "Owner";
+  for (const a of applicants) {
+    const label = normalizePrincipalApplicantType(
+      a.applicantType || a.applicant_type || ""
+    );
+    if (label) return label;
+  }
+  return "Owner";
+}
+
+export function resolvePrincipalApplicantTypeFromRoster(
+  applicants: ApplicantLike[] | null | undefined
+): PrincipalApplicantLabel | null {
+  if (!applicants?.length) return null;
+  for (const a of applicants) {
+    const label = normalizePrincipalApplicantType(
+      a.applicantType || a.applicant_type || ""
+    );
+    if (label) return label;
+  }
+  return null;
 }
 
 export function isProjectOwner(
@@ -196,10 +239,11 @@ function ownerRegistrationFromMeta(meta?: OwnerApplicantMeta | null): {
   return { registrationNo, licenseIssueDate };
 }
 
-/** Build one Owner row for applicant_details.applicants[] (matches DB backfill shape). */
+/** Build one Owner/Developer row for applicant_details.applicants[] (matches DB backfill shape). */
 export function buildOwnerApplicantRow(
   ownerUserId: string,
-  meta?: OwnerApplicantMeta | null
+  meta?: OwnerApplicantMeta | null,
+  applicantType: PrincipalApplicantLabel = "Owner"
 ): ApplicantLike & Record<string, unknown> {
   const name =
     [meta?.first_name, meta?.middle_name, meta?.last_name].filter(Boolean).join(" ").trim() ||
@@ -232,7 +276,7 @@ export function buildOwnerApplicantRow(
   );
   return {
     user_id: ownerUserId,
-    applicantType: "Owner",
+    applicantType,
     name,
     contactNumber: meta?.alternate_phone?.trim() || meta?.mobile?.trim() || "-",
     email: meta?.email?.trim() || "-",
@@ -273,8 +317,7 @@ export function ensureOwnerInApplicantRoster(
   const ownerIndex = applicants.findIndex((a) => {
     const uid = a.user_id || a.userId;
     if (!sameUserId(uid, ownerId)) return false;
-    const t = (a.applicantType || a.applicant_type || "").toLowerCase();
-    return t.includes("owner");
+    return isOwnerApplicantType(a.applicantType || a.applicant_type || "");
   });
 
   const entityTypeFromMeta = meta?.entity_type?.trim() || "";
@@ -307,7 +350,14 @@ export function ensureOwnerInApplicantRoster(
   }
 
   return {
-    applicants: [buildOwnerApplicantRow(ownerId, meta), ...applicants],
+    applicants: [
+      buildOwnerApplicantRow(
+        ownerId,
+        meta,
+        meta?.role === "Developer" ? "Developer" : "Owner"
+      ),
+      ...applicants,
+    ],
   };
 }
 
@@ -424,13 +474,14 @@ export function validateOwnerForArchitectProject(
     return {
       ok: false,
       message:
-        "Add a project Owner from the directory before submitting. The owner will sign applications in In Process.",
+        "Add a project Owner or Developer from the directory before submitting. They will sign applications in In Process.",
     };
   }
   if (architectUserId && sameUserId(ownerUserId, architectUserId)) {
     return {
       ok: false,
-      message: "The project Owner must be a different account than the architect.",
+      message:
+        "The project Owner or Developer must be a different account than the architect.",
     };
   }
   return { ok: true, ownerUserId };

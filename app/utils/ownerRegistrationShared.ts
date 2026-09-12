@@ -91,6 +91,98 @@ export const OWNER_EXTRA_REG_REQUIRED_BY_TYPE: Record<string, string[]> = {
   "Govt. / PSU / Local Body": ["departmentName"],
 };
 
+export type OwnerEntityDocumentRequirement = {
+  id: string;
+  label: string;
+  required?: boolean;
+  accept?: string;
+};
+
+/** Entity-specific PDF checklist for Owner/Developer registration. */
+export const OWNER_DOC_CHECKLIST: Record<string, OwnerEntityDocumentRequirement[]> = {
+  Proprietorship: [
+    { id: "individualUtility", label: "Recent Utility Bill / Address Proof", accept: ".pdf" },
+  ],
+  Individual: [
+    { id: "individualUtility", label: "Recent Utility Bill / Address Proof", accept: ".pdf" },
+  ],
+  "Partnership Firm": [
+    { id: "partnershipDeed", label: "Partnership Deed", required: true, accept: ".pdf" },
+    { id: "partnershipCert", label: "Firm Registration Certificate", required: true, accept: ".pdf" },
+  ],
+  "Pvt. Ltd. / Ltd. Company": [
+    { id: "companyIncorporationCert", label: "Certificate of Incorporation", required: true, accept: ".pdf" },
+    { id: "companyMoaAoa", label: "MoA & AoA (single compiled PDF)", required: true, accept: ".pdf" },
+    { id: "companyBoardResolution", label: "Board Resolution authorising signatory", required: true, accept: ".pdf" },
+  ],
+  LLP: [
+    { id: "llpCertificate", label: "LLPIN Allotment / Certificate of Incorporation", required: true, accept: ".pdf" },
+    { id: "llpAgreementDoc", label: "LLP Agreement", required: true, accept: ".pdf" },
+    { id: "llpResolutionDoc", label: "Resolution / LOA authorising Designated Partner", required: true, accept: ".pdf" },
+    { id: "llpEntityPan", label: "Entity PAN Card", required: true, accept: ".pdf" },
+    { id: "llpGstCertificate", label: "GST Registration Certificate", required: true, accept: ".pdf" },
+  ],
+  "Trust / Society": [
+    { id: "trustRegistrationCert", label: "Registration Certificate (Trust / Society)", required: true, accept: ".pdf" },
+    { id: "trustDeedDoc", label: "Trust Deed / Bye-laws", required: true, accept: ".pdf" },
+  ],
+  "Govt. / PSU / Local Body": [
+    { id: "govOrder", label: "Government Order / Office Order authorising officer", required: true, accept: ".pdf" },
+  ],
+};
+
+export const OWNER_ENTITY_TYPES_WITH_ENTITY_PAN = new Set(["LLP"]);
+
+export const OWNER_LLP_AUTOFILL_ENTITY_DOC_IDS = new Set([
+  "llpCertificate",
+  "llpEntityPan",
+  "llpGstCertificate",
+]);
+
+/** Form entity-doc id → auth metadata URL key. */
+export const OWNER_ENTITY_DOC_URL_META_BY_ID: Record<string, string> = {
+  individualUtility: "individual_utility_url",
+  partnershipDeed: "partnership_deed_url",
+  partnershipCert: "partnership_cert_url",
+  companyIncorporationCert: "company_incorporation_cert_url",
+  companyMoaAoa: "company_moa_aoa_url",
+  companyBoardResolution: "company_board_resolution_url",
+  llpCertificate: "llp_certificate_url",
+  llpAgreementDoc: "llp_agreement_url",
+  llpResolutionDoc: "llp_resolution_url",
+  llpEntityPan: "llp_entity_pan_url",
+  llpGstCertificate: "llp_gst_certificate_url",
+  trustRegistrationCert: "trust_registration_cert_url",
+  trustDeedDoc: "trust_deed_url",
+  govOrder: "gov_order_url",
+};
+
+export function ownerUsesEntityPan(entityType: string): boolean {
+  return OWNER_ENTITY_TYPES_WITH_ENTITY_PAN.has(entityType);
+}
+
+export function isOwnerDocumentsSectionComplete(
+  entityType: string,
+  data: {
+    aadhaarCardFile: File | null;
+    panCardFile: File | null;
+    authorizedSignatoryPhotoFile: File | null;
+    authorizedSignatorySignatureFile: File | null;
+    entityDocuments: Record<string, File | null>;
+  }
+): boolean {
+  if (!entityType) return false;
+  if (!data.aadhaarCardFile) return false;
+  if (!ownerUsesEntityPan(entityType) && !data.panCardFile) return false;
+  if (!data.authorizedSignatoryPhotoFile || !data.authorizedSignatorySignatureFile) {
+    return false;
+  }
+  for (const doc of OWNER_DOC_CHECKLIST[entityType] || []) {
+    if (!data.entityDocuments[doc.id]) return false;
+  }
+  return true;
+}
+
 export type PartialOwnerPayload = {
   entityType: string;
   entityName?: string;
@@ -151,8 +243,11 @@ export function getPrimaryOwnerRegNoFromPayload(data: PartialOwnerPayload): stri
   return normalizeRegNo(value);
 }
 
+export type PrincipalAccountRole = "Owner" | "Developer";
+
 export function buildPartialOwnerMetadata(
-  data: PartialOwnerPayload
+  data: PartialOwnerPayload,
+  accountRole: PrincipalAccountRole = "Owner"
 ): Record<string, unknown> {
   const fullAddress = composeAddressLines(
     data.addressLine1 || "",
@@ -165,7 +260,7 @@ export function buildPartialOwnerMetadata(
     first_name: data.firstName,
     middle_name: data.middleName || null,
     last_name: data.lastName,
-    role: "Owner",
+    role: accountRole,
     email: data.email,
     city: data.city || null,
     pincode: data.pincode || null,

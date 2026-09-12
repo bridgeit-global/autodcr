@@ -113,7 +113,7 @@ export async function POST(
       appRow.owner_signed_at.trim().length > 0
     ) {
       return NextResponse.json(
-        { error: "Owner has already signed this application." },
+        { error: "The project principal has already signed this application." },
         { status: 409 }
       );
     }
@@ -132,7 +132,7 @@ export async function POST(
       typeof project.architect_user_id === "string" ? project.architect_user_id.trim() : "";
     if (!architectId || architectId !== user.id) {
       return NextResponse.json(
-        { error: "Only the appointed architect can sign on behalf of the owner." },
+        { error: "Only the appointed architect can sign on behalf of the project principal." },
         { status: 403 }
       );
     }

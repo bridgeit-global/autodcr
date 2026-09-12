@@ -8,6 +8,7 @@ import {
 } from "@/app/utils/email";
 import { isMailNotificationEnabledForStage } from "@/app/utils/mailNotificationPreferences";
 import { permissionTitleToApplicantType } from "@/app/utils/applicantAppointmentPermissions";
+import { isOwnerApplicantType } from "@/app/utils/projectAccess";
 import {
   buildApplicationDetailsUrl,
   getAppBaseUrl,
@@ -182,7 +183,7 @@ export async function POST(
 
       if (!userId && !isValidEmail(email)) continue;
 
-      const isOwner = type.toLowerCase() === "owner";
+      const isOwner = isOwnerApplicantType(type);
       const isTargetConsultant =
         consultantApplicantType &&
         type.toLowerCase() === consultantApplicantType.toLowerCase();
@@ -190,7 +191,7 @@ export async function POST(
       if (isOwner || isTargetConsultant) {
         recipients.push({
           email,
-          name: name === "-" ? (isOwner ? "Owner" : "Consultant") : name,
+          name: name === "-" ? (isOwner ? type || "Owner" : "Consultant") : name,
           role: type,
           userId,
         });

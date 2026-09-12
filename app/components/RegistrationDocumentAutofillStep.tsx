@@ -109,7 +109,7 @@ function slotsForKind(
     return consultantIdentitySlots();
   }
 
-  if (kind === "owner" && entityType === "LLP") {
+  if ((kind === "owner" || kind === "developer") && entityType === "LLP") {
     return [
       { id: "aadhaar", label: "Aadhaar Card", required: true },
       {
@@ -130,7 +130,8 @@ function slotsForKind(
   const common: DocSlot[] = [
     { id: "aadhaar", label: "Aadhaar Card", required: true },
   ];
-  const skipPersonalPan = kind === "owner" && entityType === "LLP";
+  const skipPersonalPan =
+    (kind === "owner" || kind === "developer") && entityType === "LLP";
   if (!skipPersonalPan) {
     common.push({ id: "pan", label: "PAN Card", required: true });
   }

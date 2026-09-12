@@ -31,16 +31,19 @@ const TileGrid = ({ tiles }: TileGridProps) => {
   const router = useRouter();
 
   function onClick(item: string) {
-    // Navigate to owner registration page
     if (item === "Owner") {
       router.push("/owner");
       return;
     }
-    else if (item === "Consultant") {
+    if (item === "Developer") {
+      router.push("/developer");
+      return;
+    }
+    if (item === "Consultant") {
       router.push("/consultant");
       return;
     }
-    
+
     const modalKey = MODAL_KEYS[item];
     if (modalKey) setActiveModal(modalKey);
   }

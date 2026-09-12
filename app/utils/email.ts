@@ -33,7 +33,10 @@ export type ApplicationStage =
 type RecipientKind = "owner" | "consultant";
 
 function resolveRecipientKind(role: string): RecipientKind {
-  return role.trim().toLowerCase() === "owner" ? "owner" : "consultant";
+  const normalized = role.trim().toLowerCase();
+  return normalized === "owner" || normalized === "developer"
+    ? "owner"
+    : "consultant";
 }
 
 function stripHtml(value: string): string {

@@ -1,5 +1,6 @@
 import type { TemplateType } from "@/app/templates/templateGenerators";
 import { findConsultantApplicantInList } from "@/app/utils/consultantTemplateTokens";
+import { isOwnerApplicantType } from "@/app/utils/projectAccess";
 
 /** Project/applicant shape used for signing permission checks. */
 export type SigningProjectContext = {
@@ -91,8 +92,8 @@ export function collectOwnerSignerUserIds(
   }
   const applicants = project?.applicant_details?.applicants ?? [];
   for (const a of applicants) {
-    const type = (a.applicantType || a.applicant_type || "").toLowerCase();
-    if (!type.includes("owner")) continue;
+    const type = a.applicantType || a.applicant_type || "";
+    if (!isOwnerApplicantType(type)) continue;
     for (const v of [a.user_id, a.userId, a.id, a.owner_id]) {
       if (typeof v === "string" && v.trim()) raw.push(v.trim());
     }

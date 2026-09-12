@@ -215,7 +215,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   const getRegistrationInfo = (): { label: string; value: string } => {
     if (!userMetadata) return { label: "NMA Reg Number:", value: "" };
     
-    if (userMetadata.role === "Owner") {
+    if (userMetadata.role === "Owner" || userMetadata.role === "Developer") {
       const entityType = userMetadata.entity_type;
       if (entityType === "Pvt. Ltd. / Ltd. Company") {
         return { label: "CIN Number:", value: userMetadata.cin || "" };
@@ -311,7 +311,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
       const fullName = [firstName, middleName, lastName].filter(Boolean).join(" ");
 
       setValue("name", fullName || "");
-      setValue("console",  userMetadata.role == "Owner" ? userMetadata.entity_type : userMetadata.consultant_type );
+      setValue("console",  (userMetadata.role == "Owner" || userMetadata.role == "Developer") ? userMetadata.entity_type : userMetadata.consultant_type );
       setValue("panNo", userMetadata.pan || "");
       setValue("address", userMetadata.address || "");
       setValue("city", userMetadata.city || "");
@@ -429,7 +429,7 @@ const ProfileModal: React.FC<Props> = ({ open, onClose }) => {
   // Load the latest mapping from any one of the owner's projects for display.
   useEffect(() => {
     if (!open) return;
-    if (userMetadata?.role !== "Owner") return;
+    if (userMetadata?.role !== "Owner" && userMetadata?.role !== "Developer") return;
 
     const loadTemplatesFromProjects = async () => {
       try {

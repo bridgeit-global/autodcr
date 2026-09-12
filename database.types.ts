@@ -645,7 +645,7 @@ export type Database = {
         }[]
       }
       get_owners: {
-        Args: never
+        Args: { p_role?: string }
         Returns: {
           address: string
           address_line1: string
