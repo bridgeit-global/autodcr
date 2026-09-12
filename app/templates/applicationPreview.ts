@@ -20,6 +20,10 @@ import {
 } from "@/app/utils/resolveBuildingProposalOffice";
 import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
+import {
+  isOwnerApplicantType,
+  type PrincipalApplicantLabel,
+} from "@/app/utils/projectAccess";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
 export type { BuildingProposalAddressBlock } from "@/app/utils/resolveBuildingProposalOffice";
@@ -372,8 +376,8 @@ export function mapToPdfFieldValues(
   const sanitizeAddressLine = stripTrailingAddressPunctuation;
 
   const applicants = source?.projectData?.applicant_details?.applicants || [];
-  const ownerApplicant = applicants.find(
-    (applicant) => (applicant.applicantType || applicant.applicant_type || "").toLowerCase().includes("owner")
+  const ownerApplicant = applicants.find((applicant) =>
+    isOwnerApplicantType(applicant.applicantType || applicant.applicant_type || "")
   );
   const isLicensedSurveyorLetter = templateType === "Licensed Surveyor";
   const consultantKeywords = templateType
@@ -2309,7 +2313,8 @@ export function mockSecondSignerLabel(templateType?: TemplateType): string {
 
 export function injectMockOwnerSignatureIntoPreviewHtml(
   html: string,
-  _templateType?: TemplateType
+  _templateType?: TemplateType,
+  principalLabel: PrincipalApplicantLabel = "Owner"
 ): string {
   if (typeof window === "undefined" || typeof DOMParser === "undefined") {
     return html;
@@ -2319,7 +2324,12 @@ export function injectMockOwnerSignatureIntoPreviewHtml(
 
   const ownerSignatureBlock = parsed.querySelector(".owner-signature");
   if (ownerSignatureBlock && !ownerSignatureBlock.querySelector("#preview-dummy-owner-sign")) {
-    const wrap = buildMockSignatureWrap(parsed, "preview-dummy-owner-sign", "Owner", "-2deg");
+    const wrap = buildMockSignatureWrap(
+      parsed,
+      "preview-dummy-owner-sign",
+      principalLabel,
+      "-2deg"
+    );
     wrap.style.display = "block";
     wrap.style.textAlign = "right";
     wrap.style.alignSelf = "flex-end";
@@ -2345,7 +2355,12 @@ export function injectMockOwnerSignatureIntoPreviewHtml(
   if (!ownerCell || !signatureLine) return html;
   if (ownerCell.querySelector("#preview-dummy-owner-sign")) return html;
 
-  const wrap = buildMockSignatureWrap(parsed, "preview-dummy-owner-sign", "Owner", "-2deg");
+  const wrap = buildMockSignatureWrap(
+    parsed,
+    "preview-dummy-owner-sign",
+    principalLabel,
+    "-2deg"
+  );
   ownerCell.insertBefore(wrap, signatureLine);
   (signatureLine as HTMLElement).style.marginTop = "4px";
   return parsed.documentElement.outerHTML;

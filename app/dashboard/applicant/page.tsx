@@ -23,11 +23,14 @@ import {
   canCreateProjectAsArchitect,
   ensureArchitectInApplicantRoster,
   ensureOwnerInApplicantRoster,
+  isOwnerApplicantType,
+  primaryApplicantLabelFromRoster,
   readSessionUserMetaFromStorage,
   resolveOwnerUserIdFromApplicants,
   sameUserId,
   validateOwnerForArchitectProject,
   type OwnerApplicantMeta,
+  type PrincipalApplicantLabel,
 } from "@/app/utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "@/app/utils/ownerApplicantRoster";
 import ConsultantPartialRegistrationModal from "@/app/components/ConsultantPartialRegistrationModal";
@@ -83,6 +86,8 @@ type ConsultantDirectoryEntry = {
   registrationNumber: string;
   licenseIssueDate: string;
   entity_name?: string;
+  entity_type?: string;
+  letterhead_url?: string;
 };
 
 const APPLICANT_TYPE_OPTIONS = [
@@ -274,16 +279,16 @@ const composeAddress = (
   return normalizeAddressSingleLine(raw);
 };
 
-const isOwnerApplicantType = (type: string): boolean =>
-  type.trim().toLowerCase() === "owner";
+const isPrincipalApplicantType = (type: string): boolean =>
+  isOwnerApplicantType(type);
 
-/** Owner row is always first; display ids are renumbered 1..n. */
+/** Principal (Owner/Developer) row is always first; display ids are renumbered 1..n. */
 const sortApplicantsOwnerFirst = (rows: ApplicantRow[]): ApplicantRow[] => {
   if (rows.length <= 1) return rows.map((row, index) => ({ ...row, id: index + 1 }));
 
   const sorted = [...rows].sort((a, b) => {
-    const aOwner = isOwnerApplicantType(a.applicantType);
-    const bOwner = isOwnerApplicantType(b.applicantType);
+    const aOwner = isPrincipalApplicantType(a.applicantType);
+    const bOwner = isPrincipalApplicantType(b.applicantType);
     if (aOwner && !bOwner) return -1;
     if (!aOwner && bOwner) return 1;
     return a.id - b.id;
@@ -459,11 +464,14 @@ export default function ApplicantDetailsPage() {
   // Show the directory dropdown as soon as applicant type is selected.
   const showDirectoryDropdown = !!selectedApplicantType;
   const canManageProjectOwner = canCreateProjectAsArchitect(userMetadata);
+  const isPrincipalApplicantSelection =
+    selectedApplicantType === "Owner" || selectedApplicantType === "Developer";
   const canAddNewConsultant =
-    !!selectedApplicantType && selectedApplicantType !== "Owner";
+    !!selectedApplicantType && !isPrincipalApplicantSelection;
   const canAddNewOwner =
-    selectedApplicantType === "Owner" && canManageProjectOwner;
+    isPrincipalApplicantSelection && canManageProjectOwner;
   const canAddNewUser = canAddNewConsultant || canAddNewOwner;
+  const principalLabelOnRoster = primaryApplicantLabelFromRoster(applicants);
   const isLocked = showDirectoryDropdown && isValidDirectorySelection;
 
   // Capture logged-in Supabase auth user id (used to store `user_id` in applicant rows)
@@ -496,7 +504,7 @@ export default function ApplicantDetailsPage() {
           typeof projectData.user_id === "string" ? projectData.user_id.trim() : "";
         const orderedApplicants = sortApplicantsOwnerFirst(
           mapStoredApplicantsToRows(applicantsList).map((row) => {
-            if (!isOwnerApplicantType(row.applicantType)) return row;
+            if (!isPrincipalApplicantType(row.applicantType)) return row;
             if (row.user_id?.trim()) return row;
             if (!projectOwnerId) return row;
             return { ...row, user_id: projectOwnerId };
@@ -586,13 +594,14 @@ export default function ApplicantDetailsPage() {
         return;
       }
 
-      // For Owner type, use get_owners() to fetch all owners
+      // For Owner/Developer type, use get_owners(p_role) to fetch principals
       // For other types, use the standard get_consultants_by_type function
       let data, error;
       
-      if (selectedApplicantType === "Owner") {
-        // Use function to get all owners (no entity type filter)
-        const result = await supabase.rpc("get_owners");
+      if (selectedApplicantType === "Owner" || selectedApplicantType === "Developer") {
+        const result = await supabase.rpc("get_owners", {
+          p_role: selectedApplicantType.toLowerCase(),
+        });
         data = result.data;
         error = result.error;
       } else {
@@ -619,9 +628,26 @@ export default function ApplicantDetailsPage() {
             row.user_metadata?.pincode,
             row.user_metadata?.pin_code
           );
+          const personName = [row.first_name, row.middle_name, row.last_name]
+            .filter(Boolean)
+            .join(" ");
+          const entityName =
+            pickText(
+              row.entity_name,
+              row.entityName,
+              row.firm_name,
+              row.company_name,
+              row.user_metadata?.entity_name,
+              row.user_metadata?.entityName,
+              row.user_metadata?.firm_name,
+              row.user_metadata?.company_name
+            ) || undefined;
+          const isPrincipal =
+            selectedApplicantType === "Owner" ||
+            selectedApplicantType === "Developer";
           return {
           id: row.user_id,
-          fullName: [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(" "),
+          fullName: (isPrincipal && entityName) || personName,
           email: row.email || "",
           contactNumber: row.contact_number || "",
           pan: row.pan || "",
@@ -640,16 +666,17 @@ export default function ApplicantDetailsPage() {
           ),
           registrationNumber: row.registration_number || "",
           licenseIssueDate: row.license_issue_date || "",
-          entity_name:
+          entity_name: entityName,
+          entity_type:
             pickText(
-              row.entity_name,
-              row.entityName,
-              row.firm_name,
-              row.company_name,
-              row.user_metadata?.entity_name,
-              row.user_metadata?.entityName,
-              row.user_metadata?.firm_name,
-              row.user_metadata?.company_name
+              row.entity_type,
+              row.entityType,
+              row.user_metadata?.entity_type
+            ) || undefined,
+          letterhead_url:
+            pickText(
+              row.letterhead_url,
+              row.user_metadata?.letterhead_url
             ) || undefined,
         };
         }) ?? [];
@@ -782,22 +809,26 @@ export default function ApplicantDetailsPage() {
     loadDirectoryOptions();
   }, [selectedApplicantType, directoryRefreshKey]);
 
-  // Owner-created projects: logged-in owner is always the first applicant row.
+  // Owner/Developer-created projects: logged-in principal is always the first applicant row.
   // Consultants: logged-in consultant type is added when missing.
   useEffect(() => {
     if (!userMetadata) return;
 
     const isConsultant = userMetadata.role === "Consultant";
-    // Wait for auth id so the default Owner row gets projects.user_id / applicant user_id.
+    const sessionPrincipalLabel: PrincipalApplicantLabel =
+      userMetadata.role === "Developer" ? "Developer" : "Owner";
+    // Wait for auth id so the default principal row gets projects.user_id / applicant user_id.
     if (!isConsultant && !authUserId) return;
 
     if (isEditMode && projectData && applicantRosterHasOwner(applicants)) return;
 
     setApplicants((prev) => {
-      const applicantType = isConsultant ? (userMetadata.consultant_type || "") : "Owner";
+      const applicantType = isConsultant
+        ? userMetadata.consultant_type || ""
+        : sessionPrincipalLabel;
 
       if (!isConsultant) {
-        const ownerIndex = prev.findIndex((a) => isOwnerApplicantType(a.applicantType));
+        const ownerIndex = prev.findIndex((a) => isPrincipalApplicantType(a.applicantType));
         if (ownerIndex >= 0) {
           const existing = prev[ownerIndex];
           const ownerEntityType =
@@ -808,6 +839,7 @@ export default function ApplicantDetailsPage() {
                 ? {
                     ...row,
                     user_id: authUserId,
+                    applicantType: sessionPrincipalLabel,
                     ...(ownerEntityType ? { entity_type: ownerEntityType } : {}),
                   }
                 : row
@@ -1000,9 +1032,9 @@ export default function ApplicantDetailsPage() {
     setIsFormAutofilled(false);
   }, [selectedApplicantType, setValue]);
 
-  // Reset directory selection and fields when applicant type changes to Owner
+  // Reset directory selection and fields when applicant type changes to Owner/Developer
   useEffect(() => {
-    if (selectedApplicantType === "Owner") {
+    if (selectedApplicantType === "Owner" || selectedApplicantType === "Developer") {
       setValue("plumbingConsultant", "");
       resetApplicantFields();
       setIsFormAutofilled(false);
@@ -1086,8 +1118,10 @@ export default function ApplicantDetailsPage() {
     let licenseIssueDate = String(meta.registration_date || "");
     const consultantType = String(meta.consultant_type || "");
     const entityType = String(meta.entity_type || "");
+    const isOwnerOrDeveloper =
+      selectedApplicantType === "Owner" || selectedApplicantType === "Developer";
 
-    if (selectedApplicantType === "Owner" || entityType) {
+    if (isOwnerOrDeveloper) {
       registrationNumber = getOwnerRegistrationNumberFromMetadata(meta, entityType);
       switch (entityType) {
         case "Proprietorship":
@@ -1154,9 +1188,17 @@ export default function ApplicantDetailsPage() {
       }
     }
 
+    const entityName =
+      pickText(
+        meta.entity_name,
+        meta.entityName,
+        meta.firm_name,
+        meta.company_name,
+        meta.companyName
+      ) || undefined;
     const displayName =
-      selectedApplicantType === "Owner" && String(meta.entity_name || "").trim()
-        ? String(meta.entity_name).trim()
+      isOwnerOrDeveloper && entityName
+        ? entityName
         : fullName || result.email || "New User";
 
     if (Object.keys(meta).length > 0) {
@@ -1181,14 +1223,10 @@ export default function ApplicantDetailsPage() {
         ),
         registrationNumber,
         licenseIssueDate,
-        entity_name:
-          pickText(
-            meta.entity_name,
-            meta.entityName,
-            meta.firm_name,
-            meta.company_name,
-            meta.companyName
-          ) || undefined,
+        entity_name: entityName,
+        entity_type: entityType || undefined,
+        letterhead_url:
+          pickText(meta.letterhead_url, meta.letterheadUrl) || undefined,
       };
       setDirectoryOptions((prev) => {
         if (prev.some((e) => e.id === entry.id)) {
@@ -1212,6 +1250,8 @@ export default function ApplicantDetailsPage() {
   // Check if Architect or Licensed Surveyor is already added
   const hasArchitect = addedApplicantTypes.includes("Architect");
   const hasLicensedSurveyor = addedApplicantTypes.includes("Licensed Surveyor");
+  const hasOwner = addedApplicantTypes.includes("Owner");
+  const hasDeveloper = addedApplicantTypes.includes("Developer");
   
   // Filter out already added applicant types from dropdown options
   // Also enforce mutual exclusivity: if Architect is added, exclude Licensed Surveyor and vice versa
@@ -1234,13 +1274,22 @@ export default function ApplicantDetailsPage() {
     return true;
   });
 
-  // If logged-in user is a consultant, add "Owner" option (unless already added)
+  // If logged-in user is a consultant, add Owner/Developer options with mutual exclusivity
   const isConsultant = userMetadata?.role === "Consultant";
-  if (
-    isConsultant &&
-    (!addedApplicantTypes.includes("Owner") || changingOwner || ownerAwaitingReplacement)
-  ) {
-    availableApplicantTypes = ["Owner", ...availableApplicantTypes.filter((t) => t !== "Owner")];
+  if (isConsultant) {
+    const allowPrincipalSwap = changingOwner || ownerAwaitingReplacement;
+    const principalOptions: PrincipalApplicantLabel[] = [];
+    if (allowPrincipalSwap || (!hasOwner && !hasDeveloper)) {
+      principalOptions.push("Owner", "Developer");
+    }
+    if (principalOptions.length > 0) {
+      availableApplicantTypes = [
+        ...principalOptions,
+        ...availableApplicantTypes.filter(
+          (t) => t !== "Owner" && t !== "Developer"
+        ),
+      ];
+    }
   }
 
   const isLoggedInApplicantRow = (applicant: ApplicantRow): boolean =>
@@ -1351,7 +1400,7 @@ export default function ApplicantDetailsPage() {
     }
 
     const ownerRow = (rosterForSave.applicants as ApplicantRow[]).find((row) =>
-      isOwnerApplicantType(String(row.applicantType || ""))
+      isPrincipalApplicantType(String(row.applicantType || ""))
     );
     const payload: Record<string, unknown> = {
       user_id: userId,
@@ -1415,6 +1464,7 @@ export default function ApplicantDetailsPage() {
       addressLine3 = split.line3;
     }
     const entityNameFromDirectory = pickText(selectedDirectoryEntry?.entity_name);
+    const entityTypeFromDirectory = pickText(selectedDirectoryEntry?.entity_type);
     const newApplicant: ApplicantRow = {
       id: nextId,
       user_id: userId,
@@ -1441,21 +1491,25 @@ export default function ApplicantDetailsPage() {
       city: city || undefined,
       pincode: pincode || undefined,
       ...(entityNameFromDirectory ? { entity_name: entityNameFromDirectory } : {}),
+      ...(entityTypeFromDirectory ? { entity_type: entityTypeFromDirectory } : {}),
     };
 
-    const isAddingOwner = isOwnerApplicantType(data.applicantType);
+    const isAddingOwner = isPrincipalApplicantType(data.applicantType);
+    const principalLabel = (data.applicantType === "Developer"
+      ? "Developer"
+      : "Owner") as PrincipalApplicantLabel;
     if (isAddingOwner && canManageProjectOwner) {
       if (!userId) {
         showAlert({
-          title: "Owner required",
-          message: "Select an Owner from the directory so they are linked to an account.",
+          title: `${principalLabel} required`,
+          message: `Select a ${principalLabel} from the directory so they are linked to an account.`,
         });
         return;
       }
       if (authUserId && sameUserId(userId, authUserId)) {
         showAlert({
-          title: "Invalid Owner",
-          message: "The project Owner must be a different account than the architect.",
+          title: `Invalid ${principalLabel}`,
+          message: `The project ${principalLabel} must be a different account than the architect.`,
         });
         return;
       }
@@ -1463,7 +1517,7 @@ export default function ApplicantDetailsPage() {
 
     const baseRoster =
       isAddingOwner && (changingOwner || ownerAwaitingReplacement || applicantRosterHasOwner(applicants))
-        ? applicants.filter((row) => !isOwnerApplicantType(row.applicantType))
+        ? applicants.filter((row) => !isPrincipalApplicantType(row.applicantType))
         : applicants;
     const nextApplicants = sortApplicantsOwnerFirst([...baseRoster, newApplicant]);
 
@@ -1494,7 +1548,7 @@ export default function ApplicantDetailsPage() {
     showAlert({
       title: "Applicant details",
       message: isAddingOwner && canManageProjectOwner
-        ? "Owner updated and saved to the project."
+        ? `${principalLabel} updated and saved to the project.`
         : "Applicant details saved successfully!",
     });
   };
@@ -1545,10 +1599,13 @@ export default function ApplicantDetailsPage() {
 
   const handleChangeOwnerClick = (applicant: ApplicantRow) => {
     if (isReadOnlyMode || !canManageProjectOwner) return;
-    if (!isOwnerApplicantType(applicant.applicantType)) return;
+    if (!isPrincipalApplicantType(applicant.applicantType)) return;
     setChangingOwner(true);
     setOwnerAwaitingReplacement(false);
-    setValue("applicantType", "Owner");
+    setValue(
+      "applicantType",
+      applicant.applicantType === "Developer" ? "Developer" : "Owner"
+    );
     setValue("plumbingConsultant", "");
     setIsSaved(false);
   };
@@ -1565,7 +1622,9 @@ export default function ApplicantDetailsPage() {
       return;
     }
 
-    const removingOwner = isOwnerApplicantType(applicantToRemove.applicantType);
+    const removingOwner = isPrincipalApplicantType(applicantToRemove.applicantType);
+    const removedLabel =
+      applicantToRemove.applicantType === "Developer" ? "Developer" : "Owner";
     if (removingOwner && canManageProjectOwner) {
       setOwnerAwaitingReplacement(true);
       setChangingOwner(false);
@@ -1579,7 +1638,7 @@ export default function ApplicantDetailsPage() {
 
     if (!projectId) return;
 
-    // Persist roster without Owner; keep projects.user_id until a new Owner is saved.
+    // Persist roster without principal; keep projects.user_id until a new principal is saved.
     const ok = await persistApplicantsToProject(updatedApplicants, { syncProjectOwner: false });
     if (!ok) {
       setApplicants(applicants);
@@ -1591,12 +1650,11 @@ export default function ApplicantDetailsPage() {
     }
 
     if (removingOwner && canManageProjectOwner) {
-      setValue("applicantType", "Owner");
+      setValue("applicantType", removedLabel);
       setIsSaved(false);
       showAlert({
-        title: "Owner removed",
-        message:
-          "Select a new Owner from the directory and Save to update the project. Update Project stays blocked until an Owner is saved.",
+        title: `${removedLabel} removed`,
+        message: `Select a new Owner or Developer from the directory and Save to update the project. Update Project stays blocked until a principal is saved.`,
       });
     }
   };
@@ -1624,15 +1682,15 @@ export default function ApplicantDetailsPage() {
             <div className="mb-4 space-y-3">
               {isArchitectCreatingProject && (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  Add a project Owner from the directory before submitting the project. The owner
-                  will sign applications in In Process; you can manage everything else.
+                  Add a project Owner or Developer from the directory before submitting the project.
+                  They will sign applications in In Process; you can manage everything else.
                 </p>
               )}
               {canManageProjectOwner && (ownerAwaitingReplacement || changingOwner) && (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   {changingOwner
-                    ? "Select a new Owner from the directory below and Save. That updates the applicants roster and projects.user_id together."
-                    : "Owner removed from the roster. Select a new Owner from the directory and Save to set the project owner. Update Project stays blocked until then."}
+                    ? `Select a new ${principalLabelOnRoster === "Developer" ? "Developer" : "Owner or Developer"} from the directory below and Save. That updates the applicants roster and projects.user_id together.`
+                    : "Owner or Developer removed from the roster. Select a new Owner or Developer from the directory and Save to set the project principal. Update Project stays blocked until then."}
                 </p>
               )}
             </div>
@@ -1667,7 +1725,7 @@ export default function ApplicantDetailsPage() {
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.residentialAddress}</td>
                       <td className={`${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>
                         {(() => {
-                          const isOwnerRow = isOwnerApplicantType(applicant.applicantType);
+                          const isOwnerRow = isPrincipalApplicantType(applicant.applicantType);
                           const isLoggedInUserEntry = isLoggedInApplicantRow(applicant);
                           const deleteDisabled =
                             isReadOnlyMode ||
@@ -2009,11 +2067,11 @@ export default function ApplicantDetailsPage() {
 
               {/* Message */}
               <p className="text-gray-700 text-center mb-6">
-                {isOwnerApplicantType(deleteConfirmation.applicantType) && canManageProjectOwner ? (
+                {isPrincipalApplicantType(deleteConfirmation.applicantType) && canManageProjectOwner ? (
                   <>
                     Remove <span className="font-semibold text-gray-900">{deleteConfirmation.applicantName}</span> from
-                    the applicants roster? You must select a new Owner and Save before Update Project. The project
-                    owner id stays unchanged until you save the replacement.
+                    the applicants roster? You must select a new Owner or Developer and Save before Update Project. The project
+                    principal id stays unchanged until you save the replacement.
                   </>
                 ) : (
                   <>
@@ -2052,6 +2110,9 @@ export default function ApplicantDetailsPage() {
       />
       <OwnerPartialRegistrationModal
         open={showNewUserModal && canAddNewOwner}
+        accountRole={
+          selectedApplicantType === "Developer" ? "Developer" : "Owner"
+        }
         onClose={() => setShowNewUserModal(false)}
         onSuccess={handleNewUserSuccess}
       />

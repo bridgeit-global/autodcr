@@ -7,8 +7,8 @@ import {
 import { normalizePhone, normalizeRegNo } from "@/app/utils/ownerRegistrationShared";
 
 /**
- * Lookup owner by phone and/or registration number.
- * POST body: { phone?: string, registrationNumber?: string, entityType?: string }
+ * Lookup owner/developer by phone and/or registration number.
+ * POST body: { phone?: string, registrationNumber?: string, entityType?: string, accountRole?: "Owner" | "Developer" }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +17,13 @@ export async function POST(request: NextRequest) {
     const registrationNumber = normalizeRegNo(body.registrationNumber);
     const entityType =
       typeof body.entityType === "string" ? body.entityType.trim() : "";
+    const accountRoleRaw = String(body.accountRole || body.role || "").trim();
+    const allowedRoles =
+      accountRoleRaw === "Developer"
+        ? (["Developer"] as const)
+        : accountRoleRaw === "Owner"
+          ? (["Owner"] as const)
+          : (["Owner", "Developer"] as const);
 
     if (!phone && !registrationNumber) {
       return NextResponse.json(
@@ -34,7 +41,7 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      const match = await findOwnerByPhone(admin, phone);
+      const match = await findOwnerByPhone(admin, phone, allowedRoles);
       if (!match) {
         return NextResponse.json({ status: "not_found" });
       }
@@ -50,7 +57,8 @@ export async function POST(request: NextRequest) {
     const match = await findOwnerByRegistrationNumber(
       admin,
       registrationNumber,
-      entityType || undefined
+      entityType || undefined,
+      allowedRoles
     );
     if (!match) {
       return NextResponse.json({ status: "not_found" });

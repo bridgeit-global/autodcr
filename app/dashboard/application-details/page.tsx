@@ -28,6 +28,11 @@ import {
   resolveAppointedSecondSignerUserId,
   sameUserId,
 } from "@/app/utils/applicationSigning";
+import {
+  isOwnerApplicantType,
+  primaryApplicantLabelFromRoster,
+  type PrincipalApplicantLabel,
+} from "@/app/utils/projectAccess";
 import { canUserAccessApplication } from "@/app/utils/applicationAccess";
 import {
   consultantSignsAppointmentLetter,
@@ -184,8 +189,8 @@ function canArchitectSignOnBehalfOfOwner(args: {
 function pickOwnerPanFromApplicants(projectData: PreviewProjectData | null): string {
   const applicants = projectData?.applicant_details?.applicants ?? [];
   for (const a of applicants) {
-    const type = String(a.applicantType || a.applicant_type || "").toLowerCase();
-    if (!type.includes("owner")) continue;
+    const type = String(a.applicantType || a.applicant_type || "");
+    if (!isOwnerApplicantType(type)) continue;
     const pan = pickPanFromUserMetadata({
       pan: a.pan,
       pan_no: a.pan_no || a.panNo,
@@ -349,6 +354,10 @@ function computeMockSignAvailability(args: {
   const secondSigned = Boolean(architectSignedAt?.trim());
   const ownerSignerIds = collectOwnerSignerUserIds(projectData, projectRowUserId);
   const isOwner = isAnySameUserId(uid, ownerSignerIds);
+  const principalLabel: PrincipalApplicantLabel = primaryApplicantLabelFromRoster(
+    projectData?.applicant_details?.applicants
+  );
+  const principalLower = principalLabel.toLowerCase();
   const appointedSecondId = resolveAppointedSecondSignerUserId(projectData, templateType);
   const isSecondSigner = sameUserId(uid, appointedSecondId);
   const secondRoleLabel =
@@ -377,7 +386,7 @@ function computeMockSignAvailability(args: {
         onBehalfOfOwner: false,
         idleReason: canApprove
           ? undefined
-          : "Signing is complete. Only the owner or appointed signer can approve.",
+          : `Signing is complete. Only the ${principalLower} or appointed signer can approve.`,
         subtitle: canApprove
           ? "Both signatures are complete. Click Approved to move the application."
           : "Both signatures are complete.",
@@ -385,7 +394,7 @@ function computeMockSignAvailability(args: {
     }
 
     const waitingParts: string[] = [];
-    if (!ownerSigned) waitingParts.push("owner");
+    if (!ownerSigned) waitingParts.push(principalLower);
     if (!secondSigned) waitingParts.push(secondRoleLabel);
 
     return {
@@ -395,7 +404,7 @@ function computeMockSignAvailability(args: {
       canApprove: false,
       onBehalfOfOwner: onBehalf,
       idleReason: `Waiting for ${waitingParts.join(" and ")} signature${waitingParts.length > 1 ? "s" : ""}.`,
-      subtitle: "Owner and consultant may sign independently. Approved unlocks after both sign.",
+      subtitle: `${principalLabel} and consultant may sign independently. Approved unlocks after both sign.`,
     };
   }
 
@@ -406,9 +415,9 @@ function computeMockSignAvailability(args: {
       canSignAsOwner: false,
       canSignAsConsultant: false,
       canApprove,
-      idleReason: canApprove ? undefined : "Only the project owner can approve.",
+      idleReason: canApprove ? undefined : `Only the project ${principalLower} can approve.`,
       subtitle: canApprove
-        ? "Owner has signed. Click Approved to move the application."
+        ? `${principalLabel} has signed. Click Approved to move the application.`
         : "This application has been signed.",
     };
   }
@@ -418,8 +427,8 @@ function computeMockSignAvailability(args: {
       canSignAsOwner: true,
       canSignAsConsultant: false,
       canApprove: false,
-      idleReason: "Waiting for owner signature.",
-      subtitle: "Sign as Owner from Application Details, then approve.",
+      idleReason: `Waiting for ${principalLower} signature.`,
+      subtitle: `Sign as ${principalLabel} from Application Details, then approve.`,
     };
   }
   return {
@@ -427,8 +436,8 @@ function computeMockSignAvailability(args: {
     canSignAsOwner: false,
     canSignAsConsultant: false,
     canApprove: false,
-    idleReason: "Only the project owner can sign.",
-    subtitle: "Only the project owner can sign this application.",
+    idleReason: `Only the project ${principalLower} can sign.`,
+    subtitle: `Only the project ${principalLower} can sign this application.`,
   };
 }
 
@@ -831,7 +840,7 @@ async function buildApplicationPreviewContext(
   // only filled from the server-resolved consultant profile (never the viewer's own).
   let consultantLetterheadUrl = "";
   const ownerApplicants = (projectData?.applicant_details?.applicants || []).filter((a) =>
-    (a.applicantType || a.applicant_type || "").toLowerCase().includes("owner")
+    isOwnerApplicantType(a.applicantType || a.applicant_type || "")
   );
   const ownerApplicant = ownerApplicants[0];
   // Prefer firm name from applicant_details; fall back to auth.users metadata below.
@@ -1360,7 +1369,13 @@ async function buildApplicationSavePdfHtml(
     savedPdfUrlForQr,
   });
   if (signatures?.owner) {
-    html = injectMockOwnerSignatureIntoPreviewHtml(html, built.templateType);
+    html = injectMockOwnerSignatureIntoPreviewHtml(
+      html,
+      built.templateType,
+      primaryApplicantLabelFromRoster(
+        built.previewSource.projectData?.applicant_details?.applicants
+      )
+    );
   }
   if (signatures?.consultant) {
     const variant = signatures.variant ?? built.previewSource.letterVariant ?? "appointment";
@@ -1539,7 +1554,13 @@ async function buildDualLetterPdfBlobs(
     if (!signatures?.owner && !signatures?.consultant) return html;
     let out = html;
     if (signatures.owner) {
-      out = injectMockOwnerSignatureIntoPreviewHtml(out, templateType);
+      out = injectMockOwnerSignatureIntoPreviewHtml(
+        out,
+        templateType,
+        primaryApplicantLabelFromRoster(
+          appointmentBuilt.previewSource.projectData?.applicant_details?.applicants
+        )
+      );
     }
     if (
       signatures.consultant &&
@@ -1616,7 +1637,13 @@ async function buildAcceptanceLetterPdfBlob(
     }
   );
   if (signatures.owner) {
-    acceptanceHtml = injectMockOwnerSignatureIntoPreviewHtml(acceptanceHtml, templateType);
+    acceptanceHtml = injectMockOwnerSignatureIntoPreviewHtml(
+      acceptanceHtml,
+      templateType,
+      primaryApplicantLabelFromRoster(
+        acceptanceBuilt.previewSource.projectData?.applicant_details?.applicants
+      )
+    );
   }
   if (signatures.consultant) {
     acceptanceHtml = injectMockConsultantSignatureIntoPreviewHtml(acceptanceHtml, templateType);
@@ -2160,6 +2187,11 @@ export default function ApplicationDetailsPage() {
     ]
   );
 
+  const principalApplicantLabel = useMemo(
+    () => primaryApplicantLabelFromRoster(projectData?.applicant_details?.applicants),
+    [projectData]
+  );
+
   const mockSignMode = useMemo((): "owner_only" | "owner_and_architect" => {
     if (!isDualLetterType(previewTemplateType)) return "owner_only";
     const ownerSigned = Boolean(ownerSignedAt?.trim());
@@ -2439,7 +2471,13 @@ export default function ApplicationDetailsPage() {
       );
 
       if (ownerSignedAt?.trim()) {
-        html = injectMockOwnerSignatureIntoPreviewHtml(html, templateType);
+        html = injectMockOwnerSignatureIntoPreviewHtml(
+          html,
+          templateType,
+          primaryApplicantLabelFromRoster(
+            previewSource.projectData?.applicant_details?.applicants
+          )
+        );
       }
       if (
         architectSignedAt?.trim() &&
@@ -3020,7 +3058,13 @@ export default function ApplicationDetailsPage() {
           { ...ctx.previewSource, savedPdfUrlForQr },
           authToken
         );
-        signHtml = injectMockOwnerSignatureIntoPreviewHtml(signHtml, ctx.templateType);
+        signHtml = injectMockOwnerSignatureIntoPreviewHtml(
+          signHtml,
+          ctx.templateType,
+          primaryApplicantLabelFromRoster(
+            ctx.previewSource.projectData?.applicant_details?.applicants
+          )
+        );
         const signedBlob = await generateApplicationPreviewPdfFromHtml(signHtml, ctx.templateType);
         const uploaded = await submitSavedApplicationPdfs({
           projectId,
@@ -4183,7 +4227,7 @@ export default function ApplicationDetailsPage() {
                     value="owner"
                     disabled={!mockSignAvailability.canSignAsOwner}
                   >
-                    Sign as Owner
+                    Sign as {principalApplicantLabel}
                     {mockSignAvailability.onBehalfOfOwner ? " (on behalf)" : ""}
                     {ownerSignedAt ? " (done)" : ""}
                   </option>
@@ -4288,6 +4332,7 @@ export default function ApplicationDetailsPage() {
         autoMockSignAfterOpen={autoMockSignAfterPreviewOpen}
         mockSignMode={mockSignMode}
         mockSecondSignLabel={mockSecondSignLabel}
+        mockPrincipalSignLabel={principalApplicantLabel}
         onSave={projectId ? handleSaveApplicationPdf : undefined}
         isSaving={isSavingPdf}
         saveDisabled={!projectId || !previewReadyForSave}
@@ -4366,6 +4411,7 @@ export default function ApplicationDetailsPage() {
 
       <SignOnBehalfOwnerModal
         open={onBehalfConfirmOpen}
+        principalLabel={principalApplicantLabel}
         onCancel={() => setOnBehalfConfirmOpen(false)}
         onContinue={() => {
           setOnBehalfConfirmOpen(false);

@@ -348,7 +348,7 @@ async function persistProjectApplicantRoster(
   const serialized = serializeApplicantRosterForStorage(applicantRows);
   if (serialized.applicants.length === 0) {
     return (
-      "Applicant roster was not saved. On Applicant Details, add Owner (and other roles) using the directory dropdown, then save again."
+      "Applicant roster was not saved. On Applicant Details, add Owner or Developer (and other roles) using the directory dropdown, then save again."
     );
   }
 
@@ -806,7 +806,7 @@ function DashboardLayoutContent({
         );
         if (!ownerCheck.ok) {
           setSubmitError(ownerCheck.message);
-          showAlert({ title: "Owner required", message: ownerCheck.message });
+          showAlert({ title: "Owner or Developer required", message: ownerCheck.message });
           return;
         }
         ownerUserIdForCreate = ownerCheck.ownerUserId;
@@ -1112,7 +1112,7 @@ function DashboardLayoutContent({
         const ownerCheck = validateOwnerForArchitectProject(resolvedApplicants, userId);
         if (!ownerCheck.ok) {
           setSubmitError(ownerCheck.message);
-          showAlert({ title: "Owner required", message: ownerCheck.message });
+          showAlert({ title: "Owner or Developer required", message: ownerCheck.message });
           return;
         }
         ownerUserIdForCreate = ownerCheck.ownerUserId;

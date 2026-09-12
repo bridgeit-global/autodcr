@@ -7,7 +7,7 @@ export default function OwnerRegistrationPage() {
       title="Owner Registration"
       description="Create your owner account"
     >
-      <RegistrationForm title="Owner Registration" />
+      <RegistrationForm title="Owner Registration" accountRole="Owner" />
     </RegistrationPageShell>
   );
 }

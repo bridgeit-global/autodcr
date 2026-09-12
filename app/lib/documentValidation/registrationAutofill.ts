@@ -5,7 +5,11 @@ import {
 } from "@/app/utils/consultantRegistrationShared";
 import { normalizeIndianPincode, pincodeDigits } from "@/app/utils/pincode";
 
-export type RegistrationKind = "owner" | "consultant";
+export type RegistrationKind = "owner" | "developer" | "consultant";
+
+function isOwnerLikeRegistrationKind(kind: RegistrationKind): boolean {
+  return kind === "owner" || kind === "developer";
+}
 
 export type AutofillContext = {
   consultantType?: string;
@@ -854,9 +858,14 @@ export function buildAadhaarAutofillPatch(
   applyNamePatch(patch, extracted.name, includeProprietor);
 
   const shouldApplyAadhaarAddress =
-    registrationKind !== "owner" || context.entityType === "Individual";
+    !isOwnerLikeRegistrationKind(registrationKind) ||
+    context.entityType === "Individual";
   if (shouldApplyAadhaarAddress) {
-    applyAddressPatch(patch, extracted.address, registrationKind === "owner");
+    applyAddressPatch(
+      patch,
+      extracted.address,
+      isOwnerLikeRegistrationKind(registrationKind)
+    );
     applyCityStatePincodeFromExtracted(patch, extracted, extracted.address);
   }
 
@@ -906,7 +915,7 @@ export function buildGstAutofillPatch(
   applyAddressPatch(
     patch,
     extracted.principalPlaceOfBusiness,
-    registrationKind === "owner"
+    isOwnerLikeRegistrationKind(registrationKind)
   );
   applyCityStatePincodeFromExtracted(
     patch,
@@ -1096,7 +1105,11 @@ export function buildLicenseAutofillPatch(
   }
 
   applyNamePatch(patch, extracted.technicalPersonName, false);
-  applyAddressPatch(patch, extracted.address, registrationKind === "owner");
+  applyAddressPatch(
+    patch,
+    extracted.address,
+    isOwnerLikeRegistrationKind(registrationKind)
+  );
   applyCityStatePincodeFromExtracted(patch, extracted, extracted.address);
 
   if (extracted.organizationName?.trim()) {

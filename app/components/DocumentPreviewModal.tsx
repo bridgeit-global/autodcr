@@ -47,7 +47,9 @@ type DocumentPreviewModalProps = {
   mockSignMode?: "owner_only" | "owner_and_architect";
   /** Cursive label for the second signature column (e.g. Plumber, Architect). */
   mockSecondSignLabel?: string;
-  /** Show a mock “Sign” control that injects “Owner” + a dummy signature into the HTML iframe (first client signature column). */
+  /** Cursive label for the principal signature column (Owner or Developer). */
+  mockPrincipalSignLabel?: string;
+  /** Show a mock “Sign” control that injects principal + a dummy signature into the HTML iframe (first client signature column). */
   showMockSignButton?: boolean;
   /** After mock sign is injected (and fonts settle), parent can persist PDF / update workflow. */
   onMockSignComplete?: () => void | Promise<void>;
@@ -80,6 +82,7 @@ export default function DocumentPreviewModal({
   autoMockSignAfterOpen = false,
   mockSignMode = "owner_only",
   mockSecondSignLabel = "Architect",
+  mockPrincipalSignLabel = "Owner",
   showMockSignButton = false,
   onMockSignComplete,
   mockSignBusy = false,
@@ -240,7 +243,7 @@ export default function DocumentPreviewModal({
           display:inline-block;
           transform:rotate(-2deg);
           text-shadow:0 1px 0 rgba(255,255,255,0.6);
-        ">Owner</span>`;
+        ">${mockPrincipalSignLabel}</span>`;
             if (details) {
               ownerSignatureBlock.insertBefore(wrap, details);
             } else {
@@ -256,7 +259,12 @@ export default function DocumentPreviewModal({
 
         let ownerResult: boolean | "already" = "already";
         if (needOwner && firstCell) {
-          ownerResult = injectColumn(firstCell, "preview-dummy-owner-sign", "Owner", "-2deg");
+          ownerResult = injectColumn(
+            firstCell,
+            "preview-dummy-owner-sign",
+            mockPrincipalSignLabel,
+            "-2deg"
+          );
           if (ownerResult === false) return false;
         }
 

@@ -4,14 +4,18 @@ type SignOnBehalfOwnerModalProps = {
   open: boolean;
   onContinue: () => void;
   onCancel: () => void;
+  principalLabel?: "Owner" | "Developer";
 };
 
 export default function SignOnBehalfOwnerModal({
   open,
   onContinue,
   onCancel,
+  principalLabel = "Owner",
 }: SignOnBehalfOwnerModalProps) {
   if (!open) return null;
+
+  const principalLower = principalLabel.toLowerCase();
 
   return (
     <div
@@ -22,13 +26,16 @@ export default function SignOnBehalfOwnerModal({
     >
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200">
         <h2 id="sign-on-behalf-title" className="text-lg font-semibold text-gray-900">
-          Sign on behalf of the owner?
+          Sign on behalf of the {principalLower}?
         </h2>
         <p className="text-sm text-gray-600 mt-3">
-          You are about to complete the owner signature step using the{" "}
-          <span className="font-medium text-gray-800">owner&apos;s DSC token</span>. Plug in the
-          owner&apos;s token — the certificate must match the owner&apos;s registered PAN. Your own
-          architect signature on the acceptance letter will still be required afterward.
+          You are about to complete the {principalLower} signature step using the{" "}
+          <span className="font-medium text-gray-800">
+            {principalLower}&apos;s DSC token
+          </span>
+          . Plug in the {principalLower}&apos;s token — the certificate must match the{" "}
+          {principalLower}&apos;s registered PAN. Your own architect signature on the acceptance
+          letter will still be required afterward.
         </p>
         <div className="mt-6 flex justify-end gap-3">
           <button
@@ -43,7 +50,7 @@ export default function SignOnBehalfOwnerModal({
             onClick={onContinue}
             className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-800 to-emerald-500 hover:from-emerald-900 hover:to-emerald-600 text-white shadow-sm hover:shadow-md transition-all text-sm font-semibold"
           >
-            Continue with owner&apos;s DSC
+            Continue with {principalLower}&apos;s DSC
           </button>
         </div>
       </div>
