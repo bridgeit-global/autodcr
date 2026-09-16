@@ -10,6 +10,8 @@ const ApplicationStoredPdfViewer = dynamic(() => import("./ApplicationStoredPdfV
   ssr: false,
 }) as React.ComponentType<{ fileUrl: string }>;
 
+const IMAGE_URL_PATTERN = /\.(png|jpe?g|webp|gif|bmp)(\?|#|$)/i;
+
 type DocumentPreviewModalProps = {
   open: boolean;
   onClose: () => void;
@@ -41,6 +43,8 @@ type DocumentPreviewModalProps = {
   isLoading?: boolean;
   /** Error to show inside the modal when preview content could not be loaded. */
   loadError?: string | null;
+  /** Neutral (non-error) message shown in place of content, e.g. “License not available.” */
+  notice?: string | null;
   /** When true with `showMockSignButton`, iframe loads then mock sign + `onMockSignComplete` run once (sidebar “Sign application”). */
   autoMockSignAfterOpen?: boolean;
   /** `owner_only` = owner signature only; `owner_and_architect` = owner + second signer columns. */
@@ -55,10 +59,14 @@ type DocumentPreviewModalProps = {
   onMockSignComplete?: () => void | Promise<void>;
   /** While parent is saving after mock sign (e.g. generating/uploading PDF). */
   mockSignBusy?: boolean;
-  /** Dual-letter applications: show Appointment / Acceptance selector in the toolbar. */
+  /** Show the Appointment / Acceptance / License document selector in the toolbar. */
   showLetterVariantSelector?: boolean;
-  letterVariant?: "appointment" | "acceptance";
-  onLetterVariantChange?: (variant: "appointment" | "acceptance") => void;
+  /** Dual-letter applications only: include the Acceptance option. */
+  showAcceptanceOption?: boolean;
+  letterVariant?: "appointment" | "acceptance" | "license";
+  onLetterVariantChange?: (
+    variant: "appointment" | "acceptance" | "license"
+  ) => void;
   letterVariantDisabled?: boolean;
 };
 
@@ -79,6 +87,7 @@ export default function DocumentPreviewModal({
   hideSaveButton = false,
   isLoading = false,
   loadError = null,
+  notice = null,
   autoMockSignAfterOpen = false,
   mockSignMode = "owner_only",
   mockSecondSignLabel = "Architect",
@@ -87,6 +96,7 @@ export default function DocumentPreviewModal({
   onMockSignComplete,
   mockSignBusy = false,
   showLetterVariantSelector = false,
+  showAcceptanceOption = true,
   letterVariant = "appointment",
   onLetterVariantChange,
   letterVariantDisabled = false,
@@ -391,11 +401,13 @@ export default function DocumentPreviewModal({
   }, [open, htmlContent, fileUrl, showMockSignButton, autoMockSignAfterOpen, mockSignApplied]);
 
   const hasContent = Boolean(fileUrl) || Boolean(htmlContent);
-  if (!open || (!hasContent && !isLoading && !loadError)) return null;
+  if (!open || (!hasContent && !isLoading && !loadError && !notice)) return null;
   if (typeof window === "undefined") return null;
 
   const isHtmlPreview = Boolean(htmlContent) && !fileUrl;
   const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
+  /** Licenses may be uploaded as images; pdf.js cannot render those. */
+  const isImagePreview = Boolean(fileUrl) && IMAGE_URL_PATTERN.test(fileUrl ?? "");
   const downloadPdfUrl =
     fileUrl ?? (saveCompleted && storedPdfDownloadUrl ? storedPdfDownloadUrl : null);
   const showDownloadPdf = Boolean(downloadPdfUrl);
@@ -432,12 +444,14 @@ export default function DocumentPreviewModal({
 
   const deriveStoredPdfDownloadName = (): string => {
     const url = downloadPdfUrl;
+    const fallbackExt = isImagePreview ? "" : ".pdf";
     if (url) {
       try {
         const pathname = new URL(url).pathname;
         const base = pathname.split("/").pop();
-        if (base?.toLowerCase().endsWith(".pdf")) {
-          return base.split("?")[0] ?? "document.pdf";
+        const lower = base?.toLowerCase() ?? "";
+        if (lower.endsWith(".pdf") || IMAGE_URL_PATTERN.test(lower)) {
+          return base?.split("?")[0] ?? `document${fallbackExt}`;
         }
       } catch {
         /* ignore */
@@ -448,9 +462,9 @@ export default function DocumentPreviewModal({
         .trim()
         .replace(/[^\w\s-]/g, "")
         .replace(/\s+/g, "_");
-      if (slug) return `${slug}.pdf`;
+      if (slug) return `${slug}${fallbackExt}`;
     }
-    return "document.pdf";
+    return `document${fallbackExt}`;
   };
 
   /** Download the stored PDF bytes — preserves DSC signatures (print/save-as-PDF does not). */
@@ -503,20 +517,26 @@ export default function DocumentPreviewModal({
               <div className="flex items-center gap-2">
                 {showLetterVariantSelector && onLetterVariantChange && (
                   <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <span className="whitespace-nowrap">Letter</span>
+                    <span className="whitespace-nowrap">Document</span>
                     <select
                       value={letterVariant}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const next = e.target.value;
                         onLetterVariantChange(
-                          e.target.value === "acceptance" ? "acceptance" : "appointment"
-                        )
-                      }
+                          next === "acceptance" || next === "license"
+                            ? next
+                            : "appointment"
+                        );
+                      }}
                       disabled={letterVariantDisabled || saveUiBusy}
                       className="h-9 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 min-w-[11rem] disabled:opacity-50"
-                      aria-label="Letter type"
+                      aria-label="Document type"
                     >
                       <option value="appointment">Appointment</option>
-                      <option value="acceptance">Acceptance</option>
+                      {showAcceptanceOption && (
+                        <option value="acceptance">Acceptance</option>
+                      )}
+                      <option value="license">License</option>
                     </select>
                   </label>
                 )}
@@ -525,7 +545,9 @@ export default function DocumentPreviewModal({
                     onClick={() => void handleDownloadStoredPdf()}
                     disabled={saveUiBusy}
                     className={`h-9 px-3 rounded-lg text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none ${BTN_PRIMARY}`}
-                    aria-label="Download saved PDF"
+                    aria-label={
+                      isImagePreview ? "Download document" : "Download saved PDF"
+                    }
                     type="button"
                   >
                     <svg
@@ -543,7 +565,7 @@ export default function DocumentPreviewModal({
                       <polyline points="7 10 12 15 17 10" />
                       <line x1="12" y1="15" x2="12" y2="3" />
                     </svg>
-                    Download PDF
+                    {isImagePreview ? "Download" : "Download PDF"}
                   </button>
                 )}
                 {htmlContent && !fileUrl && !showDownloadPdf && (
@@ -662,6 +684,10 @@ export default function DocumentPreviewModal({
                 <div className="flex min-h-[600px] w-full items-center justify-center px-6 text-center text-sm text-red-600">
                   {loadError}
                 </div>
+              ) : notice && !hasContent ? (
+                <div className="flex min-h-[600px] w-full items-center justify-center px-6 text-center text-sm text-gray-500">
+                  {notice}
+                </div>
               ) : htmlContent && !fileUrl ? (
                 <div className="flex justify-center">
                   <div
@@ -683,7 +709,16 @@ export default function DocumentPreviewModal({
                     className="rounded-xl bg-white border border-gray-200 overflow-hidden"
                     style={{ width: "min(800px, calc(100vw - 2rem))", minHeight: "600px" }}
                   >
-                    <ApplicationStoredPdfViewer fileUrl={fileUrl} />
+                    {isImagePreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={fileUrl}
+                        alt={title || "Document Preview"}
+                        className="block h-auto w-full"
+                      />
+                    ) : (
+                      <ApplicationStoredPdfViewer fileUrl={fileUrl} />
+                    )}
                   </div>
                 </div>
               ) : null}

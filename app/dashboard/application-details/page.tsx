@@ -61,6 +61,7 @@ import {
   resolveSavedPdfUrlForQr,
 } from "@/app/utils/projectSavedApplicationPdfUrl";
 import { resolveOwnerEntityTypeForDesignation } from "@/app/utils/applicantRecordFields";
+import { templateTypeLicenseUrlKeys } from "@/app/utils/consultantTemplateTokens";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
@@ -1255,6 +1256,15 @@ const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
 /** Whether this type uses dual letters (appointment + acceptance). */
 const isDualLetterType = (t: TemplateType) => TYPES_WITH_ACCEPTANCE.has(t);
 
+/** Narrows a raw `<select>` value to the document-type union. */
+function normalizePreviewDocSelection(
+  value: string
+): "appointment" | "acceptance" | "license" {
+  if (value === "acceptance") return "acceptance";
+  if (value === "license") return "license";
+  return "appointment";
+}
+
 function applicationTemplateSavedInUrls(
   raw: unknown,
   templateType: TemplateType
@@ -1897,6 +1907,10 @@ export default function ApplicationDetailsPage() {
   const [letterVariant, setLetterVariant] = useState<
     "appointment" | "acceptance"
   >("appointment");
+  /** Which document the preview shows: a letter (appointment/acceptance) or the consultant's license. */
+  const [previewDocKind, setPreviewDocKind] = useState<"letter" | "license">("letter");
+  /** Neutral (non-error) message shown in the preview modal, e.g. license not uploaded. */
+  const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewFieldMapping, setPreviewFieldMapping] = useState<Record<string, string | undefined> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -2232,6 +2246,137 @@ export default function ApplicationDetailsPage() {
     [previewTemplateType]
   );
 
+  /** Returns the cached project row, loading it (direct select, then RPC) when missing. */
+  const ensureProjectDataForPreview = async (): Promise<PreviewProjectData | null> => {
+    if (projectData) return projectData;
+    if (!projectId) return null;
+
+    const coreSelect =
+      "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
+    const { data: directData } = await supabase
+      .from("projects")
+      .select(coreSelect)
+      .eq("id", projectId)
+      .single();
+    if (directData) {
+      const loaded = directData as PreviewProjectData;
+      setProjectData(loaded);
+      return loaded;
+    }
+
+    const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
+      p_project_id: projectId,
+    });
+    if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+      const loaded = rpcData as PreviewProjectData;
+      setProjectData(loaded);
+      return loaded;
+    }
+    return null;
+  };
+
+  /**
+   * Shows the appointed consultant's already-uploaded license document.
+   * Read-only: the URL comes from the consultant's auth metadata, nothing is generated or stored.
+   */
+  const loadLicensePreview = async (opts?: { keepModalOpen?: boolean }) => {
+    const keepModalOpen = opts?.keepModalOpen ?? false;
+
+    try {
+      setPreviewError(null);
+      setPreviewNotice(null);
+      setSavePdfMessage(null);
+      setSavePdfError(null);
+      // A license is not a letter — never let the save/sign pipeline pick it up.
+      setPreviewReadyForSave(false);
+      setPdfSavedForCurrentPreview(false);
+      setStoredSigningPdfUrl(null);
+      previewPdfContextRef.current = null;
+
+      setPreviewHtml(null);
+      if (!keepModalOpen) {
+        setPreviewUrl((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return null;
+        });
+      }
+
+      setIsPreviewLoading(true);
+      setPreviewOpen(true);
+
+      const clearPreviewUrl = () =>
+        setPreviewUrl((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return null;
+        });
+
+      const projectForPreview = await ensureProjectDataForPreview();
+      if (!projectForPreview) {
+        setPreviewError(
+          "Project data could not be loaded. Confirm you have access to this project and try again."
+        );
+        return;
+      }
+
+      const lookupUserIds = pickConsultantLookupUserIdsFromProject(
+        previewTemplateType,
+        projectForPreview
+      );
+      if (lookupUserIds.length === 0) {
+        clearPreviewUrl();
+        setPreviewNotice("License not available.");
+        return;
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      let metadata: Record<string, unknown> | null = null;
+      if (token) {
+        const res = await fetch("/api/preview-consultant-metadata", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            access_token: token,
+            consultant_lookup_user_ids: lookupUserIds,
+          }),
+        });
+        if (res.ok) {
+          const payload = (await res.json()) as { metadata?: unknown };
+          if (payload.metadata && typeof payload.metadata === "object") {
+            metadata = payload.metadata as Record<string, unknown>;
+          }
+        }
+      }
+
+      const licenseUrl = metadata
+        ? templateTypeLicenseUrlKeys(previewTemplateType)
+            .map((key) => String(metadata?.[key] ?? "").trim())
+            .find(Boolean) ?? ""
+        : "";
+
+      if (!licenseUrl) {
+        clearPreviewUrl();
+        setPreviewNotice("License not available.");
+        return;
+      }
+
+      setPreviewUrl((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return licenseUrl;
+      });
+    } catch (err) {
+      setPreviewUrl((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setPreviewError(
+        err instanceof Error ? err.message : "License could not be loaded."
+      );
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
   const loadPreviewContent = async (
     variant: "appointment" | "acceptance",
     opts?: { keepModalOpen?: boolean; resetSaveState?: boolean }
@@ -2241,6 +2386,9 @@ export default function ApplicationDetailsPage() {
 
     try {
       setPreviewError(null);
+      // Any letter load takes the dropdown out of the License selection.
+      setPreviewDocKind("letter");
+      setPreviewNotice(null);
       if (resetSaveState) {
         setSavePdfMessage(null);
         setSavePdfError(null);
@@ -2262,28 +2410,7 @@ export default function ApplicationDetailsPage() {
       setIsPreviewLoading(true);
       if (!keepModalOpen) setPreviewOpen(true);
 
-      let projectForPreview = projectData;
-      if (!projectForPreview && projectId) {
-        const coreSelect =
-          "title,project_info,save_plot_details,applicant_details,user_id,architect_user_id,application_urls";
-        const { data: directData } = await supabase
-          .from("projects")
-          .select(coreSelect)
-          .eq("id", projectId)
-          .single();
-        if (directData) {
-          projectForPreview = directData as PreviewProjectData;
-          setProjectData(projectForPreview);
-        } else {
-          const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
-            p_project_id: projectId,
-          });
-          if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
-            projectForPreview = rpcData as PreviewProjectData;
-            setProjectData(projectForPreview);
-          }
-        }
-      }
+      const projectForPreview = await ensureProjectDataForPreview();
 
       if (!projectForPreview) {
         setPreviewError(
@@ -2540,21 +2667,55 @@ export default function ApplicationDetailsPage() {
   };
 
   const handlePreview = async () => {
+    if (previewDocKind === "license") {
+      await loadLicensePreview({ keepModalOpen: false });
+      return;
+    }
     await loadPreviewContent(letterVariant, {
       keepModalOpen: false,
       resetSaveState: true,
     });
   };
 
-  const handleLetterVariantChange = (next: "appointment" | "acceptance") => {
-    if (next === letterVariant) return;
+  const handleLetterVariantChange = (
+    next: "appointment" | "acceptance",
+    opts?: { force?: boolean }
+  ) => {
+    if (next === letterVariant && !opts?.force) return;
     setLetterVariant(next);
     if (previewOpen) {
       void loadPreviewContent(next, { keepModalOpen: true, resetSaveState: false });
     }
   };
 
-  openPreviewForSignRef.current = handlePreview;
+  /** Dropdown selection spanning both letter variants and the consultant's license. */
+  const previewDocSelection: "appointment" | "acceptance" | "license" =
+    previewDocKind === "license" ? "license" : letterVariant;
+
+  const handlePreviewDocSelectionChange = (
+    next: "appointment" | "acceptance" | "license"
+  ) => {
+    if (next === previewDocSelection) return;
+    if (next === "license") {
+      setPreviewDocKind("license");
+      if (previewOpen) void loadLicensePreview({ keepModalOpen: true });
+      return;
+    }
+    // Coming back from License must reload even when `letterVariant` is unchanged.
+    const leavingLicense = previewDocKind === "license";
+    setPreviewDocKind("letter");
+    setPreviewNotice(null);
+    handleLetterVariantChange(next, { force: leavingLicense });
+  };
+
+  // Sidebar “Sign application” auto-signs whatever the modal shows, so it must
+  // always open the letter — never the license.
+  openPreviewForSignRef.current = async () => {
+    await loadPreviewContent(letterVariant, {
+      keepModalOpen: false,
+      resetSaveState: true,
+    });
+  };
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) return;
@@ -2573,7 +2734,9 @@ export default function ApplicationDetailsPage() {
           letterVariant,
         });
         if (cancelled) return;
-        setDetailsFieldRows(buildDetailsFieldRowsForUi(ctx.fieldMapping, ctx.templateType));
+        setDetailsFieldRows(
+          buildDetailsFieldRowsForUi(ctx.fieldMapping, ctx.templateType, ctx.previewSource)
+        );
       } catch (err: unknown) {
         if (!cancelled) {
           const message =
@@ -3641,6 +3804,8 @@ export default function ApplicationDetailsPage() {
         });
         setStoredSigningPdfUrl(pdfUrl);
         setPreviewHtml(null);
+        setPreviewDocKind("letter");
+        setPreviewNotice(null);
         setPreviewUrl((prev) => {
           if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
           return pdfUrl;
@@ -3979,6 +4144,8 @@ export default function ApplicationDetailsPage() {
           if (!pdfUrl) return;
           setStoredSigningPdfUrl(pdfUrl);
           setPreviewHtml(null);
+          setPreviewDocKind("letter");
+          setPreviewNotice(null);
           setPreviewUrl((prev) => {
             if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
             return pdfUrl;
@@ -4243,26 +4410,27 @@ export default function ApplicationDetailsPage() {
                 </select>
               </label>
             )}
-            {isDualLetterType(previewTemplateType) && (
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
-                  Letter
-                </span>
-                <select
-                  value={letterVariant}
-                  onChange={(e) =>
-                    handleLetterVariantChange(
-                      e.target.value === "acceptance" ? "acceptance" : "appointment"
-                    )
-                  }
-                  className={selectClasses}
-                  aria-label="Letter type"
-                >
-                  <option value="appointment">Appointment</option>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
+                Document
+              </span>
+              <select
+                value={previewDocSelection}
+                onChange={(e) =>
+                  handlePreviewDocSelectionChange(
+                    normalizePreviewDocSelection(e.target.value)
+                  )
+                }
+                className={selectClasses}
+                aria-label="Document type"
+              >
+                <option value="appointment">Appointment</option>
+                {isDualLetterType(previewTemplateType) && (
                   <option value="acceptance">Acceptance</option>
-                </select>
-              </label>
-            )}
+                )}
+                <option value="license">License</option>
+              </select>
+            </label>
             <button
               type="button"
               onClick={handlePreview}
@@ -4346,10 +4514,12 @@ export default function ApplicationDetailsPage() {
         }
         onMockSignComplete={handleMockSignComplete}
         mockSignBusy={isSigningPdf}
-        showLetterVariantSelector={isDualLetterType(previewTemplateType)}
-        letterVariant={letterVariant}
-        onLetterVariantChange={handleLetterVariantChange}
+        showLetterVariantSelector
+        showAcceptanceOption={isDualLetterType(previewTemplateType)}
+        letterVariant={previewDocSelection}
+        onLetterVariantChange={handlePreviewDocSelectionChange}
         letterVariantDisabled={isPreviewLoading || isSavingPdf || isSigningPdf}
+        notice={previewNotice}
       />
 
       {applicationPdfSavedDialogOpen && (

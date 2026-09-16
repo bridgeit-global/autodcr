@@ -75,6 +75,39 @@ export function templateConsultantApplicantKeywords(templateType: TemplateType):
   }
 }
 
+/**
+ * Auth `user_metadata` key holding the consultant's uploaded license document URL.
+ * Mirrors `CONSULTANT_CERTIFICATE_URL_BY_TYPE` in `app/api/consultants/partial/route.ts`,
+ * keyed by template type instead of registration type.
+ */
+const LICENSE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>> = {
+  Architect: "coa_certificate_url",
+  "Licensed Surveyor": "lbs_certificate_url",
+  "Structural Engineer": "structural_license_url",
+  "Fire Safety Consultant": "fire_noc_url",
+  "M&E Consultant": "mep_experience_url",
+  Plumber: "phe_accreditation_url",
+  "Site Supervisor": "site_supervisor_license_url",
+  "Landscape Consultant": "landscape_certificate_url",
+  "Geotechnical Consultant": "lab_registration_url",
+  "Environmental Consultant": "env_certificate_url",
+  "Town Planner": "town_planner_certificate_url",
+  "PMC / Project Manager": "pmc_certificate_url",
+};
+
+/** Generic license URL key, written alongside the type-specific one on every upload. */
+const GENERIC_LICENSE_URL_KEY = "license_certificate_url";
+
+/**
+ * Ordered candidate metadata keys holding the consultant's license document URL.
+ * Types without a registration counterpart (Parking, Rainwater, Horticulturist)
+ * resolve to the generic key only.
+ */
+export function templateTypeLicenseUrlKeys(templateType: TemplateType): string[] {
+  const typeKey = LICENSE_URL_KEY_BY_TEMPLATE_TYPE[templateType];
+  return typeKey ? [typeKey, GENERIC_LICENSE_URL_KEY] : [GENERIC_LICENSE_URL_KEY];
+}
+
 export type ConsultantAppointmentFieldKeys = {
   company: string;
   addr1: string;
