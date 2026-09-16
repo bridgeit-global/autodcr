@@ -273,6 +273,45 @@ function formatSurveyNumbersListForSubject(joinedList: string): string {
   return `${parts.slice(0, -1).join(", ")} & ${parts[parts.length - 1]}`;
 }
 
+/** Subject-line survey label (`C.T.S. No(s).`) chosen by Project Details `plotBelongsTo`. */
+function surveyLabelForSubjectLine(plotBelongs?: string): string {
+  switch (plotBelongs) {
+    case "CS No.":
+      return "C.S. No(s).";
+    case "F.P.No":
+      return "F.P. No(s).";
+    default:
+      return "C.T.S. No(s).";
+  }
+}
+
+/** Matches the survey label baked into the subject token value, e.g. `C.T.S. No(s). 338 & 340`. */
+const SURVEY_SUBJECT_LABEL_PREFIX = /^((?:C\.T\.S\.|C\.S\.|F\.P\.)\s*No\(s\)\.)\s*/i;
+
+/**
+ * Splits `C.T.S. No(s). 338 & 340` so the Application Details row can show the
+ * survey kind as the field label and only the numbers as the value.
+ */
+function splitSurveySubjectValue(value: string): { label?: string; numbers: string } {
+  const match = value.match(SURVEY_SUBJECT_LABEL_PREFIX);
+  if (!match) return { numbers: value.trim() };
+  return { label: match[1].trim(), numbers: value.slice(match[0].length).trim() };
+}
+
+/** Village / division / TPS wording matching the Project Details dropdown label. */
+function villageDivisionFieldLabel(plotBelongs?: string): string {
+  switch (plotBelongs) {
+    case "CS No.":
+      return "Division";
+    case "CTS No.":
+      return "Village";
+    case "F.P.No":
+      return "TPS schema";
+    default:
+      return "Village / division";
+  }
+}
+
 /** Label before bracketed survey numbers — includes “No.” like Project Details (`plotBelongsTo`). */
 function surveyNumbersKindLabel(plotBelongs?: string): string | undefined {
   switch (plotBelongs) {
@@ -469,12 +508,7 @@ export function mapToPdfFieldValues(
   const regionForProjectToken = source?.projectData?.save_plot_details?.region?.trim();
   const rawSurveyList = joinProposedCsOrCtsNos(source).trim();
   const plotBelongs = source?.projectData?.save_plot_details?.plotBelongsTo;
-  const surveyLabelForSubject =
-    plotBelongs === "CS No."
-      ? "C.S. No(s)."
-      : plotBelongs === "F.P.No"
-        ? "F.P. No(s)."
-        : "C.T.S. No(s).";
+  const surveyLabelForSubject = surveyLabelForSubjectLine(plotBelongs);
   const csCtsNosSubjectDisplay = rawSurveyList
     ? `${surveyLabelForSubject} ${formatSurveyNumbersListForSubject(rawSurveyList)}`
     : "";
@@ -1059,20 +1093,33 @@ export type PdfDetailsFieldRow = {
  */
 export function buildDetailsFieldRowsForUi(
   fieldMapping: Record<string, string | undefined>,
-  templateType: TemplateType
+  templateType: TemplateType,
+  source?: ApplicationPreviewSource
 ): PdfDetailsFieldRow[] {
   const rows: PdfDetailsFieldRow[] = [];
+  const plotBelongs = source?.projectData?.save_plot_details?.plotBelongsTo;
 
   const pushKey = (key: string) => {
     if (shouldSkipFieldKeyForDetailsUi(key, fieldMapping)) return;
     const raw = fieldMapping[key];
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value) return;
-    rows.push({
-      key,
-      label: labelForPdfFieldKey(key, templateType),
-      value: key === "project_Ward." ? formatWardDisplayValue(value) : value,
-    });
+
+    let label = labelForPdfFieldKey(key, templateType);
+    let displayValue = value;
+
+    if (key === "project_CS/CTSNos.") {
+      const split = splitSurveySubjectValue(value);
+      label = split.label || surveyLabelForSubjectLine(plotBelongs);
+      displayValue = split.numbers;
+    } else if (key === "project_Division/Village") {
+      label = villageDivisionFieldLabel(plotBelongs);
+    } else if (key === "project_Ward.") {
+      displayValue = formatWardDisplayValue(value);
+    }
+
+    if (!displayValue) return;
+    rows.push({ key, label, value: displayValue });
   };
 
   for (const key of APPLICATION_LETTER_SUBJECT_FIELD_KEYS) {
