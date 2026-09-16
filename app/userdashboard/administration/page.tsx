@@ -70,7 +70,7 @@ export default function AdministrationPage() {
     projects,
     loading: projectsLoading,
     isConsultant,
-    hasArchitectDelegateAccess,
+    isArchitectConsultant,
     architectDelegateProjectIds,
   } = useDashboardProjects();
 
@@ -82,7 +82,7 @@ export default function AdministrationPage() {
     null
   );
 
-  const canViewAdministration = !isConsultant || hasArchitectDelegateAccess;
+  const canViewAdministration = !isConsultant || isArchitectConsultant;
 
   const allowedProjects = useMemo(
     () =>
@@ -221,8 +221,8 @@ export default function AdministrationPage() {
             <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
               <Users className="h-8 w-8 text-gray-300" />
               <p className="max-w-md text-sm text-gray-500">
-                Only the project owner or appointed architect can view
-                Administration.
+                Administration is available to owners, developers, and
+                architects only.
               </p>
             </div>
           ) : loading ? (

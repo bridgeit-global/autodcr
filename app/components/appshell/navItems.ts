@@ -24,6 +24,8 @@ export type AppNavItem = {
   live?: boolean;
   /** When set, item is shown only to that role. Omit for shared items. */
   audience?: AppNavAudience;
+  /** Owner/Developer or Architect consultants only. */
+  adminRolesOnly?: boolean;
 };
 
 export const APP_NAV_ITEMS: AppNavItem[] = [
@@ -66,7 +68,7 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
   },
   {
     id: "documents",
-    label: "Documents",
+    label: "Document Generator",
     href: "/userdashboard/documents",
     icon: FileText,
     live: true,
@@ -105,5 +107,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     href: "/userdashboard/administration",
     icon: Users,
     live: true,
+    adminRolesOnly: true,
   },
 ];

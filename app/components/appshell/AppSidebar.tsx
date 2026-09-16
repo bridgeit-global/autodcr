@@ -36,9 +36,12 @@ export default function AppSidebar({
   onCloseMobile,
 }: AppSidebarProps) {
   const pathname = usePathname() || "/userdashboard";
-  const { isConsultant } = useDashboardProjects();
+  const { isConsultant, isArchitectConsultant } = useDashboardProjects();
 
   const visibleNavItems = APP_NAV_ITEMS.filter((item) => {
+    if (item.adminRolesOnly) {
+      return !isConsultant || isArchitectConsultant;
+    }
     if (!item.audience) return true;
     if (isConsultant) return item.audience === "consultant";
     return item.audience === "owner";
