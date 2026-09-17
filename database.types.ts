@@ -96,6 +96,7 @@ export type Database = {
       }
       building_proposal_offices: {
         Row: {
+          authority: string
           correspondence_type: string
           id: string
           line1: string
@@ -106,6 +107,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          authority?: string
           correspondence_type?: string
           id: string
           line1: string
@@ -116,6 +118,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          authority?: string
           correspondence_type?: string
           id?: string
           line1?: string

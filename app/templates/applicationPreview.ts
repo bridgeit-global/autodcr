@@ -15,8 +15,12 @@ import {
   templateTypeToPdfTokenSuffix,
 } from "@/app/utils/consultantTemplateTokens";
 import {
+  applyWardToOfficerName,
+  CORRESPONDENCE_AUTHORITY_ALL,
   resolveBuildingProposalOffice,
+  selectOfficesForAuthority,
   type BuildingProposalAddressBlock,
+  type CorrespondenceOfficesByAuthority,
 } from "@/app/utils/resolveBuildingProposalOffice";
 import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
@@ -26,7 +30,10 @@ import {
 } from "@/app/utils/projectAccess";
 import { type TemplateFields, type TemplateType } from "./templateGenerators";
 
-export type { BuildingProposalAddressBlock } from "@/app/utils/resolveBuildingProposalOffice";
+export type {
+  BuildingProposalAddressBlock,
+  CorrespondenceOfficesByAuthority,
+} from "@/app/utils/resolveBuildingProposalOffice";
 
 export { templateConsultantApplicantKeywords, templateTypeToPdfTokenSuffix } from "@/app/utils/consultantTemplateTokens";
 
@@ -66,10 +73,10 @@ export type ApplicationPreviewSource = {
   consultantEmail?: string | null;
   /** Applicant directory ids (`user_id` on the row) for COA lookup when JWT is not the consultant. */
   consultantLookupUserIds?: string[];
-  /** Building Proposal offices from `public.building_proposal_offices` (keyed by slug). */
-  buildingProposalOfficesByKey?: Record<string, BuildingProposalAddressBlock>;
+  /** Building Proposal offices from `public.building_proposal_offices` (by authority, then slug). */
+  buildingProposalOfficesByKey?: CorrespondenceOfficesByAuthority;
   /** Fire Brigade RCC offices (`correspondence_type = fire_consultant`). */
-  fireConsultantOfficesByKey?: Record<string, BuildingProposalAddressBlock>;
+  fireConsultantOfficesByKey?: CorrespondenceOfficesByAuthority;
   /**
    * For all types that have an acceptance letter: `appointment` → default template,
    * `acceptance` → `{type}_acceptance.html` in Application_Templates.
@@ -359,7 +366,10 @@ export function mapApplicationPreviewFields(
   const fireBrigadeAddress = isFireConsultantLetter
     ? resolveFireBrigadeOffice(
         savePlot.ward,
-        source.fireConsultantOfficesByKey
+        selectOfficesForAuthority(
+          source.fireConsultantOfficesByKey,
+          savePlot.planningAuthority
+        )
       )
     : undefined;
 
@@ -643,7 +653,7 @@ export function mapToPdfFieldValues(
   const buildingProposalAddressRaw = resolveBuildingProposalOffice(
     regionForProjectToken,
     wardForProjectToken,
-    source?.buildingProposalOfficesByKey
+    selectOfficesForAuthority(source?.buildingProposalOfficesByKey, planningAuthority)
   );
   const buildingProposalAddressFormatted = buildingProposalAddressRaw
     ? formatAddressLinesForLetterDisplay(
@@ -680,10 +690,31 @@ export function mapToPdfFieldValues(
     buildingProposalOfficerLine
   );
 
+  // Authorities with their own office rows (e.g. SRA) address the officer straight
+  // from `officer_name` — no "O/o The Dy. Ch. Eng. (B.P.)" / zone suffix line.
+  const authorityOfficerName =
+    buildingProposalAddressRaw &&
+    buildingProposalAddressRaw.authority !== CORRESPONDENCE_AUTHORITY_ALL
+      ? applyWardToOfficerName(
+          buildingProposalAddressRaw.officerName,
+          wardForProjectToken
+        ).trim()
+      : "";
+  if (authorityOfficerName) {
+    buildingProposalBaseDesignation = authorityOfficerName;
+    officerDesignationDisplay = "";
+    officerZoneSuffix = "";
+    buildingProposalOfficerLine = "";
+    buildingProposalToHeader = buildBuildingProposalToHeaderLines(
+      buildingProposalBaseDesignation,
+      ""
+    );
+  }
+
   if (isFireConsultantLetter) {
     const fireBrigadeAddressRaw = resolveFireBrigadeOffice(
       wardForProjectToken,
-      source?.fireConsultantOfficesByKey
+      selectOfficesForAuthority(source?.fireConsultantOfficesByKey, planningAuthority)
     );
     if (fireBrigadeAddressRaw) {
       const fireAddressFormatted = formatAddressLinesForLetterDisplay(
