@@ -10,6 +10,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { BTN_PRIMARY, NAV_ITEM_ACTIVE, NAV_ITEM_ACTIVE_BAR } from "@/app/utils/buttonClasses";
 import { TEXT_CAPTION, TEXT_NAV, TEXT_TITLE_MD } from "@/app/utils/typography";
 import {
+  APPLICATION_DETAILS_LABEL,
+  APPLICATION_DETAILS_PATH,
   CREATE_PROJECT_SECTIONS,
   LIBRARY_GATE_ALERT,
   isGatedCreateProjectPath,
@@ -541,33 +543,83 @@ const DashboardSidebar = ({
     ),
   };
 
-  const menuItems = [
-    ...(isReadOnlyMode
-      ? [
-          {
-            id: "application-details",
-            label: "Application Details",
-            path: "/dashboard/application-details",
-            icon: (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"
-                />
-              </svg>
-            ),
-          },
-        ]
-      : []),
-    ...CREATE_PROJECT_SECTIONS.map((section) => ({
-      id: section.id,
-      label: section.label,
-      path: section.path,
-      icon: sectionIcons[section.id],
-    })),
-  ];
+  const menuItems = CREATE_PROJECT_SECTIONS.map((section) => ({
+    id: section.id,
+    label: section.label,
+    path: section.path,
+    icon: sectionIcons[section.id],
+  }));
+
+  const applicationNavItem = {
+    id: "application-details",
+    label: APPLICATION_DETAILS_LABEL,
+    path: APPLICATION_DETAILS_PATH,
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"
+        />
+      </svg>
+    ),
+  };
+
+  const renderNavItem = (item: { id: string; label: string; path: string; icon: ReactNode }) => {
+    // Normalize paths by removing trailing slashes for comparison
+    const normalizedPathname = pathname.replace(/\/$/, "");
+    const normalizedItemPath = item.path.replace(/\/$/, "");
+
+    const isActive = normalizedPathname === normalizedItemPath;
+    const isGated = isLibraryGated && isGatedCreateProjectPath(item.path);
+
+    const justifyClass = collapsed ? "justify-center" : "justify-between";
+
+    return (
+      <button
+        key={item.id}
+        onClick={() => handleNavigation(item.path)}
+        aria-disabled={isGated ? true : undefined}
+        className={`relative w-full flex items-center ${justifyClass} px-4 py-3 rounded-xl transition-colors ${
+          isActive
+            ? NAV_ITEM_ACTIVE
+            : isGated
+              ? "text-gray-400 cursor-not-allowed"
+              : "text-gray-700 hover:bg-gray-100"
+        }`}
+      >
+        {/* Active indicator bar */}
+        {isActive && (
+          <span className={`absolute left-0 top-2 bottom-2 w-1 rounded-r-full ${NAV_ITEM_ACTIVE_BAR}`} />
+        )}
+        <span className={`${TEXT_NAV} flex items-center gap-2`}>
+          <span
+            className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg text-emerald-700 shrink-0"
+            aria-hidden="true"
+          >
+            {item.icon}
+          </span>
+          {!collapsed && <span>{item.label}</span>}
+        </span>
+        {!collapsed && (
+          <svg
+            className="w-4 h-4 text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        )}
+      </button>
+    );
+  };
 
   // Narrow sidebar on small screens; expand only on md+ for better mobile layout
   const sidebarWidthClass = collapsed ? "w-12 md:w-16" : "w-16 md:w-64";
@@ -769,60 +821,17 @@ const DashboardSidebar = ({
 
         {/* Navigation Items - Scrollable */}
         <nav className="space-y-1 flex-1 overflow-y-auto min-h-0">
-          {menuItems.map((item) => {
-            // Normalize paths by removing trailing slashes for comparison
-            const normalizedPathname = pathname.replace(/\/$/, "");
-            const normalizedItemPath = item.path.replace(/\/$/, "");
-            
-            const isActive = normalizedPathname === normalizedItemPath;
-            const isGated = isLibraryGated && isGatedCreateProjectPath(item.path);
-
-            const justifyClass = collapsed ? "justify-center" : "justify-between";
-
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleNavigation(item.path)}
-                aria-disabled={isGated ? true : undefined}
-                className={`relative w-full flex items-center ${justifyClass} px-4 py-3 rounded-xl transition-colors ${
-                  isActive
-                    ? NAV_ITEM_ACTIVE
-                    : isGated
-                      ? "text-gray-400 cursor-not-allowed"
-                      : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {/* Active indicator bar */}
-                {isActive && (
-                  <span className={`absolute left-0 top-2 bottom-2 w-1 rounded-r-full ${NAV_ITEM_ACTIVE_BAR}`} />
-                )}
-                <span className={`${TEXT_NAV} flex items-center gap-2`}>
-                  <span
-                    className="w-8 h-8 flex items-center justify-center bg-emerald-100 rounded-lg text-emerald-700 shrink-0"
-                    aria-hidden="true"
-                  >
-                    {item.icon}
-                  </span>
-                  {!collapsed && <span>{item.label}</span>}
-                </span>
-                {!collapsed && (
-                  <svg
-                    className="w-4 h-4 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
+          {isReadOnlyMode && (
+            <>
+              {renderNavItem(applicationNavItem)}
+              {!collapsed && (
+                <p className="hidden md:block px-4 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                  Project Data
+                </p>
+              )}
+            </>
+          )}
+          {menuItems.map((item) => renderNavItem(item))}
         </nav>
       </div>
 
