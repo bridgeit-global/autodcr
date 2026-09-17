@@ -34,6 +34,11 @@ type PrincipalLookupMatch = {
   metadata?: Record<string, unknown>;
 };
 
+const DOCS_INCOMPLETE_ERRORS = new Set([
+  "Upload all required documents to continue.",
+  "Upload all required documents first.",
+]);
+
 /** True when lookup hit belongs to someone else (not this form's verified/self identity). */
 function isForeignPrincipalMatch(
   match: PrincipalLookupMatch | null | undefined,
@@ -86,6 +91,7 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const router = useRouter();
   const registrationKind = accountRole === "Developer" ? "developer" : "owner";
   const [formError, setFormError] = useState("");
+  const [pendingDocsContinue, setPendingDocsContinue] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [hasScrolledDeclaration, setHasScrolledDeclaration] = useState(false);
@@ -903,6 +909,22 @@ I hereby declare that I have read, understood, and agree to comply with all the 
       element.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
+
+  // The autofill step applies files and requests continue in the same batch, so
+  // completeness can only be read after that state commits.
+  useEffect(() => {
+    if (isDocumentsComplete) {
+      setFormError((prev) => (DOCS_INCOMPLETE_ERRORS.has(prev) ? "" : prev));
+    }
+    if (!pendingDocsContinue) return;
+    setPendingDocsContinue(false);
+    if (isDocumentsComplete) {
+      scrollToSection("section-basic-details");
+    } else {
+      setFormError("Upload all required documents to continue.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDocsContinue, isDocumentsComplete]);
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
@@ -2863,13 +2885,7 @@ I hereby declare that I have read, understood, and agree to comply with all the 
                   registrationKind={registrationKind}
                   entityType={formData.entityType}
                   onAutofill={applyRegistrationAutofill}
-                  onContinue={() => {
-                    if (isDocumentsComplete) {
-                      scrollToSection("section-basic-details");
-                    } else {
-                      setFormError("Upload all required documents to continue.");
-                    }
-                  }}
+                  onContinue={() => setPendingDocsContinue(true)}
                 />
               </div>
 

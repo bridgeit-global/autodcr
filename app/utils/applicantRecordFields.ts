@@ -87,7 +87,10 @@ export function resolveOwnerEntityTypeForDesignation(opts: {
   return "";
 }
 
-/** Map owner `entity_type` to the signatory line under the DSC (e.g. Director). */
+/**
+ * Map owner `entity_type` to the signatory line under the DSC (e.g. Director).
+ * Individual owners sign in their own name, so they get no designation line.
+ */
 export function entityTypeToSignatoryDesignation(entityType: string): string {
   if (!isKnownEntityType(entityType)) return "";
   const normalized = entityType.trim().toLowerCase();
@@ -95,7 +98,7 @@ export function entityTypeToSignatoryDesignation(entityType: string): string {
     case "proprietorship":
       return "Proprietor";
     case "individual":
-      return "Individual Owner";
+      return "";
     case "pvt. ltd. / ltd. company":
       return "Director";
     case "llp":

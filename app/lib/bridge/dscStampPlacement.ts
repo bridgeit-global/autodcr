@@ -553,7 +553,11 @@ export async function resolveDscStampRectFromPdf(
       if (layout === "cleanRight" && role === "owner") {
         const thankYou = findLine(lines, "thanking you");
         signatureAnchor = findRightSignatureAnchor(lines, pageMidX, thankYou);
-        anchor = thankYou;
+        // "For {firm}," sits between "Thanking you," and the stamp — anchor below it.
+        anchor =
+          findColumnCompanyBlockBottomLine(lines, pageMidX, "right", thankYou, signatureAnchor) ??
+          findColumnForLine(lines, pageMidX, "right", thankYou) ??
+          thankYou;
       } else if (layout === "acceptanceLeft") {
         const thankYou = findLine(lines, "thanking you");
         signatureAnchor = findColumnDesignationAnchor(lines, pageMidX, "left", thankYou);

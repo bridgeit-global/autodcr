@@ -283,8 +283,10 @@ function removeEmptyAddressParagraphs(html: string): string {
     }
     const attrStr = attrs ?? "";
     const isAddressLike =
-      /\bbold\b|MsoNormal|value-bold|to-content|signature-company/i.test(attrStr) ||
-      /value-bold|class=['"]?bold|signature-company/i.test(inner);
+      /\bbold\b|MsoNormal|value-bold|to-content|signature-company|signature-designation/i.test(
+        attrStr
+      ) ||
+      /value-bold|class=['"]?bold|signature-company|signature-designation/i.test(inner);
     return isAddressLike ? "" : full;
   });
 }

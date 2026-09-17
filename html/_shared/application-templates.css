@@ -452,6 +452,12 @@
     align-self: flex-end;
   }
   
+  .owner-signature .signature-company {
+    margin: 0 0 4px;
+    text-align: right;
+    align-self: flex-end;
+  }
+  
   .owner-signature .owner-signature-details.signature-line {
     margin-top: 0;
     margin-left: 0;
@@ -462,6 +468,11 @@
     line-height: 1.25;
     text-align: right;
     align-self: flex-end;
+  }
+  
+  .owner-signature .signature-line p {
+    margin: 0;
+    line-height: 1.25;
   }
   
   .dsc-stamp-slot {
