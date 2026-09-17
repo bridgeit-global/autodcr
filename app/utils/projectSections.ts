@@ -9,6 +9,10 @@ export type CreateProjectSection = {
 
 export const PROJECT_LIBRARY_PATH = "/dashboard/project-library";
 
+export const APPLICATION_DETAILS_PATH = "/dashboard/application-details";
+
+export const APPLICATION_DETAILS_LABEL = "Application Details";
+
 export const CREATE_PROJECT_SECTIONS: CreateProjectSection[] = [
   {
     id: "project-library",
