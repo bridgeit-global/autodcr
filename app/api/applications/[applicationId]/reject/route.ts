@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-import { canUserAccessApplication } from "@/app/utils/applicationAccess";
 import { canManageProject } from "@/app/utils/projectAccess";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
@@ -13,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Reject an application: sets workflow_stage to 'rejected' and notifies owner + consultant.
- * Allowed for project owner, appointed architect delegate, or the assigned consultant.
+ * Allowed only for project owner / developer or the appointed architect.
  */
 export async function POST(
   request: NextRequest,
@@ -89,8 +88,6 @@ export async function POST(
     }
 
     const projectId = String(appRow.project_id);
-    const permissionType =
-      typeof appRow.permission_type === "string" ? appRow.permission_type.trim() : "";
 
     const { data: projectRow, error: projErr } = await admin
       .from("projects")
@@ -102,26 +99,8 @@ export async function POST(
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
 
-    const { data: rosterData } = await admin.rpc("get_applicant_details_for_project", {
-      p_project_id: projectId,
-    });
-
-    const applicants: Record<string, unknown>[] =
-      Array.isArray((rosterData as { applicants?: unknown })?.applicants)
-        ? ((rosterData as { applicants: unknown[] }).applicants as Record<string, unknown>[])
-        : [];
-
     const uid = String(user.id);
-    const canReject =
-      canManageProject(projectRow, uid) ||
-      canUserAccessApplication({
-        authUserId: uid,
-        project: projectRow,
-        applicants,
-        permissionType,
-      });
-
-    if (!canReject) {
+    if (!canManageProject(projectRow, uid)) {
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
