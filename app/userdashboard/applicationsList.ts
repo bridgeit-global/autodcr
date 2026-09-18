@@ -88,12 +88,26 @@ export function bucketApplicationHealth(
   return split;
 }
 
+export function sortApplicationsByLatestCreated(
+  applications: DashboardApplication[]
+): DashboardApplication[] {
+  return [...applications].sort((a, b) => {
+    const aTime = a.createdAt ? Date.parse(a.createdAt) : 0;
+    const bTime = b.createdAt ? Date.parse(b.createdAt) : 0;
+    const aValid = Number.isFinite(aTime) ? aTime : 0;
+    const bValid = Number.isFinite(bTime) ? bTime : 0;
+    if (bValid !== aValid) return bValid - aValid;
+    return b.id.localeCompare(a.id);
+  });
+}
+
 export function filterApplicationsByStage(
   applications: DashboardApplication[],
   filter: ApplicationStageFilter
 ): DashboardApplication[] {
-  if (filter === "all") return applications;
-  return applications.filter((app) => getApplicationStage(app) === filter);
+  const sorted = sortApplicationsByLatestCreated(applications);
+  if (filter === "all") return sorted;
+  return sorted.filter((app) => getApplicationStage(app) === filter);
 }
 
 export async function fetchApplicationsList(params: {
@@ -113,16 +127,18 @@ export async function fetchApplicationsList(params: {
     .order("created_at", { ascending: false });
 
   if (!error && data) {
-    return (data as Array<Record<string, unknown>>).map((row) => ({
-      id: String(row.id),
-      projectId: String(row.project_id ?? ""),
-      projectTitle: String(row.project_title ?? "Untitled project"),
-      permissionType: String(row.permission_type ?? "Application"),
-      department: String(row.department ?? ""),
-      createdAt: typeof row.created_at === "string" ? row.created_at : undefined,
-      workflowStage:
-        typeof row.workflow_stage === "string" ? row.workflow_stage : null,
-    }));
+    return sortApplicationsByLatestCreated(
+      (data as Array<Record<string, unknown>>).map((row) => ({
+        id: String(row.id),
+        projectId: String(row.project_id ?? ""),
+        projectTitle: String(row.project_title ?? "Untitled project"),
+        permissionType: String(row.permission_type ?? "Application"),
+        department: String(row.department ?? ""),
+        createdAt: typeof row.created_at === "string" ? row.created_at : undefined,
+        workflowStage:
+          typeof row.workflow_stage === "string" ? row.workflow_stage : null,
+      }))
+    );
   }
 
   const rpcName = isConsultant
@@ -162,5 +178,5 @@ export async function fetchApplicationsList(params: {
     })
   );
 
-  return Array.from(byId.values());
+  return sortApplicationsByLatestCreated(Array.from(byId.values()));
 }

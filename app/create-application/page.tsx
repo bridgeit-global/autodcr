@@ -918,7 +918,7 @@ export default function CreateApplicationPage() {
   const handleModalOk = () => {
     setShowInfoModal(false);
     if (redirectOnModalOk) {
-      router.push(`/userdashboard?department=${encodeURIComponent(selectedDepartment)}`);
+      router.push("/userdashboard/applications?stage=draft");
     }
   };
 

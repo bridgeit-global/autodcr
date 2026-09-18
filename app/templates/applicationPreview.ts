@@ -649,6 +649,9 @@ export function mapToPdfFieldValues(
   const displayClientCompanyDesignation = clientCompanyDesignation
     ? entityTypeToSignatoryDesignation(clientCompanyDesignation)
     : "";
+  // Individual: title sits under the name (not above like Proprietor / Director).
+  const displayClientDesignationBelow =
+    clientCompanyDesignation.trim().toLowerCase() === "individual" ? "Owner" : "";
   const isFireConsultantLetter = templateType === "Fire Safety Consultant";
   const buildingProposalAddressRaw = resolveBuildingProposalOffice(
     regionForProjectToken,
@@ -805,6 +808,7 @@ export function mapToPdfFieldValues(
       ? `For ${clientCompanyName},`
       : "",
     project_Client_Company_Designation: displayClientCompanyDesignation,
+    project_Client_Designation_Below: displayClientDesignationBelow,
     project_Client_Name: clientName,
     project_addressline1_Client: clientAddressLine1,
     project_addressline2_Client: clientAddressLine2,
@@ -907,6 +911,8 @@ const PDF_FIELD_LABELS: Record<string, string> = {
   project_Owner_Approved_For:
     "Owner approved-for line (For entity_name,) — empty when no firm",
   project_Client_Company_Designation: "Client designation",
+  project_Client_Designation_Below:
+    "Client designation under name (Individual → Owner; empty otherwise)",
   project_Client_Name: "Client name",
   project_addressline1_Client: "Client — address line 1",
   project_addressline2_Client: "Client — address line 2",
