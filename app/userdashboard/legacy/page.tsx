@@ -1000,6 +1000,48 @@ function UserDashboardContent() {
     setSelectedDraftApp(null);
   };
 
+  const handleBackToDraftApplication = async (applicationId: string) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const authToken = sessionData.session?.access_token;
+    if (!authToken) {
+      showAlert({
+        title: "Sign in required",
+        message: "You must be signed in to move an application back to draft.",
+      });
+      return;
+    }
+
+    const response = await fetch(
+      `/api/applications/${encodeURIComponent(applicationId)}/back-to-draft`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => null)) as {
+        error?: string;
+        details?: string;
+      } | null;
+      const msg =
+        typeof errBody?.error === "string"
+          ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+          : "Failed to move application back to draft. Please try again.";
+      showAlert({
+        title: "Could not move to draft",
+        message: msg,
+      });
+      return;
+    }
+
+    await loadDraftCounts();
+    setIsDraftModalOpen(false);
+    setSelectedDraftApp(null);
+  };
+
   const handleOpenApplicationDetails = async (payload: {
     applicationId: string;
     projectId?: string;
@@ -1277,6 +1319,9 @@ function UserDashboardContent() {
           )}
           onDeleteApplication={canUseOwnerProjectActions ? handleDeleteApplication : undefined}
           onRejectApplication={handleRejectApplication}
+          onBackToDraftApplication={
+            canUseOwnerProjectActions ? handleBackToDraftApplication : undefined
+          }
           onOpenApplicationDetails={handleOpenApplicationDetails}
         />
       )}

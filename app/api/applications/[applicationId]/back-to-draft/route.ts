@@ -11,8 +11,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Reject an application: sets workflow_stage to 'rejected' and notifies owner + consultant.
- * Allowed only for project owner / developer or the appointed architect.
+ * Move an in-process application back to draft.
+ * Clears signature fields so a re-submit starts clean.
+ * Allowed for project owner / developer or the appointed architect.
  */
 export async function POST(
   request: NextRequest,
@@ -29,7 +30,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            "Server misconfigured: set SUPABASE_SERVICE_ROLE_KEY to reject applications.",
+            "Server misconfigured: set SUPABASE_SERVICE_ROLE_KEY to move applications back to draft.",
         },
         { status: 500 }
       );
@@ -75,8 +76,8 @@ export async function POST(
 
     if (String(appRow.workflow_stage || "") !== "in_process") {
       return NextResponse.json(
-        { error: "Only in-process applications can be rejected." },
-        { status: 400 }
+        { error: "Only in-process applications can be moved back to draft." },
+        { status: 409 }
       );
     }
 
@@ -99,34 +100,25 @@ export async function POST(
 
     const { error: updateErr } = await admin
       .from("applications")
-      .update({ workflow_stage: "rejected" })
+      .update({
+        workflow_stage: "draft",
+        owner_signed_at: null,
+        owner_signed_by: null,
+        architect_signed_at: null,
+        architect_signed_by: null,
+      })
       .eq("id", applicationId.trim());
 
     if (updateErr) {
       return NextResponse.json(
-        { error: "Failed to reject application.", details: updateErr.message },
+        { error: "Failed to move application back to draft.", details: updateErr.message },
         { status: 500 }
       );
     }
 
-    // Fire notification (fire-and-forget from server side)
-    const notifyUrl = new URL(
-      `/api/applications/${encodeURIComponent(applicationId.trim())}/notify`,
-      request.nextUrl.origin
-    );
-
-    fetch(notifyUrl.toString(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ stage: "rejected" }),
-    }).catch((err) => console.error("[reject-application] Notification failed:", err));
-
-    return NextResponse.json({ success: true, workflow_stage: "rejected" });
+    return NextResponse.json({ success: true, workflow_stage: "draft" });
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Reject failed.";
+    const message = e instanceof Error ? e.message : "Back to draft failed.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -553,11 +553,19 @@ export function mapToPdfFieldValues(
   const consultantValidityDisplay = isLicensedSurveyorLetter
     ? (formatCoaExpiryDisplay(source?.lbsExpiryDate) ?? "")
     : (formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "");
+  const clientCompanyNameEarly = source?.clientCompanyName?.trim() || "";
+  const rawClientNameCandidates = [
+    source?.clientName?.trim(),
+    fields.ApplicantName?.trim(),
+    source?.projectData?.title?.trim(),
+  ].filter((v): v is string => Boolean(v && v.trim()));
+  // Prefer a person name; skip values that are just the owner company / project title firm.
   const clientName =
-    source?.clientName?.trim() ||
-    fields.ApplicantName?.trim() ||
-    source?.projectData?.title?.trim() ||
-    "-";
+    rawClientNameCandidates.find(
+      (name) =>
+        !clientCompanyNameEarly ||
+        name.toLowerCase() !== clientCompanyNameEarly.toLowerCase()
+    ) || "-";
   const clientAddressFormatted = formatAddressLinesForLetterDisplay(
     sanitizeAddressLine(
       pickText(

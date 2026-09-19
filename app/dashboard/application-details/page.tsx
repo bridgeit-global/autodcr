@@ -8,6 +8,7 @@ import DscPanVerifyModal from "@/app/components/DscPanVerifyModal";
 import SignOnBehalfOwnerModal from "@/app/components/SignOnBehalfOwnerModal";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
+import { useApplicationLifecycleActionsSlot } from "@/app/dashboard/context/ApplicationLifecycleActionsSlotContext";
 import {
   normalizeApplicationWorkflowStage,
   type ApplicationWorkflowStage,
@@ -29,6 +30,7 @@ import {
   sameUserId,
 } from "@/app/utils/applicationSigning";
 import {
+  canManageProject,
   isOwnerApplicantType,
   primaryApplicantLabelFromRoster,
   type PrincipalApplicantLabel,
@@ -98,6 +100,8 @@ import {
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
 import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
+import Modal from "@/app/components/ui/Modal";
+import { Loader2, RotateCcw, Trash2, XCircle } from "lucide-react";
 
 type PreviewProjectData = {
   title?: string;
@@ -853,9 +857,18 @@ async function buildApplicationPreviewContext(
     (typeof ownerApplicant?.entityName === "string"
       ? ownerApplicant.entityName.trim()
       : "");
+  // Owner/Developer roster often stores company in `name`; prefer person name for signatures.
+  const applicantRosterName =
+    typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "";
+  const personFromApplicant = pickPersonFullNameFromMeta(ownerApplicant);
+  const rosterNameIsCompany =
+    Boolean(applicantRosterName) &&
+    Boolean(clientCompanyName) &&
+    applicantRosterName.toLowerCase() === clientCompanyName.toLowerCase();
   let clientName =
-    (typeof ownerApplicant?.name === "string" ? ownerApplicant.name.trim() : "") ||
-    pickPersonFullNameFromMeta(ownerApplicant);
+    personFromApplicant ||
+    (!rosterNameIsCompany ? applicantRosterName : "") ||
+    "";
   let clientCompanyDesignation = resolveOwnerEntityTypeForDesignation({
     applicantEntityType:
       ownerApplicant?.entity_type?.trim() ||
@@ -1032,9 +1045,15 @@ async function buildApplicationPreviewContext(
       const resolvedType = pickEntityTypeFromMeta(ownerMeta);
       if (resolvedType) clientCompanyDesignation = resolvedType;
     }
-    if (!clientName) {
+    {
       const resolvedClientName = pickPersonFullNameFromMeta(ownerMeta);
-      if (resolvedClientName) clientName = resolvedClientName;
+      const clientNameIsCompany =
+        Boolean(clientName) &&
+        Boolean(clientCompanyName) &&
+        clientName.toLowerCase() === clientCompanyName.toLowerCase();
+      if (resolvedClientName && (!clientName || clientNameIsCompany)) {
+        clientName = resolvedClientName;
+      }
     }
     if (!ownerLetterheadUrl) {
       const resolvedLetterheadUrl = pickLetterheadUrlFromMeta(ownerMeta);
@@ -1063,6 +1082,15 @@ async function buildApplicationPreviewContext(
     const resolvedCompany = pickEntityNameFromMeta(ownerMeta);
     if (resolvedCompany && !clientCompanyName) {
       clientCompanyName = resolvedCompany;
+    }
+    // If company was resolved after name, drop roster name that is just the firm.
+    if (
+      clientName &&
+      clientCompanyName &&
+      clientName.toLowerCase() === clientCompanyName.toLowerCase()
+    ) {
+      const personFromMeta = pickPersonFullNameFromMeta(ownerMeta);
+      clientName = personFromMeta || "";
     }
     if (
       clientCompanyDesignation &&
@@ -1954,6 +1982,16 @@ export default function ApplicationDetailsPage() {
   const [onBehalfConfirmOpen, setOnBehalfConfirmOpen] = useState(false);
   const { setSlot } = useApplicationPdfSaveSlot();
   const { setSlot: setSignApplicationSlot } = useApplicationSignSlot();
+  const { setSlot: setLifecycleActionsSlot } = useApplicationLifecycleActionsSlot();
+  const [lifecycleActionBusy, setLifecycleActionBusy] = useState<
+    "delete" | "reject" | "back_to_draft" | null
+  >(null);
+  const [lifecycleConfirmType, setLifecycleConfirmType] = useState<
+    "delete" | "reject" | "back_to_draft" | null
+  >(null);
+  const runLifecycleActionRef = useRef<
+    ((type: "delete" | "reject" | "back_to_draft") => Promise<void>) | null
+  >(null);
   const [autoMockSignAfterPreviewOpen, setAutoMockSignAfterPreviewOpen] = useState(false);
   const [sidebarPdfStatus, setSidebarPdfStatus] = useState<string | null>(null);
   const previewPdfContextRef = useRef<{
@@ -4302,6 +4340,142 @@ export default function ApplicationDetailsPage() {
     mockSignAvailability,
   ]);
 
+  useEffect(() => {
+    if (!isReadOnlyMode || !projectId || !applicationId || !authUserId) {
+      setLifecycleActionsSlot(null);
+      return;
+    }
+
+    const canManage = canManageProject(
+      {
+        user_id: projectData?.user_id,
+        architect_user_id: projectData?.architect_user_id,
+      },
+      authUserId
+    );
+    if (!canManage) {
+      setLifecycleActionsSlot(null);
+      return;
+    }
+
+    const getToken = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      return sessionData.session?.access_token ?? null;
+    };
+
+    const runLifecycleAction = async (
+      type: "delete" | "reject" | "back_to_draft"
+    ) => {
+      if (lifecycleActionBusy) return;
+
+      const token = await getToken();
+      if (!token) {
+        window.alert("You must be signed in to continue.");
+        return;
+      }
+
+      setLifecycleActionBusy(type);
+      try {
+        const endpoint =
+          type === "delete"
+            ? `/api/applications/${encodeURIComponent(applicationId)}`
+            : type === "back_to_draft"
+              ? `/api/applications/${encodeURIComponent(applicationId)}/back-to-draft`
+              : `/api/applications/${encodeURIComponent(applicationId)}/reject`;
+        const response = await fetch(endpoint, {
+          method: type === "delete" ? "DELETE" : "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) {
+          const errBody = (await response.json().catch(() => null)) as {
+            error?: string;
+            details?: string;
+          } | null;
+          const msg =
+            typeof errBody?.error === "string"
+              ? errBody.error + (errBody.details ? ` (${errBody.details})` : "")
+              : "Action failed. Please try again.";
+          window.alert(msg);
+          return;
+        }
+
+        setLifecycleConfirmType(null);
+
+        if (type === "delete") {
+          router.push("/userdashboard/applications?stage=draft");
+          return;
+        }
+        if (type === "back_to_draft") {
+          setApplicationWorkflowStage("draft");
+          setPdfSavedForCurrentPreview(false);
+          setOwnerSignedAt(null);
+          setArchitectSignedAt(null);
+          return;
+        }
+        setApplicationWorkflowStage("rejected");
+        router.push("/userdashboard/applications?stage=rejected");
+      } catch (err) {
+        console.error(`Lifecycle action ${type} failed:`, err);
+        window.alert("Something went wrong. Please try again.");
+      } finally {
+        setLifecycleActionBusy(null);
+      }
+    };
+
+    runLifecycleActionRef.current = runLifecycleAction;
+
+    if (applicationWorkflowStage === "draft") {
+      setLifecycleActionsSlot({
+        delete: {
+          onClick: async () => {
+            setLifecycleConfirmType("delete");
+          },
+          busy: lifecycleActionBusy === "delete",
+        },
+      });
+    } else if (applicationWorkflowStage === "in_process") {
+      setLifecycleActionsSlot({
+        backToDraft: {
+          onClick: async () => {
+            setLifecycleConfirmType("back_to_draft");
+          },
+          busy: lifecycleActionBusy === "back_to_draft",
+        },
+        reject: {
+          onClick: async () => {
+            setLifecycleConfirmType("reject");
+          },
+          busy: lifecycleActionBusy === "reject",
+        },
+        delete: {
+          onClick: async () => {
+            setLifecycleConfirmType("delete");
+          },
+          busy: lifecycleActionBusy === "delete",
+        },
+      });
+    } else {
+      setLifecycleConfirmType(null);
+      setLifecycleActionsSlot(null);
+    }
+
+    return () => {
+      runLifecycleActionRef.current = null;
+      setLifecycleActionsSlot(null);
+    };
+  }, [
+    isReadOnlyMode,
+    projectId,
+    applicationId,
+    authUserId,
+    projectData?.user_id,
+    projectData?.architect_user_id,
+    applicationWorkflowStage,
+    lifecycleActionBusy,
+    setLifecycleActionsSlot,
+    router,
+  ]);
+
   if (!isReadOnlyMode) {
     return (
       <div className="space-y-6">
@@ -4662,6 +4836,103 @@ export default function ApplicationDetailsPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={Boolean(lifecycleConfirmType)}
+        onClose={() => {
+          if (!lifecycleActionBusy) setLifecycleConfirmType(null);
+        }}
+        title={
+          lifecycleConfirmType === "delete"
+            ? "Delete application?"
+            : lifecycleConfirmType === "back_to_draft"
+              ? "Move back to draft?"
+              : "Reject this application?"
+        }
+        maxWidth="sm"
+      >
+        {lifecycleConfirmType && (
+          <div className="space-y-5">
+            <div className="flex items-start gap-3">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                  lifecycleConfirmType === "delete"
+                    ? "bg-rose-50 text-rose-600"
+                    : lifecycleConfirmType === "back_to_draft"
+                      ? "bg-slate-100 text-brand-navy"
+                      : "bg-amber-50 text-amber-600"
+                }`}
+              >
+                {lifecycleConfirmType === "delete" ? (
+                  <Trash2 className="h-4 w-4" />
+                ) : lifecycleConfirmType === "back_to_draft" ? (
+                  <RotateCcw className="h-4 w-4" />
+                ) : (
+                  <XCircle className="h-4 w-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-brand-navy">
+                  {selectedApplication?.trim() || "Application"}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-gray-500">
+                  {projectData?.title?.trim() || "This project"}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-gray-600">
+                  {lifecycleConfirmType === "delete"
+                    ? "This application will be permanently removed. This cannot be undone."
+                    : lifecycleConfirmType === "back_to_draft"
+                      ? "This application will return to Draft and existing signatures will be cleared."
+                      : "This application will move to Rejected. Owner and consultant will be notified."}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setLifecycleConfirmType(null)}
+                disabled={Boolean(lifecycleActionBusy)}
+                className="rounded-lg border border-gray-200 px-3.5 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void runLifecycleActionRef.current?.(lifecycleConfirmType)}
+                disabled={Boolean(lifecycleActionBusy)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  lifecycleConfirmType === "delete"
+                    ? "bg-rose-600 hover:bg-rose-700"
+                    : lifecycleConfirmType === "back_to_draft"
+                      ? "bg-brand-navy hover:bg-brand-navy/90"
+                      : "bg-amber-600 hover:bg-amber-700"
+                }`}
+              >
+                {lifecycleActionBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : lifecycleConfirmType === "delete" ? (
+                  <Trash2 className="h-4 w-4" />
+                ) : lifecycleConfirmType === "back_to_draft" ? (
+                  <RotateCcw className="h-4 w-4" />
+                ) : (
+                  <XCircle className="h-4 w-4" />
+                )}
+                {lifecycleActionBusy
+                  ? lifecycleConfirmType === "delete"
+                    ? "Deleting…"
+                    : lifecycleConfirmType === "back_to_draft"
+                      ? "Moving…"
+                      : "Rejecting…"
+                  : lifecycleConfirmType === "delete"
+                    ? "Yes, delete"
+                    : lifecycleConfirmType === "back_to_draft"
+                      ? "Yes, move to draft"
+                      : "Yes, reject"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

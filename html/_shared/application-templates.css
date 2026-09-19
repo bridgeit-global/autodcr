@@ -89,12 +89,12 @@
     padding: 0;
   }
   
-  /* Date row + “To” / address (left) and saved-PDF QR (right, under Date). */
+  /* “To” / address (left), saved-PDF QR (middle), Date (right) — one top-aligned row. */
   .letter-header {
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
     page-break-inside: avoid;
   }
   
@@ -103,28 +103,37 @@
     padding: 0;
   }
   
-  .letter-header .date-row td {
+  .letter-header .address-qr-date-row td {
     padding-top: 8px;
-    padding-bottom: 8px;
+    padding-bottom: 4px;
   }
   
-  .letter-header .address-qr-row .to-block {
-    width: 100%;
+  .letter-header .address-qr-date-row .to-block {
+    width: auto;
     padding-right: 12px;
   }
   
   .letter-header .qr-cell {
     width: 132px;
     max-width: 132px;
-    text-align: right;
+    text-align: center;
     white-space: nowrap;
-    padding-top: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: 4px;
+  }
+  
+  .letter-header .date-cell {
+    width: 140px;
+    max-width: 140px;
+    white-space: nowrap;
+    padding-left: 8px;
   }
   
   .saved-pdf-qr-stack {
     display: inline-flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
     gap: 4px;
     margin: 0;
     padding: 0;

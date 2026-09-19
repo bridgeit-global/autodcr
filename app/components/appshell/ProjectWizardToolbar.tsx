@@ -2,6 +2,7 @@
 
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
+import { useApplicationLifecycleActionsSlot } from "@/app/dashboard/context/ApplicationLifecycleActionsSlotContext";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 
 type ProjectWizardToolbarProps = {
@@ -27,10 +28,41 @@ export default function ProjectWizardToolbar({
 }: ProjectWizardToolbarProps) {
   const { slot: applicationPdfSaveSlot } = useApplicationPdfSaveSlot();
   const { slot: applicationSignSlot } = useApplicationSignSlot();
+  const { slot: lifecycleActionsSlot } = useApplicationLifecycleActionsSlot();
 
   if (isReadOnlyMode) {
     return (
       <div className="flex flex-wrap items-center justify-end gap-2 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
+        {lifecycleActionsSlot?.backToDraft && (
+          <button
+            type="button"
+            onClick={() => void lifecycleActionsSlot.backToDraft?.onClick()}
+            disabled={lifecycleActionsSlot.backToDraft.busy}
+            className="inline-flex min-h-10 items-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-brand-navy transition-colors hover:bg-slate-50 disabled:opacity-50"
+          >
+            {lifecycleActionsSlot.backToDraft.busy ? "Moving…" : "Back to draft"}
+          </button>
+        )}
+        {lifecycleActionsSlot?.reject && (
+          <button
+            type="button"
+            onClick={() => void lifecycleActionsSlot.reject?.onClick()}
+            disabled={lifecycleActionsSlot.reject.busy}
+            className="inline-flex min-h-10 items-center rounded-lg border border-amber-300 px-4 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+          >
+            {lifecycleActionsSlot.reject.busy ? "Rejecting…" : "Reject"}
+          </button>
+        )}
+        {lifecycleActionsSlot?.delete && (
+          <button
+            type="button"
+            onClick={() => void lifecycleActionsSlot.delete?.onClick()}
+            disabled={lifecycleActionsSlot.delete.busy}
+            className="inline-flex min-h-10 items-center rounded-lg border border-rose-300 px-4 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-50"
+          >
+            {lifecycleActionsSlot.delete.busy ? "Deleting…" : "Delete"}
+          </button>
+        )}
         {applicationPdfSaveSlot && (
           <button
             type="button"
@@ -48,10 +80,10 @@ export default function ProjectWizardToolbar({
             ].join(" ")}
           >
             {applicationPdfSaveSlot.busy
-              ? "Saving…"
+              ? "Submitting…"
               : applicationPdfSaveSlot.done
-                ? "Saved"
-                : "Save application"}
+                ? "Submitted"
+                : "Submit"}
           </button>
         )}
         {applicationSignSlot && (() => {

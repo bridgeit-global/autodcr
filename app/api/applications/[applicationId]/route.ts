@@ -119,9 +119,10 @@ export async function DELETE(
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    if (String(appRow.workflow_stage || "") !== "draft") {
+    const stage = String(appRow.workflow_stage || "");
+    if (stage !== "draft" && stage !== "in_process") {
       return NextResponse.json(
-        { error: "Only draft applications can be deleted." },
+        { error: "Only draft or in-process applications can be deleted." },
         { status: 409 }
       );
     }
