@@ -5,6 +5,7 @@ import Image from "next/image";
 import { isPageSaved, loadDraft, saveDraft } from "@/app/utils/draftStorage";
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
+import { useApplicationLifecycleActionsSlotOptional } from "@/app/dashboard/context/ApplicationLifecycleActionsSlotContext";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useEffect, useState, type ReactNode } from "react";
 import { BTN_PRIMARY, NAV_ITEM_ACTIVE, NAV_ITEM_ACTIVE_BAR } from "@/app/utils/buttonClasses";
@@ -43,6 +44,8 @@ const DashboardSidebar = ({
 }: DashboardSidebarProps) => {
   const { slot: applicationPdfSaveSlot } = useApplicationPdfSaveSlot();
   const { slot: applicationSignSlot } = useApplicationSignSlot();
+  const lifecycleActionsCtx = useApplicationLifecycleActionsSlotOptional();
+  const lifecycleActionsSlot = lifecycleActionsCtx?.slot ?? null;
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -663,6 +666,59 @@ const DashboardSidebar = ({
           </button>
         </div>
 
+        {lifecycleActionsSlot && isReadOnlyMode && (
+          <div className="mb-4 shrink-0 w-full min-w-0 space-y-2">
+            {lifecycleActionsSlot.backToDraft && (
+              <button
+                type="button"
+                onClick={() => void lifecycleActionsSlot.backToDraft?.onClick()}
+                disabled={lifecycleActionsSlot.backToDraft.busy}
+                className="w-full border border-gray-300 text-brand-navy hover:bg-slate-50 font-semibold py-2 px-4 rounded-xl transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
+              >
+                {lifecycleActionsSlot.backToDraft.busy
+                  ? collapsed
+                    ? "…"
+                    : "Moving…"
+                  : collapsed
+                    ? "Draft"
+                    : "Back to draft"}
+              </button>
+            )}
+            {lifecycleActionsSlot.reject && (
+              <button
+                type="button"
+                onClick={() => void lifecycleActionsSlot.reject?.onClick()}
+                disabled={lifecycleActionsSlot.reject.busy}
+                className="w-full border border-amber-300 text-amber-700 hover:bg-amber-50 font-semibold py-2 px-4 rounded-xl transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
+              >
+                {lifecycleActionsSlot.reject.busy
+                  ? collapsed
+                    ? "…"
+                    : "Rejecting…"
+                  : collapsed
+                    ? "Rej"
+                    : "Reject"}
+              </button>
+            )}
+            {lifecycleActionsSlot.delete && (
+              <button
+                type="button"
+                onClick={() => void lifecycleActionsSlot.delete?.onClick()}
+                disabled={lifecycleActionsSlot.delete.busy}
+                className="w-full border border-rose-300 text-rose-700 hover:bg-rose-50 font-semibold py-2 px-4 rounded-xl transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
+              >
+                {lifecycleActionsSlot.delete.busy
+                  ? collapsed
+                    ? "…"
+                    : "Deleting…"
+                  : collapsed
+                    ? "Del"
+                    : "Delete"}
+              </button>
+            )}
+          </div>
+        )}
+
         {applicationPdfSaveSlot && isReadOnlyMode && (
           <div className="mb-4 shrink-0 w-full min-w-0">
             {!collapsed && applicationPdfSaveSlot.subtitle && (
@@ -690,8 +746,8 @@ const DashboardSidebar = ({
               }
               aria-label={
                 applicationPdfSaveSlot.done && !applicationPdfSaveSlot.busy
-                  ? "Application saved"
-                  : "Save application"
+                  ? "Application submitted"
+                  : "Submit application"
               }
             >
               {applicationPdfSaveSlot.busy ? (
@@ -700,14 +756,14 @@ const DashboardSidebar = ({
                     className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
                     aria-hidden
                   />
-                  {!collapsed && <span>Saving…</span>}
+                  {!collapsed && <span>Submitting…</span>}
                 </span>
               ) : applicationPdfSaveSlot.done ? (
-                collapsed ? "✓" : "Saved"
+                collapsed ? "✓" : "Submitted"
               ) : collapsed ? (
-                "Save"
+                "Go"
               ) : (
-                "Save application"
+                "Submit"
               )}
             </button>
           </div>

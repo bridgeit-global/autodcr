@@ -37,6 +37,7 @@ interface DraftApplicationsModalProps {
   applications: DraftApplication[];
   onDeleteApplication?: (applicationId: string) => Promise<void>;
   onRejectApplication?: (applicationId: string) => Promise<void>;
+  onBackToDraftApplication?: (applicationId: string) => Promise<void>;
   onOpenApplicationDetails?: (payload: {
     applicationId: string;
     projectId?: string;
@@ -60,13 +61,16 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
   applications,
   onDeleteApplication,
   onRejectApplication,
+  onBackToDraftApplication,
   onOpenApplicationDetails,
 }) => {
   const [fileNumberQuery, setFileNumberQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [backingToDraftId, setBackingToDraftId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRejectId, setPendingRejectId] = useState<string | null>(null);
+  const [pendingBackToDraftId, setPendingBackToDraftId] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -97,6 +101,17 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
       await onRejectApplication(applicationId);
     } finally {
       setRejectingId(null);
+    }
+  };
+
+  const handleBackToDraft = async (applicationId: string) => {
+    if (!onBackToDraftApplication) return;
+    setPendingBackToDraftId(null);
+    setBackingToDraftId(applicationId);
+    try {
+      await onBackToDraftApplication(applicationId);
+    } finally {
+      setBackingToDraftId(null);
     }
   };
 
@@ -194,10 +209,27 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                     )}
                   </div>
                   <p className="text-[13px] font-medium text-sky-700 mb-1">{app.status}</p>
-                  <div className="flex items-center gap-3">
-                    {onRejectApplication &&
-                      app.workflowStage !== "rejected" &&
-                      app.workflowStage !== "approved_verified" && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {onBackToDraftApplication && app.workflowStage === "in_process" && (
+                      <button
+                        type="button"
+                        className="text-[13px] text-slate-600 hover:text-slate-800 hover:underline disabled:text-gray-400 disabled:no-underline"
+                        onClick={() =>
+                          app.applicationId && setPendingBackToDraftId(app.applicationId)
+                        }
+                        disabled={
+                          !app.applicationId ||
+                          backingToDraftId === app.applicationId ||
+                          rejectingId === app.applicationId ||
+                          deletingId === app.applicationId
+                        }
+                      >
+                        {backingToDraftId === app.applicationId
+                          ? "Moving..."
+                          : "Back to draft"}
+                      </button>
+                    )}
+                    {onRejectApplication && app.workflowStage === "in_process" && (
                       <button
                         type="button"
                         className="text-[13px] text-amber-600 hover:text-amber-700 hover:underline disabled:text-gray-400 disabled:no-underline"
@@ -205,7 +237,8 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                         disabled={
                           !app.applicationId ||
                           rejectingId === app.applicationId ||
-                          deletingId === app.applicationId
+                          deletingId === app.applicationId ||
+                          backingToDraftId === app.applicationId
                         }
                       >
                         {rejectingId === app.applicationId ? "Rejecting..." : "Reject"}
@@ -219,7 +252,8 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                         disabled={
                           !app.applicationId ||
                           deletingId === app.applicationId ||
-                          rejectingId === app.applicationId
+                          rejectingId === app.applicationId ||
+                          backingToDraftId === app.applicationId
                         }
                       >
                         {deletingId === app.applicationId ? "Deleting..." : "Delete"}
@@ -306,6 +340,32 @@ const DraftApplicationsModal: React.FC<DraftApplicationsModalProps> = ({
                   onClick={() => handleReject(pendingRejectId)}
                 >
                   Yes, Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingBackToDraftId && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-5 w-[360px]">
+              <p className="text-sm text-gray-800">
+                Move this application back to draft? Existing signatures will be cleared.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                  onClick={() => setPendingBackToDraftId(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-sm text-white hover:bg-slate-900"
+                  onClick={() => handleBackToDraft(pendingBackToDraftId)}
+                >
+                  Yes, move to draft
                 </button>
               </div>
             </div>

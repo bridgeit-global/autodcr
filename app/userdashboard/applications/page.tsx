@@ -11,6 +11,7 @@ import {
   FileStack,
   FileText,
   Loader2,
+  RotateCcw,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -48,7 +49,7 @@ const STAGE_BADGE_CLASSES: Record<ApplicationWorkflowStage, string> = {
 };
 
 type PendingAction = {
-  type: "reject" | "delete";
+  type: "reject" | "delete" | "back_to_draft";
   app: DashboardApplication;
 };
 
@@ -180,42 +181,54 @@ function ApplicationsHubContent() {
     const { type, app } = pendingAction;
     const authToken = await getAuthToken();
     if (!authToken) {
+      const actionVerb =
+        type === "delete"
+          ? "delete"
+          : type === "back_to_draft"
+            ? "move"
+            : "reject";
       showAlert({
         title: "Sign in required",
-        message:
-          type === "delete"
-            ? "You must be signed in to delete an application."
-            : "You must be signed in to reject an application.",
+        message: `You must be signed in to ${actionVerb} an application.`,
       });
       return;
     }
 
     setBusyId(app.id);
     try {
-      const response = await fetch(
+      const endpoint =
         type === "delete"
           ? `/api/applications/${encodeURIComponent(app.id)}`
-          : `/api/applications/${encodeURIComponent(app.id)}/reject`,
-        {
-          method: type === "delete" ? "DELETE" : "POST",
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-        }
-      );
+          : type === "back_to_draft"
+            ? `/api/applications/${encodeURIComponent(app.id)}/back-to-draft`
+            : `/api/applications/${encodeURIComponent(app.id)}/reject`;
+      const response = await fetch(endpoint, {
+        method: type === "delete" ? "DELETE" : "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
 
       if (!response.ok) {
         const errBody = (await response.json().catch(() => null)) as {
           error?: string;
           details?: string;
         } | null;
+        const failTitle =
+          type === "delete"
+            ? "Could not delete application"
+            : type === "back_to_draft"
+              ? "Could not move to draft"
+              : "Could not reject application";
         showAlert({
-          title: type === "delete" ? "Could not delete application" : "Could not reject application",
+          title: failTitle,
           message: apiErrorMessage(
             errBody,
             type === "delete"
               ? "Failed to delete application. Please try again."
-              : "Failed to reject application. Please try again."
+              : type === "back_to_draft"
+                ? "Failed to move application back to draft. Please try again."
+                : "Failed to reject application. Please try again."
           ),
         });
         return;
@@ -224,6 +237,13 @@ function ApplicationsHubContent() {
       setPendingAction(null);
       if (type === "delete") {
         setApplications((prev) => prev.filter((row) => row.id !== app.id));
+      } else if (type === "back_to_draft") {
+        setApplications((prev) =>
+          prev.map((row) =>
+            row.id === app.id ? { ...row, workflowStage: "draft" } : row
+          )
+        );
+        setStageFilter("draft");
       } else {
         setApplications((prev) =>
           prev.map((row) =>
@@ -235,7 +255,12 @@ function ApplicationsHubContent() {
     } catch (err) {
       console.error(`Failed to ${type} application:`, err);
       showAlert({
-        title: type === "delete" ? "Could not delete application" : "Could not reject application",
+        title:
+          type === "delete"
+            ? "Could not delete application"
+            : type === "back_to_draft"
+              ? "Could not move to draft"
+              : "Could not reject application",
         message: "Something went wrong. Please try again.",
       });
     } finally {
@@ -365,12 +390,15 @@ function ApplicationsHubContent() {
                   {filtered.map((app) => {
                     const stage = getApplicationStage(app);
                     const canManage = canManageProjectApps(app.projectId);
-                    const canReject =
+                    const canReject = canManage && stage === "in_process";
+                    const canDelete =
                       canManage && (stage === "draft" || stage === "in_process");
-                    const canDelete = canManage && stage === "draft";
+                    const canBackToDraft = canManage && stage === "in_process";
                     const rowBusy = busyId === app.id;
                     const rejecting = rowBusy && pendingAction?.type === "reject";
                     const deleting = rowBusy && pendingAction?.type === "delete";
+                    const backingToDraft =
+                      rowBusy && pendingAction?.type === "back_to_draft";
                     const meta = [
                       app.projectTitle,
                       app.department,
@@ -410,8 +438,32 @@ function ApplicationsHubContent() {
                             </div>
                           </button>
 
-                          {(canReject || canDelete) && (
+                          {(canReject || canDelete || canBackToDraft) && (
                             <div className="flex shrink-0 items-center overflow-hidden rounded-full border border-gray-200 bg-white shadow-sm">
+                              {canBackToDraft && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPendingAction({ type: "back_to_draft", app })
+                                  }
+                                  disabled={rowBusy || actionBusy}
+                                  title="Back to draft"
+                                  aria-label={`Back to draft ${app.permissionType}`}
+                                  className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-slate-50 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+                                >
+                                  {backingToDraft ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  )}
+                                  <span className="hidden sm:inline">
+                                    {backingToDraft ? "Moving…" : "Back to draft"}
+                                  </span>
+                                </button>
+                              )}
+                              {canBackToDraft && canReject && (
+                                <span className="h-4 w-px bg-gray-200" aria-hidden />
+                              )}
                               {canReject && (
                                 <button
                                   type="button"
@@ -439,7 +491,7 @@ function ApplicationsHubContent() {
                                   type="button"
                                   onClick={() => setPendingAction({ type: "delete", app })}
                                   disabled={rowBusy || actionBusy}
-                                  title="Delete draft"
+                                  title="Delete application"
                                   aria-label={`Delete ${app.permissionType}`}
                                   className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
                                 >
@@ -480,7 +532,13 @@ function ApplicationsHubContent() {
         onClose={() => {
           if (!actionBusy) setPendingAction(null);
         }}
-        title={pendingAction?.type === "delete" ? "Delete draft application?" : "Reject this application?"}
+        title={
+          pendingAction?.type === "delete"
+            ? "Delete application?"
+            : pendingAction?.type === "back_to_draft"
+              ? "Move back to draft?"
+              : "Reject this application?"
+        }
         maxWidth="sm"
       >
         {pendingAction && (
@@ -490,11 +548,15 @@ function ApplicationsHubContent() {
                 className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
                   pendingAction.type === "delete"
                     ? "bg-rose-50 text-rose-600"
-                    : "bg-amber-50 text-amber-600"
+                    : pendingAction.type === "back_to_draft"
+                      ? "bg-slate-100 text-brand-navy"
+                      : "bg-amber-50 text-amber-600"
                 }`}
               >
                 {pendingAction.type === "delete" ? (
                   <Trash2 className="h-4 w-4" />
+                ) : pendingAction.type === "back_to_draft" ? (
+                  <RotateCcw className="h-4 w-4" />
                 ) : (
                   <XCircle className="h-4 w-4" />
                 )}
@@ -508,8 +570,10 @@ function ApplicationsHubContent() {
                 </p>
                 <p className="mt-2 text-sm leading-relaxed text-gray-600">
                   {pendingAction.type === "delete"
-                    ? "This draft will be permanently removed. This cannot be undone."
-                    : "This application will move to Rejected. Owner and consultant will be notified."}
+                    ? "This application will be permanently removed. This cannot be undone."
+                    : pendingAction.type === "back_to_draft"
+                      ? "This application will return to Draft and existing signatures will be cleared."
+                      : "This application will move to Rejected. Owner and consultant will be notified."}
                 </p>
               </div>
             </div>
@@ -529,23 +593,31 @@ function ApplicationsHubContent() {
                 className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   pendingAction.type === "delete"
                     ? "bg-rose-600 hover:bg-rose-700"
-                    : "bg-amber-600 hover:bg-amber-700"
+                    : pendingAction.type === "back_to_draft"
+                      ? "bg-brand-navy hover:bg-brand-navy/90"
+                      : "bg-amber-600 hover:bg-amber-700"
                 }`}
               >
                 {actionBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : pendingAction.type === "delete" ? (
                   <Trash2 className="h-4 w-4" />
+                ) : pendingAction.type === "back_to_draft" ? (
+                  <RotateCcw className="h-4 w-4" />
                 ) : (
                   <XCircle className="h-4 w-4" />
                 )}
                 {actionBusy
                   ? pendingAction.type === "delete"
                     ? "Deleting…"
-                    : "Rejecting…"
+                    : pendingAction.type === "back_to_draft"
+                      ? "Moving…"
+                      : "Rejecting…"
                   : pendingAction.type === "delete"
                     ? "Yes, delete"
-                    : "Yes, reject"}
+                    : pendingAction.type === "back_to_draft"
+                      ? "Yes, move to draft"
+                      : "Yes, reject"}
               </button>
             </div>
           </div>
