@@ -25,6 +25,12 @@ import {
 import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
 import {
+  catalogPlaceholderFieldMap,
+  fetchApplicationCatalogTypeByTitle,
+  fetchDocumentsForApplicationType,
+  fetchResolvedPlaceholdersForApplication,
+} from "@/app/utils/applicationCatalog";
+import {
   isOwnerApplicantType,
   type PrincipalApplicantLabel,
 } from "@/app/utils/projectAccess";
@@ -2278,6 +2284,42 @@ export async function fetchApplicationPreviewHtmlRaw(
   opts?: { accessToken?: string; skipSessionRefresh?: boolean }
 ): Promise<string> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
+  const applicationTitle = source?.selectedApplication?.trim() || "";
+  if (applicationTitle) {
+    try {
+      const catalogType = await fetchApplicationCatalogTypeByTitle(applicationTitle);
+      if (catalogType) {
+        const letterVariant =
+          source?.letterVariant === "acceptance" || source?.architectHtmlVariant === "acceptance"
+            ? "acceptance"
+            : "appointment";
+        const docs = await fetchDocumentsForApplicationType(catalogType.id);
+        const variantDoc =
+          docs.find((d) => d.letter_variant === letterVariant) || docs.find((d) => d.html);
+        const placeholders = await fetchResolvedPlaceholdersForApplication(
+          catalogType.id,
+          variantDoc?.id
+        );
+        const catalogFields = catalogPlaceholderFieldMap(
+          placeholders,
+          {
+            title: source?.projectData?.title,
+            project_info: source?.projectData?.project_info as Record<string, unknown> | null,
+            save_plot_details: source?.projectData?.save_plot_details as Record<string, unknown> | null,
+            building_details: (source?.projectData as { building_details?: Record<string, unknown> } | undefined)
+              ?.building_details,
+            applicant_details: source?.projectData?.applicant_details as
+              | { applicants?: Record<string, unknown>[] }
+              | null,
+          },
+          catalogType.applicant_type
+        );
+        Object.assign(formValues, catalogFields);
+      }
+    } catch (err) {
+      console.warn("catalog placeholder overlay failed:", err);
+    }
+  }
 
   let access_token = opts?.accessToken?.trim();
   if (!access_token && !opts?.skipSessionRefresh) {
@@ -2296,6 +2338,7 @@ export async function fetchApplicationPreviewHtmlRaw(
     },
     body: JSON.stringify({
       templateType,
+      ...(applicationTitle ? { applicationTitle } : {}),
       fields: formValues,
       ...(source?.projectId ? { projectId: source.projectId } : {}),
       ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),

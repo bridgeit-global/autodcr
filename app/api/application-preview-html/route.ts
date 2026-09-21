@@ -5,13 +5,14 @@ import QRCode from "qrcode";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 
-import { PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
+import { CATALOG_SAVED_PDF_QR_SENTINEL, PROJECT_SAVED_PDF_QR_SENTINEL } from "./constants";
 import {
   CLEAN_APPOINTMENT_HTML_TYPES,
   isLegacySubAppointmentHtml,
   mergeBuildingProposalOfficerZoneParagraphs,
 } from "@/app/utils/cleanAppointmentLetterTypes";
 import { enrichConsultantAppointmentFields } from "@/app/utils/enrichConsultantAppointmentFields";
+import { resolveHtmlPathForApplication } from "@/app/utils/applicationCatalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -243,9 +244,9 @@ function replaceTemplateTokens(
   const entries = Object.entries(fields).sort(([a], [b]) => b.length - a.length);
   for (const [key, raw] of entries) {
     const safeRaw = raw ?? "";
-    const token = key.startsWith("$") ? key : `$${key}`;
     const escaped = escapeHtml(safeRaw);
-    // First try fast exact replacement.
+    const isMustache = key.startsWith("{{") && key.endsWith("}}");
+    const token = isMustache ? key : key.startsWith("$") ? key : `$${key}`;
     out = out.split(token).join(escaped);
     // Then replace whitespace-variant tokens often produced by Word HTML exports.
     const whitespaceTolerantTokenRegex = new RegExp(
@@ -258,6 +259,9 @@ function replaceTemplateTokens(
   // Keep PROJECT_SAVED_PDF_QR_SENTINEL — replaced later with a QR <img> after DB lookup.
   out = out.replace(/\$project_[A-Za-z0-9_./-]+/g, (match) =>
     match === PROJECT_SAVED_PDF_QR_SENTINEL ? match : ""
+  );
+  out = out.replace(/\{\{[A-Z0-9_]+\}\}/g, (match) =>
+    match === "{{SAVED_PDF_QR}}" ? match : ""
   );
   return out;
 }
@@ -391,7 +395,9 @@ async function injectSavedPdfQrHtml(
     pdfUrl = await loadSavedPdfUrlForQr(supabase, opts.projectId.trim(), urlsKey);
   }
 
-  const stripSentinel = (s: string) => s.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("");
+  const qrSentinels = [PROJECT_SAVED_PDF_QR_SENTINEL, CATALOG_SAVED_PDF_QR_SENTINEL];
+  const stripSentinel = (s: string) =>
+    qrSentinels.reduce((acc, token) => acc.split(token).join(""), s);
 
   if (!pdfUrl) {
     return stripSentinel(html);
@@ -414,7 +420,7 @@ async function injectSavedPdfQrHtml(
 
   const qrRightColumn = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:0!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
 
-  const hadSentinel = html.includes(PROJECT_SAVED_PDF_QR_SENTINEL);
+  const hadSentinel = qrSentinels.some((token) => html.includes(token));
 
   /** Match layout on HTML without sentinel / QR — avoids EOF sentinel forcing last page. */
   const stripExistingQrBlocks = (s: string) =>
@@ -426,7 +432,7 @@ async function injectSavedPdfQrHtml(
       );
 
   const baseForLayout = stripExistingQrBlocks(
-    hadSentinel ? html.split(PROJECT_SAVED_PDF_QR_SENTINEL).join("") : html
+    hadSentinel ? stripSentinel(html) : html
   );
 
   const beside = insertSavedPdfQrBesideClientBlock(baseForLayout, qrRightColumn);
@@ -435,7 +441,9 @@ async function injectSavedPdfQrHtml(
   }
 
   /* No To/Sub structure found (e.g. Plumber): keep sentinel replacement or append fallback. */
-  let out = hadSentinel ? html.split(PROJECT_SAVED_PDF_QR_SENTINEL).join(qrBox) : html;
+  let out = hadSentinel
+    ? qrSentinels.reduce((acc, token) => acc.split(token).join(qrBox), html)
+    : html;
   if (!hadSentinel) {
     const fallback = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin-top:12px!important;padding:8px 0!important;border-top:1px solid #e5e7eb!important;width:132px!important;max-width:132px!important;min-width:0!important;margin-left:auto!important;margin-right:0!important;clear:both!important;flex-shrink:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
     if (out.includes("</body>")) {
@@ -577,6 +585,7 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json()) as {
       templateType?: TemplateType;
+      applicationTitle?: string;
       fields?: Record<string, string | undefined>;
       owner_debug?: unknown;
       projectId?: string;
@@ -606,16 +615,28 @@ export async function POST(request: NextRequest) {
 
     const supabase = createTemplateSupabaseClient(token);
 
-    let htmlTemplate = await downloadGlobalTemplateHtml({
-      supabase,
-      templateType: body.templateType,
-      letterVariant,
+    const catalogHtmlPath = await resolveHtmlPathForApplication({
+      applicationTitle: body.applicationTitle,
+      letterVariant: letterVariant === "acceptance" ? "acceptance" : "appointment",
+      client: supabase,
     });
 
+    let htmlTemplate = catalogHtmlPath
+      ? await loadApplicationTemplateHtml(supabase, catalogHtmlPath, {
+          templateType: body.templateType,
+          letterVariant,
+        })
+      : await downloadGlobalTemplateHtml({
+          supabase,
+          templateType: body.templateType,
+          letterVariant,
+        });
+
     const expectedPath =
-      letterVariant === "acceptance"
+      catalogHtmlPath ||
+      (letterVariant === "acceptance"
         ? (ACCEPTANCE_TEMPLATE_PATH_MAP[body.templateType] ?? TEMPLATE_PATH_MAP[body.templateType])
-        : TEMPLATE_PATH_MAP[body.templateType];
+        : TEMPLATE_PATH_MAP[body.templateType]);
 
     if (!htmlTemplate) {
       return NextResponse.json(
@@ -648,6 +669,7 @@ export async function POST(request: NextRequest) {
 
     // Inject shared CSS for all templates that use the clean acceptance HTML format.
     const needsSharedCss =
+      Boolean(catalogHtmlPath) ||
       body.templateType === "Architect" ||
       isCleanAppointmentLetter ||
       (letterVariant === "acceptance" && body.templateType in ACCEPTANCE_TEMPLATE_PATH_MAP);

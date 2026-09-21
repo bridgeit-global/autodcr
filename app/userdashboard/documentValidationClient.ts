@@ -55,7 +55,9 @@ function toDocumentTypeOption(id: string): DocumentTypeOption | null {
  * Includes registry-backed application names + appointment letters that share
  * architect-appointment-letter when mapped in APPLICATION_DOCUMENTS.
  */
-export function listApplicationDocumentOptions(): ApplicationDocumentOption[] {
+export function listApplicationDocumentOptions(
+  extraApplicationTypes: readonly string[] = []
+): ApplicationDocumentOption[] {
   const seen = new Set<string>();
   const options: ApplicationDocumentOption[] = [];
 
@@ -88,6 +90,9 @@ export function listApplicationDocumentOptions(): ApplicationDocumentOption[] {
     push(name);
   }
   for (const name of GENERAL_APPOINTMENT_TYPES) {
+    push(name);
+  }
+  for (const name of extraApplicationTypes) {
     push(name);
   }
 

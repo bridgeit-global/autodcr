@@ -59,6 +59,215 @@ export type Database = {
         }
         Relationships: []
       }
+      application_types: {
+        Row: {
+          applicant_type: string | null
+          application_title: string
+          category: string
+          created_at: string
+          department: string
+          description: string
+          icon_key: string
+          id: string
+          is_active: boolean
+          planning_authorities: string[]
+          requires_roster_match: boolean
+          show_building_permission_fields: boolean
+          sort_order: number
+          token_suffix: string | null
+          updated_at: string
+        }
+        Insert: {
+          applicant_type?: string | null
+          application_title: string
+          category: string
+          created_at?: string
+          department: string
+          description?: string
+          icon_key?: string
+          id: string
+          is_active?: boolean
+          planning_authorities?: string[]
+          requires_roster_match?: boolean
+          show_building_permission_fields?: boolean
+          sort_order?: number
+          token_suffix?: string | null
+          updated_at?: string
+        }
+        Update: {
+          applicant_type?: string | null
+          application_title?: string
+          category?: string
+          created_at?: string
+          department?: string
+          description?: string
+          icon_key?: string
+          id?: string
+          is_active?: boolean
+          planning_authorities?: string[]
+          requires_roster_match?: boolean
+          show_building_permission_fields?: boolean
+          sort_order?: number
+          token_suffix?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      application_documents: {
+        Row: {
+          application_type_id: string
+          category: string
+          html: string | null
+          id: string
+          is_active: boolean
+          letter_variant: string | null
+          sign: string[]
+          sort_order: number
+          sub_category: string | null
+        }
+        Insert: {
+          application_type_id: string
+          category: string
+          html?: string | null
+          id: string
+          is_active?: boolean
+          letter_variant?: string | null
+          sign?: string[]
+          sort_order?: number
+          sub_category?: string | null
+        }
+        Update: {
+          application_type_id?: string
+          category?: string
+          html?: string | null
+          id?: string
+          is_active?: boolean
+          letter_variant?: string | null
+          sign?: string[]
+          sort_order?: number
+          sub_category?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_documents_application_type_id_fkey"
+            columns: ["application_type_id"]
+            isOneToOne: false
+            referencedRelation: "application_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      placeholders: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string
+          legacy_token: string | null
+          source_column: string | null
+          source_table: string
+          token: string
+          ui_group: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          is_active?: boolean
+          label: string
+          legacy_token?: string | null
+          source_column?: string | null
+          source_table: string
+          token: string
+          ui_group?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          legacy_token?: string | null
+          source_column?: string | null
+          source_table?: string
+          token?: string
+          ui_group?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      application_type_placeholders: {
+        Row: {
+          application_type_id: string
+          placeholder_id: string
+          required: boolean
+          sort_order: number
+        }
+        Insert: {
+          application_type_id: string
+          placeholder_id: string
+          required?: boolean
+          sort_order?: number
+        }
+        Update: {
+          application_type_id?: string
+          placeholder_id?: string
+          required?: boolean
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_type_placeholders_application_type_id_fkey"
+            columns: ["application_type_id"]
+            isOneToOne: false
+            referencedRelation: "application_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_type_placeholders_placeholder_id_fkey"
+            columns: ["placeholder_id"]
+            isOneToOne: false
+            referencedRelation: "placeholders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      application_document_placeholders: {
+        Row: {
+          document_id: string
+          placeholder_id: string
+          required: boolean
+          sort_order: number
+        }
+        Insert: {
+          document_id: string
+          placeholder_id: string
+          required?: boolean
+          sort_order?: number
+        }
+        Update: {
+          document_id?: string
+          placeholder_id?: string
+          required?: boolean
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_document_placeholders_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "application_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_document_placeholders_placeholder_id_fkey"
+            columns: ["placeholder_id"]
+            isOneToOne: false
+            referencedRelation: "placeholders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       applicants: {
         Row: {
           applicant_details: Json
@@ -547,7 +756,23 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      application_catalog_sheet: {
+        Row: {
+          application_type: string | null
+          category: string | null
+          column: string | null
+          department: string | null
+          document_sort: number | null
+          html: string | null
+          placeholder: string | null
+          placeholder_sort: number | null
+          sign: string | null
+          sub_category: string | null
+          table: string | null
+          type_sort: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       user_can_access_project: {

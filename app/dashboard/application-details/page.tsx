@@ -89,6 +89,11 @@ import {
   type DscStampRole,
 } from "@/app/lib/bridge/dscStampPlacement";
 import {
+  catalogConsultantSignsAppointment,
+  fetchCatalogSigningByTitle,
+  type CatalogSigningInfo,
+} from "@/app/utils/applicationCatalog";
+import {
   pdfHasCompletedSignature,
   pdfHasUnsignedSignaturePlaceholder,
   assertPdfPriorSignaturesPreserved,
@@ -1207,7 +1212,7 @@ async function buildApplicationPreviewContext(
       ? { fireConsultantOfficesByKey }
       : {}),
     // Pass letterVariant for all types that have an acceptance template.
-    ...(TYPES_WITH_ACCEPTANCE.has(templateType)
+    ...(isDualLetterType(templateType, selectedApplication)
       ? {
           letterVariant: (inputLetterVariant ?? architectHtmlVariant) ?? "appointment",
         }
@@ -1264,6 +1269,33 @@ const TYPES_WITH_ACCEPTANCE = new Set<TemplateType>([
   "PMC / Project Manager",
 ]);
 
+const catalogSigningByTitle = new Map<string, CatalogSigningInfo>();
+let dualLetterApplicationTitle = "";
+
+function catalogSigningFor(applicationTitle?: string | null): CatalogSigningInfo | undefined {
+  const key = (applicationTitle ?? dualLetterApplicationTitle).trim().toLowerCase();
+  return key ? catalogSigningByTitle.get(key) : undefined;
+}
+
+/** Whether this type uses dual letters (appointment + acceptance). Catalog titles win when loaded. */
+const isDualLetterType = (t: TemplateType, applicationTitle?: string | null) => {
+  const title = (applicationTitle ?? dualLetterApplicationTitle).trim();
+  const info = catalogSigningFor(title);
+  if (info) return info.hasAcceptanceHtml;
+  if (catalogSigningByTitle.size > 0 && title) return false;
+  return TYPES_WITH_ACCEPTANCE.has(t);
+};
+
+/** Consultant DSC on the appointment letter: catalog `sign` array, else Architect/LS fallback. */
+function consultantSignsThisAppointment(
+  templateType: TemplateType,
+  applicationTitle?: string | null
+): boolean {
+  const info = catalogSigningFor(applicationTitle);
+  if (info) return catalogConsultantSignsAppointment(info);
+  return consultantSignsAppointmentLetter(templateType);
+}
+
 /** `application_urls` key for each type's acceptance PDF. */
 const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>> = {
   Architect: "Architect_acceptance",
@@ -1280,9 +1312,6 @@ const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>>
 };
 
 const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
-
-/** Whether this type uses dual letters (appointment + acceptance). */
-const isDualLetterType = (t: TemplateType) => TYPES_WITH_ACCEPTANCE.has(t);
 
 /** Narrows a raw `<select>` value to the document-type union. */
 function normalizePreviewDocSelection(
@@ -1602,7 +1631,7 @@ async function buildDualLetterPdfBlobs(
     }
     if (
       signatures.consultant &&
-      (variant === "acceptance" || consultantSignsAppointmentLetter(templateType))
+      (variant === "acceptance" || consultantSignsThisAppointment(templateType))
     ) {
       out = injectMockConsultantSignatureIntoPreviewHtml(out, templateType);
     }
@@ -1921,6 +1950,20 @@ export default function ApplicationDetailsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedApplication = searchParams.get("selectedApplication");
+  dualLetterApplicationTitle = selectedApplication?.trim() || "";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const signing = await fetchCatalogSigningByTitle();
+      if (cancelled) return;
+      catalogSigningByTitle.clear();
+      for (const [title, info] of signing) catalogSigningByTitle.set(title, info);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const applicationNo = searchParams.get("applicationNo");
   const applicationId = searchParams.get("applicationId");
   const projectId = searchParams.get("projectId");
@@ -3046,7 +3089,7 @@ export default function ApplicationDetailsPage() {
       if (hasDualLetters) {
         const consultantSigning = mockSignRole === "consultant";
         const consultantDualAppointment =
-          consultantSigning && consultantSignsAppointmentLetter(ctx.templateType);
+          consultantSigning && consultantSignsThisAppointment(ctx.templateType);
         setSidebarPdfStatus(
           consultantDualAppointment
             ? "Signing acceptance & appointment…"
@@ -3628,7 +3671,7 @@ export default function ApplicationDetailsPage() {
       const ownerAlreadySigned = Boolean(ownerSignedAtRow);
       const signingAcceptance = isDual && signRole === "consultant";
       const consultantDualAppointment =
-        signingAcceptance && consultantSignsAppointmentLetter(ctx.templateType);
+        signingAcceptance && consultantSignsThisAppointment(ctx.templateType);
       setSidebarPdfStatus(
         consultantDualAppointment
           ? "Signing acceptance & appointment with DSC…"
