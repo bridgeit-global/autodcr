@@ -593,6 +593,8 @@ export async function POST(request: NextRequest) {
       letterVariant?: "appointment" | "acceptance";
       /** @deprecated Back-compat alias for `letterVariant`. */
       architectHtmlVariant?: "appointment" | "acceptance";
+      /** Catalog `application_documents.id` when the type has multiple HTML documents. */
+      catalogDocumentId?: string;
       /** Pre-known PDF URL for QR (e.g. deterministic Storage URL before first upload). */
       savedPdfUrlForQr?: string;
     };
@@ -618,8 +620,18 @@ export async function POST(request: NextRequest) {
     const catalogHtmlPath = await resolveHtmlPathForApplication({
       applicationTitle: body.applicationTitle,
       letterVariant: letterVariant === "acceptance" ? "acceptance" : "appointment",
+      documentId: typeof body.catalogDocumentId === "string" ? body.catalogDocumentId : null,
       client: supabase,
     });
+
+    if (body.catalogDocumentId && !catalogHtmlPath) {
+      return NextResponse.json(
+        {
+          error: `No HTML template found for catalog document "${body.catalogDocumentId}". Upload the file named in application_documents.html to Storage bucket "${TEMPLATE_BUCKET}".`,
+        },
+        { status: 400 }
+      );
+    }
 
     let htmlTemplate = catalogHtmlPath
       ? await loadApplicationTemplateHtml(supabase, catalogHtmlPath, {

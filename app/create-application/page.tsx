@@ -184,30 +184,6 @@ const CATALOG_ICON_BY_KEY: Record<string, React.ReactNode> = {
   flow: <FlowIcon />,
 };
 
-const proposalSubmissionOptions = [
-  "Plan Approval Only",
-  "Concessions",
-  "IOD (Zero FSI/ Without Concession)",
-  "LOA (Without Concession)",
-  "Other",
-];
-
-const noticeOptions = [
-  "Commencement Notice",
-  "Revised Commencement",
-  "Plinth Completion",
-  "Occupancy",
-];
-
-const majorUseOptions = ["Residential", "Commercial", "Industrial", "Mixed Use"];
-
-const applicationTypeOptions = [
-  "New Proposal",
-  "Amended Proposal",
-  "Revalidation",
-  "Completion",
-];
-
 export default function CreateApplicationPage() {
   const router = useRouter();
   const { showAlert } = useDashboardAlertModal();
@@ -217,11 +193,6 @@ export default function CreateApplicationPage() {
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [selectedDepartment, setSelectedDepartment] = useState("General");
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
-  const [proposalSubmission, setProposalSubmission] = useState(proposalSubmissionOptions[0]);
-  const [typeOfNotice, setTypeOfNotice] = useState("");
-  const [proposedApplication, setProposedApplication] = useState("");
-  const [majorUse, setMajorUse] = useState("");
-  const [applicationType, setApplicationType] = useState("");
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -598,11 +569,6 @@ export default function CreateApplicationPage() {
 
   useEffect(() => {
     setSelectedPermission(null);
-    setProposalSubmission(proposalSubmissionOptions[0]);
-    setTypeOfNotice("");
-    setProposedApplication("");
-    setMajorUse("");
-    setApplicationType("");
   }, [selectedAuthority, selectedDepartment]);
 
   useEffect(() => {
@@ -646,10 +612,6 @@ export default function CreateApplicationPage() {
     };
   }, [selectedProject, selectedDepartment]);
 
-  const showBuildingPermissionFields = catalogTypesForDepartment.some(
-    (type) => type.show_building_permission_fields
-  );
-
   useEffect(() => {
     if (!selectedPermission) return;
     const selectedPermissionTitle = visiblePermissionTypes.find(
@@ -666,19 +628,12 @@ export default function CreateApplicationPage() {
     if (!stillVisible) setSelectedPermission(null);
   }, [visiblePermissionTypes, selectedPermission]);
 
-  const inputClasses =
-    "h-11 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20";
-
   const canSubmit =
     Boolean(selectedProject && selectedPermission) &&
     !isSubmitting &&
     !(
       selectedPermission &&
       existingPermissionTypes.includes(selectedPermissionRecord?.title ?? "")
-    ) &&
-    !(
-      showBuildingPermissionFields &&
-      (!typeOfNotice || !proposedApplication || !majorUse || !applicationType)
     );
 
   const projectSelectOptions = filteredProjects.map((project) => ({
@@ -716,10 +671,7 @@ export default function CreateApplicationPage() {
     },
     {
       label: "Major Use",
-      value:
-        majorUse ||
-        selectedProjectData?.save_plot_details?.majorUseOfPlot?.trim() ||
-        "—",
+      value: selectedProjectData?.save_plot_details?.majorUseOfPlot?.trim() || "—",
     },
   ];
 
@@ -838,88 +790,6 @@ export default function CreateApplicationPage() {
                   )}
                 </div>
               </div>
-
-              {showBuildingPermissionFields && (
-                <div className="space-y-5 rounded-xl border border-gray-200 bg-gray-50/80 p-4 md:p-5">
-                  <div>
-                    <p className="mb-3 text-sm font-medium text-gray-800">
-                      Proposal Submission For
-                    </p>
-                    <div className="flex flex-wrap gap-x-4 gap-y-2">
-                      {proposalSubmissionOptions.map((option) => (
-                        <label key={option} className="flex min-w-0 items-center gap-2 text-sm text-gray-800">
-                          <input
-                            type="radio"
-                            name="proposal-submission"
-                            value={option}
-                            checked={proposalSubmission === option}
-                            onChange={() => setProposalSubmission(option)}
-                            className="h-4 w-4 text-brand-blue focus:ring-brand-blue"
-                          />
-                          {option}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                        Type of Notice
-                      </label>
-                      <CustomSelect
-                        value={typeOfNotice}
-                        onChange={setTypeOfNotice}
-                        options={noticeOptions.map((option) => ({
-                          value: option,
-                          label: option,
-                        }))}
-                        placeholder="Select"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                        Proposed Application
-                      </label>
-                      <input
-                        type="text"
-                        value={proposedApplication}
-                        onChange={(event) => setProposedApplication(event.target.value)}
-                        placeholder="Enter proposal reference"
-                        className={inputClasses}
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                        Major Use of Plot
-                      </label>
-                      <CustomSelect
-                        value={majorUse}
-                        onChange={setMajorUse}
-                        options={majorUseOptions.map((option) => ({
-                          value: option,
-                          label: option,
-                        }))}
-                        placeholder="Select"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                        Application Type
-                      </label>
-                      <CustomSelect
-                        value={applicationType}
-                        onChange={setApplicationType}
-                        options={applicationTypeOptions.map((option) => ({
-                          value: option,
-                          label: option,
-                        }))}
-                        placeholder="Select"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <div>
                 <div className="mb-3 flex items-end justify-between gap-3">

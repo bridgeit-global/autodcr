@@ -269,7 +269,7 @@ function ApplicationsHubContent() {
   }, [pendingAction, busyId, getAuthToken, showAlert]);
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-6 overflow-hidden px-4 py-6 md:px-6 md:py-8">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6 md:py-8 xl:min-h-0 xl:flex-1 xl:overflow-hidden">
       <div className="flex shrink-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
@@ -331,8 +331,8 @@ function ApplicationsHubContent() {
         />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
-        <div className="min-h-0 lg:col-span-3 lg:overflow-y-auto">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5 xl:min-h-0 xl:flex-1">
+        <div className="min-h-0 lg:col-span-3 xl:overflow-y-auto">
           <ApplicationHealthCard
             health={health}
             activeSlice={filterToActiveSlice(stageFilter) ?? "draft"}
@@ -340,8 +340,8 @@ function ApplicationsHubContent() {
           />
         </div>
 
-        <div className="flex min-h-0 flex-col lg:col-span-9">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+        <div className="flex flex-col lg:col-span-9 xl:min-h-0">
+          <div className="flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm xl:min-h-0 xl:flex-1 xl:overflow-hidden">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
               <div>
                 <h2 className="text-sm font-bold text-brand-navy">{listTitle}</h2>
@@ -362,7 +362,7 @@ function ApplicationsHubContent() {
               )}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain max-h-[calc(100dvh-22rem)] lg:max-h-none">
+            <div className="xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
               {loading ? (
                 <p className="px-5 py-12 text-center text-sm text-gray-500">
                   Loading applications…

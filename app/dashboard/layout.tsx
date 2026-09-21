@@ -1277,8 +1277,8 @@ function DashboardLayoutContent({
         <ApplicationPdfSaveSlotProvider>
           <ApplicationSignSlotProvider>
             <ApplicationLifecycleActionsSlotProvider>
-            <div className="mx-auto flex min-h-0 max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 lg:px-8">
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
+            <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 lg:px-8">
+              <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
                 <div className="shrink-0">
                   <ProjectWizardToolbar
                     onSubmitProjectClick={handleSubmitProjectClick}

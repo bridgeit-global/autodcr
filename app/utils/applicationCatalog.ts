@@ -428,9 +428,31 @@ export function catalogPlaceholderFieldMap(
   return out;
 }
 
+export function catalogDocumentOptionLabel(doc: ApplicationCatalogDocument): string {
+  const category = doc.category.trim() || doc.id;
+  const sub = doc.sub_category?.trim();
+  if (sub && sub.toLowerCase() !== category.toLowerCase()) {
+    return `${category} — ${sub}`;
+  }
+  return category;
+}
+
+export function pickCatalogDocument(
+  docs: ApplicationCatalogDocument[],
+  opts?: { documentId?: string | null; letterVariant?: "appointment" | "acceptance" }
+): ApplicationCatalogDocument | undefined {
+  if (opts?.documentId) {
+    const byId = docs.find((d) => d.id === opts.documentId);
+    if (byId) return byId;
+  }
+  const variant = opts?.letterVariant ?? "appointment";
+  return docs.find((d) => d.letter_variant === variant && d.html) || docs.find((d) => d.html);
+}
+
 export async function resolveHtmlPathForApplication(opts: {
   applicationTitle?: string | null;
   letterVariant?: "appointment" | "acceptance";
+  documentId?: string | null;
   client?: CatalogDb;
 }): Promise<string | null> {
   const title = opts.applicationTitle?.trim();
@@ -438,11 +460,10 @@ export async function resolveHtmlPathForApplication(opts: {
   const type = await fetchApplicationCatalogTypeByTitle(title, opts.client);
   if (!type) return null;
   const docs = await fetchDocumentsForApplicationType(type.id, opts.client);
-  const variant = opts.letterVariant ?? "appointment";
-  const match =
-    docs.find((d) => d.letter_variant === variant && d.html) ||
-    docs.find((d) => d.html);
-  return match?.html ?? null;
+  return pickCatalogDocument(docs, {
+    documentId: opts.documentId,
+    letterVariant: opts.letterVariant,
+  })?.html ?? null;
 }
 
 export type CatalogSigningInfo = {

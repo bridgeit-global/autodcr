@@ -90,7 +90,11 @@ import {
 } from "@/app/lib/bridge/dscStampPlacement";
 import {
   catalogConsultantSignsAppointment,
+  catalogDocumentOptionLabel,
+  fetchApplicationCatalogTypeByTitle,
   fetchCatalogSigningByTitle,
+  fetchDocumentsForApplicationType,
+  type ApplicationCatalogDocument,
   type CatalogSigningInfo,
 } from "@/app/utils/applicationCatalog";
 import {
@@ -105,6 +109,7 @@ import {
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
 import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
+import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import { Loader2, RotateCcw, Trash2, XCircle } from "lucide-react";
 
@@ -776,6 +781,8 @@ type BuildApplicationPreviewContextInput = {
   projectId: string | null;
   /** For all dual-letter types: `appointment` → default template, `acceptance` → acceptance template. */
   letterVariant?: "appointment" | "acceptance";
+  /** Catalog `application_documents.id` when the type has multiple documents. */
+  catalogDocumentId?: string | null;
   /** @deprecated Use `letterVariant`. */
   architectHtmlVariant?: "appointment" | "acceptance";
 };
@@ -796,6 +803,7 @@ async function buildApplicationPreviewContext(
     applicationCreatedAt,
     projectId,
     letterVariant: inputLetterVariant,
+    catalogDocumentId,
     architectHtmlVariant,
   } = input;
 
@@ -1217,6 +1225,7 @@ async function buildApplicationPreviewContext(
           letterVariant: (inputLetterVariant ?? architectHtmlVariant) ?? "appointment",
         }
       : {}),
+    ...(catalogDocumentId?.trim() ? { catalogDocumentId: catalogDocumentId.trim() } : {}),
   };
 
   const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
@@ -1313,13 +1322,11 @@ const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>>
 
 const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
 
-/** Narrows a raw `<select>` value to the document-type union. */
-function normalizePreviewDocSelection(
-  value: string
-): "appointment" | "acceptance" | "license" {
-  if (value === "acceptance") return "acceptance";
-  if (value === "license") return "license";
-  return "appointment";
+const LICENSE_PREVIEW_VALUE = "license";
+
+/** Narrows a raw `<select>` value to a known fallback, otherwise keeps catalog document ids. */
+function normalizePreviewDocSelection(value: string): string {
+  return value.trim();
 }
 
 function applicationTemplateSavedInUrls(
@@ -1563,6 +1570,7 @@ function dualLetterBuiltContexts(
         ...base.previewSource,
         letterVariant: "appointment",
         architectHtmlVariant: undefined,
+        catalogDocumentId: undefined,
       },
     },
     acceptance: {
@@ -1572,6 +1580,7 @@ function dualLetterBuiltContexts(
         ...base.previewSource,
         letterVariant: "acceptance",
         architectHtmlVariant: "acceptance",
+        catalogDocumentId: undefined,
       },
     },
   };
@@ -1980,6 +1989,48 @@ export default function ApplicationDetailsPage() {
   >("appointment");
   /** Which document the preview shows: a letter (appointment/acceptance) or the consultant's license. */
   const [previewDocKind, setPreviewDocKind] = useState<"letter" | "license">("letter");
+  const [catalogDocuments, setCatalogDocuments] = useState<ApplicationCatalogDocument[]>([]);
+  const [catalogDocumentsReady, setCatalogDocumentsReady] = useState(false);
+  const [catalogTypeIsAppointment, setCatalogTypeIsAppointment] = useState(false);
+  const [selectedCatalogDocumentId, setSelectedCatalogDocumentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCatalogDocumentsReady(false);
+    setCatalogDocuments([]);
+    setSelectedCatalogDocumentId(null);
+    setPreviewDocKind("letter");
+    setLetterVariant("appointment");
+    setCatalogTypeIsAppointment(false);
+
+    const title = selectedApplication?.trim();
+    if (!title) {
+      setCatalogDocumentsReady(true);
+      return;
+    }
+
+    (async () => {
+      const type = await fetchApplicationCatalogTypeByTitle(title);
+      if (cancelled) return;
+      if (!type) {
+        setCatalogDocuments([]);
+        setCatalogTypeIsAppointment(false);
+        setCatalogDocumentsReady(true);
+        return;
+      }
+      const docs = await fetchDocumentsForApplicationType(type.id);
+      if (cancelled) return;
+      setCatalogDocuments(docs);
+      setCatalogTypeIsAppointment(type.category === "appointment_letter");
+      const appointment = docs.find((d) => d.letter_variant === "appointment");
+      setSelectedCatalogDocumentId(appointment?.id ?? docs[0]?.id ?? null);
+      setCatalogDocumentsReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedApplication]);
   /** Neutral (non-error) message shown in the preview modal, e.g. license not uploaded. */
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -2311,6 +2362,8 @@ export default function ApplicationDetailsPage() {
     const appointedId = resolveAppointedSecondSignerUserId(projectData, previewTemplateType);
     if (authUserId && sameUserId(authUserId, appointedId)) {
       setLetterVariant("acceptance");
+      const acceptanceDoc = catalogDocuments.find((d) => d.letter_variant === "acceptance");
+      if (acceptanceDoc) setSelectedCatalogDocumentId(acceptanceDoc.id);
     }
   }, [
     isReadOnlyMode,
@@ -2320,6 +2373,7 @@ export default function ApplicationDetailsPage() {
     architectSignedAt,
     projectData,
     authUserId,
+    catalogDocuments,
   ]);
 
   const mockSecondSignLabel = useMemo(
@@ -2460,10 +2514,18 @@ export default function ApplicationDetailsPage() {
 
   const loadPreviewContent = async (
     variant: "appointment" | "acceptance",
-    opts?: { keepModalOpen?: boolean; resetSaveState?: boolean }
+    opts?: {
+      keepModalOpen?: boolean;
+      resetSaveState?: boolean;
+      catalogDocumentId?: string | null;
+    }
   ) => {
     const keepModalOpen = opts?.keepModalOpen ?? false;
     const resetSaveState = opts?.resetSaveState ?? !keepModalOpen;
+    const resolvedCatalogDocumentId =
+      opts?.catalogDocumentId !== undefined
+        ? opts.catalogDocumentId
+        : selectedCatalogDocumentId;
 
     try {
       setPreviewError(null);
@@ -2525,6 +2587,7 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant: variant,
+          catalogDocumentId: resolvedCatalogDocumentId,
         });
 
       const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
@@ -2755,38 +2818,94 @@ export default function ApplicationDetailsPage() {
     await loadPreviewContent(letterVariant, {
       keepModalOpen: false,
       resetSaveState: true,
+      catalogDocumentId: selectedCatalogDocumentId,
     });
   };
 
   const handleLetterVariantChange = (
     next: "appointment" | "acceptance",
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; catalogDocumentId?: string | null }
   ) => {
-    if (next === letterVariant && !opts?.force) return;
+    if (next === letterVariant && !opts?.force && !opts?.catalogDocumentId) return;
     setLetterVariant(next);
+    const matchingId =
+      opts?.catalogDocumentId ??
+      catalogDocuments.find((d) => d.letter_variant === next)?.id ??
+      null;
+    if (matchingId) setSelectedCatalogDocumentId(matchingId);
     if (previewOpen) {
-      void loadPreviewContent(next, { keepModalOpen: true, resetSaveState: false });
+      void loadPreviewContent(next, {
+        keepModalOpen: true,
+        resetSaveState: false,
+        catalogDocumentId: matchingId,
+      });
     }
   };
 
-  /** Dropdown selection spanning both letter variants and the consultant's license. */
-  const previewDocSelection: "appointment" | "acceptance" | "license" =
-    previewDocKind === "license" ? "license" : letterVariant;
+  const usingCatalogDocs = catalogDocumentsReady && catalogDocuments.length > 0;
 
-  const handlePreviewDocSelectionChange = (
-    next: "appointment" | "acceptance" | "license"
-  ) => {
+  const previewDocumentOptions = useMemo(() => {
+    if (!catalogDocumentsReady) {
+      return [{ value: "", label: "Loading…" }];
+    }
+    if (catalogDocuments.length > 0) {
+      const opts = catalogDocuments.map((doc) => ({
+        value: doc.id,
+        label: catalogDocumentOptionLabel(doc),
+      }));
+      if (catalogTypeIsAppointment) {
+        opts.push({ value: LICENSE_PREVIEW_VALUE, label: "License" });
+      }
+      return opts;
+    }
+    const opts = [{ value: "appointment", label: "Appointment" }];
+    if (isDualLetterType(previewTemplateType)) {
+      opts.push({ value: "acceptance", label: "Acceptance" });
+    }
+    opts.push({ value: LICENSE_PREVIEW_VALUE, label: "License" });
+    return opts;
+  }, [
+    catalogDocumentsReady,
+    catalogDocuments,
+    catalogTypeIsAppointment,
+    previewTemplateType,
+  ]);
+
+  /** Dropdown selection spanning catalog documents and the consultant's license. */
+  const previewDocSelection: string = !catalogDocumentsReady
+    ? ""
+    : previewDocKind === "license"
+      ? LICENSE_PREVIEW_VALUE
+      : usingCatalogDocs
+        ? selectedCatalogDocumentId ?? ""
+        : letterVariant;
+
+  const handlePreviewDocSelectionChange = (next: string) => {
     if (next === previewDocSelection) return;
-    if (next === "license") {
+    if (next === LICENSE_PREVIEW_VALUE) {
       setPreviewDocKind("license");
       if (previewOpen) void loadLicensePreview({ keepModalOpen: true });
       return;
     }
-    // Coming back from License must reload even when `letterVariant` is unchanged.
     const leavingLicense = previewDocKind === "license";
     setPreviewDocKind("letter");
     setPreviewNotice(null);
-    handleLetterVariantChange(next, { force: leavingLicense });
+
+    const catalogDoc = catalogDocuments.find((d) => d.id === next);
+    if (catalogDoc) {
+      setSelectedCatalogDocumentId(catalogDoc.id);
+      const nextVariant =
+        catalogDoc.letter_variant === "acceptance" ? "acceptance" : "appointment";
+      handleLetterVariantChange(nextVariant, {
+        force: leavingLicense || nextVariant === letterVariant,
+        catalogDocumentId: catalogDoc.id,
+      });
+      return;
+    }
+
+    if (next === "acceptance" || next === "appointment") {
+      handleLetterVariantChange(next, { force: leavingLicense });
+    }
   };
 
   // Sidebar “Sign application” auto-signs whatever the modal shows, so it must
@@ -2795,6 +2914,7 @@ export default function ApplicationDetailsPage() {
     await loadPreviewContent(letterVariant, {
       keepModalOpen: false,
       resetSaveState: true,
+      catalogDocumentId: selectedCatalogDocumentId,
     });
   };
 
@@ -2813,6 +2933,7 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant,
+          catalogDocumentId: selectedCatalogDocumentId,
         });
         if (cancelled) return;
         setDetailsFieldRows(
@@ -2841,6 +2962,7 @@ export default function ApplicationDetailsPage() {
     applicationNo,
     userMetadata,
     letterVariant,
+    selectedCatalogDocumentId,
   ]);
 
   useEffect(() => {
@@ -3503,6 +3625,7 @@ export default function ApplicationDetailsPage() {
       const { fields, previewSource, templateType } = await buildApplicationPreviewContext({
         ...previewBase,
         letterVariant: signingLetterVariant,
+        catalogDocumentId: isDualForSign ? undefined : selectedCatalogDocumentId,
       });
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
@@ -4076,6 +4199,9 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant,
+          catalogDocumentId: isDualLetterType(saveTemplateType)
+            ? undefined
+            : selectedCatalogDocumentId,
         });
         previewPdfContextRef.current = {
           fields: built.fields,
@@ -4521,7 +4647,7 @@ export default function ApplicationDetailsPage() {
 
   if (!isReadOnlyMode) {
     return (
-      <div className="space-y-6">
+      <div className="w-full space-y-6">
         <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-5 py-5 md:px-6">
             <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
@@ -4538,7 +4664,7 @@ export default function ApplicationDetailsPage() {
 
   if (applicationAccessState === "loading") {
     return (
-      <div className="flex justify-center py-16">
+      <div className="flex w-full justify-center py-16">
         <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
       </div>
     );
@@ -4546,7 +4672,7 @@ export default function ApplicationDetailsPage() {
 
   if (applicationAccessState === "denied") {
     return (
-      <div className="space-y-6">
+      <div className="w-full space-y-6">
         <section className="overflow-hidden rounded-xl border border-rose-200 bg-white shadow-sm">
           <div className="border-b border-rose-100 bg-rose-50/60 px-5 py-5 md:px-6">
             <h2 className="text-xl font-semibold tracking-tight text-brand-navy">Access denied</h2>
@@ -4570,14 +4696,30 @@ export default function ApplicationDetailsPage() {
     );
   }
 
-  const selectClasses =
-    "h-10 min-w-[12rem] rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-50";
+  const signRoleOptions = [
+    {
+      value: "owner",
+      label: `Sign as ${principalApplicantLabel}${
+        mockSignAvailability.onBehalfOfOwner ? " (on behalf)" : ""
+      }${ownerSignedAt ? " (done)" : ""}`,
+      disabled: !mockSignAvailability.canSignAsOwner,
+    },
+    ...(isDualLetterType(previewTemplateType)
+      ? [
+          {
+            value: "consultant",
+            label: `Sign as ${mockSecondSignLabel}${architectSignedAt ? " (done)" : ""}`,
+            disabled: !mockSignAvailability.canSignAsConsultant,
+          },
+        ]
+      : []),
+  ];
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div className="w-full space-y-6">
+      <section className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between md:px-6">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
               Application Details
             </h2>
@@ -4585,69 +4727,48 @@ export default function ApplicationDetailsPage() {
               Read-only details for the selected application.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {applicationWorkflowStage === "in_process" && isReadOnlyMode && (
-              <label className="flex items-center gap-2 text-sm text-gray-700">
+              <div className="flex items-center gap-2 text-sm text-gray-700">
                 <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
                   Sign
                 </span>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    e.target.value = "";
-                    if (v === "owner" || v === "consultant") {
-                      handleSignRoleSelect(v);
-                    }
-                  }}
-                  disabled={isSigningPdf || isSavingPdf}
-                  className={selectClasses}
-                  aria-label="Sign as role"
-                >
-                  <option value="" disabled>
-                    Select role…
-                  </option>
-                  <option
-                    value="owner"
-                    disabled={!mockSignAvailability.canSignAsOwner}
-                  >
-                    Sign as {principalApplicantLabel}
-                    {mockSignAvailability.onBehalfOfOwner ? " (on behalf)" : ""}
-                    {ownerSignedAt ? " (done)" : ""}
-                  </option>
-                  {isDualLetterType(previewTemplateType) && (
-                    <option
-                      value="consultant"
-                      disabled={!mockSignAvailability.canSignAsConsultant}
-                    >
-                      {`Sign as ${mockSecondSignLabel}`}
-                      {architectSignedAt ? " (done)" : ""}
-                    </option>
-                  )}
-                </select>
-              </label>
+                <div className="w-56 shrink-0">
+                  <CustomSelect
+                    value=""
+                    onChange={(v) => {
+                      if (v === "owner" || v === "consultant") {
+                        handleSignRoleSelect(v);
+                      }
+                    }}
+                    options={signRoleOptions}
+                    placeholder="Select role…"
+                    disabled={isSigningPdf || isSavingPdf}
+                    aria-label="Sign as role"
+                  />
+                </div>
+              </div>
             )}
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+            <div className="flex items-center gap-2 text-sm text-gray-700">
               <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
                 Document
               </span>
-              <select
-                value={previewDocSelection}
-                onChange={(e) =>
-                  handlePreviewDocSelectionChange(
-                    normalizePreviewDocSelection(e.target.value)
-                  )
-                }
-                className={selectClasses}
-                aria-label="Document type"
-              >
-                <option value="appointment">Appointment</option>
-                {isDualLetterType(previewTemplateType) && (
-                  <option value="acceptance">Acceptance</option>
-                )}
-                <option value="license">License</option>
-              </select>
-            </label>
+              <div className="w-72 shrink-0 sm:w-80">
+                <CustomSelect
+                  value={previewDocSelection}
+                  onChange={(v) =>
+                    handlePreviewDocSelectionChange(normalizePreviewDocSelection(v))
+                  }
+                  options={previewDocumentOptions.map((opt) => ({
+                    ...opt,
+                    disabled: !opt.value,
+                  }))}
+                  placeholder={catalogDocumentsReady ? "Select document" : "Loading…"}
+                  disabled={!catalogDocumentsReady}
+                  aria-label="Document type"
+                />
+              </div>
+            </div>
             <button
               type="button"
               onClick={handlePreview}
@@ -4673,16 +4794,19 @@ export default function ApplicationDetailsPage() {
             <p className="mb-3 text-sm text-status-danger">{savePdfError}</p>
           )}
 
-          {detailsFieldsLoading ? (
+          {detailsFieldsLoading && detailsFieldRows.length === 0 && !detailsFieldsError ? (
             <p className="text-sm text-gray-500">Resolving fields…</p>
           ) : detailsFieldRows.length === 0 && !detailsFieldsError ? (
             <p className="text-sm text-gray-500">No letter fields to show yet.</p>
           ) : (
             <div className="overflow-hidden rounded-xl border border-gray-200">
-              <div className="border-b border-gray-100 bg-gray-50 px-4 py-2.5">
+              <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                   Letter fields
                 </p>
+                {detailsFieldsLoading ? (
+                  <span className="text-xs text-gray-400">Updating…</span>
+                ) : null}
               </div>
               <div className="divide-y divide-gray-100 bg-white">
                 {detailsFieldRows.map((row) => (
@@ -4733,9 +4857,12 @@ export default function ApplicationDetailsPage() {
         mockSignBusy={isSigningPdf}
         showLetterVariantSelector
         showAcceptanceOption={isDualLetterType(previewTemplateType)}
+        documentOptions={previewDocumentOptions}
         letterVariant={previewDocSelection}
         onLetterVariantChange={handlePreviewDocSelectionChange}
-        letterVariantDisabled={isPreviewLoading || isSavingPdf || isSigningPdf}
+        letterVariantDisabled={
+          isPreviewLoading || isSavingPdf || isSigningPdf || !catalogDocumentsReady
+        }
         notice={previewNotice}
       />
 

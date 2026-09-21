@@ -29,6 +29,7 @@ import {
   fetchApplicationCatalogTypeByTitle,
   fetchDocumentsForApplicationType,
   fetchResolvedPlaceholdersForApplication,
+  pickCatalogDocument,
 } from "@/app/utils/applicationCatalog";
 import {
   isOwnerApplicantType,
@@ -91,6 +92,8 @@ export type ApplicationPreviewSource = {
   letterVariant?: "appointment" | "acceptance";
   /** @deprecated Use `letterVariant` instead. Kept for backward compatibility. */
   architectHtmlVariant?: "appointment" | "acceptance";
+  /** Catalog `application_documents.id` — picks HTML/placeholders when letter_variant is not unique. */
+  catalogDocumentId?: string | null;
   /** When set, HTML preview embeds a QR for this URL (skips DB lookup). */
   savedPdfUrlForQr?: string | null;
   projectData?: {
@@ -2294,8 +2297,10 @@ export async function fetchApplicationPreviewHtmlRaw(
             ? "acceptance"
             : "appointment";
         const docs = await fetchDocumentsForApplicationType(catalogType.id);
-        const variantDoc =
-          docs.find((d) => d.letter_variant === letterVariant) || docs.find((d) => d.html);
+        const variantDoc = pickCatalogDocument(docs, {
+          documentId: source?.catalogDocumentId,
+          letterVariant,
+        });
         const placeholders = await fetchResolvedPlaceholdersForApplication(
           catalogType.id,
           variantDoc?.id
@@ -2344,6 +2349,9 @@ export async function fetchApplicationPreviewHtmlRaw(
       ...(source?.ownerDebug ? { owner_debug: source.ownerDebug } : {}),
       ...((source?.letterVariant === "acceptance" || source?.architectHtmlVariant === "acceptance")
         ? { letterVariant: "acceptance" as const }
+        : {}),
+      ...(source?.catalogDocumentId?.trim()
+        ? { catalogDocumentId: source.catalogDocumentId.trim() }
         : {}),
       ...(source?.savedPdfUrlForQr?.trim()
         ? { savedPdfUrlForQr: source.savedPdfUrlForQr.trim() }
