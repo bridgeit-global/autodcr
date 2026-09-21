@@ -1,31 +1,12 @@
--- Building Permission – IOD/CC Pending Concession
--- Placeholders from retained HTML:
---   6. Application for IOD upto Plinth and CC upto Plinth pending approval of concession
---   7. Undertaking cum Indemnity
---   8. Report Format for Issue of IOD upto Plinth
---  11. Work Start Notice Appendix XV
--- Skip {{VARIABLE_TAGS}}. Reuse {{WARD}} and {{VILLAGE}}.
+-- Placeholders from Building Permission IOD/CC Pending Concession HTML
+-- (iod-cc-pending-architect, iod-cc-pending-owner-undertaking,
+--  iod-cc-pending-provisional-report, work-start-notice).
+-- Reuse existing master rows for {{WARD}}, {{VILLAGE}}, {{DATE}}, {{CTS_NO}},
+-- {{BUILDING_NO}}, {{TPS_NO}}, {{OWNER_DEVELOPER}}. Do not insert VARIABLE_TAGS.
 
--- 1) Application type
-INSERT INTO public.application_types
-  (id, department, application_title, description, category, applicant_type, token_suffix,
-   planning_authorities, requires_roster_match, show_building_permission_fields, sort_order, icon_key)
-VALUES
-  ('iod_cc_pending_concession', 'Building Permission', 'IOD/CC pending concession',
-   'IOD/CC pending concession by Architect/LS',
-   'department_permission', NULL, NULL, '{}', false, true, 14, 'document')
-ON CONFLICT (id) DO UPDATE SET
-  department = EXCLUDED.department,
-  application_title = EXCLUDED.application_title,
-  description = EXCLUDED.description,
-  category = EXCLUDED.category,
-  show_building_permission_fields = EXCLUDED.show_building_permission_fields,
-  sort_order = EXCLUDED.sort_order,
-  icon_key = EXCLUDED.icon_key,
-  is_active = true,
-  updated_at = now();
-
--- 2) Documents (HTML files)
+-- ---------------------------------------------------------------------------
+-- Catalog: keep the four retained forms; drop 9 and 10 from the old bundle
+-- ---------------------------------------------------------------------------
 INSERT INTO public.application_documents
   (id, application_type_id, category, html, sign, letter_variant, sort_order)
 VALUES
@@ -56,13 +37,14 @@ WHERE id IN (
   'cc_upto_plinth_pending_concessions'
 );
 
--- 3) Placeholders from HTML tokens
+-- ---------------------------------------------------------------------------
+-- Master placeholders (new tokens only)
+-- ---------------------------------------------------------------------------
 INSERT INTO public.placeholders
   (id, token, legacy_token, label, source_table, source_column, ui_group)
 VALUES
-  ('date', '{{DATE}}', NULL, 'Date', 'computed', 'current_date', 'other'),
+  -- Application for IOD upto Plinth / CC upto Plinth
   ('zone', '{{ZONE}}', NULL, 'Zone', 'projects', 'save_plot_details->>zone', 'subject'),
-  ('cts_no', '{{CTS_NO}}', NULL, 'CTS number', 'projects', 'save_plot_details->>proposedCtsNumber', 'subject'),
   ('property_no_2', '{{PROPERTY_NO_2}}', NULL, 'Property number', 'projects', 'save_plot_details->>plotNo', 'subject'),
   ('location_1', '{{LOCATION_1}}', NULL, 'Location', 'projects', 'project_info->>landmark', 'subject'),
   ('site_address', '{{SITE_ADDRESS}}', NULL, 'Site address', 'projects', 'project_info->>propertyAddress', 'subject'),
@@ -73,14 +55,17 @@ VALUES
   ('che_ref_no', '{{CHE_REF_NO}}', NULL, 'Ch.E. reference number', 'computed', NULL, 'reference'),
   ('owner_ca_name', '{{OWNER_CA_NAME}}', NULL, 'Owner / C.A. name', 'owner_applicant', 'name', 'client'),
   ('architects_name', '{{ARCHITECTS_NAME}}', NULL, 'Architect name', 'applicants', 'name', 'consultant'),
+
+  -- Undertaking cum Indemnity
   ('che_no', '{{CHE_NO}}', NULL, 'Ch.E. number', 'computed', NULL, 'reference'),
   ('bp_zone', '{{BP_ZONE}}', NULL, 'BP zone', 'projects', 'save_plot_details->>zone', 'office'),
   ('a_suffix', '{{A_SUFFIX}}', NULL, 'A suffix', 'computed', NULL, 'other'),
   ('architect', '{{ARCHITECT}}', NULL, 'Architect', 'applicants', 'name', 'consultant'),
   ('plan_ref_page', '{{PLAN_REF_PAGE}}', NULL, 'Plan reference (page)', 'computed', NULL, 'other'),
-  ('owner_developer', '{{OWNER_DEVELOPER}}', NULL, 'Owner / developer', 'owner_applicant', 'name', 'client'),
   ('eebp_zone', '{{EEBP_ZONE}}', NULL, 'EEBP zone', 'projects', 'save_plot_details->>region', 'office'),
   ('concession_date', '{{CONCESSION_DATE}}', NULL, 'Concession date', 'computed', NULL, 'other'),
+
+  -- Report Format for Issue of IOD upto Plinth
   ('pr_card_page', '{{PR_CARD_PAGE}}', NULL, 'P.R. card (page)', 'computed', NULL, 'other'),
   ('pr_card_area', '{{PR_CARD_AREA}}', NULL, 'P.R. card area', 'computed', NULL, 'other'),
   ('ca_affidavit_page', '{{CA_AFFIDAVIT_PAGE}}', NULL, 'C.A. affidavit (page)', 'computed', NULL, 'other'),
@@ -107,9 +92,9 @@ VALUES
   ('aebp_ward', '{{AEBP_WARD}}', NULL, 'AEBP ward', 'projects', 'save_plot_details->>ward', 'office'),
   ('eebp_zone_2', '{{EEBP_ZONE_2}}', NULL, 'EEBP zone (2)', 'projects', 'save_plot_details->>region', 'office'),
   ('eebp_ward_2', '{{EEBP_WARD_2}}', NULL, 'EEBP ward (2)', 'projects', 'save_plot_details->>ward', 'office'),
-  ('building_no', '{{BUILDING_NO}}', NULL, 'Building number', 'computed', NULL, 'other'),
+
+  -- Work Start Notice Appendix XV
   ('plot_cs_cts_no', '{{PLOT_CS_CTS_NO}}', NULL, 'Plot CS / CTS number', 'projects', 'save_plot_details->>proposedCtsNumber', 'subject'),
-  ('tps_no', '{{TPS_NO}}', NULL, 'T.P.S. number', 'computed', NULL, 'subject'),
   ('street_road', '{{STREET_ROAD}}', NULL, 'Street / road', 'projects', 'save_plot_details->>roadName', 'subject'),
   ('ward_2', '{{WARD_2}}', NULL, 'Ward (2)', 'projects', 'save_plot_details->>ward', 'subject'),
   ('work_start_date', '{{WORK_START_DATE}}', NULL, 'Work start date', 'computed', NULL, 'other'),
@@ -140,7 +125,7 @@ SELECT
   lower(seg || '_' || suffix),
   '{{' || seg || '_' || suffix || '}}',
   NULL,
-  initcap(replace(lower(seg || ' ' || suffix_label), '_', ' ')),
+  initcap(replace(lower(seg), '_', ' ')) || ' — ' || suffix_label,
   'computed',
   NULL,
   'other'
@@ -166,39 +151,106 @@ ON CONFLICT (id) DO UPDATE SET
   is_active = true,
   updated_at = now();
 
--- 4) Link all IOD/CC pending concession HTML tokens to the type
+-- ---------------------------------------------------------------------------
+-- Type-level: letter header / key variables shared across IOD/CC Pending HTML
+-- ---------------------------------------------------------------------------
 INSERT INTO public.application_type_placeholders
   (application_type_id, placeholder_id, required, sort_order)
+VALUES
+  ('iod_cc_pending_concession', 'date', true, 110),
+  ('iod_cc_pending_concession', 'village', true, 120),
+  ('iod_cc_pending_concession', 'ward', true, 130),
+  ('iod_cc_pending_concession', 'zone', true, 140),
+  ('iod_cc_pending_concession', 'cts_no', true, 150),
+  ('iod_cc_pending_concession', 'property_no_2', false, 160),
+  ('iod_cc_pending_concession', 'location_1', false, 170),
+  ('iod_cc_pending_concession', 'site_address', true, 180),
+  ('iod_cc_pending_concession', 'pin_code', true, 190),
+  ('iod_cc_pending_concession', 'architects_name', true, 200),
+  ('iod_cc_pending_concession', 'architect', true, 210),
+  ('iod_cc_pending_concession', 'owner_developer', true, 220),
+  ('iod_cc_pending_concession', 'owner_name', true, 230),
+  ('iod_cc_pending_concession', 'plot_cs_cts_no', true, 240),
+  ('iod_cc_pending_concession', 'street_road', true, 250),
+  ('iod_cc_pending_concession', 'building_no', false, 260),
+  ('iod_cc_pending_concession', 'tps_no', false, 270),
+  ('iod_cc_pending_concession', 'permission_no', true, 280)
+ON CONFLICT (application_type_id, placeholder_id) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Document-level: tokens unique to each IOD/CC Pending Concession HTML
+-- ---------------------------------------------------------------------------
+INSERT INTO public.application_document_placeholders
+  (document_id, placeholder_id, required, sort_order)
+VALUES
+  -- iod-cc-pending-architect.html
+  ('iod_cc_pending_architect', 'ref_1', false, 10),
+  ('iod_cc_pending_architect', 'ref_2', false, 20),
+  ('iod_cc_pending_architect', 'subject', false, 30),
+  ('iod_cc_pending_architect', 'che_ref_no', false, 40),
+  ('iod_cc_pending_architect', 'owner_ca_name', false, 50),
+
+  -- iod-cc-pending-owner-undertaking.html
+  ('iod_cc_pending_owner_undertaking', 'che_no', false, 10),
+  ('iod_cc_pending_owner_undertaking', 'bp_zone', false, 20),
+  ('iod_cc_pending_owner_undertaking', 'a_suffix', false, 30),
+  ('iod_cc_pending_owner_undertaking', 'plan_ref_page', false, 40),
+  ('iod_cc_pending_owner_undertaking', 'eebp_zone', false, 50),
+  ('iod_cc_pending_owner_undertaking', 'concession_date', false, 60),
+
+  -- iod-cc-pending-provisional-report.html
+  ('iod_cc_pending_provisional_report', 'pr_card_page', false, 10),
+  ('iod_cc_pending_provisional_report', 'pr_card_area', false, 20),
+  ('iod_cc_pending_provisional_report', 'ca_affidavit_page', false, 30),
+  ('iod_cc_pending_provisional_report', 'ca_affidavit_area', false, 40),
+  ('iod_cc_pending_provisional_report', 'arch_cert_page', false, 50),
+  ('iod_cc_pending_provisional_report', 'arch_cert_area', false, 60),
+  ('iod_cc_pending_provisional_report', 'performa_a_page', false, 70),
+  ('iod_cc_pending_provisional_report', 'performa_a_area', false, 80),
+  ('iod_cc_pending_provisional_report', 'triangulation_page', false, 90),
+  ('iod_cc_pending_provisional_report', 'triangulation_area', false, 100),
+  ('iod_cc_pending_provisional_report', 'accepted_area_page', false, 110),
+  ('iod_cc_pending_provisional_report', 'accepted_area', false, 120),
+  ('iod_cc_pending_provisional_report', 'auto_scrutiny_area', false, 130),
+  ('iod_cc_pending_provisional_report', 'total_permissible_fsi', false, 140),
+  ('iod_cc_pending_provisional_report', 'total_area_approvable', false, 150),
+  ('iod_cc_pending_provisional_report', 'total_area_approved', false, 160),
+  ('iod_cc_pending_provisional_report', 'balance_approvable_area', false, 170),
+  ('iod_cc_pending_provisional_report', 'area_proposed_iod_plinth_cc', false, 180),
+  ('iod_cc_pending_provisional_report', 'payments_payable_page', false, 190),
+  ('iod_cc_pending_provisional_report', 'payments_paid_page', false, 200),
+  ('iod_cc_pending_provisional_report', 'iod_plinth_cc_page', false, 210),
+  ('iod_cc_pending_provisional_report', 'draft_plan_page', false, 220),
+  ('iod_cc_pending_provisional_report', 'sebp_ward', false, 230),
+  ('iod_cc_pending_provisional_report', 'aebp_ward', false, 240),
+  ('iod_cc_pending_provisional_report', 'eebp_zone_2', false, 250),
+  ('iod_cc_pending_provisional_report', 'eebp_ward_2', false, 260),
+
+  -- work-start-notice.html
+  ('work_start_notice', 'ward_2', false, 10),
+  ('work_start_notice', 'work_start_date', false, 20),
+  ('work_start_notice', 'work_start_date_2', false, 30),
+  ('work_start_notice', 'permission_date', false, 40),
+  ('work_start_notice', 'supervisor_name', false, 50),
+  ('work_start_notice', 'license_no', false, 60),
+  ('work_start_notice', 'owner_signature', false, 70),
+  ('work_start_notice', 'owner_name_block', false, 80),
+  ('work_start_notice', 'owner_address_line_1', false, 90),
+  ('work_start_notice', 'owner_address_line_2', false, 100),
+  ('work_start_notice', 'owner_address_line_3', false, 110),
+  ('work_start_notice', 'owner_address_line_4', false, 120)
+ON CONFLICT (document_id, placeholder_id) DO NOTHING;
+
+INSERT INTO public.application_document_placeholders
+  (document_id, placeholder_id, required, sort_order)
 SELECT
-  'iod_cc_pending_concession',
+  'iod_cc_pending_provisional_report',
   p.id,
-  p.id IN (
-    'ward', 'village', 'date', 'cts_no', 'zone', 'site_address', 'pin_code',
-    'owner_developer', 'architects_name', 'architect', 'plot_cs_cts_no',
-    'street_road', 'owner_name', 'permission_no'
-  ),
-  10 * ROW_NUMBER() OVER (ORDER BY p.id)
+  false,
+  270 + 10 * ROW_NUMBER() OVER (ORDER BY p.id)
 FROM public.placeholders p
-WHERE p.id IN (
-  'ward', 'village',
-  'date', 'zone', 'cts_no', 'property_no_2', 'location_1', 'site_address', 'pin_code',
-  'ref_1', 'ref_2', 'subject', 'che_ref_no', 'owner_ca_name', 'architects_name',
-  'che_no', 'bp_zone', 'a_suffix', 'architect', 'plan_ref_page', 'owner_developer',
-  'eebp_zone', 'concession_date', 'pr_card_page', 'pr_card_area',
-  'ca_affidavit_page', 'ca_affidavit_area', 'arch_cert_page', 'arch_cert_area',
-  'performa_a_page', 'performa_a_area', 'triangulation_page', 'triangulation_area',
-  'accepted_area_page', 'accepted_area', 'auto_scrutiny_area',
-  'total_permissible_fsi', 'total_area_approvable', 'total_area_approved',
-  'balance_approvable_area', 'area_proposed_iod_plinth_cc',
-  'payments_payable_page', 'payments_paid_page', 'iod_plinth_cc_page', 'draft_plan_page',
-  'sebp_ward', 'aebp_ward', 'eebp_zone_2', 'eebp_ward_2',
-  'building_no', 'plot_cs_cts_no', 'tps_no', 'street_road', 'ward_2',
-  'work_start_date', 'work_start_date_2', 'permission_no', 'permission_date',
-  'supervisor_name', 'license_no', 'owner_signature', 'owner_name', 'owner_name_block',
-  'owner_address_line_1', 'owner_address_line_2', 'owner_address_line_3', 'owner_address_line_4'
-)
-   OR p.id LIKE 'north_%'
+WHERE p.id LIKE 'north_%'
    OR p.id LIKE 'west_a_r_%'
    OR p.id LIKE 'east_%'
    OR p.id LIKE 'south_%'
-ON CONFLICT (application_type_id, placeholder_id) DO NOTHING;
+ON CONFLICT (document_id, placeholder_id) DO NOTHING;
