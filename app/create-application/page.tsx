@@ -667,7 +667,7 @@ export default function CreateApplicationPage() {
   }, [visiblePermissionTypes, selectedPermission]);
 
   const inputClasses =
-    "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20";
+    "h-11 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20";
 
   const canSubmit =
     Boolean(selectedProject && selectedPermission) &&
@@ -725,10 +725,10 @@ export default function CreateApplicationPage() {
 
   return (
     <AppShell title="Create Application">
-      <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between md:px-6">
-            <div>
+      <div className="mx-auto w-full min-w-0 max-w-6xl px-4 py-6 md:px-6 md:py-8">
+        <div className="min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex min-w-0 flex-col gap-4 border-b border-gray-100 px-5 py-5 lg:flex-row lg:items-start lg:justify-between md:px-6">
+            <div className="min-w-0 shrink-0 lg:max-w-sm">
               <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
                 Create Application
               </h1>
@@ -736,8 +736,8 @@ export default function CreateApplicationPage() {
                 Select authority and project, then choose the application to create.
               </p>
             </div>
-            <div className="grid w-full gap-3 sm:max-w-xl sm:grid-cols-2">
-              <div>
+            <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 lg:max-w-xl">
+              <div className="min-w-0">
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
                   Authority
                 </label>
@@ -751,7 +751,7 @@ export default function CreateApplicationPage() {
                   placeholder="Select authority"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
                   Project
                 </label>
@@ -768,19 +768,19 @@ export default function CreateApplicationPage() {
                   }
                   disabled={projectsLoading || filteredProjects.length === 0}
                 />
-                {!projectsLoading && filteredProjects.length === 0 && (
-                  <p className="mt-1.5 text-xs text-gray-500">
-                    Draft projects are not listed. Submit a project for this authority first.
-                  </p>
-                )}
+                <p className="mt-1.5 min-h-4 text-xs text-gray-500">
+                  {!projectsLoading && filteredProjects.length === 0
+                    ? "Draft projects are not listed. Submit a project for this authority first."
+                    : "\u00a0"}
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-6 px-5 py-6 lg:grid-cols-3 md:px-6">
-            <div className="space-y-6 lg:col-span-2">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
+          <div className="grid min-w-0 gap-6 px-5 py-6 lg:grid-cols-3 md:px-6">
+            <div className="min-w-0 space-y-6 lg:col-span-2">
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <div className="min-w-0">
                   <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Department
                   </label>
@@ -795,14 +795,14 @@ export default function CreateApplicationPage() {
                     disabled={!selectedProject}
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="mb-1.5 block text-sm font-medium text-gray-800">
                     Application type
                   </label>
                   {catalogTypesForDepartment.some((type) => type.requires_roster_match) &&
                   selectedProject &&
                   visiblePermissionTypes.length === 0 ? (
-                    <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-sm text-gray-700">
+                    <p className="min-h-11 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-sm leading-snug text-gray-700">
                       No consultant roles match an appointment letter yet. Add matching roles in{" "}
                       <Link
                         href={`/dashboard/applicant?projectId=${encodeURIComponent(selectedProject)}`}
@@ -845,9 +845,9 @@ export default function CreateApplicationPage() {
                     <p className="mb-3 text-sm font-medium text-gray-800">
                       Proposal Submission For
                     </p>
-                    <div className="flex flex-wrap gap-4">
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
                       {proposalSubmissionOptions.map((option) => (
-                        <label key={option} className="flex items-center gap-2 text-sm text-gray-800">
+                        <label key={option} className="flex min-w-0 items-center gap-2 text-sm text-gray-800">
                           <input
                             type="radio"
                             name="proposal-submission"
@@ -862,8 +862,8 @@ export default function CreateApplicationPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
+                  <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                    <div className="min-w-0">
                       <label className="mb-1.5 block text-sm font-medium text-gray-800">
                         Type of Notice
                       </label>
@@ -877,7 +877,7 @@ export default function CreateApplicationPage() {
                         placeholder="Select"
                       />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="mb-1.5 block text-sm font-medium text-gray-800">
                         Proposed Application
                       </label>
@@ -889,7 +889,7 @@ export default function CreateApplicationPage() {
                         className={inputClasses}
                       />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="mb-1.5 block text-sm font-medium text-gray-800">
                         Major Use of Plot
                       </label>
@@ -903,7 +903,7 @@ export default function CreateApplicationPage() {
                         placeholder="Select"
                       />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="mb-1.5 block text-sm font-medium text-gray-800">
                         Application Type
                       </label>
@@ -931,55 +931,66 @@ export default function CreateApplicationPage() {
                   </div>
                 </div>
                 <div className="overflow-hidden rounded-xl border border-gray-200">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-                      <tr>
-                        <th className="px-4 py-3 font-medium">Field</th>
-                        <th className="px-4 py-3 font-medium">Value</th>
-                        <th className="px-4 py-3 font-medium">Source</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white">
-                      {!selectedProject ? (
+                  <div className="max-h-[280px] overflow-auto">
+                    <table className="w-full table-fixed text-left text-sm">
+                      <thead className="sticky top-0 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                         <tr>
-                          <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                            Select a project to view key variables.
-                          </td>
+                          <th className="w-[30%] px-4 py-3 font-medium">Field</th>
+                          <th className="w-[45%] px-4 py-3 font-medium">Value</th>
+                          <th className="w-[25%] px-4 py-3 font-medium">Source</th>
                         </tr>
-                      ) : keyVariables.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                            No project variables available yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        keyVariables.map((row) => (
-                          <tr key={row.field}>
-                            <td className="px-4 py-3 font-medium text-gray-800">{row.field}</td>
-                            <td className="px-4 py-3 text-gray-700">{row.value}</td>
-                            <td className="px-4 py-3 text-gray-500">{row.source}</td>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {!selectedProject ? (
+                          <tr>
+                            <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                              Select a project to view key variables.
+                            </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                        ) : keyVariables.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                              No project variables available yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          keyVariables.map((row) => (
+                            <tr key={row.field}>
+                              <td className="truncate px-4 py-3 font-medium text-gray-800" title={row.field}>
+                                {row.field}
+                              </td>
+                              <td className="truncate px-4 py-3 text-gray-700" title={row.value}>
+                                {row.value}
+                              </td>
+                              <td className="truncate px-4 py-3 text-gray-500" title={row.source}>
+                                {row.source}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <aside className="lg:col-span-1">
-              <div className="h-full rounded-xl border border-sky-100 bg-sky-50/70 p-5">
+            <aside className="min-w-0 lg:col-span-1">
+              <div className="h-full min-w-0 overflow-hidden rounded-xl border border-sky-100 bg-sky-50/70 p-5">
                 <h2 className="text-sm font-semibold text-brand-navy">Related Information</h2>
                 <p className="mt-1 text-xs text-gray-500">
                   Summary of your current selections.
                 </p>
                 <dl className="mt-5 space-y-4">
                   {relatedRows.map((row) => (
-                    <div key={row.label}>
+                    <div key={row.label} className="min-w-0">
                       <dt className="text-xs font-medium uppercase tracking-wide text-sky-800/70">
                         {row.label}
                       </dt>
-                      <dd className="mt-1 text-sm font-medium text-gray-900 break-words">
+                      <dd
+                        className="mt-1 truncate text-sm font-medium text-gray-900"
+                        title={row.value}
+                      >
                         {row.value}
                       </dd>
                     </div>

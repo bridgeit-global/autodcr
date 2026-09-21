@@ -146,7 +146,7 @@ export default function CustomSelect({
               left: menuPosition.left,
               width: menuPosition.width,
             }}
-            className="z-[100] bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto"
+            className="z-[100] max-h-60 overflow-x-hidden overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg"
           >
             {options.map((opt, idx) => (
               <button
@@ -176,7 +176,7 @@ export default function CustomSelect({
       : null;
 
   return (
-    <div ref={ref} className={`relative ${className}`} id={id}>
+    <div ref={ref} className={`relative min-w-0 w-full ${className}`} id={id}>
       <button
         ref={buttonRef}
         type="button"
@@ -231,14 +231,15 @@ export default function CustomSelect({
             setOpen(false);
           }
         }}
-        className={`flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${
+        className={`flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${
           disabled ? "cursor-not-allowed bg-gray-100 text-gray-400" : "hover:border-gray-300"
         }`}
       >
         <span
-          className={`min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm ${
+          className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm ${
             value ? "text-gray-900" : "text-gray-400"
           }`}
+          title={value ? selectedLabel : undefined}
         >
           {value
             ? renderHighlightedLabel(selectedLabel, selectedOption?.highlightedPart)
