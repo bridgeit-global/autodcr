@@ -2696,15 +2696,14 @@ export default function ApplicationDetailsPage() {
           ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
               forceFresh: true,
             })
-          : undefined;
+          : projectForPreview.application_urls;
       const qrKey =
         resolvedPreviewVariant === "acceptance"
           ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`)
           : templateType;
-      const savedPdfUrlForQr =
-        projectId && urlsRawForQr
-          ? resolveSavedPdfUrlForQr(projectId, qrKey, urlsRawForQr)
-          : undefined;
+      const savedPdfUrlForQr = projectId
+        ? resolveSavedPdfUrlForQr(projectId, qrKey, urlsRawForQr)
+        : undefined;
       const storedPdfUrl = urlsRawForQr
         ? getStoredApplicationPdfUrl(urlsRawForQr, templateType, resolvedPreviewVariant)
         : null;

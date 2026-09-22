@@ -25,11 +25,14 @@ import {
 import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
 import {
+  catalogDocumentPrefersConsultantLetterhead,
+  catalogDocumentShowsLetterhead,
   catalogPlaceholderFieldMap,
   fetchApplicationCatalogTypeByTitle,
   fetchDocumentsForApplicationType,
   fetchResolvedPlaceholdersForApplication,
   pickCatalogDocument,
+  resolveCatalogDocumentForPreview,
 } from "@/app/utils/applicationCatalog";
 import {
   isOwnerApplicantType,
@@ -150,11 +153,14 @@ export type ApplicationPreviewSource = {
  * Appointment letters go out on the owner's letterhead; acceptance letters are written
  * by the consultant, so they use the appointed consultant's letterhead instead.
  */
-function resolveLetterheadUrlForVariant(source?: ApplicationPreviewSource): string {
+function resolveLetterheadUrlForVariant(
+  source?: ApplicationPreviewSource,
+  opts?: { preferConsultant?: boolean }
+): string {
   const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
   const isAcceptanceLetter =
     (source?.letterVariant ?? source?.architectHtmlVariant) === "acceptance";
-  if (!isAcceptanceLetter) return ownerLetterheadUrl;
+  if (!isAcceptanceLetter && !opts?.preferConsultant) return ownerLetterheadUrl;
   return source?.consultantLetterheadUrl?.trim() || ownerLetterheadUrl;
 }
 
@@ -1650,14 +1656,25 @@ function prependFloatingSavedPdfQrIntoLetterRoot(html: string): string {
     return html;
   }
   const parsed = new DOMParser().parseFromString(html, "text/html");
-  const root = letterRootFromParsed(parsed);
-  const qrFallback = parsed.body.querySelector(".application-saved-pdf-qr-fallback");
-  const qrStandalone = parsed.body.querySelector("#app-saved-pdf-qr");
+  const root = letterRootFromParsed(parsed) ?? parsed.body;
+  const qrFallback = parsed.body?.querySelector(".application-saved-pdf-qr-fallback");
+  const qrStandalone = parsed.body?.querySelector("#app-saved-pdf-qr");
   let node: Element | null = null;
   if (root && qrFallback && !root.contains(qrFallback)) node = qrFallback;
   else if (root && qrStandalone && !root.contains(qrStandalone)) node = qrStandalone;
+  else if (root && qrFallback && root === parsed.body && qrFallback !== root.firstElementChild) {
+    node = qrFallback;
+  }
 
   if (!root || !node) return html;
+  if (node.parentElement === root && node === root.firstElementChild) return html;
+  if (
+    node.parentElement?.classList.contains("application-saved-pdf-qr-firstpage-wrap") &&
+    node.parentElement.parentElement === root &&
+    node.parentElement === root.firstElementChild
+  ) {
+    return html;
+  }
 
   const wrap = parsed.createElement("div");
   wrap.className = "application-saved-pdf-qr-firstpage-wrap";
@@ -1701,10 +1718,22 @@ function escapeCssUrlValue(url: string): string {
   return url.replace(/\\/g, "%5C").replace(/'/g, "%27");
 }
 
+function isUsableLetterheadUrl(url: string): boolean {
+  const u = url.trim();
+  if (!u) return false;
+  if (u.includes("$project_Letterhead") || u.includes("{{LETTERHEAD")) return false;
+  if (/^cid:/i.test(u)) return false;
+  if (u === "none" || u === "''" || u === '""') return false;
+  return /^(https?:|data:image)/i.test(u);
+}
+
 function resolveLetterheadUrlFromHtml(
   html: string,
   ownerLetterheadUrl?: string | null
 ): string {
+  const passed = ownerLetterheadUrl?.trim() || "";
+  if (isUsableLetterheadUrl(passed)) return passed;
+
   const metaHtml = htmlWithoutSavedPdfQrInjection(html);
   const dataUriMatch = metaHtml.match(
     /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
@@ -1715,17 +1744,14 @@ function resolveLetterheadUrlFromHtml(
   const cssBackgroundShorthandMatch = metaHtml.match(
     /background\s*:\s*[^;]*url\((['"]?)(.*?)\1\)[^;]*;/i
   );
-  let letterheadUrl =
+  const fromHtml = (
     dataUriMatch?.[0] ||
     cssBackgroundImageMatch?.[2]?.trim() ||
     cssBackgroundShorthandMatch?.[2]?.trim() ||
-    ownerLetterheadUrl?.trim() ||
-    "";
-  if (letterheadUrl.includes("$project_Letterhead")) letterheadUrl = "";
-  if (!letterheadUrl && ownerLetterheadUrl?.trim()) {
-    letterheadUrl = ownerLetterheadUrl.trim();
-  }
-  return letterheadUrl;
+    ""
+  ).trim();
+  if (isUsableLetterheadUrl(fromHtml)) return fromHtml;
+  return "";
 }
 
 /**
@@ -1740,50 +1766,80 @@ function resolveLetterheadUrlFromHtml(
  * zoom; Print/Save as PDF uses the same `@page` rules → vector PDF output
  * matches the on-screen pagination exactly.
  */
+function htmlLooksLikeAppointmentLetter(html: string): boolean {
+  return (
+    html.includes("letter-header") ||
+    html.includes("subject-reference-table") ||
+    html.includes("eeb-tab-line") ||
+    html.includes("acceptance-letter-body")
+  );
+}
+
 function injectPaginatedStyles(
   html: string,
   templateType?: TemplateType,
-  ownerLetterheadUrl?: string | null
+  ownerLetterheadUrl?: string | null,
+  opts?: { showLetterhead?: boolean; letterLayout?: boolean }
 ): string {
+  const showLetterhead = opts?.showLetterhead !== false;
   html = prependFloatingSavedPdfQrIntoLetterRoot(html);
   const metaHtml = htmlWithoutSavedPdfQrInjection(html);
-  const letterheadUrl = resolveLetterheadUrlFromHtml(html, ownerLetterheadUrl);
+  const letterheadUrl = showLetterhead
+    ? resolveLetterheadUrlFromHtml(html, ownerLetterheadUrl)
+    : "";
   const letterheadCssUrl = letterheadUrl ? escapeCssUrlValue(letterheadUrl) : "";
   const previewOrigin = resolvePreviewAppOrigin();
-  const isArchitectTemplate = templateType === "Architect";
-  // Acceptance letters use the same clean HTML format as the Architect template,
-  // so apply the same compact page margins regardless of consultant type.
   const isAcceptanceLetter =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body");
   const isAuthorityAppointmentLetter =
     metaHtml.includes("letter-header") &&
     metaHtml.includes("subject-reference-table") &&
     !isAcceptanceLetter;
+  // Concession and other building-permission HTML maps to templateType Architect
+  // but is not an appointment letter — Architect margins/CSS hide those forms.
+  const letterLayout =
+    opts?.letterLayout ??
+    (htmlLooksLikeAppointmentLetter(metaHtml) ||
+      isAcceptanceLetter ||
+      isAuthorityAppointmentLetter);
+  const isArchitectTemplate = letterLayout && templateType === "Architect";
   const useArchitectLayout =
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
   const pageMarginTop = useArchitectLayout
     ? "72pt"
-    : "95pt";
+    : letterLayout
+      ? "95pt"
+      : letterheadCssUrl
+        ? "72pt"
+        : "18pt";
   const pageMarginBottom = isAcceptanceLetter
     ? "64pt"
     : useArchitectLayout
       ? "72pt"
-      : "135pt";
+      : letterLayout
+        ? "135pt"
+        : letterheadCssUrl
+          ? "56pt"
+          : "18pt";
   // Clear letterhead branding without stacking a full second band under @page margin.
   // (22pt sat on logos; 90px left a large empty gap.)
   const contentPaddingTop = useArchitectLayout
     ? "28pt"
-    : "40pt";
+    : letterLayout
+      ? "40pt"
+      : "12pt";
   /* Clear white band under last CC line — keep bottom air without starving the top. */
   const contentPaddingBottom = isAcceptanceLetter
     ? "20pt"
     : useArchitectLayout
       ? "24pt"
-      : "40pt";
-  const pageMarginLeft = useArchitectLayout ? "36pt" : "56pt";
-  const pageMarginRight = useArchitectLayout ? "30pt" : "42pt";
-  const contentPaddingLeft = useArchitectLayout ? "36pt" : "56pt";
-  const contentPaddingRight = useArchitectLayout ? "30pt" : "42pt";
+      : letterLayout
+        ? "40pt"
+        : "12pt";
+  const pageMarginLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
+  const pageMarginRight = useArchitectLayout ? "30pt" : letterLayout ? "42pt" : "18pt";
+  const contentPaddingLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
+  const contentPaddingRight = useArchitectLayout ? "30pt" : letterLayout ? "42pt" : "18pt";
 
   const acceptanceLetterBodyPagedCss =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body")
@@ -2006,6 +2062,14 @@ function injectPaginatedStyles(
     flex-shrink: 0 !important;
     box-sizing: border-box !important;
   }
+  .application-saved-pdf-qr-firstpage-wrap {
+    display: flex !important;
+    justify-content: flex-end !important;
+    width: 100% !important;
+    margin: 0 0 10px 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
 
   /* The Word template has a 80pt top gap before the signature block which,
      combined with page-break-inside:avoid, can shove the block onto a fresh
@@ -2036,15 +2100,48 @@ function injectPaginatedStyles(
   .pagedjs_pages {
     padding: 12px 0;
   }
-  .pagedjs_page {
+  .pagedjs_page,
+  .pagedjs_pagebox {
     background-color: #ffffff;
-    ${letterheadCssUrl ? `background-image: url('${letterheadCssUrl}');` : ""}
-    ${letterheadCssUrl ? "background-repeat: no-repeat;" : ""}
-    ${letterheadCssUrl ? "background-size: 210mm 297mm;" : ""}
-    ${letterheadCssUrl ? "background-position: top center;" : ""}
+    ${letterheadCssUrl ? `background-image: url('${letterheadCssUrl}') !important;` : ""}
+    ${letterheadCssUrl ? "background-repeat: no-repeat !important;" : ""}
+    ${letterheadCssUrl ? "background-size: 210mm 297mm !important;" : ""}
+    ${letterheadCssUrl ? "background-position: top center !important;" : ""}
+  }
+  .pagedjs_page {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     margin: 0 auto 16px auto;
     overflow: visible;
+  }
+  ${
+    letterheadCssUrl
+      ? `
+  html, body {
+    background: #fff url('${letterheadCssUrl}') top center / 210mm 297mm no-repeat !important;
+  }
+  .pagedjs_page_content,
+  .pagedjs_page_content > div,
+  .pagedjs_page_content .page,
+  .pagedjs_page_content .WordSection1,
+  .pagedjs_page_content main.page {
+    background-color: transparent !important;
+    background-image: none !important;
+  }`
+      : ""
+  }
+
+  /* Forms (IOD, Concession, etc.) must be allowed to split or Paged.js hides the document. */
+  ${
+    letterLayout
+      ? ""
+      : `
+  .pagedjs_page_content table,
+  .pagedjs_page_content tr,
+  .pagedjs_page_content td,
+  .pagedjs_page_content p {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }`
   }
 
   /* Letterhead only on page 1; continuation pages stay plain white. */
@@ -2089,7 +2186,8 @@ ${PAGED_PREVIEW_START_SCRIPT}`;
 
 function injectPlumberPreviewPages(
   html: string,
-  ownerLetterheadUrl?: string | null
+  ownerLetterheadUrl?: string | null,
+  showLetterhead = true
 ): string {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const marker = parsed.querySelector("p.MsoNormal.cc-start") as HTMLElement | null;
@@ -2122,11 +2220,12 @@ function injectPlumberPreviewPages(
   const cssUrlMatch = metaHtml.match(
     /background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i
   );
-  const letterheadUrl =
-    ownerLetterheadUrl?.trim() ||
-    dataUriMatch?.[0] ||
-    cssUrlMatch?.[2] ||
-    "";
+  const letterheadUrl = showLetterhead
+    ? ownerLetterheadUrl?.trim() ||
+      dataUriMatch?.[0] ||
+      cssUrlMatch?.[2] ||
+      ""
+    : "";
 
   const plumberHead = `
 <style>
@@ -2264,20 +2363,41 @@ export async function generateApplicationPreviewHtml(
   source?: ApplicationPreviewSource,
   accessToken?: string
 ): Promise<string> {
+  const letterVariant =
+    source?.letterVariant === "acceptance" || source?.architectHtmlVariant === "acceptance"
+      ? "acceptance"
+      : "appointment";
+  const catalogDoc = await resolveCatalogDocumentForPreview({
+    applicationTitle: source?.selectedApplication,
+    letterVariant,
+    documentId: source?.catalogDocumentId,
+  });
+  const showLetterhead = catalogDocumentShowsLetterhead(catalogDoc);
+  const preferConsultantLetterhead = catalogDocumentPrefersConsultantLetterhead(catalogDoc);
+
   const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source, {
     accessToken,
     skipSessionRefresh: Boolean(accessToken),
   });
-  const letterheadUrl = resolveLetterheadUrlForVariant(source);
+  const letterheadUrl = showLetterhead
+    ? resolveLetterheadUrlForVariant(source, { preferConsultant: preferConsultantLetterhead })
+    : "";
   // Legacy Word-export plumber layout (cc-start); clean templates use letter-header + injectPaginatedStyles.
   if (
     templateType === "Plumber" &&
     !rawHtml.includes("eeb-tab-line") &&
     !rawHtml.includes("letter-header")
   ) {
-    return injectPlumberPreviewPages(rawHtml, letterheadUrl);
+    return injectPlumberPreviewPages(rawHtml, letterheadUrl, showLetterhead);
   }
-  return injectPaginatedStyles(rawHtml, templateType, letterheadUrl);
+  const letterLayout =
+    catalogDoc?.letter_variant === "appointment" ||
+    catalogDoc?.letter_variant === "acceptance" ||
+    htmlLooksLikeAppointmentLetter(rawHtml);
+  return injectPaginatedStyles(rawHtml, templateType, letterheadUrl, {
+    showLetterhead,
+    letterLayout,
+  });
 }
 
 export async function fetchApplicationPreviewHtmlRaw(
@@ -2320,6 +2440,17 @@ export async function fetchApplicationPreviewHtmlRaw(
           catalogType.applicant_type
         );
         Object.assign(formValues, catalogFields);
+        if (!catalogDocumentShowsLetterhead(variantDoc)) {
+          delete formValues.project_Letterhead_Image_Url;
+          delete formValues["{{LETTERHEAD_URL}}"];
+        } else if (catalogDocumentPrefersConsultantLetterhead(variantDoc)) {
+          const consultantLetterhead =
+            source?.consultantLetterheadUrl?.trim() || source?.ownerLetterheadUrl?.trim() || "";
+          if (consultantLetterhead) {
+            formValues.project_Letterhead_Image_Url = consultantLetterhead;
+            formValues["{{LETTERHEAD_URL}}"] = consultantLetterhead;
+          }
+        }
       }
     } catch (err) {
       console.warn("catalog placeholder overlay failed:", err);

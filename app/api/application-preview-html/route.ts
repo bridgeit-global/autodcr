@@ -12,7 +12,11 @@ import {
   mergeBuildingProposalOfficerZoneParagraphs,
 } from "@/app/utils/cleanAppointmentLetterTypes";
 import { enrichConsultantAppointmentFields } from "@/app/utils/enrichConsultantAppointmentFields";
-import { resolveHtmlPathForApplication } from "@/app/utils/applicationCatalog";
+import {
+  catalogDocumentShowsLetterhead,
+  catalogDocumentShowsQrcode,
+  resolveCatalogDocumentForPreview,
+} from "@/app/utils/applicationCatalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -364,6 +368,73 @@ async function loadSavedPdfUrlForQr(
   return undefined;
 }
 
+const LETTERHEAD_FIELD_KEYS = ["project_Letterhead_Image_Url", "{{LETTERHEAD_URL}}"] as const;
+
+function omitLetterheadTemplateFields(
+  fields: Record<string, string | undefined>
+): Record<string, string | undefined> {
+  const next = { ...fields };
+  for (const key of LETTERHEAD_FIELD_KEYS) {
+    delete next[key];
+  }
+  return next;
+}
+
+function pickLetterheadUrlFromPreviewFields(
+  fields: Record<string, string | undefined>
+): string {
+  for (const key of LETTERHEAD_FIELD_KEYS) {
+    const value = fields[key]?.trim() || "";
+    if (/^(https?:|data:image)/i.test(value) && !value.includes("$project_Letterhead")) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function injectLetterheadBackgroundStyle(html: string, letterheadUrl: string): string {
+  const cssUrl = letterheadUrl.replace(/\\/g, "%5C").replace(/'/g, "%27");
+  const block = `<style id="application-letterhead-bg">
+html, body {
+  background: #fff url('${cssUrl}') top center / 210mm 297mm no-repeat !important;
+  background-color: #ffffff !important;
+}
+.page, .WordSection1, main.page {
+  background-color: transparent !important;
+}
+</style>`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (open) => `${open}\n${block}\n`);
+  }
+  return `${block}\n${html}`;
+}
+
+const PROJECT_LIBRARY_BUCKET = "project-library";
+
+function applicationUrlsKeyToStorageSlug(applicationUrlsKey: string): string {
+  return applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
+}
+
+/** Same public URL `save-application-pdf` writes — used so QR shows before the first upload. */
+function predictedSavedPdfPublicUrl(
+  projectId: string,
+  urlsKey: string
+): string | undefined {
+  const base = supabaseUrl.replace(/\/$/, "");
+  const id = projectId.trim();
+  const key = urlsKey.trim();
+  if (!base || !id || !key) return undefined;
+  const path = `${id}/saved-applications/${applicationUrlsKeyToStorageSlug(key)}.pdf`;
+  return `${base}/storage/v1/object/public/${PROJECT_LIBRARY_BUCKET}/${path}`;
+}
+
+function insertMarkupAfterBodyOpen(html: string, markup: string): string {
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body[^>]*>/i, (open) => `${open}${markup}`);
+  }
+  return `${markup}${html}`;
+}
+
 async function injectSavedPdfQrHtml(
   html: string,
   opts: {
@@ -374,8 +445,20 @@ async function injectSavedPdfQrHtml(
     applicationUrlsKey?: string;
     /** When set (e.g. predicted Storage public URL before first upload), skips DB lookup. */
     savedPdfUrlForQr?: string | null;
+    /** Catalog `show_qrcode`. When false, strip QR sentinels and skip injection. */
+    enabled?: boolean;
+    /** When false, do not wrap To/Sub letter body around the QR (forms). */
+    letterLayout?: boolean;
   }
 ): Promise<string> {
+  const qrSentinels = [PROJECT_SAVED_PDF_QR_SENTINEL, CATALOG_SAVED_PDF_QR_SENTINEL];
+  const stripSentinel = (s: string) =>
+    qrSentinels.reduce((acc, token) => acc.split(token).join(""), s);
+
+  if (opts.enabled === false) {
+    return stripSentinel(html);
+  }
+
   let pdfUrl: string | undefined =
     typeof opts.savedPdfUrlForQr === "string" && opts.savedPdfUrlForQr.trim()
       ? opts.savedPdfUrlForQr.trim()
@@ -395,9 +478,9 @@ async function injectSavedPdfQrHtml(
     pdfUrl = await loadSavedPdfUrlForQr(supabase, opts.projectId.trim(), urlsKey);
   }
 
-  const qrSentinels = [PROJECT_SAVED_PDF_QR_SENTINEL, CATALOG_SAVED_PDF_QR_SENTINEL];
-  const stripSentinel = (s: string) =>
-    qrSentinels.reduce((acc, token) => acc.split(token).join(""), s);
+  if (!pdfUrl && opts.projectId?.trim()) {
+    pdfUrl = predictedSavedPdfPublicUrl(opts.projectId, urlsKey);
+  }
 
   if (!pdfUrl) {
     return stripSentinel(html);
@@ -435,25 +518,22 @@ async function injectSavedPdfQrHtml(
     hadSentinel ? stripSentinel(html) : html
   );
 
-  const beside = insertSavedPdfQrBesideClientBlock(baseForLayout, qrRightColumn);
+  const beside =
+    opts.letterLayout === false
+      ? null
+      : insertSavedPdfQrBesideClientBlock(baseForLayout, qrRightColumn);
   if (beside) {
     return beside;
   }
 
-  /* No To/Sub structure found (e.g. Plumber): keep sentinel replacement or append fallback. */
-  let out = hadSentinel
-    ? qrSentinels.reduce((acc, token) => acc.split(token).join(qrBox), html)
-    : html;
-  if (!hadSentinel) {
-    const fallback = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin-top:12px!important;padding:8px 0!important;border-top:1px solid #e5e7eb!important;width:132px!important;max-width:132px!important;min-width:0!important;margin-left:auto!important;margin-right:0!important;clear:both!important;flex-shrink:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
-    if (out.includes("</body>")) {
-      out = out.replace(/<\/body>/i, `${fallback}</body>`);
-    } else {
-      out = `${out}${fallback}`;
-    }
+  /* Sentinel stays in the template slot (letter-header qr-cell). Otherwise pin to
+     the start of <body> so Paged.js puts the QR on page 1, not after the last page. */
+  if (hadSentinel) {
+    return qrSentinels.reduce((acc, token) => acc.split(token).join(qrBox), html);
   }
 
-  return out;
+  const fallback = `<div class="application-saved-pdf-qr-fallback application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:0 0 10px auto!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
+  return insertMarkupAfterBodyOpen(html, fallback);
 }
 
 /** Maps each template type to its acceptance HTML file name. */
@@ -617,12 +697,15 @@ export async function POST(request: NextRequest) {
 
     const supabase = createTemplateSupabaseClient(token);
 
-    const catalogHtmlPath = await resolveHtmlPathForApplication({
+    const catalogDocument = await resolveCatalogDocumentForPreview({
       applicationTitle: body.applicationTitle,
       letterVariant: letterVariant === "acceptance" ? "acceptance" : "appointment",
       documentId: typeof body.catalogDocumentId === "string" ? body.catalogDocumentId : null,
       client: supabase,
     });
+    const catalogHtmlPath = catalogDocument?.html ?? null;
+    const showLetterhead = catalogDocumentShowsLetterhead(catalogDocument);
+    const showQrcode = catalogDocumentShowsQrcode(catalogDocument);
 
     if (body.catalogDocumentId && !catalogHtmlPath) {
       return NextResponse.json(
@@ -679,12 +762,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Inject shared CSS for all templates that use the clean acceptance HTML format.
+    // Shared appointment CSS (break-inside:avoid on every table) blanks large
+    // building-permission forms. Only inject it for actual letters.
+    const catalogIsLetter =
+      catalogDocument?.letter_variant === "appointment" ||
+      catalogDocument?.letter_variant === "acceptance";
     const needsSharedCss =
-      Boolean(catalogHtmlPath) ||
-      body.templateType === "Architect" ||
+      catalogIsLetter ||
       isCleanAppointmentLetter ||
-      (letterVariant === "acceptance" && body.templateType in ACCEPTANCE_TEMPLATE_PATH_MAP);
+      (!catalogHtmlPath && body.templateType === "Architect") ||
+      (letterVariant === "acceptance" &&
+        !catalogHtmlPath &&
+        body.templateType in ACCEPTANCE_TEMPLATE_PATH_MAP);
     let mergedHtml = htmlTemplate;
     if (needsSharedCss) {
       const sharedCss = await loadSharedArchitectApplicationCss(supabase, {
@@ -706,12 +795,22 @@ export async function POST(request: NextRequest) {
         templateType: body.templateType,
       });
     }
+    if (!showLetterhead) {
+      fieldsForTemplate = omitLetterheadTemplateFields(fieldsForTemplate);
+    }
 
     let finalHtml = removeEmptyAddressParagraphs(
       mergeBuildingProposalOfficerZoneParagraphs(
         replaceTemplateTokens(mergedHtml, fieldsForTemplate)
       )
     );
+
+    const letterheadUrl = showLetterhead
+      ? pickLetterheadUrlFromPreviewFields(fieldsForTemplate)
+      : "";
+    if (letterheadUrl) {
+      finalHtml = injectLetterheadBackgroundStyle(finalHtml, letterheadUrl);
+    }
 
     const acceptanceUrlsKey =
       letterVariant === "acceptance"
@@ -724,6 +823,8 @@ export async function POST(request: NextRequest) {
       authorizationToken: token,
       applicationUrlsKey: acceptanceUrlsKey,
       savedPdfUrlForQr: body.savedPdfUrlForQr,
+      enabled: showQrcode,
+      letterLayout: catalogDocument ? catalogIsLetter : true,
     });
 
     if (process.env.NODE_ENV === "development") {

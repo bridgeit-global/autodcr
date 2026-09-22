@@ -36,9 +36,18 @@ export type ApplicationCatalogDocument = {
   html: string | null;
   sign: string[];
   letter_variant: "appointment" | "acceptance" | null;
+  /** Catalog flag: preview paints owner/consultant letterhead. */
+  show_letterhead: boolean;
+  /** Catalog flag: preview injects the saved-PDF QR. */
+  show_qrcode: boolean;
   is_active: boolean;
   sort_order: number;
 };
+
+const DOCUMENT_COLUMNS =
+  "id, application_type_id, category, sub_category, html, sign, letter_variant, show_letterhead, show_qrcode, is_active, sort_order";
+const DOCUMENT_COLUMNS_LEGACY =
+  "id, application_type_id, category, sub_category, html, sign, letter_variant, is_active, sort_order";
 
 export type ApplicationCatalogPlaceholder = {
   id: string;
@@ -92,9 +101,42 @@ function mapDocumentRow(row: Record<string, unknown>): ApplicationCatalogDocumen
     html: typeof row.html === "string" && row.html.trim() ? row.html.trim() : null,
     sign: asStringArray(row.sign),
     letter_variant: variant === "acceptance" || variant === "appointment" ? variant : null,
+    // Missing columns (pre-migration) keep current always-on preview behavior.
+    show_letterhead: row.show_letterhead === undefined ? true : Boolean(row.show_letterhead),
+    show_qrcode: row.show_qrcode === undefined ? true : Boolean(row.show_qrcode),
     is_active: row.is_active !== false,
     sort_order: typeof row.sort_order === "number" ? row.sort_order : 100,
   };
+}
+
+/** Legacy templates with no catalog row keep letterhead on. */
+export function catalogDocumentShowsLetterhead(
+  doc?: ApplicationCatalogDocument | null
+): boolean {
+  return doc ? doc.show_letterhead : true;
+}
+
+/** Legacy templates with no catalog row keep saved-PDF QR on. */
+export function catalogDocumentShowsQrcode(
+  doc?: ApplicationCatalogDocument | null
+): boolean {
+  return doc ? doc.show_qrcode : true;
+}
+
+/**
+ * Appointment letters stay on the owner's letterhead. Acceptance letters and
+ * architect/LS building-permission applications use the consultant letterhead.
+ */
+export function catalogDocumentPrefersConsultantLetterhead(
+  doc?: ApplicationCatalogDocument | null
+): boolean {
+  if (!doc) return false;
+  if (doc.letter_variant === "acceptance") return true;
+  if (doc.letter_variant === "appointment") return false;
+  return doc.sign.some((item) => {
+    const role = item.trim().toLowerCase();
+    return role === "architect_or_ls" || role === "consultant";
+  });
 }
 
 function mapPlaceholderRow(row: Record<string, unknown>): ApplicationCatalogPlaceholder {
@@ -150,20 +192,30 @@ export async function fetchApplicationCatalogTypeByTitle(
   return mapTypeRow(data as Record<string, unknown>);
 }
 
+async function selectDocumentsForType(
+  db: CatalogDb,
+  applicationTypeId: string,
+  columns: string
+) {
+  return db
+    .from("application_documents")
+    .select(columns)
+    .eq("application_type_id", applicationTypeId)
+    .eq("is_active", true)
+    .order("sort_order");
+}
+
 export async function fetchDocumentsForApplicationType(
   applicationTypeId: string,
   client?: CatalogDb
 ): Promise<ApplicationCatalogDocument[]> {
   const db = await resolveClient(client);
-  const { data, error } = await db
-    .from("application_documents")
-    .select(
-      "id, application_type_id, category, sub_category, html, sign, letter_variant, is_active, sort_order"
-    )
-    .eq("application_type_id", applicationTypeId)
-    .eq("is_active", true)
-    .order("sort_order");
-
+  let { data, error } = await selectDocumentsForType(db, applicationTypeId, DOCUMENT_COLUMNS);
+  if (error) {
+    const retry = await selectDocumentsForType(db, applicationTypeId, DOCUMENT_COLUMNS_LEGACY);
+    data = retry.data;
+    error = retry.error;
+  }
   if (error || !Array.isArray(data)) return [];
   return data.map((row) => mapDocumentRow(row as Record<string, unknown>));
 }
@@ -449,21 +501,33 @@ export function pickCatalogDocument(
   return docs.find((d) => d.letter_variant === variant && d.html) || docs.find((d) => d.html);
 }
 
+export async function resolveCatalogDocumentForPreview(opts: {
+  applicationTitle?: string | null;
+  letterVariant?: "appointment" | "acceptance";
+  documentId?: string | null;
+  client?: CatalogDb;
+}): Promise<ApplicationCatalogDocument | null> {
+  const title = opts.applicationTitle?.trim();
+  if (!title) return null;
+  const type = await fetchApplicationCatalogTypeByTitle(title, opts.client);
+  if (!type) return null;
+  const docs = await fetchDocumentsForApplicationType(type.id, opts.client);
+  return (
+    pickCatalogDocument(docs, {
+      documentId: opts.documentId,
+      letterVariant: opts.letterVariant,
+    }) ?? null
+  );
+}
+
 export async function resolveHtmlPathForApplication(opts: {
   applicationTitle?: string | null;
   letterVariant?: "appointment" | "acceptance";
   documentId?: string | null;
   client?: CatalogDb;
 }): Promise<string | null> {
-  const title = opts.applicationTitle?.trim();
-  if (!title) return null;
-  const type = await fetchApplicationCatalogTypeByTitle(title, opts.client);
-  if (!type) return null;
-  const docs = await fetchDocumentsForApplicationType(type.id, opts.client);
-  return pickCatalogDocument(docs, {
-    documentId: opts.documentId,
-    letterVariant: opts.letterVariant,
-  })?.html ?? null;
+  const doc = await resolveCatalogDocumentForPreview(opts);
+  return doc?.html ?? null;
 }
 
 export type CatalogSigningInfo = {

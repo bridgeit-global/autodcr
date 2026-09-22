@@ -121,6 +121,8 @@ export type Database = {
           id: string
           is_active: boolean
           letter_variant: string | null
+          show_letterhead: boolean
+          show_qrcode: boolean
           sign: string[]
           sort_order: number
           sub_category: string | null
@@ -132,6 +134,8 @@ export type Database = {
           id: string
           is_active?: boolean
           letter_variant?: string | null
+          show_letterhead?: boolean
+          show_qrcode?: boolean
           sign?: string[]
           sort_order?: number
           sub_category?: string | null
@@ -143,6 +147,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           letter_variant?: string | null
+          show_letterhead?: boolean
+          show_qrcode?: boolean
           sign?: string[]
           sort_order?: number
           sub_category?: string | null
@@ -766,6 +772,8 @@ export type Database = {
           html: string | null
           placeholder: string | null
           placeholder_sort: number | null
+          show_letterhead: boolean | null
+          show_qrcode: boolean | null
           sign: string | null
           sub_category: string | null
           table: string | null
