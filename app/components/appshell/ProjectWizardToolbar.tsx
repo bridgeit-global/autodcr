@@ -32,7 +32,7 @@ export default function ProjectWizardToolbar({
 
   if (isReadOnlyMode) {
     return (
-      <div className="flex flex-wrap items-center justify-end gap-2 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
+      <div className="flex w-full flex-wrap items-center justify-end gap-2 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
         {lifecycleActionsSlot?.backToDraft && (
           <button
             type="button"
@@ -119,7 +119,7 @@ export default function ProjectWizardToolbar({
   const updateDisabled = isProjectDataLoading || isSubmittingProject;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
+    <div className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white px-4 py-3 sm:px-6">
       <p className="text-sm text-gray-500">
         Complete each section, then submit when everything is saved.
       </p>

@@ -1,4 +1,5 @@
 import { supabase } from "@/app/utils/supabase";
+import { fetchApplicationCatalogTypeByTitle } from "@/app/utils/applicationCatalog";
 
 export type OwnerApplicationRow = {
   id: string;
@@ -138,6 +139,14 @@ export async function createApplicationForOwner(
       return { error: message, code: "23505" };
     }
     console.warn("create_application_for_owner failed, falling back:", message);
+  }
+
+  const catalogType = await fetchApplicationCatalogTypeByTitle(input.permissionType);
+  if (
+    !catalogType ||
+    catalogType.department.trim().toLowerCase() !== input.department.trim().toLowerCase()
+  ) {
+    return { error: "Unknown or inactive application type for this department.", code: "22023" };
   }
 
   const { data: inserted, error: insertError } = await supabase

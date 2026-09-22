@@ -62,6 +62,7 @@ import {
   readApplicationUrlFromUrls,
   resolveSavedPdfUrlForQr,
 } from "@/app/utils/projectSavedApplicationPdfUrl";
+import { resolveApplicationUrlsKey } from "@/app/utils/applicationPdfUrlKeys";
 import { resolveOwnerEntityTypeForDesignation } from "@/app/utils/applicantRecordFields";
 import { templateTypeLicenseUrlKeys } from "@/app/utils/consultantTemplateTokens";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
@@ -89,6 +90,15 @@ import {
   type DscStampRole,
 } from "@/app/lib/bridge/dscStampPlacement";
 import {
+  catalogConsultantSignsAppointment,
+  catalogDocumentOptionLabel,
+  fetchApplicationCatalogTypeByTitle,
+  fetchCatalogSigningByTitle,
+  fetchDocumentsForApplicationType,
+  type ApplicationCatalogDocument,
+  type CatalogSigningInfo,
+} from "@/app/utils/applicationCatalog";
+import {
   pdfHasCompletedSignature,
   pdfHasUnsignedSignaturePlaceholder,
   assertPdfPriorSignaturesPreserved,
@@ -100,6 +110,7 @@ import {
 import { listCertsForSlot, listSlots, pingHost, signPdf } from "@/app/lib/bridge/signingOrchestrator";
 import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
+import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import { Loader2, RotateCcw, Trash2, XCircle } from "lucide-react";
 
@@ -771,6 +782,8 @@ type BuildApplicationPreviewContextInput = {
   projectId: string | null;
   /** For all dual-letter types: `appointment` → default template, `acceptance` → acceptance template. */
   letterVariant?: "appointment" | "acceptance";
+  /** Catalog `application_documents.id` when the type has multiple documents. */
+  catalogDocumentId?: string | null;
   /** @deprecated Use `letterVariant`. */
   architectHtmlVariant?: "appointment" | "acceptance";
 };
@@ -791,6 +804,7 @@ async function buildApplicationPreviewContext(
     applicationCreatedAt,
     projectId,
     letterVariant: inputLetterVariant,
+    catalogDocumentId,
     architectHtmlVariant,
   } = input;
 
@@ -1207,11 +1221,12 @@ async function buildApplicationPreviewContext(
       ? { fireConsultantOfficesByKey }
       : {}),
     // Pass letterVariant for all types that have an acceptance template.
-    ...(TYPES_WITH_ACCEPTANCE.has(templateType)
+    ...(isDualLetterType(templateType, selectedApplication)
       ? {
           letterVariant: (inputLetterVariant ?? architectHtmlVariant) ?? "appointment",
         }
       : {}),
+    ...(catalogDocumentId?.trim() ? { catalogDocumentId: catalogDocumentId.trim() } : {}),
   };
 
   const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
@@ -1264,6 +1279,33 @@ const TYPES_WITH_ACCEPTANCE = new Set<TemplateType>([
   "PMC / Project Manager",
 ]);
 
+const catalogSigningByTitle = new Map<string, CatalogSigningInfo>();
+let dualLetterApplicationTitle = "";
+
+function catalogSigningFor(applicationTitle?: string | null): CatalogSigningInfo | undefined {
+  const key = (applicationTitle ?? dualLetterApplicationTitle).trim().toLowerCase();
+  return key ? catalogSigningByTitle.get(key) : undefined;
+}
+
+/** Whether this type uses dual letters (appointment + acceptance). Catalog titles win when loaded. */
+const isDualLetterType = (t: TemplateType, applicationTitle?: string | null) => {
+  const title = (applicationTitle ?? dualLetterApplicationTitle).trim();
+  const info = catalogSigningFor(title);
+  if (info) return info.hasAcceptanceHtml;
+  if (catalogSigningByTitle.size > 0 && title) return false;
+  return TYPES_WITH_ACCEPTANCE.has(t);
+};
+
+/** Consultant DSC on the appointment letter: catalog `sign` array, else Architect/LS fallback. */
+function consultantSignsThisAppointment(
+  templateType: TemplateType,
+  applicationTitle?: string | null
+): boolean {
+  const info = catalogSigningFor(applicationTitle);
+  if (info) return catalogConsultantSignsAppointment(info);
+  return consultantSignsAppointmentLetter(templateType);
+}
+
 /** `application_urls` key for each type's acceptance PDF. */
 const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>> = {
   Architect: "Architect_acceptance",
@@ -1281,16 +1323,28 @@ const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>>
 
 const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
 
-/** Whether this type uses dual letters (appointment + acceptance). */
-const isDualLetterType = (t: TemplateType) => TYPES_WITH_ACCEPTANCE.has(t);
+const LICENSE_PREVIEW_VALUE = "license";
 
-/** Narrows a raw `<select>` value to the document-type union. */
-function normalizePreviewDocSelection(
-  value: string
-): "appointment" | "acceptance" | "license" {
-  if (value === "acceptance") return "acceptance";
-  if (value === "license") return "license";
-  return "appointment";
+/** Storage / QR key: catalog document id for multi-doc types, else templateType / acceptance. */
+function applicationUrlsKeyFor(
+  templateType: TemplateType,
+  opts?: {
+    letterVariant?: "appointment" | "acceptance" | null;
+    catalogDocumentId?: string | null;
+  }
+): string {
+  return resolveApplicationUrlsKey({
+    templateType,
+    letterVariant: opts?.letterVariant,
+    catalogDocumentId: opts?.catalogDocumentId,
+    isDualLetter: isDualLetterType(templateType),
+    acceptanceKeyByTemplateType: ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE,
+  });
+}
+
+/** Narrows a raw `<select>` value to a known fallback, otherwise keeps catalog document ids. */
+function normalizePreviewDocSelection(value: string): string {
+  return value.trim();
 }
 
 function applicationTemplateSavedInUrls(
@@ -1349,14 +1403,12 @@ async function fetchProjectApplicationUrls(
 function getStoredApplicationPdfUrl(
   raw: unknown,
   templateType: TemplateType,
-  letterVariant: "appointment" | "acceptance" = "appointment"
+  letterVariant: "appointment" | "acceptance" = "appointment",
+  catalogDocumentId?: string | null
 ): string | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const key =
-    letterVariant === "acceptance"
-      ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? templateType)
-      : templateType;
+  const key = applicationUrlsKeyFor(templateType, { letterVariant, catalogDocumentId });
   const v = o[key];
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 }
@@ -1380,9 +1432,18 @@ function resolveStoredPreviewPdfUrl(
   urlsRaw: unknown,
   templateType: TemplateType,
   letterVariant: "appointment" | "acceptance",
-  opts?: { ownerSignedAt?: string | null; architectSignedAt?: string | null }
+  opts?: {
+    ownerSignedAt?: string | null;
+    architectSignedAt?: string | null;
+    catalogDocumentId?: string | null;
+  }
 ): string | null {
-  const storedUrl = getStoredApplicationPdfUrl(urlsRaw, templateType, letterVariant);
+  const storedUrl = getStoredApplicationPdfUrl(
+    urlsRaw,
+    templateType,
+    letterVariant,
+    opts?.catalogDocumentId
+  );
   if (!storedUrl) return null;
   return storedPdfUrlWithCacheBuster(storedUrl, opts);
 }
@@ -1404,6 +1465,7 @@ async function buildApplicationSavePdfHtml(
   const savedPdfUrlForQr = resolveSavedPdfUrlForQr(projectId, applicationUrlsKey, urlsRaw);
   let html = await generateApplicationPreviewHtml(built.fields, built.templateType, {
     ...built.previewSource,
+    applicationUrlsKey,
     savedPdfUrlForQr,
   });
   if (signatures?.owner) {
@@ -1534,6 +1596,7 @@ function dualLetterBuiltContexts(
         ...base.previewSource,
         letterVariant: "appointment",
         architectHtmlVariant: undefined,
+        catalogDocumentId: undefined,
       },
     },
     acceptance: {
@@ -1543,6 +1606,7 @@ function dualLetterBuiltContexts(
         ...base.previewSource,
         letterVariant: "acceptance",
         architectHtmlVariant: "acceptance",
+        catalogDocumentId: undefined,
       },
     },
   };
@@ -1602,7 +1666,7 @@ async function buildDualLetterPdfBlobs(
     }
     if (
       signatures.consultant &&
-      (variant === "acceptance" || consultantSignsAppointmentLetter(templateType))
+      (variant === "acceptance" || consultantSignsThisAppointment(templateType))
     ) {
       out = injectMockConsultantSignatureIntoPreviewHtml(out, templateType);
     }
@@ -1921,6 +1985,20 @@ export default function ApplicationDetailsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedApplication = searchParams.get("selectedApplication");
+  dualLetterApplicationTitle = selectedApplication?.trim() || "";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const signing = await fetchCatalogSigningByTitle();
+      if (cancelled) return;
+      catalogSigningByTitle.clear();
+      for (const [title, info] of signing) catalogSigningByTitle.set(title, info);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const applicationNo = searchParams.get("applicationNo");
   const applicationId = searchParams.get("applicationId");
   const projectId = searchParams.get("projectId");
@@ -1937,6 +2015,48 @@ export default function ApplicationDetailsPage() {
   >("appointment");
   /** Which document the preview shows: a letter (appointment/acceptance) or the consultant's license. */
   const [previewDocKind, setPreviewDocKind] = useState<"letter" | "license">("letter");
+  const [catalogDocuments, setCatalogDocuments] = useState<ApplicationCatalogDocument[]>([]);
+  const [catalogDocumentsReady, setCatalogDocumentsReady] = useState(false);
+  const [catalogTypeIsAppointment, setCatalogTypeIsAppointment] = useState(false);
+  const [selectedCatalogDocumentId, setSelectedCatalogDocumentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCatalogDocumentsReady(false);
+    setCatalogDocuments([]);
+    setSelectedCatalogDocumentId(null);
+    setPreviewDocKind("letter");
+    setLetterVariant("appointment");
+    setCatalogTypeIsAppointment(false);
+
+    const title = selectedApplication?.trim();
+    if (!title) {
+      setCatalogDocumentsReady(true);
+      return;
+    }
+
+    (async () => {
+      const type = await fetchApplicationCatalogTypeByTitle(title);
+      if (cancelled) return;
+      if (!type) {
+        setCatalogDocuments([]);
+        setCatalogTypeIsAppointment(false);
+        setCatalogDocumentsReady(true);
+        return;
+      }
+      const docs = await fetchDocumentsForApplicationType(type.id);
+      if (cancelled) return;
+      setCatalogDocuments(docs);
+      setCatalogTypeIsAppointment(type.category === "appointment_letter");
+      const appointment = docs.find((d) => d.letter_variant === "appointment");
+      setSelectedCatalogDocumentId(appointment?.id ?? docs[0]?.id ?? null);
+      setCatalogDocumentsReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedApplication]);
   /** Neutral (non-error) message shown in the preview modal, e.g. license not uploaded. */
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -2054,15 +2174,20 @@ export default function ApplicationDetailsPage() {
     if (!projectId?.trim()) {
       throw new Error("Missing project.");
     }
-    const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
-      projectId,
-      ctx.templateType,
-      urlsRaw
-    );
+    const urlsKey = applicationUrlsKeyFor(ctx.templateType, {
+      letterVariant: ctx.previewSource.letterVariant ?? "appointment",
+      catalogDocumentId:
+        ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+    });
+    const savedPdfUrlForQr = resolveSavedPdfUrlForQr(projectId, urlsKey, urlsRaw);
     const html = await generateApplicationPreviewHtml(
       ctx.fields,
       ctx.templateType,
-      { ...ctx.previewSource, savedPdfUrlForQr },
+      {
+        ...ctx.previewSource,
+        applicationUrlsKey: urlsKey,
+        savedPdfUrlForQr,
+      },
       accessToken
     );
     return generateApplicationPreviewPdfFromHtml(html, ctx.templateType);
@@ -2268,6 +2393,8 @@ export default function ApplicationDetailsPage() {
     const appointedId = resolveAppointedSecondSignerUserId(projectData, previewTemplateType);
     if (authUserId && sameUserId(authUserId, appointedId)) {
       setLetterVariant("acceptance");
+      const acceptanceDoc = catalogDocuments.find((d) => d.letter_variant === "acceptance");
+      if (acceptanceDoc) setSelectedCatalogDocumentId(acceptanceDoc.id);
     }
   }, [
     isReadOnlyMode,
@@ -2277,6 +2404,7 @@ export default function ApplicationDetailsPage() {
     architectSignedAt,
     projectData,
     authUserId,
+    catalogDocuments,
   ]);
 
   const mockSecondSignLabel = useMemo(
@@ -2417,10 +2545,18 @@ export default function ApplicationDetailsPage() {
 
   const loadPreviewContent = async (
     variant: "appointment" | "acceptance",
-    opts?: { keepModalOpen?: boolean; resetSaveState?: boolean }
+    opts?: {
+      keepModalOpen?: boolean;
+      resetSaveState?: boolean;
+      catalogDocumentId?: string | null;
+    }
   ) => {
     const keepModalOpen = opts?.keepModalOpen ?? false;
     const resetSaveState = opts?.resetSaveState ?? !keepModalOpen;
+    const resolvedCatalogDocumentId =
+      opts?.catalogDocumentId !== undefined
+        ? opts.catalogDocumentId
+        : selectedCatalogDocumentId;
 
     try {
       setPreviewError(null);
@@ -2482,6 +2618,7 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant: variant,
+          catalogDocumentId: resolvedCatalogDocumentId,
         });
 
       const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
@@ -2526,7 +2663,12 @@ export default function ApplicationDetailsPage() {
           forceFresh: true,
         });
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
-        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
+        const savedPdfUrl = getStoredApplicationPdfUrl(
+          raw,
+          templateType,
+          resolvedVariant,
+          resolvedCatalogDocumentId
+        );
 
         if (savedPdfUrl && previewStoredPdf) {
           const pdfUrl = storedPdfUrlWithCacheBuster(savedPdfUrl, {
@@ -2585,22 +2727,25 @@ export default function ApplicationDetailsPage() {
       const resolvedPreviewVariant = isDualLetterType(templateType)
         ? variant
         : "appointment";
-      const urlsRawForQr =
-        workflowStageForPreview !== "draft" && projectId
-          ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
-              forceFresh: true,
-            })
-          : undefined;
-      const qrKey =
-        resolvedPreviewVariant === "acceptance"
-          ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`)
-          : templateType;
-      const savedPdfUrlForQr =
-        projectId && urlsRawForQr
-          ? resolveSavedPdfUrlForQr(projectId, qrKey, urlsRawForQr)
-          : undefined;
+      const urlsRawForQr = projectId
+        ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
+            forceFresh: workflowStageForPreview !== "draft",
+          })
+        : undefined;
+      const qrKey = applicationUrlsKeyFor(templateType, {
+        letterVariant: resolvedPreviewVariant,
+        catalogDocumentId: resolvedCatalogDocumentId,
+      });
+      // Preview QR only when this document's PDF is already in Storage.
+      // Predicted URLs 404 in draft — save flow still embeds the predicted URL in the PDF.
+      const savedPdfUrlForQr = readApplicationUrlFromUrls(urlsRawForQr, qrKey);
       const storedPdfUrl = urlsRawForQr
-        ? getStoredApplicationPdfUrl(urlsRawForQr, templateType, resolvedPreviewVariant)
+        ? getStoredApplicationPdfUrl(
+            urlsRawForQr,
+            templateType,
+            resolvedPreviewVariant,
+            resolvedCatalogDocumentId
+          )
         : null;
       if (storedPdfUrl) {
         const resolvedStoredUrl = storedPdfUrlWithCacheBuster(storedPdfUrl, {
@@ -2629,9 +2774,13 @@ export default function ApplicationDetailsPage() {
       let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
-        savedPdfUrlForQr
-          ? { ...previewSource, savedPdfUrlForQr }
-          : previewSource,
+        {
+          ...previewSource,
+          // Always pass the document key so Concession never inherits Architect's QR.
+          // Omit savedPdfUrlForQr until this document's PDF exists (draft → no QR).
+          applicationUrlsKey: qrKey,
+          ...(savedPdfUrlForQr ? { savedPdfUrlForQr } : {}),
+        },
         previewAuthToken
       );
 
@@ -2712,38 +2861,94 @@ export default function ApplicationDetailsPage() {
     await loadPreviewContent(letterVariant, {
       keepModalOpen: false,
       resetSaveState: true,
+      catalogDocumentId: selectedCatalogDocumentId,
     });
   };
 
   const handleLetterVariantChange = (
     next: "appointment" | "acceptance",
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; catalogDocumentId?: string | null }
   ) => {
-    if (next === letterVariant && !opts?.force) return;
+    if (next === letterVariant && !opts?.force && !opts?.catalogDocumentId) return;
     setLetterVariant(next);
+    const matchingId =
+      opts?.catalogDocumentId ??
+      catalogDocuments.find((d) => d.letter_variant === next)?.id ??
+      null;
+    if (matchingId) setSelectedCatalogDocumentId(matchingId);
     if (previewOpen) {
-      void loadPreviewContent(next, { keepModalOpen: true, resetSaveState: false });
+      void loadPreviewContent(next, {
+        keepModalOpen: true,
+        resetSaveState: false,
+        catalogDocumentId: matchingId,
+      });
     }
   };
 
-  /** Dropdown selection spanning both letter variants and the consultant's license. */
-  const previewDocSelection: "appointment" | "acceptance" | "license" =
-    previewDocKind === "license" ? "license" : letterVariant;
+  const usingCatalogDocs = catalogDocumentsReady && catalogDocuments.length > 0;
 
-  const handlePreviewDocSelectionChange = (
-    next: "appointment" | "acceptance" | "license"
-  ) => {
+  const previewDocumentOptions = useMemo(() => {
+    if (!catalogDocumentsReady) {
+      return [{ value: "", label: "Loading…" }];
+    }
+    if (catalogDocuments.length > 0) {
+      const opts = catalogDocuments.map((doc) => ({
+        value: doc.id,
+        label: catalogDocumentOptionLabel(doc),
+      }));
+      if (catalogTypeIsAppointment) {
+        opts.push({ value: LICENSE_PREVIEW_VALUE, label: "License" });
+      }
+      return opts;
+    }
+    const opts = [{ value: "appointment", label: "Appointment" }];
+    if (isDualLetterType(previewTemplateType)) {
+      opts.push({ value: "acceptance", label: "Acceptance" });
+    }
+    opts.push({ value: LICENSE_PREVIEW_VALUE, label: "License" });
+    return opts;
+  }, [
+    catalogDocumentsReady,
+    catalogDocuments,
+    catalogTypeIsAppointment,
+    previewTemplateType,
+  ]);
+
+  /** Dropdown selection spanning catalog documents and the consultant's license. */
+  const previewDocSelection: string = !catalogDocumentsReady
+    ? ""
+    : previewDocKind === "license"
+      ? LICENSE_PREVIEW_VALUE
+      : usingCatalogDocs
+        ? selectedCatalogDocumentId ?? ""
+        : letterVariant;
+
+  const handlePreviewDocSelectionChange = (next: string) => {
     if (next === previewDocSelection) return;
-    if (next === "license") {
+    if (next === LICENSE_PREVIEW_VALUE) {
       setPreviewDocKind("license");
       if (previewOpen) void loadLicensePreview({ keepModalOpen: true });
       return;
     }
-    // Coming back from License must reload even when `letterVariant` is unchanged.
     const leavingLicense = previewDocKind === "license";
     setPreviewDocKind("letter");
     setPreviewNotice(null);
-    handleLetterVariantChange(next, { force: leavingLicense });
+
+    const catalogDoc = catalogDocuments.find((d) => d.id === next);
+    if (catalogDoc) {
+      setSelectedCatalogDocumentId(catalogDoc.id);
+      const nextVariant =
+        catalogDoc.letter_variant === "acceptance" ? "acceptance" : "appointment";
+      handleLetterVariantChange(nextVariant, {
+        force: leavingLicense || nextVariant === letterVariant,
+        catalogDocumentId: catalogDoc.id,
+      });
+      return;
+    }
+
+    if (next === "acceptance" || next === "appointment") {
+      handleLetterVariantChange(next, { force: leavingLicense });
+    }
   };
 
   // Sidebar “Sign application” auto-signs whatever the modal shows, so it must
@@ -2752,6 +2957,7 @@ export default function ApplicationDetailsPage() {
     await loadPreviewContent(letterVariant, {
       keepModalOpen: false,
       resetSaveState: true,
+      catalogDocumentId: selectedCatalogDocumentId,
     });
   };
 
@@ -2770,6 +2976,7 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant,
+          catalogDocumentId: selectedCatalogDocumentId,
         });
         if (cancelled) return;
         setDetailsFieldRows(
@@ -2798,6 +3005,7 @@ export default function ApplicationDetailsPage() {
     applicationNo,
     userMetadata,
     letterVariant,
+    selectedCatalogDocumentId,
   ]);
 
   useEffect(() => {
@@ -3046,7 +3254,7 @@ export default function ApplicationDetailsPage() {
       if (hasDualLetters) {
         const consultantSigning = mockSignRole === "consultant";
         const consultantDualAppointment =
-          consultantSigning && consultantSignsAppointmentLetter(ctx.templateType);
+          consultantSigning && consultantSignsThisAppointment(ctx.templateType);
         setSidebarPdfStatus(
           consultantDualAppointment
             ? "Signing acceptance & appointment…"
@@ -3224,9 +3432,14 @@ export default function ApplicationDetailsPage() {
               .eq("id", projectId)
               .maybeSingle();
             const raw = urlsRow?.application_urls;
+            const urlsKey = applicationUrlsKeyFor(ctx.templateType, {
+              letterVariant: "appointment",
+              catalogDocumentId:
+                ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+            });
             const entry =
               raw && typeof raw === "object" && !Array.isArray(raw)
-                ? (raw as Record<string, unknown>)[ctx.templateType]
+                ? (raw as Record<string, unknown>)[urlsKey]
                 : undefined;
             const fallback =
               typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
@@ -3248,15 +3461,24 @@ export default function ApplicationDetailsPage() {
             .maybeSingle();
           urlsRawSign = urlsRow?.application_urls;
         }
+        const signUrlsKey = applicationUrlsKeyFor(ctx.templateType, {
+          letterVariant: "appointment",
+          catalogDocumentId:
+            ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+        });
         const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
           projectId,
-          ctx.templateType,
+          signUrlsKey,
           urlsRawSign
         );
         let signHtml = await generateApplicationPreviewHtml(
           ctx.fields,
           ctx.templateType,
-          { ...ctx.previewSource, savedPdfUrlForQr },
+          {
+            ...ctx.previewSource,
+            applicationUrlsKey: signUrlsKey,
+            savedPdfUrlForQr,
+          },
           authToken
         );
         signHtml = injectMockOwnerSignatureIntoPreviewHtml(
@@ -3273,7 +3495,7 @@ export default function ApplicationDetailsPage() {
           authToken,
           authUserId: authUser.id,
           appointmentBlob: signedBlob,
-          applicationUrlsKey: ctx.templateType,
+          applicationUrlsKey: signUrlsKey,
         });
         publicUrl = uploaded.publicUrl ?? null;
         setSidebarPdfStatus(null);
@@ -3333,9 +3555,14 @@ export default function ApplicationDetailsPage() {
           .eq("id", projectId)
           .maybeSingle();
         const raw = urlsRow?.application_urls;
+        const urlsKey = applicationUrlsKeyFor(ctx.templateType, {
+          letterVariant: "appointment",
+          catalogDocumentId:
+            ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+        });
         const entry =
           raw && typeof raw === "object" && !Array.isArray(raw)
-            ? (raw as Record<string, unknown>)[ctx.templateType]
+            ? (raw as Record<string, unknown>)[urlsKey]
             : undefined;
         const fallback =
           typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
@@ -3460,6 +3687,7 @@ export default function ApplicationDetailsPage() {
       const { fields, previewSource, templateType } = await buildApplicationPreviewContext({
         ...previewBase,
         letterVariant: signingLetterVariant,
+        catalogDocumentId: isDualForSign ? undefined : selectedCatalogDocumentId,
       });
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
@@ -3628,7 +3856,7 @@ export default function ApplicationDetailsPage() {
       const ownerAlreadySigned = Boolean(ownerSignedAtRow);
       const signingAcceptance = isDual && signRole === "consultant";
       const consultantDualAppointment =
-        signingAcceptance && consultantSignsAppointmentLetter(ctx.templateType);
+        signingAcceptance && consultantSignsThisAppointment(ctx.templateType);
       setSidebarPdfStatus(
         consultantDualAppointment
           ? "Signing acceptance & appointment with DSC…"
@@ -3637,9 +3865,12 @@ export default function ApplicationDetailsPage() {
       const primaryLetterVariant: "appointment" | "acceptance" = signingAcceptance
         ? "acceptance"
         : "appointment";
-      const key = signingAcceptance
-        ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`)
-        : ctx.templateType;
+      const key = applicationUrlsKeyFor(ctx.templateType, {
+        letterVariant: primaryLetterVariant,
+        catalogDocumentId: isDual
+          ? undefined
+          : (ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId),
+      });
 
       const { blob: unsignedBlob, builtFresh: primaryBuiltFresh } =
         await loadUnsignedLetterPdfForSigning({
@@ -3833,7 +4064,14 @@ export default function ApplicationDetailsPage() {
           : "appointment";
       const previewStoredUrl =
         mergedUrls != null
-          ? getStoredApplicationPdfUrl(mergedUrls, ctx.templateType, previewVariant)
+          ? getStoredApplicationPdfUrl(
+              mergedUrls,
+              ctx.templateType,
+              previewVariant,
+              isDual
+                ? undefined
+                : (ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId)
+            )
           : uploaded.publicUrl;
       if (previewStoredUrl) {
         const pdfUrl = storedPdfUrlWithCacheBuster(previewStoredUrl, {
@@ -4033,6 +4271,9 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant,
+          catalogDocumentId: isDualLetterType(saveTemplateType)
+            ? undefined
+            : selectedCatalogDocumentId,
         });
         previewPdfContextRef.current = {
           fields: built.fields,
@@ -4191,8 +4432,13 @@ export default function ApplicationDetailsPage() {
         })();
       } else {
         const urlsRaw = await fetchApplicationUrls();
+        const saveUrlsKey = applicationUrlsKeyFor(ctx.templateType, {
+          letterVariant: "appointment",
+          catalogDocumentId:
+            ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+        });
         const blob = await buildApplicationPreviewPdfBlob(urlsRaw, authToken);
-        await uploadPdfBlob(blob, ctx.templateType);
+        await uploadPdfBlob(blob, saveUrlsKey);
         setPdfSavedForCurrentPreview(true);
 
         void (async () => {
@@ -4201,7 +4447,12 @@ export default function ApplicationDetailsPage() {
             urlsAfterSave,
             ctx.templateType,
             "appointment",
-            { ownerSignedAt, architectSignedAt }
+            {
+              ownerSignedAt,
+              architectSignedAt,
+              catalogDocumentId:
+                ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+            }
           );
           if (!pdfUrl) return;
           setStoredSigningPdfUrl(pdfUrl);
@@ -4478,7 +4729,7 @@ export default function ApplicationDetailsPage() {
 
   if (!isReadOnlyMode) {
     return (
-      <div className="space-y-6">
+      <div className="w-full space-y-6">
         <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-5 py-5 md:px-6">
             <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
@@ -4495,7 +4746,7 @@ export default function ApplicationDetailsPage() {
 
   if (applicationAccessState === "loading") {
     return (
-      <div className="flex justify-center py-16">
+      <div className="flex w-full justify-center py-16">
         <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
       </div>
     );
@@ -4503,7 +4754,7 @@ export default function ApplicationDetailsPage() {
 
   if (applicationAccessState === "denied") {
     return (
-      <div className="space-y-6">
+      <div className="w-full space-y-6">
         <section className="overflow-hidden rounded-xl border border-rose-200 bg-white shadow-sm">
           <div className="border-b border-rose-100 bg-rose-50/60 px-5 py-5 md:px-6">
             <h2 className="text-xl font-semibold tracking-tight text-brand-navy">Access denied</h2>
@@ -4527,14 +4778,30 @@ export default function ApplicationDetailsPage() {
     );
   }
 
-  const selectClasses =
-    "h-10 min-w-[12rem] rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-50";
+  const signRoleOptions = [
+    {
+      value: "owner",
+      label: `Sign as ${principalApplicantLabel}${
+        mockSignAvailability.onBehalfOfOwner ? " (on behalf)" : ""
+      }${ownerSignedAt ? " (done)" : ""}`,
+      disabled: !mockSignAvailability.canSignAsOwner,
+    },
+    ...(isDualLetterType(previewTemplateType)
+      ? [
+          {
+            value: "consultant",
+            label: `Sign as ${mockSecondSignLabel}${architectSignedAt ? " (done)" : ""}`,
+            disabled: !mockSignAvailability.canSignAsConsultant,
+          },
+        ]
+      : []),
+  ];
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div className="w-full space-y-6">
+      <section className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between md:px-6">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
               Application Details
             </h2>
@@ -4542,69 +4809,48 @@ export default function ApplicationDetailsPage() {
               Read-only details for the selected application.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {applicationWorkflowStage === "in_process" && isReadOnlyMode && (
-              <label className="flex items-center gap-2 text-sm text-gray-700">
+              <div className="flex items-center gap-2 text-sm text-gray-700">
                 <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
                   Sign
                 </span>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    e.target.value = "";
-                    if (v === "owner" || v === "consultant") {
-                      handleSignRoleSelect(v);
-                    }
-                  }}
-                  disabled={isSigningPdf || isSavingPdf}
-                  className={selectClasses}
-                  aria-label="Sign as role"
-                >
-                  <option value="" disabled>
-                    Select role…
-                  </option>
-                  <option
-                    value="owner"
-                    disabled={!mockSignAvailability.canSignAsOwner}
-                  >
-                    Sign as {principalApplicantLabel}
-                    {mockSignAvailability.onBehalfOfOwner ? " (on behalf)" : ""}
-                    {ownerSignedAt ? " (done)" : ""}
-                  </option>
-                  {isDualLetterType(previewTemplateType) && (
-                    <option
-                      value="consultant"
-                      disabled={!mockSignAvailability.canSignAsConsultant}
-                    >
-                      {`Sign as ${mockSecondSignLabel}`}
-                      {architectSignedAt ? " (done)" : ""}
-                    </option>
-                  )}
-                </select>
-              </label>
+                <div className="w-56 shrink-0">
+                  <CustomSelect
+                    value=""
+                    onChange={(v) => {
+                      if (v === "owner" || v === "consultant") {
+                        handleSignRoleSelect(v);
+                      }
+                    }}
+                    options={signRoleOptions}
+                    placeholder="Select role…"
+                    disabled={isSigningPdf || isSavingPdf}
+                    aria-label="Sign as role"
+                  />
+                </div>
+              </div>
             )}
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+            <div className="flex items-center gap-2 text-sm text-gray-700">
               <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
                 Document
               </span>
-              <select
-                value={previewDocSelection}
-                onChange={(e) =>
-                  handlePreviewDocSelectionChange(
-                    normalizePreviewDocSelection(e.target.value)
-                  )
-                }
-                className={selectClasses}
-                aria-label="Document type"
-              >
-                <option value="appointment">Appointment</option>
-                {isDualLetterType(previewTemplateType) && (
-                  <option value="acceptance">Acceptance</option>
-                )}
-                <option value="license">License</option>
-              </select>
-            </label>
+              <div className="w-72 shrink-0 sm:w-80">
+                <CustomSelect
+                  value={previewDocSelection}
+                  onChange={(v) =>
+                    handlePreviewDocSelectionChange(normalizePreviewDocSelection(v))
+                  }
+                  options={previewDocumentOptions.map((opt) => ({
+                    ...opt,
+                    disabled: !opt.value,
+                  }))}
+                  placeholder={catalogDocumentsReady ? "Select document" : "Loading…"}
+                  disabled={!catalogDocumentsReady}
+                  aria-label="Document type"
+                />
+              </div>
+            </div>
             <button
               type="button"
               onClick={handlePreview}
@@ -4630,16 +4876,19 @@ export default function ApplicationDetailsPage() {
             <p className="mb-3 text-sm text-status-danger">{savePdfError}</p>
           )}
 
-          {detailsFieldsLoading ? (
+          {detailsFieldsLoading && detailsFieldRows.length === 0 && !detailsFieldsError ? (
             <p className="text-sm text-gray-500">Resolving fields…</p>
           ) : detailsFieldRows.length === 0 && !detailsFieldsError ? (
             <p className="text-sm text-gray-500">No letter fields to show yet.</p>
           ) : (
             <div className="overflow-hidden rounded-xl border border-gray-200">
-              <div className="border-b border-gray-100 bg-gray-50 px-4 py-2.5">
+              <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                   Letter fields
                 </p>
+                {detailsFieldsLoading ? (
+                  <span className="text-xs text-gray-400">Updating…</span>
+                ) : null}
               </div>
               <div className="divide-y divide-gray-100 bg-white">
                 {detailsFieldRows.map((row) => (
@@ -4690,9 +4939,12 @@ export default function ApplicationDetailsPage() {
         mockSignBusy={isSigningPdf}
         showLetterVariantSelector
         showAcceptanceOption={isDualLetterType(previewTemplateType)}
+        documentOptions={previewDocumentOptions}
         letterVariant={previewDocSelection}
         onLetterVariantChange={handlePreviewDocSelectionChange}
-        letterVariantDisabled={isPreviewLoading || isSavingPdf || isSigningPdf}
+        letterVariantDisabled={
+          isPreviewLoading || isSavingPdf || isSigningPdf || !catalogDocumentsReady
+        }
         notice={previewNotice}
       />
 

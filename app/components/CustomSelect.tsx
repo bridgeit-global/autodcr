@@ -7,6 +7,7 @@ export interface CustomSelectOption {
   value: string;
   label: string;
   highlightedPart?: string;
+  disabled?: boolean;
 }
 
 interface CustomSelectProps {
@@ -17,6 +18,7 @@ interface CustomSelectProps {
   className?: string;
   disabled?: boolean;
   id?: string;
+  "aria-label"?: string;
 }
 
 type MenuPosition = {
@@ -33,6 +35,7 @@ export default function CustomSelect({
   className = "",
   disabled = false,
   id,
+  "aria-label": ariaLabel,
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
@@ -99,6 +102,22 @@ export default function CustomSelect({
     };
   }, []);
 
+  const enabledIndexes = options.reduce<number[]>((acc, opt, idx) => {
+    if (!opt.disabled) acc.push(idx);
+    return acc;
+  }, []);
+
+  const nextEnabledIndex = (current: number, direction: 1 | -1) => {
+    if (enabledIndexes.length === 0) return -1;
+    if (direction === 1) {
+      const found = enabledIndexes.find((idx) => idx > current);
+      return found ?? enabledIndexes[enabledIndexes.length - 1];
+    }
+    if (current < 0) return enabledIndexes[enabledIndexes.length - 1];
+    const found = [...enabledIndexes].reverse().find((idx) => idx < current);
+    return found ?? enabledIndexes[0];
+  };
+
   const selectedOption = options.find((o) => o.value === value);
   const selectedLabel = selectedOption?.label || "";
 
@@ -127,8 +146,9 @@ export default function CustomSelect({
       typeaheadBufferRef.current = "";
     }, 600);
 
-    const matchedIndex = options.findIndex((opt) =>
-      opt.label.toLowerCase().startsWith(nextBuffer)
+    const matchedIndex = options.findIndex(
+      (opt) =>
+        !opt.disabled && opt.label.toLowerCase().startsWith(nextBuffer)
     );
     if (matchedIndex < 0) return;
     setOpen(true);
@@ -146,25 +166,29 @@ export default function CustomSelect({
               left: menuPosition.left,
               width: menuPosition.width,
             }}
-            className="z-[100] bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto"
+            className="z-[10050] max-h-60 overflow-x-hidden overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg"
           >
             {options.map((opt, idx) => (
               <button
-                key={opt.value}
+                key={opt.value || `option-${idx}`}
                 ref={(el) => {
                   optionRefs.current[idx] = el;
                 }}
                 type="button"
+                disabled={opt.disabled}
                 onClick={() => {
+                  if (opt.disabled) return;
                   onChange(opt.value);
                   setOpen(false);
                 }}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 break-words leading-snug ${
-                  value === opt.value
-                    ? "bg-blue-50 text-brand-blue font-medium"
-                    : activeIndex >= 0 && options[activeIndex]?.value === opt.value
-                      ? "bg-blue-50 text-gray-900"
-                      : "text-gray-900"
+                className={`w-full text-left px-3 py-2 text-sm break-words leading-snug ${
+                  opt.disabled
+                    ? "cursor-not-allowed text-gray-400"
+                    : value === opt.value
+                      ? "bg-blue-50 text-brand-blue font-medium hover:bg-blue-50"
+                      : activeIndex >= 0 && options[activeIndex]?.value === opt.value
+                        ? "bg-blue-50 text-gray-900 hover:bg-blue-50"
+                        : "text-gray-900 hover:bg-blue-50"
                 }`}
               >
                 {renderHighlightedLabel(opt.label, opt.highlightedPart)}
@@ -176,11 +200,14 @@ export default function CustomSelect({
       : null;
 
   return (
-    <div ref={ref} className={`relative ${className}`} id={id}>
+    <div ref={ref} className={`relative min-w-0 w-full ${className}`} id={id}>
       <button
         ref={buttonRef}
         type="button"
         disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => {
           if (disabled) return;
           setOpen((prev) => {
@@ -202,26 +229,20 @@ export default function CustomSelect({
             e.preventDefault();
             setOpen(true);
             updateMenuPosition();
-            setActiveIndex((prev) => {
-              const base = prev < 0 ? 0 : prev + 1;
-              return Math.min(base, options.length - 1);
-            });
+            setActiveIndex((prev) => nextEnabledIndex(prev, 1));
             return;
           }
           if (e.key === "ArrowUp") {
             e.preventDefault();
             setOpen(true);
             updateMenuPosition();
-            setActiveIndex((prev) => {
-              const base = prev < 0 ? options.length - 1 : prev - 1;
-              return Math.max(base, 0);
-            });
+            setActiveIndex((prev) => nextEnabledIndex(prev, -1));
             return;
           }
           if (e.key === "Enter" && open && activeIndex >= 0) {
             e.preventDefault();
             const selected = options[activeIndex];
-            if (selected) {
+            if (selected && !selected.disabled) {
               onChange(selected.value);
               setOpen(false);
             }
@@ -231,14 +252,15 @@ export default function CustomSelect({
             setOpen(false);
           }
         }}
-        className={`flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${
+        className={`flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${
           disabled ? "cursor-not-allowed bg-gray-100 text-gray-400" : "hover:border-gray-300"
         }`}
       >
         <span
-          className={`min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm ${
+          className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm ${
             value ? "text-gray-900" : "text-gray-400"
           }`}
+          title={value ? selectedLabel : undefined}
         >
           {value
             ? renderHighlightedLabel(selectedLabel, selectedOption?.highlightedPart)

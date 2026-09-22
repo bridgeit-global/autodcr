@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
+import CustomSelect from "@/app/components/CustomSelect";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 
 const ApplicationStoredPdfViewer = dynamic(() => import("./ApplicationStoredPdfViewer"), {
@@ -63,10 +64,10 @@ type DocumentPreviewModalProps = {
   showLetterVariantSelector?: boolean;
   /** Dual-letter applications only: include the Acceptance option. */
   showAcceptanceOption?: boolean;
-  letterVariant?: "appointment" | "acceptance" | "license";
-  onLetterVariantChange?: (
-    variant: "appointment" | "acceptance" | "license"
-  ) => void;
+  /** Catalog document rows (category labels). Falls back to Appointment / Acceptance / License. */
+  documentOptions?: Array<{ value: string; label: string }>;
+  letterVariant?: string;
+  onLetterVariantChange?: (variant: string) => void;
   letterVariantDisabled?: boolean;
 };
 
@@ -97,6 +98,7 @@ export default function DocumentPreviewModal({
   mockSignBusy = false,
   showLetterVariantSelector = false,
   showAcceptanceOption = true,
+  documentOptions,
   letterVariant = "appointment",
   onLetterVariantChange,
   letterVariantDisabled = false,
@@ -518,26 +520,25 @@ export default function DocumentPreviewModal({
                 {showLetterVariantSelector && onLetterVariantChange && (
                   <label className="flex items-center gap-2 text-sm text-gray-700">
                     <span className="whitespace-nowrap">Document</span>
-                    <select
-                      value={letterVariant}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        onLetterVariantChange(
-                          next === "acceptance" || next === "license"
-                            ? next
-                            : "appointment"
-                        );
-                      }}
-                      disabled={letterVariantDisabled || saveUiBusy}
-                      className="h-9 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 min-w-[11rem] disabled:opacity-50"
-                      aria-label="Document type"
-                    >
-                      <option value="appointment">Appointment</option>
-                      {showAcceptanceOption && (
-                        <option value="acceptance">Acceptance</option>
-                      )}
-                      <option value="license">License</option>
-                    </select>
+                    <div className="min-w-[11rem] w-[min(24rem,calc(100vw-8rem))]">
+                      <CustomSelect
+                        value={letterVariant}
+                        onChange={onLetterVariantChange}
+                        disabled={letterVariantDisabled || saveUiBusy}
+                        aria-label="Document type"
+                        options={
+                          documentOptions && documentOptions.length > 0
+                            ? documentOptions
+                            : [
+                                { value: "appointment", label: "Appointment" },
+                                ...(showAcceptanceOption
+                                  ? [{ value: "acceptance", label: "Acceptance" }]
+                                  : []),
+                                { value: "license", label: "License" },
+                              ]
+                        }
+                      />
+                    </div>
                   </label>
                 )}
                 {showDownloadPdf && (

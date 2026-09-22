@@ -29,6 +29,11 @@ import {
   getAuthUserId,
 } from "@/app/utils/ownerApplicationRpc";
 import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
+import {
+  appointmentTypeIdsMatchingRoster,
+  fetchApplicationCatalogTypes,
+  type ApplicationCatalogType,
+} from "@/app/utils/applicationCatalog";
 import { supabase } from "@/app/utils/supabase";
 import {
   filterApplicationDocumentOptionsByApplicantDetails,
@@ -79,7 +84,29 @@ function DocumentGeneratorContent() {
   const { projects, loading: projectsLoading } = useDashboardProjects();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const allApplicationOptions = useMemo(() => listApplicationDocumentOptions(), []);
+  const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const types = await fetchApplicationCatalogTypes();
+      if (cancelled) return;
+      setCatalogTypes(types);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const catalogAppointmentTitles = useMemo(
+    () => catalogTypes.filter((type) => type.requires_roster_match).map((type) => type.application_title),
+    [catalogTypes]
+  );
+
+  const allApplicationOptions = useMemo(
+    () => listApplicationDocumentOptions(catalogAppointmentTitles),
+    [catalogAppointmentTitles]
+  );
   const selectableProjects = useMemo(
     () => projects.filter((p) => !isDraftStatus(p.status)),
     [projects]
@@ -106,16 +133,24 @@ function DocumentGeneratorContent() {
     Record<string, string>
   >({});
 
-  const rosterApplicationOptions = useMemo(
-    () =>
-      selectedProjectId
-        ? filterApplicationDocumentOptionsByApplicantDetails(
-            allApplicationOptions,
-            applicantDetails
-          )
-        : [],
-    [allApplicationOptions, applicantDetails, selectedProjectId]
-  );
+  const rosterApplicationOptions = useMemo(() => {
+    if (!selectedProjectId) return [];
+    const allowedIds = appointmentTypeIdsMatchingRoster(catalogTypes, applicantDetails);
+    if (allowedIds.size > 0) {
+      const allowedTitles = new Set(
+        catalogTypes
+          .filter((type) => allowedIds.has(type.id))
+          .map((type) => type.application_title.trim().toLowerCase())
+      );
+      return allApplicationOptions.filter((opt) =>
+        allowedTitles.has(opt.applicationType.trim().toLowerCase())
+      );
+    }
+    return filterApplicationDocumentOptionsByApplicantDetails(
+      allApplicationOptions,
+      applicantDetails
+    );
+  }, [allApplicationOptions, applicantDetails, selectedProjectId, catalogTypes]);
 
   const existingTypeSet = useMemo(
     () => new Set(existingPermissionTypes.map((t) => t.trim().toLowerCase())),

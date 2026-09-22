@@ -1,20 +1,21 @@
 /**
- * Maps applicant types (Applicant Details form) to General department appointment-letter permission ids.
+ * Maps applicant types (Applicant Details form) to General department appointment-letter catalog ids.
  * Must match strings in `APPLICANT_TYPE_OPTIONS` in app/dashboard/applicant/page.tsx
- * and keys in permissionLibrary on create-application.
+ * and `application_types.id` in the catalog. Create Application roster filter prefers catalog
+ * `requires_roster_match` + `applicant_type`.
  */
 export const APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID: Record<string, string> = {
-  Architect: "Appointment_Letter_for_Architect",
-  "Licensed Surveyor": "Appointment_Letter_for_Licensed_Surveyor",
-  "Fire Consultant": "Appointment_Letter_for_Fire_Consultant",
-  "Landscape Consultant": "Appointment_Letter_for_Landscape_Consultant",
-  "Geotechnical Consultant": "Appointment_Letter_for_Geotechnical_Consultant",
-  "PMC / Project Manager": "Appointment_Letter_for_PMC_Project_Manager",
-  "MEP Consultant": "Appointment_Letter_for_MEP_Consultant",
-  Plumber: "Appointment_Letter_for_Plumber",
-  "Town Planner": "Appointment_Letter_for_Town_Planner",
-  "Structural Engineer": "Appointment_Letter_for_Structural_Engineer",
-  "Environmental Consultant": "Appointment_Letter_for_Environmental_Consultant",
+  Architect: "appointment_letter_for_architect",
+  "Licensed Surveyor": "appointment_letter_for_licensed_surveyor",
+  "Fire Consultant": "appointment_letter_for_fire_consultant",
+  "Landscape Consultant": "appointment_letter_for_landscape_consultant",
+  "Geotechnical Consultant": "appointment_letter_for_geotechnical_consultant",
+  "PMC / Project Manager": "appointment_letter_for_pmc_project_manager",
+  "MEP Consultant": "appointment_letter_for_mep_consultant",
+  Plumber: "appointment_letter_for_plumber",
+  "Town Planner": "appointment_letter_for_town_planner",
+  "Structural Engineer": "appointment_letter_for_structural_engineer",
+  "Environmental Consultant": "appointment_letter_for_environmental_consultant",
 };
 
 const NORMALIZED_APPOINTMENT_PERMISSION_ID: Record<string, string> = Object.fromEntries(
@@ -32,6 +33,18 @@ type ApplicantDetailsShape = {
 
 /** Human-readable `applications.permission_type` for General appointment letters. */
 export const APPOINTMENT_PERMISSION_ID_TO_TITLE: Record<string, string> = {
+  appointment_letter_for_architect: "Appointment Letter for Architect",
+  appointment_letter_for_licensed_surveyor: "Appointment Letter for Licensed Surveyor",
+  appointment_letter_for_fire_consultant: "Appointment Letter for Fire Consultant",
+  appointment_letter_for_landscape_consultant: "Appointment Letter for Landscape Consultant",
+  appointment_letter_for_geotechnical_consultant: "Appointment Letter for Geotechnical Consultant",
+  appointment_letter_for_pmc_project_manager: "Appointment Letter for PMC / Project Manager",
+  appointment_letter_for_mep_consultant: "Appointment Letter for MEP Consultant",
+  appointment_letter_for_plumber: "Appointment Letter for Plumber",
+  appointment_letter_for_town_planner: "Appointment Letter for Town Planner",
+  appointment_letter_for_structural_engineer: "Appointment Letter for Structural Engineer",
+  appointment_letter_for_environmental_consultant: "Appointment Letter for Environmental Consultant",
+  // Legacy Pascal ids still resolve titles for older client caches.
   Appointment_Letter_for_Architect: "Appointment Letter for Architect",
   Appointment_Letter_for_Licensed_Surveyor: "Appointment Letter for Licensed Surveyor",
   Appointment_Letter_for_Fire_Consultant: "Appointment Letter for Fire Consultant",
@@ -98,6 +111,24 @@ export const ACCEPTANCE_URL_KEY_MAP: Partial<Record<string, string>> = {
 /** All valid acceptance URL keys (for server-side validation). */
 export const VALID_ACCEPTANCE_URL_KEYS = new Set(Object.values(ACCEPTANCE_URL_KEY_MAP) as string[]);
 
+/**
+ * Maps applicant roster types to `projects.application_urls` / Storage appointment keys
+ * (must match TemplateType used by save-application-pdf).
+ */
+const APPLICANT_TYPE_TO_APPLICATION_URL_KEY: Record<string, string> = {
+  Architect: "Architect",
+  "Licensed Surveyor": "Licensed Surveyor",
+  "Fire Consultant": "Fire Safety Consultant",
+  "Landscape Consultant": "Landscape Consultant",
+  "Geotechnical Consultant": "Geotechnical Consultant",
+  "MEP Consultant": "M&E Consultant",
+  Plumber: "Plumber",
+  "Town Planner": "Town Planner",
+  "Structural Engineer": "Structural Engineer",
+  "Environmental Consultant": "Environmental Consultant",
+  "PMC / Project Manager": "PMC / Project Manager",
+};
+
 /** Keys in `projects.application_urls` cleared when an application is fully removed. */
 export function applicationUrlKeysForPermissionType(permissionType: string): string[] {
   const title = permissionType.trim();
@@ -106,9 +137,10 @@ export function applicationUrlKeysForPermissionType(permissionType: string): str
   for (const [type, permId] of Object.entries(APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID)) {
     const permTitle = APPOINTMENT_PERMISSION_ID_TO_TITLE[permId];
     if (permTitle && permissionTypeMatchesTitle(title, permTitle)) {
+      const urlKey = APPLICANT_TYPE_TO_APPLICATION_URL_KEY[type] ?? type;
       const acceptanceKey = ACCEPTANCE_URL_KEY_MAP[type];
-      if (acceptanceKey) return [type, acceptanceKey];
-      return [type];
+      if (acceptanceKey) return [urlKey, acceptanceKey];
+      return [urlKey];
     }
   }
 

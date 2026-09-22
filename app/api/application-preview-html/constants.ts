@@ -4,3 +4,4 @@
  * (usually `application_urls[templateType]`; Architect acceptance uses `Architect_acceptance`).
  */
 export const PROJECT_SAVED_PDF_QR_SENTINEL = "$project_Saved_Pdf_QR";
+export const CATALOG_SAVED_PDF_QR_SENTINEL = "{{SAVED_PDF_QR}}";
