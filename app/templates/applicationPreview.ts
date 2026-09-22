@@ -97,6 +97,12 @@ export type ApplicationPreviewSource = {
   architectHtmlVariant?: "appointment" | "acceptance";
   /** Catalog `application_documents.id` — picks HTML/placeholders when letter_variant is not unique. */
   catalogDocumentId?: string | null;
+  /**
+   * `projects.application_urls` key encoded in the saved-PDF QR.
+   * For multi-doc department permissions this is `catalogDocumentId`; for dual-letter
+   * consultants it is `templateType` or the acceptance key.
+   */
+  applicationUrlsKey?: string | null;
   /** When set, HTML preview embeds a QR for this URL (skips DB lookup). */
   savedPdfUrlForQr?: string | null;
   projectData?: {
@@ -2483,6 +2489,9 @@ export async function fetchApplicationPreviewHtmlRaw(
         : {}),
       ...(source?.catalogDocumentId?.trim()
         ? { catalogDocumentId: source.catalogDocumentId.trim() }
+        : {}),
+      ...(source?.applicationUrlsKey?.trim()
+        ? { applicationUrlsKey: source.applicationUrlsKey.trim() }
         : {}),
       ...(source?.savedPdfUrlForQr?.trim()
         ? { savedPdfUrlForQr: source.savedPdfUrlForQr.trim() }

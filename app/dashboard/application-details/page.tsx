@@ -62,6 +62,7 @@ import {
   readApplicationUrlFromUrls,
   resolveSavedPdfUrlForQr,
 } from "@/app/utils/projectSavedApplicationPdfUrl";
+import { resolveApplicationUrlsKey } from "@/app/utils/applicationPdfUrlKeys";
 import { resolveOwnerEntityTypeForDesignation } from "@/app/utils/applicantRecordFields";
 import { templateTypeLicenseUrlKeys } from "@/app/utils/consultantTemplateTokens";
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
@@ -1324,6 +1325,23 @@ const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
 
 const LICENSE_PREVIEW_VALUE = "license";
 
+/** Storage / QR key: catalog document id for multi-doc types, else templateType / acceptance. */
+function applicationUrlsKeyFor(
+  templateType: TemplateType,
+  opts?: {
+    letterVariant?: "appointment" | "acceptance" | null;
+    catalogDocumentId?: string | null;
+  }
+): string {
+  return resolveApplicationUrlsKey({
+    templateType,
+    letterVariant: opts?.letterVariant,
+    catalogDocumentId: opts?.catalogDocumentId,
+    isDualLetter: isDualLetterType(templateType),
+    acceptanceKeyByTemplateType: ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE,
+  });
+}
+
 /** Narrows a raw `<select>` value to a known fallback, otherwise keeps catalog document ids. */
 function normalizePreviewDocSelection(value: string): string {
   return value.trim();
@@ -1385,14 +1403,12 @@ async function fetchProjectApplicationUrls(
 function getStoredApplicationPdfUrl(
   raw: unknown,
   templateType: TemplateType,
-  letterVariant: "appointment" | "acceptance" = "appointment"
+  letterVariant: "appointment" | "acceptance" = "appointment",
+  catalogDocumentId?: string | null
 ): string | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const key =
-    letterVariant === "acceptance"
-      ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? templateType)
-      : templateType;
+  const key = applicationUrlsKeyFor(templateType, { letterVariant, catalogDocumentId });
   const v = o[key];
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 }
@@ -1416,9 +1432,18 @@ function resolveStoredPreviewPdfUrl(
   urlsRaw: unknown,
   templateType: TemplateType,
   letterVariant: "appointment" | "acceptance",
-  opts?: { ownerSignedAt?: string | null; architectSignedAt?: string | null }
+  opts?: {
+    ownerSignedAt?: string | null;
+    architectSignedAt?: string | null;
+    catalogDocumentId?: string | null;
+  }
 ): string | null {
-  const storedUrl = getStoredApplicationPdfUrl(urlsRaw, templateType, letterVariant);
+  const storedUrl = getStoredApplicationPdfUrl(
+    urlsRaw,
+    templateType,
+    letterVariant,
+    opts?.catalogDocumentId
+  );
   if (!storedUrl) return null;
   return storedPdfUrlWithCacheBuster(storedUrl, opts);
 }
@@ -1440,6 +1465,7 @@ async function buildApplicationSavePdfHtml(
   const savedPdfUrlForQr = resolveSavedPdfUrlForQr(projectId, applicationUrlsKey, urlsRaw);
   let html = await generateApplicationPreviewHtml(built.fields, built.templateType, {
     ...built.previewSource,
+    applicationUrlsKey,
     savedPdfUrlForQr,
   });
   if (signatures?.owner) {
@@ -2148,15 +2174,20 @@ export default function ApplicationDetailsPage() {
     if (!projectId?.trim()) {
       throw new Error("Missing project.");
     }
-    const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
-      projectId,
-      ctx.templateType,
-      urlsRaw
-    );
+    const urlsKey = applicationUrlsKeyFor(ctx.templateType, {
+      letterVariant: ctx.previewSource.letterVariant ?? "appointment",
+      catalogDocumentId:
+        ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+    });
+    const savedPdfUrlForQr = resolveSavedPdfUrlForQr(projectId, urlsKey, urlsRaw);
     const html = await generateApplicationPreviewHtml(
       ctx.fields,
       ctx.templateType,
-      { ...ctx.previewSource, savedPdfUrlForQr },
+      {
+        ...ctx.previewSource,
+        applicationUrlsKey: urlsKey,
+        savedPdfUrlForQr,
+      },
       accessToken
     );
     return generateApplicationPreviewPdfFromHtml(html, ctx.templateType);
@@ -2632,7 +2663,12 @@ export default function ApplicationDetailsPage() {
           forceFresh: true,
         });
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
-        const savedPdfUrl = getStoredApplicationPdfUrl(raw, templateType, resolvedVariant);
+        const savedPdfUrl = getStoredApplicationPdfUrl(
+          raw,
+          templateType,
+          resolvedVariant,
+          resolvedCatalogDocumentId
+        );
 
         if (savedPdfUrl && previewStoredPdf) {
           const pdfUrl = storedPdfUrlWithCacheBuster(savedPdfUrl, {
@@ -2691,21 +2727,25 @@ export default function ApplicationDetailsPage() {
       const resolvedPreviewVariant = isDualLetterType(templateType)
         ? variant
         : "appointment";
-      const urlsRawForQr =
-        workflowStageForPreview !== "draft" && projectId
-          ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
-              forceFresh: true,
-            })
-          : projectForPreview.application_urls;
-      const qrKey =
-        resolvedPreviewVariant === "acceptance"
-          ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[templateType] ?? `${templateType}_acceptance`)
-          : templateType;
-      const savedPdfUrlForQr = projectId
-        ? resolveSavedPdfUrlForQr(projectId, qrKey, urlsRawForQr)
+      const urlsRawForQr = projectId
+        ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
+            forceFresh: workflowStageForPreview !== "draft",
+          })
         : undefined;
+      const qrKey = applicationUrlsKeyFor(templateType, {
+        letterVariant: resolvedPreviewVariant,
+        catalogDocumentId: resolvedCatalogDocumentId,
+      });
+      // Preview QR only when this document's PDF is already in Storage.
+      // Predicted URLs 404 in draft — save flow still embeds the predicted URL in the PDF.
+      const savedPdfUrlForQr = readApplicationUrlFromUrls(urlsRawForQr, qrKey);
       const storedPdfUrl = urlsRawForQr
-        ? getStoredApplicationPdfUrl(urlsRawForQr, templateType, resolvedPreviewVariant)
+        ? getStoredApplicationPdfUrl(
+            urlsRawForQr,
+            templateType,
+            resolvedPreviewVariant,
+            resolvedCatalogDocumentId
+          )
         : null;
       if (storedPdfUrl) {
         const resolvedStoredUrl = storedPdfUrlWithCacheBuster(storedPdfUrl, {
@@ -2734,9 +2774,13 @@ export default function ApplicationDetailsPage() {
       let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
-        savedPdfUrlForQr
-          ? { ...previewSource, savedPdfUrlForQr }
-          : previewSource,
+        {
+          ...previewSource,
+          // Always pass the document key so Concession never inherits Architect's QR.
+          // Omit savedPdfUrlForQr until this document's PDF exists (draft → no QR).
+          applicationUrlsKey: qrKey,
+          ...(savedPdfUrlForQr ? { savedPdfUrlForQr } : {}),
+        },
         previewAuthToken
       );
 
@@ -3388,9 +3432,14 @@ export default function ApplicationDetailsPage() {
               .eq("id", projectId)
               .maybeSingle();
             const raw = urlsRow?.application_urls;
+            const urlsKey = applicationUrlsKeyFor(ctx.templateType, {
+              letterVariant: "appointment",
+              catalogDocumentId:
+                ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+            });
             const entry =
               raw && typeof raw === "object" && !Array.isArray(raw)
-                ? (raw as Record<string, unknown>)[ctx.templateType]
+                ? (raw as Record<string, unknown>)[urlsKey]
                 : undefined;
             const fallback =
               typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
@@ -3412,15 +3461,24 @@ export default function ApplicationDetailsPage() {
             .maybeSingle();
           urlsRawSign = urlsRow?.application_urls;
         }
+        const signUrlsKey = applicationUrlsKeyFor(ctx.templateType, {
+          letterVariant: "appointment",
+          catalogDocumentId:
+            ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+        });
         const savedPdfUrlForQr = resolveSavedPdfUrlForQr(
           projectId,
-          ctx.templateType,
+          signUrlsKey,
           urlsRawSign
         );
         let signHtml = await generateApplicationPreviewHtml(
           ctx.fields,
           ctx.templateType,
-          { ...ctx.previewSource, savedPdfUrlForQr },
+          {
+            ...ctx.previewSource,
+            applicationUrlsKey: signUrlsKey,
+            savedPdfUrlForQr,
+          },
           authToken
         );
         signHtml = injectMockOwnerSignatureIntoPreviewHtml(
@@ -3437,7 +3495,7 @@ export default function ApplicationDetailsPage() {
           authToken,
           authUserId: authUser.id,
           appointmentBlob: signedBlob,
-          applicationUrlsKey: ctx.templateType,
+          applicationUrlsKey: signUrlsKey,
         });
         publicUrl = uploaded.publicUrl ?? null;
         setSidebarPdfStatus(null);
@@ -3497,9 +3555,14 @@ export default function ApplicationDetailsPage() {
           .eq("id", projectId)
           .maybeSingle();
         const raw = urlsRow?.application_urls;
+        const urlsKey = applicationUrlsKeyFor(ctx.templateType, {
+          letterVariant: "appointment",
+          catalogDocumentId:
+            ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+        });
         const entry =
           raw && typeof raw === "object" && !Array.isArray(raw)
-            ? (raw as Record<string, unknown>)[ctx.templateType]
+            ? (raw as Record<string, unknown>)[urlsKey]
             : undefined;
         const fallback =
           typeof entry === "string" && entry.trim().length > 0 ? entry.trim() : null;
@@ -3802,9 +3865,12 @@ export default function ApplicationDetailsPage() {
       const primaryLetterVariant: "appointment" | "acceptance" = signingAcceptance
         ? "acceptance"
         : "appointment";
-      const key = signingAcceptance
-        ? (ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`)
-        : ctx.templateType;
+      const key = applicationUrlsKeyFor(ctx.templateType, {
+        letterVariant: primaryLetterVariant,
+        catalogDocumentId: isDual
+          ? undefined
+          : (ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId),
+      });
 
       const { blob: unsignedBlob, builtFresh: primaryBuiltFresh } =
         await loadUnsignedLetterPdfForSigning({
@@ -3998,7 +4064,14 @@ export default function ApplicationDetailsPage() {
           : "appointment";
       const previewStoredUrl =
         mergedUrls != null
-          ? getStoredApplicationPdfUrl(mergedUrls, ctx.templateType, previewVariant)
+          ? getStoredApplicationPdfUrl(
+              mergedUrls,
+              ctx.templateType,
+              previewVariant,
+              isDual
+                ? undefined
+                : (ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId)
+            )
           : uploaded.publicUrl;
       if (previewStoredUrl) {
         const pdfUrl = storedPdfUrlWithCacheBuster(previewStoredUrl, {
@@ -4359,8 +4432,13 @@ export default function ApplicationDetailsPage() {
         })();
       } else {
         const urlsRaw = await fetchApplicationUrls();
+        const saveUrlsKey = applicationUrlsKeyFor(ctx.templateType, {
+          letterVariant: "appointment",
+          catalogDocumentId:
+            ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+        });
         const blob = await buildApplicationPreviewPdfBlob(urlsRaw, authToken);
-        await uploadPdfBlob(blob, ctx.templateType);
+        await uploadPdfBlob(blob, saveUrlsKey);
         setPdfSavedForCurrentPreview(true);
 
         void (async () => {
@@ -4369,7 +4447,12 @@ export default function ApplicationDetailsPage() {
             urlsAfterSave,
             ctx.templateType,
             "appointment",
-            { ownerSignedAt, architectSignedAt }
+            {
+              ownerSignedAt,
+              architectSignedAt,
+              catalogDocumentId:
+                ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
+            }
           );
           if (!pdfUrl) return;
           setStoredSigningPdfUrl(pdfUrl);

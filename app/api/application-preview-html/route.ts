@@ -463,12 +463,15 @@ async function injectSavedPdfQrHtml(
     typeof opts.savedPdfUrlForQr === "string" && opts.savedPdfUrlForQr.trim()
       ? opts.savedPdfUrlForQr.trim()
       : undefined;
+  // Only look up Storage when the client names an explicit urls key.
+  // Falling back to templateType wrongly injects the Architect appointment QR
+  // into Concession/IOD drafts (they map to templateType "Architect").
   const urlsKey =
     typeof opts.applicationUrlsKey === "string" && opts.applicationUrlsKey.trim()
       ? opts.applicationUrlsKey.trim()
-      : opts.templateType;
+      : undefined;
 
-  if (!pdfUrl && opts.projectId?.trim() && opts.authorizationToken) {
+  if (!pdfUrl && urlsKey && opts.projectId?.trim() && opts.authorizationToken) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: { Authorization: `Bearer ${opts.authorizationToken}` },
@@ -478,12 +481,19 @@ async function injectSavedPdfQrHtml(
     pdfUrl = await loadSavedPdfUrlForQr(supabase, opts.projectId.trim(), urlsKey);
   }
 
-  if (!pdfUrl && opts.projectId?.trim()) {
-    pdfUrl = predictedSavedPdfPublicUrl(opts.projectId, urlsKey);
-  }
+  // Do not predict a Storage URL here — that shows a 404 QR in draft.
+  // Save/preview clients pass `savedPdfUrlForQr` when the PDF exists or is being saved.
+  const stripExistingQrBlocks = (s: string) =>
+    s
+      .replace(/<div[^>]*\bid\s*=\s*["']app-saved-pdf-qr["'][^>]*>\s*<\/div>/gi, "")
+      .replace(
+        /<div[^>]*class\s*=\s*["'][^"']*application-saved-pdf-qr-fallback[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+        ""
+      );
 
   if (!pdfUrl) {
-    return stripSentinel(html);
+    // No saved PDF yet (e.g. draft) — strip sentinel and any existing QR chrome.
+    return stripExistingQrBlocks(stripSentinel(html));
   }
 
   let qrDataUrl: string;
@@ -494,7 +504,7 @@ async function injectSavedPdfQrHtml(
       errorCorrectionLevel: "M",
     });
   } catch {
-    return stripSentinel(html);
+    return stripExistingQrBlocks(stripSentinel(html));
   }
 
   /* Word exports often use `img { width:100% !important }`. Use a fixed-size div +
@@ -504,15 +514,6 @@ async function injectSavedPdfQrHtml(
   const qrRightColumn = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:0!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
 
   const hadSentinel = qrSentinels.some((token) => html.includes(token));
-
-  /** Match layout on HTML without sentinel / QR — avoids EOF sentinel forcing last page. */
-  const stripExistingQrBlocks = (s: string) =>
-    s
-      .replace(/<div[^>]*\bid\s*=\s*["']app-saved-pdf-qr["'][^>]*>\s*<\/div>/gi, "")
-      .replace(
-        /<div[^>]*class\s*=\s*["'][^"']*application-saved-pdf-qr-fallback[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-        ""
-      );
 
   const baseForLayout = stripExistingQrBlocks(
     hadSentinel ? stripSentinel(html) : html
@@ -675,6 +676,12 @@ export async function POST(request: NextRequest) {
       architectHtmlVariant?: "appointment" | "acceptance";
       /** Catalog `application_documents.id` when the type has multiple HTML documents. */
       catalogDocumentId?: string;
+      /**
+       * `projects.application_urls` key for the saved-PDF QR.
+       * Prefer this over deriving from templateType so multi-doc types (Concession, etc.)
+       * do not share the Architect appointment key.
+       */
+      applicationUrlsKey?: string;
       /** Pre-known PDF URL for QR (e.g. deterministic Storage URL before first upload). */
       savedPdfUrlForQr?: string;
     };
@@ -816,12 +823,18 @@ export async function POST(request: NextRequest) {
       letterVariant === "acceptance"
         ? ACCEPTANCE_APPLICATION_URL_KEY_MAP[body.templateType]
         : undefined;
+    const clientUrlsKey =
+      typeof body.applicationUrlsKey === "string" && body.applicationUrlsKey.trim()
+        ? body.applicationUrlsKey.trim()
+        : undefined;
 
     finalHtml = await injectSavedPdfQrHtml(finalHtml, {
       projectId: body.projectId,
       templateType: body.templateType,
       authorizationToken: token,
-      applicationUrlsKey: acceptanceUrlsKey,
+      // Client should pass catalog document id for multi-doc types; do not infer from
+      // catalogDocumentId alone (dual-letter consultant catalog docs must keep templateType keys).
+      applicationUrlsKey: clientUrlsKey ?? acceptanceUrlsKey,
       savedPdfUrlForQr: body.savedPdfUrlForQr,
       enabled: showQrcode,
       letterLayout: catalogDocument ? catalogIsLetter : true,

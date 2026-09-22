@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { applicationUrlKeysForPermissionType } from "@/app/utils/applicantAppointmentPermissions";
+import {
+  fetchApplicationCatalogTypeByTitle,
+  fetchDocumentsForApplicationType,
+} from "@/app/utils/applicationCatalog";
+import { applicationUrlsKeyToStorageSlug } from "@/app/utils/projectSavedApplicationPdfUrl";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
@@ -26,8 +31,33 @@ function publicUrlToStoragePath(publicUrl: string): string | null {
 }
 
 function storagePathFromUrlKey(projectId: string, urlKey: string): string {
-  const slug = urlKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-  return `${projectId.trim()}/saved-applications/${slug}.pdf`;
+  return `${projectId.trim()}/saved-applications/${applicationUrlsKeyToStorageSlug(urlKey)}.pdf`;
+}
+
+/**
+ * All `application_urls` / Storage keys for this permission type:
+ * consultant appointment/acceptance keys + catalog document ids (Concession, IOD, …).
+ */
+async function resolveApplicationUrlKeysForDelete(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any },
+  permissionType: string
+): Promise<string[]> {
+  const keys = new Set<string>();
+
+  for (const key of applicationUrlKeysForPermissionType(permissionType)) {
+    if (key.trim()) keys.add(key.trim());
+  }
+
+  const catalogType = await fetchApplicationCatalogTypeByTitle(permissionType, admin);
+  if (catalogType?.id) {
+    const docs = await fetchDocumentsForApplicationType(catalogType.id, admin);
+    for (const doc of docs) {
+      if (doc.id.trim()) keys.add(doc.id.trim());
+    }
+  }
+
+  return [...keys];
 }
 
 /**
@@ -141,6 +171,12 @@ export async function DELETE(
       );
     }
 
+    // Resolve Storage keys before deleting the row (catalog lookup is independent of the row).
+    const urlKeys =
+      (siblingCount ?? 0) === 0 && permissionType
+        ? await resolveApplicationUrlKeysForDelete(admin, permissionType)
+        : [];
+
     const { error: delAppErr } = await admin.from("applications").delete().eq("id", applicationId.trim());
 
     if (delAppErr) {
@@ -150,10 +186,10 @@ export async function DELETE(
       );
     }
 
-    const cleanupArtifacts = (siblingCount ?? 0) === 0;
+    const cleanupArtifacts = (siblingCount ?? 0) === 0 && urlKeys.length > 0;
 
-    if (cleanupArtifacts && permissionType) {
-      const urlKeys = applicationUrlKeysForPermissionType(permissionType);
+    if (cleanupArtifacts) {
+      const urlKeySet = new Set(urlKeys);
       const storagePaths = new Set<string>();
 
       const prevUrls = projectRow.application_urls;
@@ -182,14 +218,13 @@ export async function DELETE(
         }
       }
 
+      // Drop matching keys from application_urls.
       const nextUrls: Record<string, string> =
         prevUrls && typeof prevUrls === "object" && !Array.isArray(prevUrls)
           ? Object.fromEntries(
               Object.entries(prevUrls as Record<string, unknown>).filter(
                 ([k, v]) =>
-                  typeof v === "string" &&
-                  v.trim().length > 0 &&
-                  !urlKeys.includes(k)
+                  typeof v === "string" && v.trim().length > 0 && !urlKeySet.has(k)
               ) as [string, string][]
             )
           : {};
@@ -199,8 +234,7 @@ export async function DELETE(
         .update({
           application_urls: nextUrls,
         })
-        .eq("id", projectId)
-        .eq("user_id", user.id);
+        .eq("id", projectId);
 
       if (projUpdErr) {
         return NextResponse.json(
@@ -211,7 +245,6 @@ export async function DELETE(
           { status: 500 }
         );
       }
-
     }
 
     return NextResponse.json({
@@ -219,6 +252,7 @@ export async function DELETE(
       projectId,
       permissionType,
       cleanedArtifacts: cleanupArtifacts,
+      removedUrlKeys: cleanupArtifacts ? urlKeys : [],
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Delete failed.";

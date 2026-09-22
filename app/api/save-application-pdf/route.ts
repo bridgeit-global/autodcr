@@ -101,7 +101,10 @@ export async function POST(request: NextRequest) {
 
     if (hasAppointmentPdf && !isValidApplicationUrlsKey(applicationUrlsKey, templateType)) {
       return NextResponse.json(
-        { error: "applicationUrlsKey must match templateType or be a valid acceptance key." },
+        {
+          error:
+            "applicationUrlsKey must match templateType, a valid acceptance key, or a catalog document id.",
+        },
         { status: 400 }
       );
     }

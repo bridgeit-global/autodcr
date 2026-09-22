@@ -111,6 +111,24 @@ export const ACCEPTANCE_URL_KEY_MAP: Partial<Record<string, string>> = {
 /** All valid acceptance URL keys (for server-side validation). */
 export const VALID_ACCEPTANCE_URL_KEYS = new Set(Object.values(ACCEPTANCE_URL_KEY_MAP) as string[]);
 
+/**
+ * Maps applicant roster types to `projects.application_urls` / Storage appointment keys
+ * (must match TemplateType used by save-application-pdf).
+ */
+const APPLICANT_TYPE_TO_APPLICATION_URL_KEY: Record<string, string> = {
+  Architect: "Architect",
+  "Licensed Surveyor": "Licensed Surveyor",
+  "Fire Consultant": "Fire Safety Consultant",
+  "Landscape Consultant": "Landscape Consultant",
+  "Geotechnical Consultant": "Geotechnical Consultant",
+  "MEP Consultant": "M&E Consultant",
+  Plumber: "Plumber",
+  "Town Planner": "Town Planner",
+  "Structural Engineer": "Structural Engineer",
+  "Environmental Consultant": "Environmental Consultant",
+  "PMC / Project Manager": "PMC / Project Manager",
+};
+
 /** Keys in `projects.application_urls` cleared when an application is fully removed. */
 export function applicationUrlKeysForPermissionType(permissionType: string): string[] {
   const title = permissionType.trim();
@@ -119,9 +137,10 @@ export function applicationUrlKeysForPermissionType(permissionType: string): str
   for (const [type, permId] of Object.entries(APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID)) {
     const permTitle = APPOINTMENT_PERMISSION_ID_TO_TITLE[permId];
     if (permTitle && permissionTypeMatchesTitle(title, permTitle)) {
+      const urlKey = APPLICANT_TYPE_TO_APPLICATION_URL_KEY[type] ?? type;
       const acceptanceKey = ACCEPTANCE_URL_KEY_MAP[type];
-      if (acceptanceKey) return [type, acceptanceKey];
-      return [type];
+      if (acceptanceKey) return [urlKey, acceptanceKey];
+      return [urlKey];
     }
   }
 
