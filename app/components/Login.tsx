@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Eye, EyeOff, ChevronLeft, ChevronRight } from "lucide-react";
 import ForgotPasswordModal from "./ForgotPasswordModal";
 import ForgetUsernameModal from "./ForgetUsernameModal";
@@ -29,7 +29,6 @@ const fieldClassName =
   "w-full rounded-lg border border-gray-200 px-3 py-2 text-base text-gray-900 placeholder:text-gray-400 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 sm:py-2.5 sm:text-sm";
 
 const Login = ({ slides }: HeroSectionProps) => {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const returnUrl = sanitizeReturnUrl(searchParams.get("returnUrl"));
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -44,15 +43,9 @@ const Login = ({ slides }: HeroSectionProps) => {
     register,
     handleSubmit,
     formState: { errors },
-    reset,
   } = useForm<LoginForm>();
 
   const [loginError, setLoginError] = useState<string>("");
-
-  useEffect(() => {
-    router.prefetch("/userdashboard");
-    router.prefetch(returnUrl);
-  }, [router, returnUrl]);
 
   const regenerateCaptcha = () => {
     setCaptcha(generateCaptchaValue());
@@ -128,8 +121,9 @@ const Login = ({ slides }: HeroSectionProps) => {
         localStorage.setItem("userMetadata", JSON.stringify(metadataToStore));
       }
 
-      router.push(returnUrl);
-      reset();
+      // Full navigation so middleware re-reads auth cookies (soft push can stay logged out).
+      window.location.assign(returnUrl);
+      return;
     } catch {
       setLoginError("An error occurred during login. Please try again.");
       regenerateCaptcha();

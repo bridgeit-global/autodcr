@@ -57,6 +57,7 @@ import {
   fetchApplicationForSigning,
   getAuthUserId,
   updateApplicationForSigning,
+  type OwnerApplicationRow,
 } from "@/app/utils/ownerApplicationRpc";
 import {
   readApplicationUrlFromUrls,
@@ -2076,6 +2077,10 @@ export default function ApplicationDetailsPage() {
     useState<ApplicationWorkflowStage>("draft");
   const [ownerSignedAt, setOwnerSignedAt] = useState<string | null>(null);
   const [architectSignedAt, setArchitectSignedAt] = useState<string | null>(null);
+  /** Cached row from the single mount fetch — reused for access check (avoid duplicate RPC). */
+  const [signingApplicationRow, setSigningApplicationRow] =
+    useState<OwnerApplicationRow | null>(null);
+  const [signingApplicationLoaded, setSigningApplicationLoaded] = useState(false);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [applicationAccessState, setApplicationAccessState] = useState<
     "loading" | "granted" | "denied"
@@ -2232,19 +2237,34 @@ export default function ApplicationDetailsPage() {
   }, [isReadOnlyMode, projectId]);
 
   useEffect(() => {
-    if (!isReadOnlyMode || !applicationId) return;
+    if (!isReadOnlyMode || !applicationId) {
+      setSigningApplicationRow(null);
+      setSigningApplicationLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    setSigningApplicationLoaded(false);
+    setSigningApplicationRow(null);
     const loadApplication = async () => {
       const { data: { user } } = await supabase.auth.getUser();
+      if (cancelled) return;
       if (!user?.id) {
         console.error("Failed to load application: not authenticated");
+        setSigningApplicationRow(null);
+        setSigningApplicationLoaded(true);
         return;
       }
 
       const { data, error } = await fetchApplicationForSigning(applicationId);
+      if (cancelled) return;
       if (error || !data) {
         console.error("Failed to load application for preview mapping:", error);
+        setSigningApplicationRow(null);
+        setSigningApplicationLoaded(true);
         return;
       }
+      setSigningApplicationRow(data);
+      setSigningApplicationLoaded(true);
       setApplicationCreatedAt(data.created_at ?? null);
       setApplicationWorkflowStage(normalizeApplicationWorkflowStage(data.workflow_stage));
       setOwnerSignedAt(
@@ -2259,6 +2279,9 @@ export default function ApplicationDetailsPage() {
       );
     };
     void loadApplication();
+    return () => {
+      cancelled = true;
+    };
   }, [isReadOnlyMode, applicationId]);
 
   useEffect(() => {
@@ -2266,7 +2289,7 @@ export default function ApplicationDetailsPage() {
       setApplicationAccessState("granted");
       return;
     }
-    if (!projectData) return;
+    if (!projectData || !signingApplicationLoaded) return;
 
     let cancelled = false;
     const verifyAccess = async () => {
@@ -2279,11 +2302,15 @@ export default function ApplicationDetailsPage() {
         return;
       }
 
-      const { data, error } = await fetchApplicationForSigning(applicationId);
-      if (cancelled) return;
-      if (error || !data) {
-        setApplicationAccessState("denied");
-        return;
+      let data = signingApplicationRow;
+      if (!data) {
+        const fetched = await fetchApplicationForSigning(applicationId);
+        if (cancelled) return;
+        if (fetched.error || !fetched.data) {
+          setApplicationAccessState("denied");
+          return;
+        }
+        data = fetched.data;
       }
 
       const applicants = projectData?.applicant_details?.applicants ?? [];
@@ -2307,6 +2334,8 @@ export default function ApplicationDetailsPage() {
     projectId,
     projectData,
     selectedApplication,
+    signingApplicationRow,
+    signingApplicationLoaded,
   ]);
 
   const handleAccessDeniedLogout = async () => {
@@ -2659,8 +2688,9 @@ export default function ApplicationDetailsPage() {
       // #endregion
 
       if (useStoredPdfPreview && projectId) {
+        // Prefer project seed / cached urls; signature timestamps already bust PDF cache.
         const raw = await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
-          forceFresh: true,
+          forceFresh: false,
         });
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
         const savedPdfUrl = getStoredApplicationPdfUrl(
@@ -2727,9 +2757,14 @@ export default function ApplicationDetailsPage() {
       const resolvedPreviewVariant = isDualLetterType(templateType)
         ? variant
         : "appointment";
+      const hasSignatureTimestamp = Boolean(
+        ownerSignedAt?.trim() || architectSignedAt?.trim()
+      );
       const urlsRawForQr = projectId
         ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
-            forceFresh: workflowStageForPreview !== "draft",
+            // Only force-refresh when a signature may have rewritten Storage URLs.
+            forceFresh:
+              workflowStageForPreview !== "draft" && hasSignatureTimestamp,
           })
         : undefined;
       const qrKey = applicationUrlsKeyFor(templateType, {
@@ -2962,7 +2997,7 @@ export default function ApplicationDetailsPage() {
   };
 
   useEffect(() => {
-    if (!isReadOnlyMode || !projectId) return;
+    if (!isReadOnlyMode || !projectId || !projectData) return;
     let cancelled = false;
     setDetailsFieldsLoading(true);
     setDetailsFieldsError(null);
