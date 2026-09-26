@@ -6,7 +6,12 @@ import {
   type SigningProjectContext,
 } from "@/app/utils/applicationSigning";
 import { isValidApplicationUrlsKey } from "@/app/utils/applicationPdfUrlKeys";
-import { applicationUrlsKeyToStorageSlug } from "@/app/utils/projectSavedApplicationPdfUrl";
+import {
+  formatSavedApplicationTimestamp,
+  isSavedApplicationTimestamp,
+  savedApplicationPdfStoragePathForUrlKey,
+  storagePathFromPublicUrl,
+} from "@/app/utils/projectSavedApplicationPdfUrl";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
@@ -176,19 +181,46 @@ export async function POST(request: NextRequest) {
           ) as Record<string, string>
         : {};
 
-    type UploadTarget = { blob: Blob; urlsKey: string };
+    const readSavedAt = (value: FormDataEntryValue | null): string | null => {
+      if (typeof value !== "string") return null;
+      const stamp = value.trim();
+      return isSavedApplicationTimestamp(stamp) ? stamp : null;
+    };
+
+    type UploadTarget = { blob: Blob; urlsKey: string; savedAt: string | null };
     const targets: UploadTarget[] = [];
     if (hasAppointmentPdf && fileField instanceof Blob) {
-      targets.push({ blob: fileField, urlsKey: applicationUrlsKey });
+      targets.push({
+        blob: fileField,
+        urlsKey: applicationUrlsKey,
+        savedAt: readSavedAt(formData.get("savedAt")),
+      });
     }
     if (hasAcceptancePdf && fileAcceptance instanceof Blob) {
-      targets.push({ blob: fileAcceptance, urlsKey: applicationUrlsKeyAcceptance });
+      targets.push({
+        blob: fileAcceptance,
+        urlsKey: applicationUrlsKeyAcceptance,
+        savedAt: readSavedAt(formData.get("savedAt_acceptance")),
+      });
     }
 
+    const replacedPaths: string[] = [];
     const urlEntries = await Promise.all(
-      targets.map(async ({ blob, urlsKey }) => {
-        const storageSlug = applicationUrlsKeyToStorageSlug(urlsKey);
-        const storagePath = `${projectId}/saved-applications/${storageSlug}.pdf`;
+      targets.map(async ({ blob, urlsKey, savedAt }) => {
+        const existingUrl = prev[urlsKey];
+        const existingPath = existingUrl ? storagePathFromPublicUrl(existingUrl) : null;
+        const stamp = savedAt ?? (existingPath ? null : formatSavedApplicationTimestamp());
+        const storagePath = stamp
+          ? await savedApplicationPdfStoragePathForUrlKey({
+              projectId,
+              urlsKey,
+              savedAt: stamp,
+              client: admin,
+            })
+          : existingPath;
+        if (!storagePath) {
+          throw new Error(`Could not resolve storage path for ${urlsKey}.`);
+        }
         const buffer = Buffer.from(await blob.arrayBuffer());
         const { error: upErr } = await admin.storage
           .from("project-library")
@@ -203,6 +235,9 @@ export async function POST(request: NextRequest) {
         const publicUrl = pub.publicUrl?.trim();
         if (!publicUrl) {
           throw new Error(`Could not resolve public URL for ${urlsKey}.`);
+        }
+        if (existingPath && existingPath !== storagePath) {
+          replacedPaths.push(existingPath);
         }
         return [urlsKey, publicUrl] as const;
       })
@@ -220,6 +255,15 @@ export async function POST(request: NextRequest) {
         { error: "Failed to update project.", details: updErr.message },
         { status: 500 }
       );
+    }
+
+    if (replacedPaths.length > 0) {
+      const { error: removeErr } = await admin.storage
+        .from("project-library")
+        .remove(replacedPaths);
+      if (removeErr) {
+        console.error("Could not remove previous saved application PDF:", removeErr.message);
+      }
     }
 
     const primaryKey = hasAppointmentPdf

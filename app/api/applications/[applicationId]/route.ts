@@ -5,7 +5,12 @@ import {
   fetchApplicationCatalogTypeByTitle,
   fetchDocumentsForApplicationType,
 } from "@/app/utils/applicationCatalog";
-import { applicationUrlsKeyToStorageSlug } from "@/app/utils/projectSavedApplicationPdfUrl";
+import {
+  legacySavedApplicationPdfStoragePath,
+  resolveSavedApplicationStorageLocation,
+  savedApplicationCategoryFolder,
+  storagePathFromPublicUrl,
+} from "@/app/utils/projectSavedApplicationPdfUrl";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
@@ -16,22 +21,26 @@ export const dynamic = "force-dynamic";
 
 const STORAGE_BUCKET = "project-library";
 
-function publicUrlToStoragePath(publicUrl: string): string | null {
-  const marker = `/object/public/${STORAGE_BUCKET}/`;
-  const altMarker = `/${STORAGE_BUCKET}/`;
-  let idx = publicUrl.indexOf(marker);
-  if (idx >= 0) {
-    return decodeURIComponent(publicUrl.slice(idx + marker.length).split("?")[0] ?? "");
+async function storagePathsForUrlKey(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: { from: (table: string) => any; storage: { from: (bucket: string) => any } },
+  projectId: string,
+  urlKey: string
+): Promise<string[]> {
+  const paths = [legacySavedApplicationPdfStoragePath(projectId, urlKey)];
+  const location = await resolveSavedApplicationStorageLocation(urlKey, admin);
+  if (!location) return paths;
+  const folder = savedApplicationCategoryFolder({ projectId, ...location });
+  const { data: files, error } = await admin.storage.from(STORAGE_BUCKET).list(folder, {
+    limit: 1000,
+  });
+  if (error || !Array.isArray(files)) return paths;
+  for (const file of files) {
+    if (typeof file?.name === "string" && file.name.trim()) {
+      paths.push(`${folder}/${file.name}`);
+    }
   }
-  idx = publicUrl.indexOf(altMarker);
-  if (idx >= 0) {
-    return decodeURIComponent(publicUrl.slice(idx + altMarker.length).split("?")[0] ?? "");
-  }
-  return null;
-}
-
-function storagePathFromUrlKey(projectId: string, urlKey: string): string {
-  return `${projectId.trim()}/saved-applications/${applicationUrlsKeyToStorageSlug(urlKey)}.pdf`;
+  return paths;
 }
 
 /**
@@ -199,15 +208,16 @@ export async function DELETE(
         for (const key of urlKeys) {
           const v = urlRecord[key];
           if (typeof v === "string" && v.trim()) {
-            const fromUrl = publicUrlToStoragePath(v.trim());
+            const fromUrl = storagePathFromPublicUrl(v.trim());
             if (fromUrl) storagePaths.add(fromUrl);
           }
-          storagePaths.add(storagePathFromUrlKey(projectId, key));
         }
-      } else {
-        for (const key of urlKeys) {
-          storagePaths.add(storagePathFromUrlKey(projectId, key));
-        }
+      }
+      const listed = await Promise.all(
+        urlKeys.map((key) => storagePathsForUrlKey(admin, projectId, key))
+      );
+      for (const group of listed) {
+        for (const path of group) storagePaths.add(path);
       }
 
       if (storagePaths.size > 0) {

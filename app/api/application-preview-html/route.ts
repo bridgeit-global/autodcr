@@ -409,25 +409,6 @@ html, body {
   return `${block}\n${html}`;
 }
 
-const PROJECT_LIBRARY_BUCKET = "project-library";
-
-function applicationUrlsKeyToStorageSlug(applicationUrlsKey: string): string {
-  return applicationUrlsKey.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
-}
-
-/** Same public URL `save-application-pdf` writes — used so QR shows before the first upload. */
-function predictedSavedPdfPublicUrl(
-  projectId: string,
-  urlsKey: string
-): string | undefined {
-  const base = supabaseUrl.replace(/\/$/, "");
-  const id = projectId.trim();
-  const key = urlsKey.trim();
-  if (!base || !id || !key) return undefined;
-  const path = `${id}/saved-applications/${applicationUrlsKeyToStorageSlug(key)}.pdf`;
-  return `${base}/storage/v1/object/public/${PROJECT_LIBRARY_BUCKET}/${path}`;
-}
-
 function insertMarkupAfterBodyOpen(html: string, markup: string): string {
   if (/<body[^>]*>/i.test(html)) {
     return html.replace(/<body[^>]*>/i, (open) => `${open}${markup}`);

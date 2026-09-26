@@ -18,6 +18,7 @@ import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertMo
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { getFieldLabel, formatWardDisplayValue } from "@/app/lib/documentValidation/fieldLabels";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
+import { formatSavedApplicationTimestamp } from "@/app/utils/projectSavedApplicationPdfUrl";
 import {
   buildApplicationDetailsPath,
   resolveApplicationNo,
@@ -503,6 +504,7 @@ function DocumentGeneratorContent() {
       formData.append("templateType", templateType);
       formData.append("user_id", ownerId);
       formData.append("applicationUrlsKey", templateType);
+      formData.append("savedAt", formatSavedApplicationTimestamp());
       formData.append(
         "pdf",
         uploaded.file,

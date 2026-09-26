@@ -129,6 +129,36 @@ const APPLICANT_TYPE_TO_APPLICATION_URL_KEY: Record<string, string> = {
   "PMC / Project Manager": "PMC / Project Manager",
 };
 
+/**
+ * Legacy `projects.application_urls` keys (`Architect`, `Architect_acceptance`) are not
+ * `application_documents.slug`. Map them to the catalog type slug and letter variant.
+ */
+export function applicationUrlKeyToCatalogType(urlsKey: string): {
+  typeSlug: string;
+  letterVariant: "appointment" | "acceptance";
+} | null {
+  const key = urlsKey.trim();
+  if (!key) return null;
+
+  for (const [applicantType, appointmentKey] of Object.entries(
+    APPLICANT_TYPE_TO_APPLICATION_URL_KEY
+  )) {
+    if (appointmentKey !== key) continue;
+    const typeSlug = APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID[applicantType];
+    if (!typeSlug) return null;
+    return { typeSlug, letterVariant: "appointment" };
+  }
+
+  for (const [applicantType, acceptanceKey] of Object.entries(ACCEPTANCE_URL_KEY_MAP)) {
+    if (acceptanceKey !== key) continue;
+    const typeSlug = APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID[applicantType];
+    if (!typeSlug) return null;
+    return { typeSlug, letterVariant: "acceptance" };
+  }
+
+  return null;
+}
+
 /** Keys in `projects.application_urls` cleared when an application is fully removed. */
 export function applicationUrlKeysForPermissionType(permissionType: string): string[] {
   const title = permissionType.trim();
