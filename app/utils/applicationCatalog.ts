@@ -1,3 +1,5 @@
+import { rememberCatalogDocumentSlug } from "@/app/utils/applicationPdfUrlKeys";
+
 /** Browser or server Supabase client — `from()` only. Avoids importing the browser client in Node APIs. */
 export type CatalogDb = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,6 +16,8 @@ export type ApplicationCatalogCategory = "appointment_letter" | "department_perm
 
 export type ApplicationCatalogType = {
   id: string;
+  /** Stable snake_case key. `id` is a uuid. */
+  slug: string;
   department: string;
   application_title: string;
   description: string;
@@ -30,6 +34,8 @@ export type ApplicationCatalogType = {
 
 export type ApplicationCatalogDocument = {
   id: string;
+  /** Stable snake_case key used as the saved-PDF URL key. `id` is a uuid. */
+  slug: string;
   application_type_id: string;
   category: string;
   sub_category: string | null;
@@ -45,7 +51,7 @@ export type ApplicationCatalogDocument = {
 };
 
 const DOCUMENT_COLUMNS =
-  "id, application_type_id, category, sub_category, html, sign, letter_variant, show_letterhead, show_qrcode, is_active, sort_order";
+  "id, slug, application_type_id, category, sub_category, html, sign, letter_variant, show_letterhead, show_qrcode, is_active, sort_order";
 const DOCUMENT_COLUMNS_LEGACY =
   "id, application_type_id, category, sub_category, html, sign, letter_variant, is_active, sort_order";
 
@@ -73,8 +79,14 @@ function asStringArray(value: unknown): string[] {
 }
 
 function mapTypeRow(row: Record<string, unknown>): ApplicationCatalogType {
+  const id = String(row.id ?? "");
+  const slug =
+    typeof row.slug === "string" && row.slug.trim()
+      ? row.slug.trim()
+      : id;
   return {
-    id: String(row.id ?? ""),
+    id,
+    slug,
     department: String(row.department ?? ""),
     application_title: String(row.application_title ?? ""),
     description: String(row.description ?? ""),
@@ -93,8 +105,15 @@ function mapTypeRow(row: Record<string, unknown>): ApplicationCatalogType {
 
 function mapDocumentRow(row: Record<string, unknown>): ApplicationCatalogDocument {
   const variant = row.letter_variant;
+  const id = String(row.id ?? "");
+  const slug =
+    typeof row.slug === "string" && row.slug.trim()
+      ? row.slug.trim()
+      : id;
+  rememberCatalogDocumentSlug(id, slug);
   return {
-    id: String(row.id ?? ""),
+    id,
+    slug,
     application_type_id: String(row.application_type_id ?? ""),
     category: String(row.category ?? ""),
     sub_category: typeof row.sub_category === "string" ? row.sub_category : null,
@@ -152,18 +171,31 @@ function mapPlaceholderRow(row: Record<string, unknown>): ApplicationCatalogPlac
   };
 }
 
+const TYPE_COLUMNS =
+  "id, slug, department, application_title, description, category, applicant_type, token_suffix, planning_authorities, requires_roster_match, show_building_permission_fields, is_active, sort_order, icon_key";
+const TYPE_COLUMNS_LEGACY =
+  "id, department, application_title, description, category, applicant_type, token_suffix, planning_authorities, requires_roster_match, show_building_permission_fields, is_active, sort_order, icon_key";
+
 export async function fetchApplicationCatalogTypes(
   client?: CatalogDb
 ): Promise<ApplicationCatalogType[]> {
   const db = await resolveClient(client);
-  const { data, error } = await db
+  let { data, error } = await db
     .from("application_types")
-    .select(
-      "id, department, application_title, description, category, applicant_type, token_suffix, planning_authorities, requires_roster_match, show_building_permission_fields, is_active, sort_order, icon_key"
-    )
+    .select(TYPE_COLUMNS)
     .eq("is_active", true)
     .order("department")
     .order("sort_order");
+  if (error) {
+    const retry = await db
+      .from("application_types")
+      .select(TYPE_COLUMNS_LEGACY)
+      .eq("is_active", true)
+      .order("department")
+      .order("sort_order");
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error || !Array.isArray(data)) {
     console.warn("fetchApplicationCatalogTypes failed:", error?.message);
@@ -179,14 +211,22 @@ export async function fetchApplicationCatalogTypeByTitle(
   const title = applicationTitle.trim();
   if (!title) return null;
   const db = await resolveClient(client);
-  const { data, error } = await db
+  let { data, error } = await db
     .from("application_types")
-    .select(
-      "id, department, application_title, description, category, applicant_type, token_suffix, planning_authorities, requires_roster_match, show_building_permission_fields, is_active, sort_order, icon_key"
-    )
+    .select(TYPE_COLUMNS)
     .eq("is_active", true)
     .ilike("application_title", title)
     .maybeSingle();
+  if (error) {
+    const retry = await db
+      .from("application_types")
+      .select(TYPE_COLUMNS_LEGACY)
+      .eq("is_active", true)
+      .ilike("application_title", title)
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error || !data) return null;
   return mapTypeRow(data as Record<string, unknown>);
@@ -481,7 +521,7 @@ export function catalogPlaceholderFieldMap(
 }
 
 export function catalogDocumentOptionLabel(doc: ApplicationCatalogDocument): string {
-  const category = doc.category.trim() || doc.id;
+  const category = doc.category.trim() || doc.slug || doc.id;
   const sub = doc.sub_category?.trim();
   if (sub && sub.toLowerCase() !== category.toLowerCase()) {
     return `${category} — ${sub}`;
@@ -494,7 +534,7 @@ export function pickCatalogDocument(
   opts?: { documentId?: string | null; letterVariant?: "appointment" | "acceptance" }
 ): ApplicationCatalogDocument | undefined {
   if (opts?.documentId) {
-    const byId = docs.find((d) => d.id === opts.documentId);
+    const byId = docs.find((d) => d.id === opts.documentId || d.slug === opts.documentId);
     if (byId) return byId;
   }
   const variant = opts?.letterVariant ?? "appointment";

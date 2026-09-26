@@ -53,7 +53,8 @@ async function resolveApplicationUrlKeysForDelete(
   if (catalogType?.id) {
     const docs = await fetchDocumentsForApplicationType(catalogType.id, admin);
     for (const doc of docs) {
-      if (doc.id.trim()) keys.add(doc.id.trim());
+      const urlKey = doc.slug.trim() || doc.id.trim();
+      if (urlKey) keys.add(urlKey);
     }
   }
 

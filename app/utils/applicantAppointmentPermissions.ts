@@ -1,7 +1,7 @@
 /**
  * Maps applicant types (Applicant Details form) to General department appointment-letter catalog ids.
  * Must match strings in `APPLICANT_TYPE_OPTIONS` in app/dashboard/applicant/page.tsx
- * and `application_types.id` in the catalog. Create Application roster filter prefers catalog
+ * and `application_types.slug` in the catalog. Create Application roster filter prefers catalog
  * `requires_roster_match` + `applicant_type`.
  */
 export const APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID: Record<string, string> = {

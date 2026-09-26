@@ -14,10 +14,30 @@ export const VALID_ACCEPTANCE_APPLICATION_URL_KEYS = new Set([
 ]);
 
 /**
- * Catalog `application_documents.id` shape (e.g. `proposal_full_potential`, `fact_sheet`).
+ * Catalog `application_documents.slug` shape (e.g. `proposal_full_potential`, `fact_sheet`).
  * Used as `projects.application_urls` keys for multi-document department permissions.
+ * Table `id` is a uuid and is not a storage key.
  */
 export const CATALOG_APPLICATION_URL_KEY_RE = /^[a-z][a-z0-9_]{0,127}$/;
+
+const documentSlugById = new Map<string, string>();
+
+/** Remember slug for a catalog document uuid so PDF URL keys stay snake_case. */
+export function rememberCatalogDocumentSlug(id: string, slug: string): void {
+  const key = id.trim();
+  const value = slug.trim();
+  if (!key || !value || key === value) return;
+  documentSlugById.set(key, value);
+}
+
+/** Storage key for a catalog document: slug when `id` is a uuid, otherwise the snake_case id. */
+export function catalogDocumentStorageKey(documentId: string | null | undefined): string {
+  const id = documentId?.trim() || "";
+  if (!id) return "";
+  const slug = documentSlugById.get(id);
+  if (slug) return slug;
+  return isCatalogApplicationUrlsKey(id) ? id : "";
+}
 
 export function isCatalogApplicationUrlsKey(applicationUrlsKey: string): boolean {
   return CATALOG_APPLICATION_URL_KEY_RE.test(applicationUrlsKey);
@@ -48,8 +68,9 @@ export function resolveApplicationUrlsKey(params: {
   acceptanceKeyByTemplateType?: Partial<Record<string, string>>;
 }): string {
   const catalogId = params.catalogDocumentId?.trim() || "";
-  if (catalogId && !params.isDualLetter) {
-    return catalogId;
+  const storageKey = catalogDocumentStorageKey(catalogId);
+  if (storageKey && !params.isDualLetter) {
+    return storageKey;
   }
   if (params.letterVariant === "acceptance") {
     return (

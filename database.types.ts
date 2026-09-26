@@ -73,6 +73,7 @@ export type Database = {
           planning_authorities: string[]
           requires_roster_match: boolean
           show_building_permission_fields: boolean
+          slug: string
           sort_order: number
           token_suffix: string | null
           updated_at: string
@@ -85,11 +86,12 @@ export type Database = {
           department: string
           description?: string
           icon_key?: string
-          id: string
+          id?: string
           is_active?: boolean
           planning_authorities?: string[]
           requires_roster_match?: boolean
           show_building_permission_fields?: boolean
+          slug: string
           sort_order?: number
           token_suffix?: string | null
           updated_at?: string
@@ -107,6 +109,7 @@ export type Database = {
           planning_authorities?: string[]
           requires_roster_match?: boolean
           show_building_permission_fields?: boolean
+          slug?: string
           sort_order?: number
           token_suffix?: string | null
           updated_at?: string
@@ -124,6 +127,7 @@ export type Database = {
           show_letterhead: boolean
           show_qrcode: boolean
           sign: string[]
+          slug: string
           sort_order: number
           sub_category: string | null
         }
@@ -131,12 +135,13 @@ export type Database = {
           application_type_id: string
           category: string
           html?: string | null
-          id: string
+          id?: string
           is_active?: boolean
           letter_variant?: string | null
           show_letterhead?: boolean
           show_qrcode?: boolean
           sign?: string[]
+          slug: string
           sort_order?: number
           sub_category?: string | null
         }
@@ -150,6 +155,7 @@ export type Database = {
           show_letterhead?: boolean
           show_qrcode?: boolean
           sign?: string[]
+          slug?: string
           sort_order?: number
           sub_category?: string | null
         }
