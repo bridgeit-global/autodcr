@@ -23,6 +23,13 @@ import {
 } from "@/app/utils/projectLibraryFiles";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
+import { fetchApplicationCatalogTypes } from "@/app/utils/applicationCatalog";
+import {
+  parseSavedApplicationPdf,
+  PROJECT_LIBRARY_BUCKET,
+  savedApplicationPdfLabel,
+} from "@/app/utils/projectSavedApplicationPdfUrl";
+import { supabase } from "@/app/utils/supabase";
 import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
   DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
@@ -80,6 +87,40 @@ type LibrarySnapshot = {
   extraDocs: ExtraDocSlot[];
   dpAttachments: DpAttachments;
 };
+
+type SavedApplicationPdfRow = {
+  key: string;
+  title: string;
+  detail: string;
+  url: string;
+  storagePath: string | null;
+};
+
+function readSavedApplicationEntries(
+  raw: unknown
+): Array<{ key: string; url: string }> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const entries: Array<{ key: string; url: string }> = [];
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string" && value.trim()) {
+      entries.push({ key, url: value.trim() });
+    }
+  }
+  return entries;
+}
+
+function formatSavedOn(iso: string | null): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 type StagingItem = {
   id: string;
@@ -403,6 +444,9 @@ export default function ProjectLibraryPage() {
     undefined
   );
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [savedApplications, setSavedApplications] = useState<SavedApplicationPdfRow[]>(
+    []
+  );
 
   const markLibraryDirty = () => {
     clearPageSaved("saved-project-library");
@@ -492,6 +536,47 @@ export default function ProjectLibraryPage() {
       cancelled = true;
     };
   }, [isEditMode, isLoading, projectData]);
+
+  useEffect(() => {
+    const entries = readSavedApplicationEntries(projectData?.application_urls);
+    if (entries.length === 0) {
+      setSavedApplications([]);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const types = await fetchApplicationCatalogTypes();
+      if (cancelled) return;
+      const titleBySlug = new Map(
+        types.map((type) => [type.slug, type.application_title])
+      );
+      const rows = entries.map(({ key, url }) => {
+        const parts = parseSavedApplicationPdf(key, url);
+        const savedOn = formatSavedOn(parts.savedAtIso);
+        const detailParts = [parts.department, savedOn].filter(
+          (part): part is string => Boolean(part)
+        );
+        return {
+          key,
+          title: savedApplicationPdfLabel(
+            parts,
+            key,
+            parts.slug ? titleBySlug.get(parts.slug) : null
+          ),
+          detail: detailParts.join(" · ") || "Saved application PDF",
+          url,
+          storagePath: parts.storagePath,
+        };
+      });
+      rows.sort((a, b) => a.title.localeCompare(b.title));
+      setSavedApplications(rows);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectData]);
 
   const closePreview = () => {
     setPreviewOpen(false);
@@ -1073,6 +1158,63 @@ export default function ProjectLibraryPage() {
             )}
           </button>
         </div>
+
+        {savedApplications.length > 0 && (
+          <section className="mb-5">
+            <h2 className="mb-3 text-sm font-semibold text-brand-navy">
+              Saved applications
+            </h2>
+            <ul className="space-y-3">
+              {savedApplications.map((pdf) => (
+                <li
+                  key={pdf.key}
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-gray-900">
+                        {pdf.title}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">{pdf.detail}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void openPreview(
+                          pdf.title,
+                          async () => {
+                            if (!pdf.storagePath) return null;
+                            const { data, error } = await supabase.storage
+                              .from(PROJECT_LIBRARY_BUCKET)
+                              .download(pdf.storagePath);
+                            if (error || !data || data.size === 0) return null;
+                            return { blob: data };
+                          },
+                          pdf.url
+                        )
+                      }
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-brand-blue shadow-sm hover:bg-gray-50"
+                      aria-label={`Preview ${pdf.title}`}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        className="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M5 4h9l5 5v11H5z" />
+                        <path d="M9 12h6" />
+                        <path d="M9 16h3" />
+                      </svg>
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {!isReadOnlyMode && (
           <div

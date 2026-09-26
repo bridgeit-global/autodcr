@@ -96,6 +96,78 @@ export function projectSavedApplicationPdfStoragePath(
   return legacySavedApplicationPdfStoragePath(projectId, applicationUrlsKey);
 }
 
+export type SavedApplicationPdfParts = {
+  storagePath: string | null;
+  department: string | null;
+  slug: string | null;
+  category: string | null;
+  /** ISO time parsed from `{category}+YYYYMMDDTHHmmssZ.pdf`, when present. */
+  savedAtIso: string | null;
+};
+
+function savedAtIsoFromFileName(fileName: string): string | null {
+  const match = fileName.match(
+    /\+(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.pdf$/i
+  );
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+}
+
+function humanizeStorageToken(value: string): string {
+  const text = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+/** Read department, type slug, and document category out of a saved-application object URL. */
+export function parseSavedApplicationPdf(
+  urlKey: string,
+  publicUrl: string
+): SavedApplicationPdfParts {
+  const storagePath = storagePathFromPublicUrl(publicUrl);
+  const empty: SavedApplicationPdfParts = {
+    storagePath,
+    department: null,
+    slug: null,
+    category: null,
+    savedAtIso: null,
+  };
+  if (!storagePath) return empty;
+  const marker = "/saved-applications/";
+  const idx = storagePath.indexOf(marker);
+  if (idx < 0) return empty;
+  const rest = storagePath
+    .slice(idx + marker.length)
+    .split("/")
+    .filter(Boolean);
+  if (rest.length < 4) {
+    const fileName = rest[rest.length - 1] ?? "";
+    return { ...empty, savedAtIso: savedAtIsoFromFileName(fileName) };
+  }
+  const fileName = rest[rest.length - 1] ?? "";
+  return {
+    storagePath,
+    department: rest[0] ?? null,
+    slug: rest[1] ?? null,
+    category: rest[2] ?? null,
+    savedAtIso: savedAtIsoFromFileName(fileName),
+  };
+}
+
+export function savedApplicationPdfLabel(
+  parts: SavedApplicationPdfParts,
+  urlKey: string,
+  applicationTitle?: string | null
+): string {
+  const category = parts.category?.trim() || "";
+  const title =
+    applicationTitle?.trim() ||
+    (parts.slug ? humanizeStorageToken(parts.slug) : "") ||
+    humanizeStorageToken(urlKey) ||
+    "Saved application";
+  return category ? `${title} — ${category}` : title;
+}
+
 export function storagePathFromPublicUrl(publicUrl: string): string | null {
   const marker = STORAGE_PUBLIC_MARKER;
   const altMarker = `/${PROJECT_LIBRARY_BUCKET}/`;

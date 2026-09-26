@@ -21,7 +21,12 @@ import {
   type ProjectLibraryExtraDocType,
 } from "@/app/utils/projectSections";
 import { getProjectLabel } from "@/app/userdashboard/administrationApplicants";
+import { fetchApplicationCatalogTypes } from "@/app/utils/applicationCatalog";
 import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
+import {
+  parseSavedApplicationPdf,
+  savedApplicationPdfLabel,
+} from "@/app/utils/projectSavedApplicationPdfUrl";
 
 type FolderSection =
   | "pr-card"
@@ -30,6 +35,7 @@ type FolderSection =
   | "power-of-attorney"
   | "assessment-department"
   | "airport-authority-of-india"
+  | "saved-applications"
   | "other";
 
 type LibraryUpload = {
@@ -67,6 +73,7 @@ const FOLDER_LABELS: Record<FolderSection, string> = {
   "power-of-attorney": PROJECT_LIBRARY_DOCUMENT_NAMES[3],
   "assessment-department": PROJECT_LIBRARY_DOCUMENT_NAMES[4],
   "airport-authority-of-india": PROJECT_LIBRARY_DOCUMENT_NAMES[5],
+  "saved-applications": "Saved Applications",
   other: "Other",
 };
 
@@ -77,6 +84,7 @@ const FOLDER_ORDER: FolderSection[] = [
   "power-of-attorney",
   "assessment-department",
   "airport-authority-of-india",
+  "saved-applications",
   "other",
 ];
 
@@ -137,6 +145,7 @@ type LibraryProjectRecord = {
   project_info?: unknown;
   save_plot_details?: unknown;
   project_library?: unknown;
+  application_urls?: unknown;
 };
 
 async function loadLibraryProjectRecords(
@@ -145,7 +154,9 @@ async function loadLibraryProjectRecords(
   const projectIds = projects.map((p) => p.id);
   const { data, error } = await supabase
     .from("projects")
-    .select("id, title, project_info, save_plot_details, project_library")
+    .select(
+      "id, title, project_info, save_plot_details, project_library, application_urls"
+    )
     .in("id", projectIds);
 
   if (!error && Array.isArray(data) && data.length === projectIds.length) {
@@ -162,6 +173,7 @@ async function loadLibraryProjectRecords(
         project_info: project.project_info,
         save_plot_details: project.save_plot_details,
         project_library: project.project_library,
+        application_urls: project.application_urls,
       };
       return record;
     })
@@ -213,6 +225,7 @@ function storagePathCandidates(
 ): string[] {
   const raw = row.path.trim().replace(/^\/+/, "");
   if (!raw) return [];
+  if (raw.includes("/saved-applications/")) return [raw];
 
   const candidates: string[] = [];
   const push = (path: string) => {
@@ -373,8 +386,14 @@ export default function ProjectLibraryBrowserPage() {
       }
 
       setFilesLoading(true);
-      const records = await loadLibraryProjectRecords(projects);
+      const [records, catalogTypes] = await Promise.all([
+        loadLibraryProjectRecords(projects),
+        fetchApplicationCatalogTypes(),
+      ]);
       if (cancelled) return;
+      const titleBySlug = new Map(
+        catalogTypes.map((type) => [type.slug, type.application_title])
+      );
 
       const nextRows: LibraryRow[] = [];
       for (const project of records) {
@@ -406,6 +425,33 @@ export default function ProjectLibraryBrowserPage() {
             uploadedAt: upload.uploadedAt?.trim() || null,
           });
         });
+
+        const savedUrls = project.application_urls;
+        if (savedUrls && typeof savedUrls === "object" && !Array.isArray(savedUrls)) {
+          for (const [key, value] of Object.entries(
+            savedUrls as Record<string, unknown>
+          )) {
+            if (typeof value !== "string" || !value.trim()) continue;
+            const url = value.trim();
+            const parts = parseSavedApplicationPdf(key, url);
+            nextRows.push({
+              id: `${project.id}-saved-${key}`,
+              projectId: project.id,
+              projectLabel,
+              authority,
+              fileName: savedApplicationPdfLabel(
+                parts,
+                key,
+                parts.slug ? titleBySlug.get(parts.slug) : null
+              ),
+              folder: "saved-applications",
+              folderLabel: FOLDER_LABELS["saved-applications"],
+              path: parts.storagePath ?? "",
+              url,
+              uploadedAt: parts.savedAtIso,
+            });
+          }
+        }
       }
 
       setProjectRecords(records);
@@ -569,7 +615,7 @@ export default function ProjectLibraryBrowserPage() {
               Project Library
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Uploaded library documents across your projects
+              Uploaded library documents and saved application PDFs across your projects
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
