@@ -264,9 +264,8 @@ function replaceTemplateTokens(
   out = out.replace(/\$project_[A-Za-z0-9_./-]+/g, (match) =>
     match === PROJECT_SAVED_PDF_QR_SENTINEL ? match : ""
   );
-  out = out.replace(/\{\{[A-Z0-9_]+\}\}/g, (match) =>
-    match === "{{SAVED_PDF_QR}}" ? match : ""
-  );
+  // Keep unreplaced {{TOKEN}} visible (e.g. {{SITE_ADDRESS}}, {{REF_1}}) so missing
+  // catalog values are obvious in preview. {{SAVED_PDF_QR}} is handled later.
   return out;
 }
 

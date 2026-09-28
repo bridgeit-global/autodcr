@@ -69,7 +69,6 @@ import { templateTypeLicenseUrlKeys } from "@/app/utils/consultantTemplateTokens
 import type { TemplateFields, TemplateType } from "@/app/templates/templateGenerators";
 import {
   type ApplicationPreviewSource,
-  buildDetailsFieldRowsForUi,
   generateApplicationPreviewHtml,
   generateApplicationPreviewHtmlBatch,
   generateApplicationPreviewPdfBatchFromHtml,
@@ -82,6 +81,7 @@ import {
   mapSelectedApplicationToTemplate,
   pickConsultantLookupUserIdsFromProject,
   prewarmPreviewPdfRuntime,
+  buildDetailsFieldRowsForUi,
   type PdfDetailsFieldRow,
 } from "@/app/templates/applicationPreview";
 import { base64ToBlob, blobToBase64 } from "@/app/lib/bridge/pdfChunker";
@@ -93,10 +93,17 @@ import {
 import {
   catalogConsultantSignsAppointment,
   catalogDocumentOptionLabel,
+  catalogPlaceholderFieldMap,
+  buildCatalogLetterFieldRows,
   fetchApplicationCatalogTypeByTitle,
   fetchCatalogSigningByTitle,
+  fetchCatalogTemplateHtmlForFields,
   fetchDocumentsForApplicationType,
+  fetchResolvedPlaceholdersForApplication,
+  filterCatalogPlaceholdersUsedInTemplate,
+  pickCatalogDocument,
   type ApplicationCatalogDocument,
+  type CatalogLetterFieldRow,
   type CatalogSigningInfo,
 } from "@/app/utils/applicationCatalog";
 import {
@@ -785,6 +792,8 @@ type BuildApplicationPreviewContextInput = {
   letterVariant?: "appointment" | "acceptance";
   /** Catalog `application_documents.id` when the type has multiple documents. */
   catalogDocumentId?: string | null;
+  /** Session Letter fields overrides (catalog tokens / legacy keys). */
+  fieldOverrides?: Record<string, string> | null;
   /** @deprecated Use `letterVariant`. */
   architectHtmlVariant?: "appointment" | "acceptance";
 };
@@ -806,6 +815,7 @@ async function buildApplicationPreviewContext(
     projectId,
     letterVariant: inputLetterVariant,
     catalogDocumentId,
+    fieldOverrides,
     architectHtmlVariant,
   } = input;
 
@@ -1228,6 +1238,9 @@ async function buildApplicationPreviewContext(
         }
       : {}),
     ...(catalogDocumentId?.trim() ? { catalogDocumentId: catalogDocumentId.trim() } : {}),
+    ...(fieldOverrides && Object.keys(fieldOverrides).length > 0
+      ? { fieldOverrides }
+      : {}),
   };
 
   const fieldMapping = mapToPdfFieldValues(fields, previewSource, templateType);
@@ -2070,9 +2083,17 @@ export default function ApplicationDetailsPage() {
   const [savePdfError, setSavePdfError] = useState<string | null>(null);
   const [previewReadyForSave, setPreviewReadyForSave] = useState(false);
   const [pdfSavedForCurrentPreview, setPdfSavedForCurrentPreview] = useState(false);
-  const [detailsFieldRows, setDetailsFieldRows] = useState<PdfDetailsFieldRow[]>([]);
+  const [detailsFieldRows, setDetailsFieldRows] = useState<CatalogLetterFieldRow[]>([]);
+  const [detailsFieldsFallbackRows, setDetailsFieldsFallbackRows] = useState<PdfDetailsFieldRow[]>(
+    []
+  );
+  const [detailsFieldsDocumentLabel, setDetailsFieldsDocumentLabel] = useState<string | null>(null);
   const [detailsFieldsLoading, setDetailsFieldsLoading] = useState(false);
   const [detailsFieldsError, setDetailsFieldsError] = useState<string | null>(null);
+  /** Session overrides for catalog Letter fields — applied to preview + PDF. */
+  const [letterFieldOverrides, setLetterFieldOverrides] = useState<Record<string, string>>({});
+  const letterFieldOverridesRef = useRef<Record<string, string>>({});
+  const letterFieldsPreviewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [applicationWorkflowStage, setApplicationWorkflowStage] =
     useState<ApplicationWorkflowStage>("draft");
   const [ownerSignedAt, setOwnerSignedAt] = useState<string | null>(null);
@@ -2648,6 +2669,7 @@ export default function ApplicationDetailsPage() {
           projectId,
           letterVariant: variant,
           catalogDocumentId: resolvedCatalogDocumentId,
+          fieldOverrides: letterFieldOverridesRef.current,
         });
 
       const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
@@ -2997,12 +3019,67 @@ export default function ApplicationDetailsPage() {
   };
 
   useEffect(() => {
+    letterFieldOverridesRef.current = letterFieldOverrides;
+  }, [letterFieldOverrides]);
+
+  useEffect(() => {
+    setLetterFieldOverrides({});
+    letterFieldOverridesRef.current = {};
+    setDetailsFieldsDocumentLabel(null);
+  }, [selectedCatalogDocumentId, selectedApplication]);
+
+  useEffect(() => {
     if (!isReadOnlyMode || !projectId || !projectData) return;
     let cancelled = false;
     setDetailsFieldsLoading(true);
     setDetailsFieldsError(null);
     void (async () => {
       try {
+        const title = selectedApplication?.trim() || "";
+        const catalogType = title
+          ? await fetchApplicationCatalogTypeByTitle(title)
+          : null;
+        if (catalogType) {
+          const docs = await fetchDocumentsForApplicationType(catalogType.id);
+          const variantDoc = pickCatalogDocument(docs, {
+            documentId: selectedCatalogDocumentId,
+            letterVariant,
+          });
+          const placeholders = await fetchResolvedPlaceholdersForApplication(
+            catalogType.id,
+            variantDoc?.id
+          );
+          // Document-wise: only placeholders that appear in this HTML template.
+          const templateHtml = await fetchCatalogTemplateHtmlForFields(variantDoc?.html);
+          const docPlaceholders = filterCatalogPlaceholdersUsedInTemplate(
+            placeholders,
+            templateHtml
+          );
+          const mapped = catalogPlaceholderFieldMap(
+            docPlaceholders,
+            {
+              title: projectData.title,
+              project_info: projectData.project_info as Record<string, unknown> | null,
+              save_plot_details: projectData.save_plot_details as Record<string, unknown> | null,
+              building_details: (projectData as { building_details?: Record<string, unknown> })
+                .building_details,
+              applicant_details: projectData.applicant_details as
+                | { applicants?: Record<string, unknown>[] }
+                | null,
+            },
+            catalogType.applicant_type
+          );
+          if (cancelled) return;
+          setDetailsFieldsDocumentLabel(
+            variantDoc ? catalogDocumentOptionLabel(variantDoc) : null
+          );
+          setDetailsFieldRows(
+            buildCatalogLetterFieldRows(docPlaceholders, mapped, letterFieldOverridesRef.current)
+          );
+          setDetailsFieldsFallbackRows([]);
+          return;
+        }
+
         const ctx = await buildApplicationPreviewContext({
           userMetadata,
           projectData,
@@ -3012,9 +3089,12 @@ export default function ApplicationDetailsPage() {
           projectId,
           letterVariant,
           catalogDocumentId: selectedCatalogDocumentId,
+          fieldOverrides: letterFieldOverridesRef.current,
         });
         if (cancelled) return;
-        setDetailsFieldRows(
+        setDetailsFieldsDocumentLabel(null);
+        setDetailsFieldRows([]);
+        setDetailsFieldsFallbackRows(
           buildDetailsFieldRowsForUi(ctx.fieldMapping, ctx.templateType, ctx.previewSource)
         );
       } catch (err: unknown) {
@@ -3022,7 +3102,9 @@ export default function ApplicationDetailsPage() {
           const message =
             err instanceof Error ? err.message : "Failed to resolve application fields.";
           setDetailsFieldsError(message);
+          setDetailsFieldsDocumentLabel(null);
           setDetailsFieldRows([]);
+          setDetailsFieldsFallbackRows([]);
         }
       } finally {
         if (!cancelled) setDetailsFieldsLoading(false);
@@ -3043,6 +3125,33 @@ export default function ApplicationDetailsPage() {
     selectedCatalogDocumentId,
   ]);
 
+  const schedulePreviewRefreshForLetterFields = () => {
+    if (letterFieldsPreviewDebounceRef.current) {
+      clearTimeout(letterFieldsPreviewDebounceRef.current);
+    }
+    letterFieldsPreviewDebounceRef.current = setTimeout(() => {
+      if (!previewOpen || previewDocKind === "license") return;
+      void loadPreviewContent(letterVariant, {
+        keepModalOpen: true,
+        resetSaveState: false,
+        catalogDocumentId: selectedCatalogDocumentId,
+      });
+    }, 300);
+  };
+
+  const handleLetterFieldChange = (row: CatalogLetterFieldRow, nextValue: string) => {
+    setLetterFieldOverrides((prev) => {
+      const next = { ...prev, [row.token]: nextValue };
+      if (row.legacyToken) next[row.legacyToken] = nextValue;
+      letterFieldOverridesRef.current = next;
+      return next;
+    });
+    setDetailsFieldRows((rows) =>
+      rows.map((r) => (r.id === row.id ? { ...r, value: nextValue } : r))
+    );
+    schedulePreviewRefreshForLetterFields();
+  };
+
   useEffect(() => {
     return () => {
       if (previewUrl?.startsWith("blob:")) {
@@ -3050,6 +3159,14 @@ export default function ApplicationDetailsPage() {
       }
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (letterFieldsPreviewDebounceRef.current) {
+        clearTimeout(letterFieldsPreviewDebounceRef.current);
+      }
+    };
+  }, []);
 
   // Pre-load the html2canvas + jsPDF chunks while the user reads the page so
   // the first Preview click feels instant rather than spending ~300-500ms on
@@ -3717,6 +3834,7 @@ export default function ApplicationDetailsPage() {
         applicationNo,
         applicationCreatedAt,
         projectId,
+        fieldOverrides: letterFieldOverridesRef.current,
       };
 
       const { fields, previewSource, templateType } = await buildApplicationPreviewContext({
@@ -4309,6 +4427,7 @@ export default function ApplicationDetailsPage() {
           catalogDocumentId: isDualLetterType(saveTemplateType)
             ? undefined
             : selectedCatalogDocumentId,
+          fieldOverrides: letterFieldOverridesRef.current,
         });
         previewPdfContextRef.current = {
           fields: built.fields,
@@ -4911,35 +5030,76 @@ export default function ApplicationDetailsPage() {
             <p className="mb-3 text-sm text-status-danger">{savePdfError}</p>
           )}
 
-          {detailsFieldsLoading && detailsFieldRows.length === 0 && !detailsFieldsError ? (
+          {detailsFieldsLoading &&
+          detailsFieldRows.length === 0 &&
+          detailsFieldsFallbackRows.length === 0 &&
+          !detailsFieldsError ? (
             <p className="text-sm text-gray-500">Resolving fields…</p>
-          ) : detailsFieldRows.length === 0 && !detailsFieldsError ? (
+          ) : detailsFieldRows.length === 0 &&
+            detailsFieldsFallbackRows.length === 0 &&
+            !detailsFieldsError ? (
             <p className="text-sm text-gray-500">No letter fields to show yet.</p>
           ) : (
             <div className="overflow-hidden rounded-xl border border-gray-200">
               <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Letter fields
-                </p>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Letter fields
+                  </p>
+                  {detailsFieldsDocumentLabel ? (
+                    <p className="mt-0.5 truncate text-xs text-gray-500" title={detailsFieldsDocumentLabel}>
+                      {detailsFieldsDocumentLabel}
+                    </p>
+                  ) : null}
+                </div>
                 {detailsFieldsLoading ? (
                   <span className="text-xs text-gray-400">Updating…</span>
                 ) : null}
               </div>
               <div className="divide-y divide-gray-100 bg-white">
-                {detailsFieldRows.map((row) => (
-                  <div
-                    key={row.key}
-                    className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(160px,38%)_1fr] sm:gap-4"
-                  >
-                    <div className="text-sm font-medium text-gray-600">{row.label}</div>
+                {detailsFieldRows.map((row) => {
+                  const empty = !row.value.trim();
+                  return (
                     <div
-                      className="break-words text-sm text-gray-900 sm:min-w-0 sm:break-all"
-                      title={row.value.length > 120 ? row.value : undefined}
+                      key={row.id}
+                      className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(160px,38%)_1fr] sm:gap-4 sm:items-start"
                     >
-                      {row.value}
+                      <div className="text-sm font-medium text-gray-600">
+                        {row.label}
+                        {row.required && empty ? (
+                          <span className="ml-1 text-xs font-normal text-amber-600">
+                            required
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="sm:min-w-0">
+                        <input
+                          type="text"
+                          value={row.value}
+                          onChange={(e) => handleLetterFieldChange(row, e.target.value)}
+                          placeholder={`Enter ${row.label}`}
+                          className="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+                {detailsFieldRows.length === 0
+                  ? detailsFieldsFallbackRows.map((row) => (
+                      <div
+                        key={row.key}
+                        className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(160px,38%)_1fr] sm:gap-4"
+                      >
+                        <div className="text-sm font-medium text-gray-600">{row.label}</div>
+                        <div
+                          className="break-words text-sm text-gray-900 sm:min-w-0 sm:break-all"
+                          title={row.value.length > 120 ? row.value : undefined}
+                        >
+                          {row.value}
+                        </div>
+                      </div>
+                    ))
+                  : null}
               </div>
             </div>
           )}

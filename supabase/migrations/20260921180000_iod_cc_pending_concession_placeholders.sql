@@ -186,11 +186,11 @@ VALUES
   -- iod-cc-pending-architect.html
   ('iod_cc_pending_architect', 'ref_1', false, 10),
   ('iod_cc_pending_architect', 'ref_2', false, 20),
-  ('iod_cc_pending_architect', 'subject', false, 30),
-  ('iod_cc_pending_architect', 'che_ref_no', false, 40),
-  ('iod_cc_pending_architect', 'owner_ca_name', false, 50),
 
   -- iod-cc-pending-owner-undertaking.html
+  ('iod_cc_pending_owner_undertaking', 'subject', true, 5),
+  ('iod_cc_pending_owner_undertaking', 'che_ref_no', false, 6),
+  ('iod_cc_pending_owner_undertaking', 'owner_ca_name', true, 7),
   ('iod_cc_pending_owner_undertaking', 'che_no', false, 10),
   ('iod_cc_pending_owner_undertaking', 'bp_zone', false, 20),
   ('iod_cc_pending_owner_undertaking', 'a_suffix', false, 30),
