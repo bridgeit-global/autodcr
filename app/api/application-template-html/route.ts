@@ -1,8 +1,23 @@
 import { readdir, readFile } from "fs/promises";
 import path from "path";
+import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+const TEMPLATE_BUCKET =
+  process.env.SUPABASE_APPLICATION_TEMPLATE_BUCKET?.trim() ||
+  process.env.NEXT_PUBLIC_APPLICATION_TEMPLATE_BUCKET?.trim() ||
+  "Application_Templates";
+
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+  process.env.SUPABASE_URL?.trim() ||
+  "";
+const supabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+  process.env.SUPABASE_ANON_KEY?.trim() ||
+  "";
 
 function isSafeHtmlBasename(file: string): boolean {
   if (!file || file.includes("..") || file.includes("/") || file.includes("\\")) {
@@ -52,9 +67,22 @@ async function findHtmlUnderBase(base: string, basename: string): Promise<string
   return walk(base, 0);
 }
 
+async function downloadStorageTemplateHtml(objectPath: string): Promise<string | null> {
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const { data, error } = await supabase.storage.from(TEMPLATE_BUCKET).download(objectPath);
+    if (error || !data) return null;
+    return await data.text();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Raw application template HTML for Letter fields token scanning.
- * Reads repo `html/<file>` (catalog flat names; also searches one–three levels deep).
+ * Repo `html/` first (when bundled), then Supabase Storage — same catalog filenames
+ * as Application_Templates so Vercel works without relying only on local files.
  */
 export async function GET(request: NextRequest) {
   const file = request.nextUrl.searchParams.get("file")?.trim() || "";
@@ -62,20 +90,30 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid file" }, { status: 400 });
   }
 
-  const base = path.resolve(process.cwd(), "html");
+  const base = path.resolve(
+    process.cwd(),
+    process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() || "html"
+  );
+
+  let text: string | null = null;
   try {
-    const text = await findHtmlUnderBase(base, file);
-    if (text == null) {
-      return NextResponse.json({ error: "Template not found" }, { status: 404 });
-    }
-    return new NextResponse(text, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-      },
-    });
+    text = await findHtmlUnderBase(base, file);
   } catch {
+    text = null;
+  }
+  if (text == null) {
+    text = await downloadStorageTemplateHtml(file);
+  }
+
+  if (text == null) {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
+
+  return new NextResponse(text, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }

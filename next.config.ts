@@ -45,6 +45,8 @@ const nextConfig: NextConfig = {
 			"./public/pagedjs/**",
 		],
 		"/api/application-preview-html": ["./html/**"],
+		// Letter fields token scan — without this, Vercel omits html/ and fields fall back to full type union.
+		"/api/application-template-html": ["./html/**"],
 	},
 	images: {
 		remotePatterns: [
