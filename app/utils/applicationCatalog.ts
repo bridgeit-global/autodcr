@@ -73,6 +73,161 @@ export type CatalogLinkedPlaceholder = ApplicationCatalogPlaceholder & {
   sort_order: number;
 };
 
+/** One row in Application Details “Letter fields” (catalog-driven). */
+export type CatalogLetterFieldRow = {
+  id: string;
+  token: string;
+  /** Legacy key without leading `$`, when present. */
+  legacyToken: string | null;
+  label: string;
+  value: string;
+  required: boolean;
+  uiGroup: string;
+};
+
+const LETTER_FIELD_SKIP_TOKENS = new Set([
+  "{{SAVED_PDF_QR}}",
+  "{{LETTERHEAD_URL}}",
+  "$project_Saved_Pdf_QR",
+  "project_Saved_Pdf_QR",
+  "project_Letterhead_Image_Url",
+]);
+
+export function catalogPlaceholderLegacyKey(
+  ph: Pick<ApplicationCatalogPlaceholder, "legacy_token">
+): string | null {
+  if (!ph.legacy_token?.trim()) return null;
+  return ph.legacy_token.startsWith("$")
+    ? ph.legacy_token.slice(1)
+    : ph.legacy_token;
+}
+
+export function shouldSkipCatalogPlaceholderForLetterFields(
+  ph: CatalogLinkedPlaceholder
+): boolean {
+  if (ph.ui_group === "letterhead") return true;
+  if (LETTER_FIELD_SKIP_TOKENS.has(ph.token)) return true;
+  const legacy = catalogPlaceholderLegacyKey(ph);
+  if (legacy && LETTER_FIELD_SKIP_TOKENS.has(legacy)) return true;
+  if (ph.legacy_token && LETTER_FIELD_SKIP_TOKENS.has(ph.legacy_token)) return true;
+  if (/letterhead/i.test(ph.id) || /letterhead/i.test(ph.token)) return true;
+  return false;
+}
+
+/**
+ * Build Letter fields panel rows from type ∪ document placeholders.
+ * Includes empty values (unlike Create Application Key Variables).
+ */
+export function buildCatalogLetterFieldRows(
+  placeholders: CatalogLinkedPlaceholder[],
+  mappedValues: Record<string, string>,
+  overrides?: Record<string, string> | null
+): CatalogLetterFieldRow[] {
+  const rows: CatalogLetterFieldRow[] = [];
+  for (const ph of placeholders) {
+    if (shouldSkipCatalogPlaceholderForLetterFields(ph)) continue;
+    const legacyToken = catalogPlaceholderLegacyKey(ph);
+    const mapped =
+      (mappedValues[ph.token] ?? "").trim() ||
+      (legacyToken ? (mappedValues[legacyToken] ?? "").trim() : "");
+    const overrideRaw =
+      overrides?.[ph.token] ??
+      (legacyToken ? overrides?.[legacyToken] : undefined) ??
+      (ph.legacy_token ? overrides?.[ph.legacy_token] : undefined);
+    const value = overrideRaw !== undefined ? String(overrideRaw) : mapped;
+    rows.push({
+      id: ph.id,
+      token: ph.token,
+      legacyToken,
+      label: ph.label?.trim() || ph.token,
+      value,
+      required: ph.required,
+      uiGroup: ph.ui_group,
+    });
+  }
+  return rows;
+}
+
+/** Tokens referenced in a template (`{{FOO}}` and `$project_…`). */
+export function extractTemplateTokensFromHtml(html: string): Set<string> {
+  const found = new Set<string>();
+  if (!html) return found;
+  for (const match of html.matchAll(/\{\{[A-Za-z0-9_]+\}\}/g)) {
+    found.add(match[0]);
+  }
+  for (const match of html.matchAll(/\$project_[A-Za-z0-9_./-]+/g)) {
+    found.add(match[0]);
+    found.add(match[0].slice(1)); // without `$`
+  }
+  return found;
+}
+
+/**
+ * Keep placeholders that appear in the selected document HTML so Letter fields
+ * are document-wise (not the full application-type union).
+ */
+export function filterCatalogPlaceholdersUsedInTemplate(
+  placeholders: CatalogLinkedPlaceholder[],
+  html: string | null | undefined
+): CatalogLinkedPlaceholder[] {
+  if (!html?.trim()) return placeholders;
+  const used = extractTemplateTokensFromHtml(html);
+  if (used.size === 0) return placeholders;
+  const filtered = placeholders.filter((ph) => {
+    if (used.has(ph.token)) return true;
+    if (ph.legacy_token && used.has(ph.legacy_token)) return true;
+    const legacy = catalogPlaceholderLegacyKey(ph);
+    if (legacy && used.has(legacy)) return true;
+    return false;
+  });
+  return filtered.length > 0 ? filtered : placeholders;
+}
+
+/** Load catalog template HTML from repo via API (for token scanning). */
+export async function fetchCatalogTemplateHtmlForFields(
+  htmlFileName: string | null | undefined
+): Promise<string | null> {
+  const file = htmlFileName?.trim() || "";
+  if (!file) return null;
+  try {
+    const res = await fetch(
+      `/api/application-template-html?file=${encodeURIComponent(file)}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Apply session overrides onto a preview field map.
+ * Writes both `{{TOKEN}}` and legacy keys when the placeholder set is provided.
+ */
+export function applyCatalogFieldOverrides(
+  formValues: Record<string, string | undefined>,
+  overrides: Record<string, string> | null | undefined,
+  placeholders?: CatalogLinkedPlaceholder[] | null
+): void {
+  if (!overrides) return;
+  for (const [key, raw] of Object.entries(overrides)) {
+    formValues[key] = raw;
+  }
+  if (!placeholders?.length) return;
+  for (const ph of placeholders) {
+    const legacy = catalogPlaceholderLegacyKey(ph);
+    const fromToken = overrides[ph.token];
+    const fromLegacy = legacy ? overrides[legacy] : undefined;
+    const fromLegacyDollar = ph.legacy_token ? overrides[ph.legacy_token] : undefined;
+    const value = fromToken ?? fromLegacy ?? fromLegacyDollar;
+    if (value === undefined) continue;
+    formValues[ph.token] = value;
+    if (legacy) formValues[legacy] = value;
+    if (ph.legacy_token) formValues[ph.legacy_token] = value;
+  }
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
@@ -499,6 +654,62 @@ export function resolveCatalogPlaceholderValue(
   return "";
 }
 
+/** Templates use `(Zone - {{ZONE}})`; stored plot zone is often already `Zone V`. */
+function formatZoneTokenForTemplate(value: string): string {
+  return value.replace(/^Zone\s+/i, "").trim();
+}
+
+/** Same idea as appointment `$project_CS/CTSNos.` — label from Project Details `plotBelongsTo`. */
+function surveyKindLabelForPlot(plotBelongs: unknown): string {
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return "C.S. No.";
+    case "F.P.No":
+      return "F.P. No.";
+    case "CTS No.":
+    default:
+      return "C.T.S. No.";
+  }
+}
+
+function formatPlotCsCtsToken(
+  numbers: string,
+  plotBelongs: unknown
+): string {
+  const cleaned = numbers.trim();
+  if (!cleaned) return "";
+  if (/^(?:C\.T\.S\.|C\.S\.|F\.P\.)\s*No/i.test(cleaned)) return cleaned;
+  return `${surveyKindLabelForPlot(plotBelongs)} ${cleaned}`;
+}
+
+/**
+ * Work Start Notice: only for F.P./TPS plots. CS/CTS → empty (phrase omitted).
+ * Value is villageName / TPS schema from save_plot_details.
+ */
+function formatTpsNoToken(villageOrTps: string, plotBelongs: unknown): string {
+  if (String(plotBelongs ?? "").trim() !== "F.P.No") return "";
+  const cleaned = villageOrTps.trim();
+  if (!cleaned) return "";
+  if (/Town Planning Scheme No/i.test(cleaned)) return cleaned.startsWith(" ")
+    ? cleaned
+    : ` ${cleaned}`;
+  return ` Town Planning Scheme No. ${cleaned}`;
+}
+
+function assignCatalogField(
+  out: Record<string, string>,
+  ph: CatalogLinkedPlaceholder,
+  value: string
+): void {
+  if (ph.token) out[ph.token] = value;
+  if (ph.legacy_token) {
+    const legacy = ph.legacy_token.startsWith("$")
+      ? ph.legacy_token.slice(1)
+      : ph.legacy_token;
+    out[legacy] = value;
+  }
+}
+
 /** Field map for new {{TOKEN}} HTML plus legacy $project_* aliases from catalog. */
 export function catalogPlaceholderFieldMap(
   placeholders: CatalogLinkedPlaceholder[],
@@ -506,16 +717,30 @@ export function catalogPlaceholderFieldMap(
   applicantType?: string | null
 ): Record<string, string> {
   const out: Record<string, string> = {};
+  const plotBelongs = project?.save_plot_details?.plotBelongsTo;
   for (const ph of placeholders) {
-    const value = resolveCatalogPlaceholderValue(ph, project, { applicantType });
-    if (!value) continue;
-    if (ph.token) out[ph.token] = value;
-    if (ph.legacy_token) {
-      const legacy = ph.legacy_token.startsWith("$")
-        ? ph.legacy_token.slice(1)
-        : ph.legacy_token;
-      out[legacy] = value;
+    let value = resolveCatalogPlaceholderValue(ph, project, { applicantType });
+    if (ph.token === "{{ZONE}}" || ph.id === "zone") {
+      if (!value) continue;
+      value = formatZoneTokenForTemplate(value);
+      if (!value) continue;
+      assignCatalogField(out, ph, value);
+      continue;
     }
+    if (ph.token === "{{PLOT_CS_CTS_NO}}" || ph.id === "plot_cs_cts_no") {
+      if (!value) continue;
+      value = formatPlotCsCtsToken(value, plotBelongs);
+      if (!value) continue;
+      assignCatalogField(out, ph, value);
+      continue;
+    }
+    if (ph.token === "{{TPS_NO}}" || ph.id === "tps_no") {
+      // Always assign (even "") so CS/CTS clears {{TPS_NO}} and hides the phrase.
+      assignCatalogField(out, ph, formatTpsNoToken(value, plotBelongs));
+      continue;
+    }
+    if (!value) continue;
+    assignCatalogField(out, ph, value);
   }
   return out;
 }

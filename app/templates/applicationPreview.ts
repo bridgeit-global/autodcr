@@ -25,6 +25,7 @@ import {
 import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
 import {
+  applyCatalogFieldOverrides,
   catalogDocumentPrefersConsultantLetterhead,
   catalogDocumentShowsLetterhead,
   catalogPlaceholderFieldMap,
@@ -105,6 +106,12 @@ export type ApplicationPreviewSource = {
   applicationUrlsKey?: string | null;
   /** When set, HTML preview embeds a QR for this URL (skips DB lookup). */
   savedPdfUrlForQr?: string | null;
+  /**
+   * Session overrides from Application Details Letter fields.
+   * Keys are catalog `{{TOKEN}}` and/or legacy `$project_*` keys (with or without `$`).
+   * Applied after catalogPlaceholderFieldMap so typed values win in preview/PDF.
+   */
+  fieldOverrides?: Record<string, string> | null;
   projectData?: {
     title?: string;
     /** The architect's Supabase auth UUID stored at the project level (projects.architect_user_id). Used as a fallback to fetch architect metadata when the applicant row lacks a user_id. */
@@ -2446,6 +2453,7 @@ export async function fetchApplicationPreviewHtmlRaw(
           catalogType.applicant_type
         );
         Object.assign(formValues, catalogFields);
+        applyCatalogFieldOverrides(formValues, source?.fieldOverrides, placeholders);
         if (!catalogDocumentShowsLetterhead(variantDoc)) {
           delete formValues.project_Letterhead_Image_Url;
           delete formValues["{{LETTERHEAD_URL}}"];
@@ -2462,6 +2470,8 @@ export async function fetchApplicationPreviewHtmlRaw(
       console.warn("catalog placeholder overlay failed:", err);
     }
   }
+
+  applyCatalogFieldOverrides(formValues, source?.fieldOverrides);
 
   let access_token = opts?.accessToken?.trim();
   if (!access_token && !opts?.skipSessionRefresh) {
