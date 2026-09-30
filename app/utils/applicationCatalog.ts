@@ -1,4 +1,26 @@
 import { rememberCatalogDocumentSlug } from "@/app/utils/applicationPdfUrlKeys";
+import type { TemplateType } from "@/app/templates/templateGenerators";
+import { findConsultantApplicantInList } from "@/app/utils/consultantTemplateTokens";
+
+/**
+ * Fact-sheet / concession "Name of Consultants" tokens — pick by role, not the
+ * document's applicant_type (e.g. Architect on Concession).
+ */
+const CONSULTANT_NAME_PLACEHOLDER_TEMPLATE_TYPE: Record<string, TemplateType> = {
+  structural_engineer: "Structural Engineer",
+  site_supervisor: "Site Supervisor",
+  licensed_plumber: "Plumber",
+  me_consultant: "M&E Consultant",
+  fire_safety_consultant: "Fire Safety Consultant",
+  traffic_parking_consultant: "Parking Consultant",
+  horticulturist: "Horticulturist",
+};
+
+const CONSULTANT_NAME_PLACEHOLDER_KEYWORDS: Record<string, string[]> = {
+  road_construction_consultant: ["road"],
+  // Do not reuse Plumber — only match an explicit PH / public health applicant type.
+  ph_consultant: ["public health", "ph consultant", "p.h.", "p.h "],
+};
 
 /** Browser or server Supabase client — `from()` only. Avoids importing the browser client in Node APIs. */
 export type CatalogDb = {
@@ -598,12 +620,36 @@ function pickApplicant(
   });
 }
 
+function resolveConsultantNameByPlaceholderId(
+  placeholderId: string,
+  applicants: JsonRecord[] | undefined
+): string | null {
+  const roleType = CONSULTANT_NAME_PLACEHOLDER_TEMPLATE_TYPE[placeholderId];
+  const roleKeywords = CONSULTANT_NAME_PLACEHOLDER_KEYWORDS[placeholderId];
+  let row: JsonRecord | undefined;
+  if (roleType) {
+    row = findConsultantApplicantInList(applicants, roleType) as JsonRecord | undefined;
+  } else if (roleKeywords?.length) {
+    row = applicants?.find((a) => {
+      const t = String(a.applicantType ?? a.applicant_type ?? "").toLowerCase();
+      return roleKeywords.some((kw) => t.includes(kw));
+    });
+  } else {
+    return null;
+  }
+  return row ? stringifyCatalogValue(row.name) : "";
+}
+
 export function resolveCatalogPlaceholderValue(
   placeholder: ApplicationCatalogPlaceholder,
   project: CatalogProjectSource | null | undefined,
   opts?: { applicantType?: string | null }
 ): string {
   const applicants = project?.applicant_details?.applicants;
+  // Role-specific consultant names (fact sheet) — even if catalog row is still "computed".
+  const consultantName = resolveConsultantNameByPlaceholderId(placeholder.id, applicants);
+  if (consultantName !== null) return consultantName;
+
   if (placeholder.source_table === "computed") {
     if (placeholder.source_column === "current_date") {
       const now = new Date();
@@ -682,6 +728,60 @@ function formatPlotCsCtsToken(
   return `${surveyKindLabelForPlot(plotBelongs)} ${cleaned}`;
 }
 
+/** Same plotBelongsTo rule as Project Details: Village / Division / TPS schema. */
+export function formatVillageDivisionForPlot(
+  villageOrDivision: string,
+  plotBelongs: unknown
+): string {
+  const cleaned = villageOrDivision.trim();
+  if (!cleaned) return "";
+  if (/^(?:Village|Division|TPS schema)\b/i.test(cleaned)) return cleaned;
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return `Division ${cleaned}`;
+    case "F.P.No":
+      return `TPS schema ${cleaned}`;
+    case "CTS No.":
+    default:
+      return `Village ${cleaned}`;
+  }
+}
+
+/**
+ * When templates hardcode "Village /Division" (or "of Village") before the token,
+ * strip that label so the plotBelongsTo-aware value can supply the correct one.
+ * Works for any HTML that contains {{VILLAGE_DIVISION}}, {{VILLAGE}}, or
+ * $project_Division/Village — no per-file edits required.
+ */
+export function normalizePlotTypeLabelsInTemplateHtml(html: string): string {
+  if (!html) return html;
+  let out = html;
+  out = out.replace(
+    /Village\s*\/\s*Division(?:&nbsp;|\u00a0|\s)*(?=(?:<[^>]+>\s*)*\{\{VILLAGE_DIVISION\}\})/gi,
+    ""
+  );
+  out = out.replace(
+    /\bof\s+[Vv]illage(?=\s*(?:<[^>]+>\s*)*\{\{VILLAGE\}\})/g,
+    "of "
+  );
+  out = out.replace(
+    /(?:^|[>\s])Village(?=\s*(?:<[^>]+>\s*)*\{\{VILLAGE\}\})/g,
+    (match) => match.replace(/Village/i, "")
+  );
+  out = out.replace(
+    /\bof\s+Village-?\s*(?=(?:<[^>]+>\s*)*\$project_Division\/Village)/gi,
+    "of "
+  );
+  return out;
+}
+
+function formatVillageDivisionToken(
+  villageOrDivision: string,
+  plotBelongs: unknown
+): string {
+  return formatVillageDivisionForPlot(villageOrDivision, plotBelongs);
+}
+
 /**
  * Work Start Notice: only for F.P./TPS plots. CS/CTS → empty (phrase omitted).
  * Value is villageName / TPS schema from save_plot_details.
@@ -737,6 +837,20 @@ export function catalogPlaceholderFieldMap(
     if (ph.token === "{{TPS_NO}}" || ph.id === "tps_no") {
       // Always assign (even "") so CS/CTS clears {{TPS_NO}} and hides the phrase.
       assignCatalogField(out, ph, formatTpsNoToken(value, plotBelongs));
+      continue;
+    }
+    if (ph.token === "{{VILLAGE_DIVISION}}" || ph.id === "village_division") {
+      if (!value) continue;
+      value = formatVillageDivisionToken(value, plotBelongs);
+      if (!value) continue;
+      assignCatalogField(out, ph, value);
+      continue;
+    }
+    if (ph.token === "{{VILLAGE}}" || ph.id === "village") {
+      if (!value) continue;
+      value = formatVillageDivisionToken(value, plotBelongs);
+      if (!value) continue;
+      assignCatalogField(out, ph, value);
       continue;
     }
     if (!value) continue;

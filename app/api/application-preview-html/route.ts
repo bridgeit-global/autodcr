@@ -15,6 +15,7 @@ import { enrichConsultantAppointmentFields } from "@/app/utils/enrichConsultantA
 import {
   catalogDocumentShowsLetterhead,
   catalogDocumentShowsQrcode,
+  normalizePlotTypeLabelsInTemplateHtml,
   resolveCatalogDocumentForPreview,
 } from "@/app/utils/applicationCatalog";
 
@@ -243,7 +244,7 @@ function replaceTemplateTokens(
   html: string,
   fields: Record<string, string | undefined>
 ): string {
-  let out = html;
+  let out = normalizePlotTypeLabelsInTemplateHtml(html);
   // Replace longer tokens first so `$foo` doesn't partially replace `$foo_bar`.
   const entries = Object.entries(fields).sort(([a], [b]) => b.length - a.length);
   for (const [key, raw] of entries) {
