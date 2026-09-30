@@ -651,8 +651,18 @@ export function resolveCatalogPlaceholderValue(
   if (consultantName !== null) return consultantName;
 
   if (placeholder.source_table === "computed") {
-    if (placeholder.source_column === "current_date") {
+    if (
+      placeholder.source_column === "current_date" ||
+      placeholder.source_column === "current_day" ||
+      placeholder.source_column === "current_month_year"
+    ) {
       const now = new Date();
+      if (placeholder.source_column === "current_day") {
+        return String(now.getDate()).padStart(2, "0");
+      }
+      if (placeholder.source_column === "current_month_year") {
+        return now.toLocaleString("en-GB", { month: "long", year: "numeric" });
+      }
       const day = String(now.getDate()).padStart(2, "0");
       const month = String(now.getMonth() + 1).padStart(2, "0");
       return `${day}/${month}/${now.getFullYear()}`;
