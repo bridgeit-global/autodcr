@@ -10,6 +10,7 @@ import {
   stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
 import { buildBuildingProposalToHeaderLines } from "@/app/utils/cleanAppointmentLetterTypes";
+import { formatVillageDivisionForPlot } from "@/app/utils/applicationCatalog";
 import {
   templateConsultantApplicantKeywords,
   templateTypeToPdfTokenSuffix,
@@ -278,20 +279,6 @@ function joinProposedCsOrCtsNos(source?: ApplicationPreviewSource): string {
 }
 
 /** Subject line: village like `KURLA - 4` → `Kurla - 4` (first letter only capitalised on name part). */
-function formatDivisionVillageForSubject(value: string): string {
-  const s = value.trim();
-  if (!s) return s;
-  const parts = s.split(/\s*-\s*/);
-  if (parts.length >= 2) {
-    const head = parts[0].trim();
-    const tail = parts.slice(1).join(" - ").trim();
-    const headFormatted =
-      head.charAt(0).toUpperCase() + head.slice(1).toLowerCase();
-    return `${headFormatted} - ${tail}`;
-  }
-  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-}
-
 /**
  * Subject line survey numbers: two items → `338 & 340`; three or more → `2, 3, 4 & 6`.
  */
@@ -551,7 +538,7 @@ export function mapToPdfFieldValues(
     ? `${surveyLabelForSubject} ${formatSurveyNumbersListForSubject(rawSurveyList)}`
     : "";
   const divisionVillageForSubject = divisionVillage
-    ? formatDivisionVillageForSubject(divisionVillage)
+    ? formatVillageDivisionForPlot(divisionVillage, plotBelongs)
     : undefined;
   const consultantApplicantRegNo =
     primaryConsultantApplicant?.registrationNumber?.trim() ||
