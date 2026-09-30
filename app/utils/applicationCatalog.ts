@@ -23,10 +23,8 @@ export type ApplicationCatalogType = {
   description: string;
   category: ApplicationCatalogCategory;
   applicant_type: string | null;
-  token_suffix: string | null;
   planning_authorities: string[];
   requires_roster_match: boolean;
-  show_building_permission_fields: boolean;
   is_active: boolean;
   sort_order: number;
   icon_key: string;
@@ -248,10 +246,8 @@ function mapTypeRow(row: Record<string, unknown>): ApplicationCatalogType {
     category:
       row.category === "appointment_letter" ? "appointment_letter" : "department_permission",
     applicant_type: typeof row.applicant_type === "string" ? row.applicant_type : null,
-    token_suffix: typeof row.token_suffix === "string" ? row.token_suffix : null,
     planning_authorities: asStringArray(row.planning_authorities),
     requires_roster_match: Boolean(row.requires_roster_match),
-    show_building_permission_fields: Boolean(row.show_building_permission_fields),
     is_active: row.is_active !== false,
     sort_order: typeof row.sort_order === "number" ? row.sort_order : 100,
     icon_key: typeof row.icon_key === "string" && row.icon_key ? row.icon_key : "document",
@@ -327,9 +323,9 @@ function mapPlaceholderRow(row: Record<string, unknown>): ApplicationCatalogPlac
 }
 
 const TYPE_COLUMNS =
-  "id, slug, department, application_title, description, category, applicant_type, token_suffix, planning_authorities, requires_roster_match, show_building_permission_fields, is_active, sort_order, icon_key";
+  "id, slug, department, application_title, description, category, applicant_type, planning_authorities, requires_roster_match, is_active, sort_order, icon_key";
 const TYPE_COLUMNS_LEGACY =
-  "id, department, application_title, description, category, applicant_type, token_suffix, planning_authorities, requires_roster_match, show_building_permission_fields, is_active, sort_order, icon_key";
+  "id, department, application_title, description, category, applicant_type, planning_authorities, requires_roster_match, is_active, sort_order, icon_key";
 
 export async function fetchApplicationCatalogTypes(
   client?: CatalogDb
