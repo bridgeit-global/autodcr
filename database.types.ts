@@ -72,10 +72,8 @@ export type Database = {
           is_active: boolean
           planning_authorities: string[]
           requires_roster_match: boolean
-          show_building_permission_fields: boolean
           slug: string
           sort_order: number
-          token_suffix: string | null
           updated_at: string
         }
         Insert: {
@@ -90,10 +88,8 @@ export type Database = {
           is_active?: boolean
           planning_authorities?: string[]
           requires_roster_match?: boolean
-          show_building_permission_fields?: boolean
           slug: string
           sort_order?: number
-          token_suffix?: string | null
           updated_at?: string
         }
         Update: {
@@ -108,10 +104,8 @@ export type Database = {
           is_active?: boolean
           planning_authorities?: string[]
           requires_roster_match?: boolean
-          show_building_permission_fields?: boolean
           slug?: string
           sort_order?: number
-          token_suffix?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -768,25 +762,7 @@ export type Database = {
       }
     }
     Views: {
-      application_catalog_sheet: {
-        Row: {
-          application_type: string | null
-          category: string | null
-          column: string | null
-          department: string | null
-          document_sort: number | null
-          html: string | null
-          placeholder: string | null
-          placeholder_sort: number | null
-          show_letterhead: boolean | null
-          show_qrcode: boolean | null
-          sign: string | null
-          sub_category: string | null
-          table: string | null
-          type_sort: number | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       user_can_access_project: {
