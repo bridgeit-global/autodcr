@@ -62,8 +62,14 @@ export type ApplicationCatalogDocument = {
   html: string | null;
   sign: string[];
   letter_variant: "appointment" | "acceptance" | null;
-  /** Catalog flag: preview paints owner/consultant letterhead. */
+  /** Catalog flag: preview paints a letterhead image. */
   show_letterhead: boolean;
+  /**
+   * Whose letterhead image: owner | architect_or_ls | consultant
+   * (same tokens as sign[]). Ignored when show_letterhead is false.
+   * Null = legacy infer from letter_variant/sign.
+   */
+  letterhead_source: "owner" | "architect_or_ls" | "consultant" | null;
   /** Catalog flag: preview injects the saved-PDF QR. */
   show_qrcode: boolean;
   is_active: boolean;
@@ -71,9 +77,11 @@ export type ApplicationCatalogDocument = {
 };
 
 const DOCUMENT_COLUMNS =
-  "id, slug, application_type_id, category, sub_category, html, sign, letter_variant, show_letterhead, show_qrcode, is_active, sort_order";
+  "id, slug, application_type_id, category, sub_category, html, sign, letter_variant, show_letterhead, letterhead_source, show_qrcode, is_active, sort_order";
 const DOCUMENT_COLUMNS_LEGACY =
   "id, application_type_id, category, sub_category, html, sign, letter_variant, is_active, sort_order";
+const DOCUMENT_COLUMNS_NO_LETTERHEAD_SOURCE =
+  "id, slug, application_type_id, category, sub_category, html, sign, letter_variant, show_letterhead, show_qrcode, is_active, sort_order";
 
 export type ApplicationCatalogPlaceholder = {
   id: string;
@@ -284,6 +292,16 @@ function mapDocumentRow(row: Record<string, unknown>): ApplicationCatalogDocumen
       ? row.slug.trim()
       : id;
   rememberCatalogDocumentSlug(id, slug);
+  const letterheadRaw =
+    typeof row.letterhead_source === "string"
+      ? row.letterhead_source.trim().toLowerCase()
+      : "";
+  const letterhead_source =
+    letterheadRaw === "owner" ||
+    letterheadRaw === "architect_or_ls" ||
+    letterheadRaw === "consultant"
+      ? letterheadRaw
+      : null;
   return {
     id,
     slug,
@@ -295,6 +313,7 @@ function mapDocumentRow(row: Record<string, unknown>): ApplicationCatalogDocumen
     letter_variant: variant === "acceptance" || variant === "appointment" ? variant : null,
     // Missing columns (pre-migration) keep current always-on preview behavior.
     show_letterhead: row.show_letterhead === undefined ? true : Boolean(row.show_letterhead),
+    letterhead_source,
     show_qrcode: row.show_qrcode === undefined ? true : Boolean(row.show_qrcode),
     is_active: row.is_active !== false,
     sort_order: typeof row.sort_order === "number" ? row.sort_order : 100,
@@ -315,20 +334,47 @@ export function catalogDocumentShowsQrcode(
   return doc ? doc.show_qrcode : true;
 }
 
+export type CatalogLetterheadSource = "owner" | "architect_or_ls" | "consultant";
+
 /**
- * Appointment letters stay on the owner's letterhead. Acceptance letters and
- * architect/LS building-permission applications use the consultant letterhead.
+ * Whose letterhead image to use for this catalog document.
+ * Prefers explicit `letterhead_source` from Supabase; falls back to sign[] when unset.
+ */
+export function catalogDocumentLetterheadSource(
+  doc?: ApplicationCatalogDocument | null
+): CatalogLetterheadSource {
+  if (!doc) return "owner";
+  if (doc.letterhead_source === "owner") return "owner";
+  if (doc.letterhead_source === "architect_or_ls") return "architect_or_ls";
+  if (doc.letterhead_source === "consultant") return "consultant";
+
+  // Legacy: infer from sign only (no letter_variant). Order matches migration backfill.
+  const roles = doc.sign.map((item) => item.trim().toLowerCase());
+  if (
+    roles.some(
+      (role) =>
+        role === "architect_or_ls" ||
+        role === "architect" ||
+        role === "licensed surveyor" ||
+        role === "ls"
+    )
+  ) {
+    return "architect_or_ls";
+  }
+  if (roles.some((role) => role === "owner")) return "owner";
+  if (roles.some((role) => role === "consultant")) return "consultant";
+  return "owner";
+}
+
+/**
+ * True when the document should use architect/consultant letterhead
+ * (not the project owner's). Driven by letterhead_source when set.
  */
 export function catalogDocumentPrefersConsultantLetterhead(
   doc?: ApplicationCatalogDocument | null
 ): boolean {
-  if (!doc) return false;
-  if (doc.letter_variant === "acceptance") return true;
-  if (doc.letter_variant === "appointment") return false;
-  return doc.sign.some((item) => {
-    const role = item.trim().toLowerCase();
-    return role === "architect_or_ls" || role === "consultant";
-  });
+  const source = catalogDocumentLetterheadSource(doc);
+  return source === "architect_or_ls" || source === "consultant";
 }
 
 function mapPlaceholderRow(row: Record<string, unknown>): ApplicationCatalogPlaceholder {
@@ -425,9 +471,20 @@ export async function fetchDocumentsForApplicationType(
   const db = await resolveClient(client);
   let { data, error } = await selectDocumentsForType(db, applicationTypeId, DOCUMENT_COLUMNS);
   if (error) {
-    const retry = await selectDocumentsForType(db, applicationTypeId, DOCUMENT_COLUMNS_LEGACY);
-    data = retry.data;
-    error = retry.error;
+    // Column letterhead_source not migrated yet — keep show_letterhead/qrcode.
+    const mid = await selectDocumentsForType(
+      db,
+      applicationTypeId,
+      DOCUMENT_COLUMNS_NO_LETTERHEAD_SOURCE
+    );
+    if (!mid.error && Array.isArray(mid.data)) {
+      data = mid.data;
+      error = null;
+    } else {
+      const retry = await selectDocumentsForType(db, applicationTypeId, DOCUMENT_COLUMNS_LEGACY);
+      data = retry.data;
+      error = retry.error;
+    }
   }
   if (error || !Array.isArray(data)) return [];
   return data.map((row) => mapDocumentRow(row as Record<string, unknown>));
