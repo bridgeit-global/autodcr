@@ -1,3 +1,5 @@
+-- Indemnity on stamp paper: no architect letterhead / QR in the reserved top half.
+
 UPDATE public.application_documents
 SET show_letterhead = false,
     show_qrcode = false

@@ -1,3 +1,5 @@
+-- Full OC/BCC application: plotBelongsTo-aware subject + street/pin tokens.
+
 INSERT INTO public.application_type_placeholders
   (application_type_id, placeholder_id, required, sort_order)
 SELECT t.id, v.placeholder_id, v.required, v.sort_order
