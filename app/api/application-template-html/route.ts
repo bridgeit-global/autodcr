@@ -19,24 +19,33 @@ const supabaseAnonKey =
   process.env.SUPABASE_ANON_KEY?.trim() ||
   "";
 
-function isSafeHtmlBasename(file: string): boolean {
-  if (!file || file.includes("..") || file.includes("/") || file.includes("\\")) {
-    return false;
-  }
-  return file.toLowerCase().endsWith(".html");
+/** Relative Storage/repo path under html/; allow folders + spaces, block traversal. */
+function isSafeHtmlObjectPath(file: string): boolean {
+  if (!file || file.includes("\0") || file.includes("\\")) return false;
+  if (file.startsWith("/") || file.includes("..")) return false;
+  if (!file.toLowerCase().endsWith(".html")) return false;
+  return true;
 }
 
-async function findHtmlUnderBase(base: string, basename: string): Promise<string | null> {
-  const direct = path.resolve(base, basename);
-  const directRel = path.relative(base, direct);
-  if (!directRel.startsWith("..") && !path.isAbsolute(directRel)) {
-    try {
-      return await readFile(direct, "utf8");
-    } catch {
-      /* try nested folders */
-    }
+async function readHtmlAtRelativePath(
+  base: string,
+  objectPath: string
+): Promise<string | null> {
+  const abs = path.resolve(base, objectPath);
+  const rel = path.relative(base, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  try {
+    return await readFile(abs, "utf8");
+  } catch {
+    return null;
   }
+}
 
+/** Fallback when catalog still has a bare basename: find first match under html/. */
+async function findHtmlByBasename(
+  base: string,
+  basename: string
+): Promise<string | null> {
   async function walk(dir: string, depth: number): Promise<string | null> {
     if (depth > 3) return null;
     let entries;
@@ -46,7 +55,7 @@ async function findHtmlUnderBase(base: string, basename: string): Promise<string
       return null;
     }
     for (const ent of entries) {
-      if (ent.name.startsWith(".")) continue;
+      if (ent.name.startsWith(".") || ent.name === "htmls") continue;
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) {
         const found = await walk(abs, depth + 1);
@@ -81,12 +90,12 @@ async function downloadStorageTemplateHtml(objectPath: string): Promise<string |
 
 /**
  * Raw application template HTML for Letter fields token scanning.
- * Repo `html/` first (when bundled), then Supabase Storage — same catalog filenames
- * as Application_Templates so Vercel works without relying only on local files.
+ * Repo `html/` first (when bundled), then Supabase Storage — same catalog paths
+ * as Application_Templates (folder-relative or flat basenames).
  */
 export async function GET(request: NextRequest) {
   const file = request.nextUrl.searchParams.get("file")?.trim() || "";
-  if (!isSafeHtmlBasename(file)) {
+  if (!isSafeHtmlObjectPath(file)) {
     return NextResponse.json({ error: "Invalid file" }, { status: 400 });
   }
 
@@ -97,7 +106,10 @@ export async function GET(request: NextRequest) {
 
   let text: string | null = null;
   try {
-    text = await findHtmlUnderBase(base, file);
+    text = await readHtmlAtRelativePath(base, file);
+    if (text == null && !file.includes("/")) {
+      text = await findHtmlByBasename(base, file);
+    }
   } catch {
     text = null;
   }

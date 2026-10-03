@@ -33,21 +33,21 @@ const TEMPLATE_BUCKET =
   "Application_Templates";
 
 const TEMPLATE_PATH_MAP: Record<TemplateType, string> = {
-  Architect: "architect.html",
-  "Licensed Surveyor": "licensed-surveyor.html",
-  "Structural Engineer": "structural-engineer.html",
-  "Fire Safety Consultant": "fire-safety-consultant.html",
-  "M&E Consultant": "me-consultant.html",
-  Plumber: "plumber.html",
-  "Parking Consultant": "parking-consultant.html",
-  "Rainwater Consultant": "rainwater-consultant.html",
-  "Site Supervisor": "site-supervisor.html",
-  Horticulturist: "horticulturist.html",
-  "Landscape Consultant": "landscape-consultant.html",
-  "Geotechnical Consultant": "geotechnical-consultant.html",
-  "Environmental Consultant": "environmental-consultant.html",
-  "Town Planner": "town-planner.html",
-  "PMC / Project Manager": "pmc-project-manager.html",
+  Architect: "Appointment/architect.html",
+  "Licensed Surveyor": "Appointment/licensed-surveyor.html",
+  "Structural Engineer": "Appointment/structural-engineer.html",
+  "Fire Safety Consultant": "Appointment/fire-safety-consultant.html",
+  "M&E Consultant": "Appointment/me-consultant.html",
+  Plumber: "Appointment/plumber.html",
+  "Parking Consultant": "Appointment/parking-consultant.html",
+  "Rainwater Consultant": "Appointment/rainwater-consultant.html",
+  "Site Supervisor": "Appointment/site-supervisor.html",
+  Horticulturist: "Appointment/horticulturist.html",
+  "Landscape Consultant": "Appointment/landscape-consultant.html",
+  "Geotechnical Consultant": "Appointment/geotechnical-consultant.html",
+  "Environmental Consultant": "Appointment/environmental-consultant.html",
+  "Town Planner": "Appointment/town-planner.html",
+  "PMC / Project Manager": "Appointment/pmc-project-manager.html",
 };
 
 /** Storage errors sometimes expose `message` as JSON (e.g. `{ "url": "..." }`) — normalize for UI. */
@@ -82,7 +82,7 @@ function describeStorageTemplateDownloadError(
     looksLikeJsonOnlyUrl;
 
   if (likelyMissing) {
-    return `Missing template "${objectPath}" in Storage bucket "${bucket}". Upload it from your repo (e.g. html/architect_acceptance.html) or confirm the file name matches exactly.`;
+    return `Missing template "${objectPath}" in Storage bucket "${bucket}". Upload it from your repo (e.g. html/Acceptance/architect_acceptance.html) or confirm the file name matches exactly.`;
   }
 
   if (nestedMsg) return nestedMsg;
@@ -518,19 +518,19 @@ async function injectSavedPdfQrHtml(
   return insertMarkupAfterBodyOpen(html, fallback);
 }
 
-/** Maps each template type to its acceptance HTML file name. */
+/** Maps each template type to its acceptance HTML object path. */
 const ACCEPTANCE_TEMPLATE_PATH_MAP: Partial<Record<TemplateType, string>> = {
-  Architect: "architect_acceptance.html",
-  "Licensed Surveyor": "licensed-surveyor_acceptance.html",
-  "Fire Safety Consultant": "fire-safety-consultant_acceptance.html",
-  "Landscape Consultant": "landscape-consultant_acceptance.html",
-  "Geotechnical Consultant": "geotechnical-consultant_acceptance.html",
-  "M&E Consultant": "me-consultant_acceptance.html",
-  Plumber: "plumber_acceptance.html",
-  "Town Planner": "town-planner_acceptance.html",
-  "Structural Engineer": "structural-engineer_acceptance.html",
-  "Environmental Consultant": "environmental-consultant_acceptance.html",
-  "PMC / Project Manager": "pmc-project-manager_acceptance.html",
+  Architect: "Acceptance/architect_acceptance.html",
+  "Licensed Surveyor": "Acceptance/licensed-surveyor_acceptance.html",
+  "Fire Safety Consultant": "Acceptance/fire-safety-consultant_acceptance.html",
+  "Landscape Consultant": "Acceptance/landscape-consultant_acceptance.html",
+  "Geotechnical Consultant": "Acceptance/geotechnical-consultant_acceptance.html",
+  "M&E Consultant": "Acceptance/me-consultant_acceptance.html",
+  Plumber: "Acceptance/plumber_acceptance.html",
+  "Town Planner": "Acceptance/town-planner_acceptance.html",
+  "Structural Engineer": "Acceptance/structural-engineer_acceptance.html",
+  "Environmental Consultant": "Acceptance/environmental-consultant_acceptance.html",
+  "PMC / Project Manager": "Acceptance/pmc-project-manager_acceptance.html",
 };
 
 /** Maps template type to its `application_urls` acceptance key for QR injection. */
