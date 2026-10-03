@@ -1,12 +1,14 @@
 /**
  * Sync letter HTML into the `Application_Templates` Storage bucket.
  *
- * Put files in `html/` using the exact catalog `html` filename, then:
+ * Object keys are paths relative to `html/` (folders preserved), and must match
+ * `application_documents.html` (e.g. `IOD/iod-cc-architect-letterhead.html` or
+ * flat `architect.html`). Nested junk under `html/htmls/` is skipped.
  *
  *   pnpm sync:templates --list
  *   pnpm sync:templates --all
  *   pnpm sync:templates --dir ./html
- *   pnpm sync:templates fact-sheet.html work-start-notice.html
+ *   pnpm sync:templates concession/fact-sheet.html
  *   pnpm sync:templates /path/to/fact-sheet.html
  *
  * Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local.
@@ -54,7 +56,7 @@ function printUsage() {
   pnpm sync:templates fact-sheet.html work-start-notice.html
   pnpm sync:templates /absolute/path/to/fact-sheet.html
 
-File names must match the catalog html column (e.g. fact-sheet.html).
+Object keys must match the catalog html column (folder path or basename).
 `);
 }
 
@@ -71,6 +73,7 @@ async function collectFilesInDir(dir) {
   const names = [];
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
+    if (entry.name === "htmls" || entry.name.startsWith(".")) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       names.push(...(await collectFilesInDir(full)));

@@ -1126,7 +1126,7 @@ export function labelForPdfFieldKey(key: string, templateType: TemplateType): st
     .trim();
 }
 
-/** Keys that fill the letter “Sub:” line (see e.g. `html/architect.html`). */
+/** Keys that fill the letter “Sub:” line (see e.g. `html/Appointment/architect.html`). */
 export const APPLICATION_LETTER_SUBJECT_FIELD_KEYS = [
   "project_Letter_Appointment_Role",
   "project_CS/CTSNos.",
