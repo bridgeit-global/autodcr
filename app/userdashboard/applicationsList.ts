@@ -48,6 +48,7 @@ const DEPARTMENTS = [
   "DP(TDR)",
   "Estate and Land Management",
   "Airport Authority of India",
+  "MahaRERA",
   "General",
 ];
 
@@ -146,8 +147,19 @@ export async function fetchApplicationsList(params: {
     : "get_applications_for_owner";
   const byId = new Map<string, DashboardApplication>();
 
+  // Include catalog departments (e.g. MahaRERA) so new types are not dropped on RPC fallback.
+  const departmentSet = new Set(DEPARTMENTS);
+  const { data: catalogDepartments } = await supabase
+    .from("application_types")
+    .select("department")
+    .eq("is_active", true);
+  for (const row of catalogDepartments ?? []) {
+    const dept = typeof row.department === "string" ? row.department.trim() : "";
+    if (dept) departmentSet.add(dept);
+  }
+
   await Promise.all(
-    DEPARTMENTS.map(async (department) => {
+    [...departmentSet].map(async (department) => {
       const rpcArgs = isConsultant
         ? {
             p_consultant_id: userId,
