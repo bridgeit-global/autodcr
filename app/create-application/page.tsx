@@ -28,7 +28,10 @@ import {
   isProjectEligibleForNewApplication,
   type OwnerProjectSelectRow,
 } from "@/app/utils/ownerProjects";
-import { canCreateProjectAsArchitect } from "@/app/utils/projectAccess";
+import {
+  canCreateApplicationsRole,
+  canCreateProjectAsArchitect,
+} from "@/app/utils/projectAccess";
 import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
@@ -238,6 +241,18 @@ export default function CreateApplicationPage() {
           /* ignore */
         }
       }
+      if (!canCreateApplicationsRole({ role, consultant_type: consultantType })) {
+        if (!cancelled) {
+          setProjectsLoading(false);
+          showAlert({
+            title: "Cannot create application",
+            message:
+              "Only owners, developers, architects, and licensed surveyors can create applications.",
+          });
+          router.replace("/userdashboard/applications");
+        }
+        return;
+      }
       const rows = canCreateProjectAsArchitect({ role, consultant_type: consultantType })
         ? await fetchManageableProjectsForSelect()
         : await fetchOwnerProjectsForSelect();
@@ -249,7 +264,7 @@ export default function CreateApplicationPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router, showAlert]);
 
   useEffect(() => {
     if (!selectedProject) return;

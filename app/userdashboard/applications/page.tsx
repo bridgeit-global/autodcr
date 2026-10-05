@@ -23,6 +23,7 @@ import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { supabase } from "@/app/utils/supabase";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 import { normalizeProjectId } from "@/app/utils/applicantAppointmentPermissions";
+import { canCreateApplicationsRole } from "@/app/utils/projectAccess";
 import {
   applicationHref,
   bucketApplicationHealth,
@@ -100,6 +101,7 @@ function ApplicationsHubContent() {
     isConsultant,
     isArchitectConsultant,
     architectDelegateProjectIds,
+    consultantType,
   } = useDashboardProjects();
   const [applications, setApplications] = useState<DashboardApplication[]>([]);
   const [applicationsLoading, setApplicationsLoading] = useState(true);
@@ -108,6 +110,11 @@ function ApplicationsHubContent() {
   );
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const canCreateApplications = canCreateApplicationsRole({
+    role: isConsultant ? "Consultant" : "Owner",
+    consultant_type: consultantType ?? "",
+  });
 
   useEffect(() => {
     const fromQuery = parseStageFilter(searchParams.get("stage"));
@@ -279,13 +286,26 @@ function ApplicationsHubContent() {
             Track draft, in-process, approved, and rejected applications across your projects.
           </p>
         </div>
-        <Link
-          href="/create-application"
-          className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold ${BTN_PRIMARY}`}
-        >
-          <FilePlus2 className="h-4 w-4" />
-          Create Application
-        </Link>
+        {canCreateApplications ? (
+          <Link
+            href="/create-application"
+            className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold ${BTN_PRIMARY}`}
+          >
+            <FilePlus2 className="h-4 w-4" />
+            Create Application
+          </Link>
+        ) : (
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            title="Only owners, developers, architects, and licensed surveyors can create applications"
+            className={`inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold opacity-50 ${BTN_PRIMARY}`}
+          >
+            <FilePlus2 className="h-4 w-4" />
+            Create Application
+          </button>
+        )}
       </div>
 
       <div className="grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -375,15 +395,27 @@ function ApplicationsHubContent() {
                       ? "No applications yet. Create one to get started."
                       : "No applications in this stage."}
                   </p>
-                  {applications.length === 0 && (
-                    <Link
-                      href="/create-application"
-                      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
-                    >
-                      <FilePlus2 className="h-4 w-4" />
-                      Create Application
-                    </Link>
-                  )}
+                  {applications.length === 0 &&
+                    (canCreateApplications ? (
+                      <Link
+                        href="/create-application"
+                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold ${BTN_PRIMARY}`}
+                      >
+                        <FilePlus2 className="h-4 w-4" />
+                        Create Application
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        title="Only owners, developers, architects, and licensed surveyors can create applications"
+                        className={`inline-flex cursor-not-allowed items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold opacity-50 ${BTN_PRIMARY}`}
+                      >
+                        <FilePlus2 className="h-4 w-4" />
+                        Create Application
+                      </button>
+                    ))}
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-100">

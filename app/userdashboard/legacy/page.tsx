@@ -102,6 +102,7 @@ const departments = [
   "DP(TDR)",
   "Estate and Land Management",
   "Airport Authority of India",
+  "MahaRERA",
   "General",
 ];
 

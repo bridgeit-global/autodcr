@@ -34,6 +34,7 @@ const DEPARTMENTS = [
   "DP(TDR)",
   "Estate and Land Management",
   "Airport Authority of India",
+  "MahaRERA",
   "General",
 ];
 
@@ -79,8 +80,18 @@ export async function fetchOwnerWorkspaceApplications(params: {
     : "get_applications_for_owner";
   const byId = new Map<string, OwnerWorkspaceApplication>();
 
+  const departmentSet = new Set(DEPARTMENTS);
+  const { data: catalogDepartments } = await supabase
+    .from("application_types")
+    .select("department")
+    .eq("is_active", true);
+  for (const row of catalogDepartments ?? []) {
+    const dept = typeof row.department === "string" ? row.department.trim() : "";
+    if (dept) departmentSet.add(dept);
+  }
+
   await Promise.all(
-    DEPARTMENTS.map(async (department) => {
+    [...departmentSet].map(async (department) => {
       const rpcArgs = isConsultant
         ? {
             p_consultant_id: userId,

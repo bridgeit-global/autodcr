@@ -121,6 +121,25 @@ export function isArchitectConsultantRole(meta: UserMetadataLike): boolean {
   return t === "architect" || t.includes("architect");
 }
 
+export function isLicensedSurveyorConsultantRole(meta: UserMetadataLike): boolean {
+  if (!meta) return false;
+  if (meta.role !== "Consultant") return false;
+  const t = (meta.consultant_type ?? "").trim().toLowerCase();
+  return (
+    t === "licensed surveyor" ||
+    t === "licence surveyor" ||
+    t.includes("licensed surveyor") ||
+    t.includes("licence surveyor")
+  );
+}
+
+/** Owner/Developer accounts, or Architect / Licensed Surveyor consultants. */
+export function canCreateApplicationsRole(meta: UserMetadataLike): boolean {
+  if (!meta) return false;
+  if (meta.role !== "Consultant") return true;
+  return isArchitectConsultantRole(meta) || isLicensedSurveyorConsultantRole(meta);
+}
+
 export function canCreateProjectAsArchitect(meta: UserMetadataLike): boolean {
   return isArchitectConsultantRole(meta);
 }
