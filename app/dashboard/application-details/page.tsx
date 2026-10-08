@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import ApplicationDocumentPreviewPane from "@/app/components/ApplicationDocumentPreviewPane";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import DscExpiryModal from "@/app/components/DscExpiryModal";
 import DscPanVerifyModal from "@/app/components/DscPanVerifyModal";
@@ -2125,13 +2126,20 @@ export default function ApplicationDetailsPage() {
   const [detailsFieldsFallbackRows, setDetailsFieldsFallbackRows] = useState<PdfDetailsFieldRow[]>(
     []
   );
-  const [detailsFieldsDocumentLabel, setDetailsFieldsDocumentLabel] = useState<string | null>(null);
+  const [, setDetailsFieldsDocumentLabel] = useState<string | null>(null);
   const [detailsFieldsLoading, setDetailsFieldsLoading] = useState(false);
   const [detailsFieldsError, setDetailsFieldsError] = useState<string | null>(null);
+  /** Document key whose letter fields have finished loading (including an empty or error result). */
+  const [fieldsReadyKey, setFieldsReadyKey] = useState<string | null>(null);
+  /** Preview selection whose document has finished loading (including an error or notice). */
+  const [previewReadyKey, setPreviewReadyKey] = useState<string | null>(null);
   /** Session overrides for catalog Letter fields — applied to preview + PDF. */
   const [letterFieldOverrides, setLetterFieldOverrides] = useState<Record<string, string>>({});
   const letterFieldOverridesRef = useRef<Record<string, string>>({});
   const letterFieldsPreviewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Drops stale letter/license preview results when a newer load starts. */
+  const previewLoadRequestRef = useRef(0);
+  const sidePreviewLoadRef = useRef<() => Promise<void> | null>(() => null);
   const [applicationWorkflowStage, setApplicationWorkflowStage] =
     useState<ApplicationWorkflowStage>("draft");
   const [ownerSignedAt, setOwnerSignedAt] = useState<string | null>(null);
@@ -2539,8 +2547,11 @@ export default function ApplicationDetailsPage() {
    * Shows the appointed consultant's already-uploaded license document.
    * Read-only: the URL comes from the consultant's auth metadata, nothing is generated or stored.
    */
-  const loadLicensePreview = async (opts?: { keepModalOpen?: boolean }) => {
+  const loadLicensePreview = async (opts?: { keepModalOpen?: boolean; openModal?: boolean }) => {
     const keepModalOpen = opts?.keepModalOpen ?? false;
+    const openModal = opts?.openModal ?? true;
+    const requestId = ++previewLoadRequestRef.current;
+    const stale = () => requestId !== previewLoadRequestRef.current;
 
     try {
       setPreviewError(null);
@@ -2562,7 +2573,7 @@ export default function ApplicationDetailsPage() {
       }
 
       setIsPreviewLoading(true);
-      setPreviewOpen(true);
+      if (openModal) setPreviewOpen(true);
 
       const clearPreviewUrl = () =>
         setPreviewUrl((prev) => {
@@ -2571,6 +2582,7 @@ export default function ApplicationDetailsPage() {
         });
 
       const projectForPreview = await ensureProjectDataForPreview();
+      if (stale()) return;
       if (!projectForPreview) {
         setPreviewError(
           "Project data could not be loaded. Confirm you have access to this project and try again."
@@ -2589,6 +2601,7 @@ export default function ApplicationDetailsPage() {
       }
 
       const { data: sessionData } = await supabase.auth.getSession();
+      if (stale()) return;
       const token = sessionData.session?.access_token;
       let metadata: Record<string, unknown> | null = null;
       if (token) {
@@ -2602,6 +2615,7 @@ export default function ApplicationDetailsPage() {
         });
         if (res.ok) {
           const payload = (await res.json()) as { metadata?: unknown };
+          if (stale()) return;
           if (payload.metadata && typeof payload.metadata === "object") {
             metadata = payload.metadata as Record<string, unknown>;
           }
@@ -2620,11 +2634,13 @@ export default function ApplicationDetailsPage() {
         return;
       }
 
+      if (stale()) return;
       setPreviewUrl((prev) => {
         if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
         return licenseUrl;
       });
     } catch (err) {
+      if (stale()) return;
       setPreviewUrl((prev) => {
         if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
         return null;
@@ -2633,7 +2649,7 @@ export default function ApplicationDetailsPage() {
         err instanceof Error ? err.message : "License could not be loaded."
       );
     } finally {
-      setIsPreviewLoading(false);
+      if (!stale()) setIsPreviewLoading(false);
     }
   };
 
@@ -2643,14 +2659,19 @@ export default function ApplicationDetailsPage() {
       keepModalOpen?: boolean;
       resetSaveState?: boolean;
       catalogDocumentId?: string | null;
+      /** When false, refresh preview state without opening the modal. */
+      openModal?: boolean;
     }
   ) => {
     const keepModalOpen = opts?.keepModalOpen ?? false;
+    const openModal = opts?.openModal ?? true;
     const resetSaveState = opts?.resetSaveState ?? !keepModalOpen;
     const resolvedCatalogDocumentId =
       opts?.catalogDocumentId !== undefined
         ? opts.catalogDocumentId
         : selectedCatalogDocumentId;
+    const requestId = ++previewLoadRequestRef.current;
+    const stale = () => requestId !== previewLoadRequestRef.current;
 
     try {
       setPreviewError(null);
@@ -2676,15 +2697,16 @@ export default function ApplicationDetailsPage() {
       }
 
       setIsPreviewLoading(true);
-      if (!keepModalOpen) setPreviewOpen(true);
+      if (!keepModalOpen && openModal) setPreviewOpen(true);
 
       const projectForPreview = await ensureProjectDataForPreview();
+      if (stale()) return;
 
       if (!projectForPreview) {
         setPreviewError(
           "Project data could not be loaded. Confirm you have access to this project and try again."
         );
-        setPreviewOpen(true);
+        if (openModal) setPreviewOpen(true);
         return;
       }
 
@@ -2695,6 +2717,7 @@ export default function ApplicationDetailsPage() {
           .select("workflow_stage")
           .eq("id", applicationId)
           .maybeSingle();
+        if (stale()) return;
         if (appRow?.workflow_stage != null && appRow.workflow_stage !== "") {
           workflowStageForPreview = normalizeApplicationWorkflowStage(
             String(appRow.workflow_stage)
@@ -2715,6 +2738,7 @@ export default function ApplicationDetailsPage() {
           catalogDocumentId: resolvedCatalogDocumentId,
           fieldOverrides: letterFieldOverridesRef.current,
         });
+      if (stale()) return;
 
       const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
       const useStoredPdfPreview = shouldUseStoredPdfPreview(
@@ -2758,6 +2782,7 @@ export default function ApplicationDetailsPage() {
         const raw = await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
           forceFresh: false,
         });
+        if (stale()) return;
         const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
         const savedPdfUrl = getStoredApplicationPdfUrl(
           raw,
@@ -2806,7 +2831,7 @@ export default function ApplicationDetailsPage() {
             return pdfUrl;
           });
           setPreviewFieldMapping(fieldMapping);
-          setPreviewOpen(true);
+          if (openModal) setPreviewOpen(true);
           return;
         }
 
@@ -2833,6 +2858,7 @@ export default function ApplicationDetailsPage() {
               workflowStageForPreview !== "draft" && hasSignatureTimestamp,
           })
         : undefined;
+      if (stale()) return;
       const qrKey = applicationUrlsKeyFor(templateType, {
         letterVariant: resolvedPreviewVariant,
         catalogDocumentId: resolvedCatalogDocumentId,
@@ -2864,12 +2890,13 @@ export default function ApplicationDetailsPage() {
             return resolvedStoredUrl;
           });
           setPreviewFieldMapping(fieldMapping);
-          setPreviewOpen(true);
+          if (openModal) setPreviewOpen(true);
           return;
         }
       }
 
       const { data: previewSessionData } = await supabase.auth.getSession();
+      if (stale()) return;
       const previewAuthToken = previewSessionData.session?.access_token;
 
       let html = await generateApplicationPreviewHtml(
@@ -2884,6 +2911,7 @@ export default function ApplicationDetailsPage() {
         },
         previewAuthToken
       );
+      if (stale()) return;
 
       if (ownerSignedAt?.trim()) {
         html = injectMockOwnerSignatureIntoPreviewHtml(
@@ -2903,7 +2931,7 @@ export default function ApplicationDetailsPage() {
 
       if (!html || !html.trim()) {
         setPreviewError("Preview HTML was empty. Check that the template file exists under html/.");
-        setPreviewOpen(true);
+        if (openModal) setPreviewOpen(true);
         return;
       }
 
@@ -2943,14 +2971,15 @@ export default function ApplicationDetailsPage() {
       }
       // #endregion
       setPreviewFieldMapping(fieldMapping);
-      setPreviewOpen(true);
+      if (openModal) setPreviewOpen(true);
     } catch (error: unknown) {
+      if (stale()) return;
       console.error("Preview generation failed:", error);
       const message = error instanceof Error ? error.message : "Failed to generate preview.";
       setPreviewError(message);
-      setPreviewOpen(true);
+      if (openModal) setPreviewOpen(true);
     } finally {
-      setIsPreviewLoading(false);
+      if (!stale()) setIsPreviewLoading(false);
     }
   };
 
@@ -2977,13 +3006,6 @@ export default function ApplicationDetailsPage() {
       catalogDocuments.find((d) => d.letter_variant === next)?.id ??
       null;
     if (matchingId) setSelectedCatalogDocumentId(matchingId);
-    if (previewOpen) {
-      void loadPreviewContent(next, {
-        keepModalOpen: true,
-        resetSaveState: false,
-        catalogDocumentId: matchingId,
-      });
-    }
   };
 
   const usingCatalogDocs = catalogDocumentsReady && catalogDocuments.length > 0;
@@ -3028,7 +3050,6 @@ export default function ApplicationDetailsPage() {
     if (next === previewDocSelection) return;
     if (next === LICENSE_PREVIEW_VALUE) {
       setPreviewDocKind("license");
-      if (previewOpen) void loadLicensePreview({ keepModalOpen: true });
       return;
     }
     const leavingLicense = previewDocKind === "license";
@@ -3151,7 +3172,12 @@ export default function ApplicationDetailsPage() {
           setDetailsFieldsFallbackRows([]);
         }
       } finally {
-        if (!cancelled) setDetailsFieldsLoading(false);
+        if (!cancelled) {
+          setDetailsFieldsLoading(false);
+          setFieldsReadyKey(
+            `${selectedApplication ?? ""}|${letterVariant}|${selectedCatalogDocumentId ?? ""}`
+          );
+        }
       }
     })();
     return () => {
@@ -3169,16 +3195,63 @@ export default function ApplicationDetailsPage() {
     selectedCatalogDocumentId,
   ]);
 
+  sidePreviewLoadRef.current = () => {
+    if (!isReadOnlyMode || applicationAccessState !== "granted") return null;
+    if (!catalogDocumentsReady || !projectId || !projectData) return null;
+    if (!previewDocSelection) return null;
+    if (previewDocSelection === LICENSE_PREVIEW_VALUE) {
+      return loadLicensePreview({ keepModalOpen: true, openModal: false });
+    }
+    return loadPreviewContent(letterVariant, {
+      keepModalOpen: true,
+      resetSaveState: false,
+      catalogDocumentId: selectedCatalogDocumentId,
+      openModal: false,
+    });
+  };
+
+  useEffect(() => {
+    setFieldsReadyKey(null);
+  }, [selectedApplication, letterVariant, selectedCatalogDocumentId]);
+
+  useEffect(() => {
+    if (letterFieldsPreviewDebounceRef.current) {
+      clearTimeout(letterFieldsPreviewDebounceRef.current);
+      letterFieldsPreviewDebounceRef.current = null;
+    }
+    let cancelled = false;
+    const key = previewDocSelection;
+    setPreviewReadyKey(null);
+    const pending = sidePreviewLoadRef.current();
+    if (!pending) return;
+    void pending.finally(() => {
+      if (!cancelled) setPreviewReadyKey(key);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isReadOnlyMode,
+    applicationAccessState,
+    catalogDocumentsReady,
+    projectId,
+    Boolean(projectData),
+    previewDocSelection,
+    letterVariant,
+    selectedCatalogDocumentId,
+  ]);
+
   const schedulePreviewRefreshForLetterFields = () => {
     if (letterFieldsPreviewDebounceRef.current) {
       clearTimeout(letterFieldsPreviewDebounceRef.current);
     }
     letterFieldsPreviewDebounceRef.current = setTimeout(() => {
-      if (!previewOpen || previewDocKind === "license") return;
+      if (previewDocKind === "license") return;
       void loadPreviewContent(letterVariant, {
         keepModalOpen: true,
         resetSaveState: false,
         catalogDocumentId: selectedCatalogDocumentId,
+        openModal: previewOpen,
       });
     }, 300);
   };
@@ -5004,19 +5077,52 @@ export default function ApplicationDetailsPage() {
       : []),
   ];
 
+  const fieldsKey = `${selectedApplication ?? ""}|${letterVariant}|${selectedCatalogDocumentId ?? ""}`;
+  const showSplitLoader = fieldsReadyKey !== fieldsKey || previewReadyKey !== previewDocSelection;
+
   return (
-    <div className="w-full space-y-6">
-      <section className="w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between md:px-6">
-          <div className="min-w-0">
-            <h2 className="text-xl font-semibold tracking-tight text-brand-navy">
-              Application Details
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Read-only details for the selected application.
-            </p>
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+      <section className="relative flex min-h-0 w-full flex-1 flex-col">
+        <div className="sticky top-0 z-10 -mx-2 flex shrink-0 flex-wrap items-start justify-between gap-2 border-b border-gray-100 bg-white px-2 py-3">
+          <div
+            role="tablist"
+            aria-label="Document type"
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+          >
+            {!catalogDocumentsReady ? (
+              <span className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-400">
+                Loading…
+              </span>
+            ) : (
+              previewDocumentOptions.map((opt) => {
+                const disabled = !opt.value;
+                const selected = opt.value === previewDocSelection;
+                return (
+                  <button
+                    key={opt.value || opt.label}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    disabled={disabled}
+                    onClick={() =>
+                      handlePreviewDocSelectionChange(normalizePreviewDocSelection(opt.value))
+                    }
+                    className={[
+                      "rounded-lg px-3 py-2 text-left text-sm font-medium leading-snug transition-colors",
+                      disabled
+                        ? "cursor-not-allowed bg-gray-50 text-gray-300"
+                        : selected
+                          ? "bg-brand-blue text-white shadow-sm"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900",
+                    ].join(" ")}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })
+            )}
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {applicationWorkflowStage === "in_process" && isReadOnlyMode && (
               <div className="flex items-center gap-2 text-sm text-gray-700">
                 <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -5038,26 +5144,6 @@ export default function ApplicationDetailsPage() {
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500">
-                Document
-              </span>
-              <div className="w-72 shrink-0 sm:w-80">
-                <CustomSelect
-                  value={previewDocSelection}
-                  onChange={(v) =>
-                    handlePreviewDocSelectionChange(normalizePreviewDocSelection(v))
-                  }
-                  options={previewDocumentOptions.map((opt) => ({
-                    ...opt,
-                    disabled: !opt.value,
-                  }))}
-                  placeholder={catalogDocumentsReady ? "Select document" : "Loading…"}
-                  disabled={!catalogDocumentsReady}
-                  aria-label="Document type"
-                />
-              </div>
-            </div>
             <button
               type="button"
               onClick={handlePreview}
@@ -5069,20 +5155,22 @@ export default function ApplicationDetailsPage() {
           </div>
         </div>
 
-        <div className="px-5 py-5 md:px-6">
-          {previewError && (
-            <p className="mb-3 text-sm text-status-danger">{previewError}</p>
-          )}
-          {detailsFieldsError && (
-            <p className="mb-3 text-sm text-status-danger">{detailsFieldsError}</p>
-          )}
-          {savePdfMessage && (
-            <p className="mb-3 text-sm text-status-success">{savePdfMessage}</p>
-          )}
-          {savePdfError && (
-            <p className="mb-3 text-sm text-status-danger">{savePdfError}</p>
-          )}
+        {(detailsFieldsError || savePdfMessage || savePdfError) && (
+          <div className="shrink-0 space-y-1 pt-3">
+            {detailsFieldsError && (
+              <p className="text-sm text-status-danger">{detailsFieldsError}</p>
+            )}
+            {savePdfMessage && (
+              <p className="text-sm text-status-success">{savePdfMessage}</p>
+            )}
+            {savePdfError && (
+              <p className="text-sm text-status-danger">{savePdfError}</p>
+            )}
+          </div>
+        )}
 
+        <div className="flex min-h-0 flex-1 flex-col gap-4 pt-3 lg:flex-row">
+          <div className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain lg:w-2/5 lg:flex-none">
           {detailsFieldsLoading &&
           detailsFieldRows.length === 0 &&
           detailsFieldsFallbackRows.length === 0 &&
@@ -5093,70 +5181,77 @@ export default function ApplicationDetailsPage() {
             !detailsFieldsError ? (
             <p className="text-sm text-gray-500">No letter fields to show yet.</p>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-gray-200">
-              <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Letter fields
-                  </p>
-                  {detailsFieldsDocumentLabel ? (
-                    <p className="mt-0.5 truncate text-xs text-gray-500" title={detailsFieldsDocumentLabel}>
-                      {detailsFieldsDocumentLabel}
-                    </p>
-                  ) : null}
-                </div>
-                {detailsFieldsLoading ? (
-                  <span className="text-xs text-gray-400">Updating…</span>
-                ) : null}
-              </div>
-              <div className="divide-y divide-gray-100 bg-white">
-                {detailsFieldRows.map((row) => {
-                  const empty = !row.value.trim();
-                  return (
+            <div className="divide-y divide-gray-100">
+              {detailsFieldRows.map((row) => {
+                const empty = !row.value.trim();
+                return (
+                  <div
+                    key={row.id}
+                    className="grid grid-cols-1 gap-1 py-2 sm:grid-cols-[minmax(8rem,11rem)_1fr] sm:gap-3 sm:items-start"
+                  >
+                    <div className="text-sm font-medium text-gray-600">
+                      {row.label}
+                      {row.required && empty ? (
+                        <span className="ml-1 text-xs font-normal text-amber-600">
+                          required
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="sm:min-w-0">
+                      <input
+                        type="text"
+                        value={row.value}
+                        onChange={(e) => handleLetterFieldChange(row, e.target.value)}
+                        placeholder={`Enter ${row.label}`}
+                        className="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {detailsFieldRows.length === 0
+                ? detailsFieldsFallbackRows.map((row) => (
                     <div
-                      key={row.id}
-                      className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(160px,38%)_1fr] sm:gap-4 sm:items-start"
+                      key={row.key}
+                      className="grid grid-cols-1 gap-1 py-2 sm:grid-cols-[minmax(8rem,11rem)_1fr] sm:gap-3"
                     >
-                      <div className="text-sm font-medium text-gray-600">
-                        {row.label}
-                        {row.required && empty ? (
-                          <span className="ml-1 text-xs font-normal text-amber-600">
-                            required
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="sm:min-w-0">
-                        <input
-                          type="text"
-                          value={row.value}
-                          onChange={(e) => handleLetterFieldChange(row, e.target.value)}
-                          placeholder={`Enter ${row.label}`}
-                          className="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
-                        />
+                      <div className="text-sm font-medium text-gray-600">{row.label}</div>
+                      <div
+                        className="break-words text-sm text-gray-900 sm:min-w-0 sm:break-all"
+                        title={row.value.length > 120 ? row.value : undefined}
+                      >
+                        {row.value}
                       </div>
                     </div>
-                  );
-                })}
-                {detailsFieldRows.length === 0
-                  ? detailsFieldsFallbackRows.map((row) => (
-                      <div
-                        key={row.key}
-                        className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(160px,38%)_1fr] sm:gap-4"
-                      >
-                        <div className="text-sm font-medium text-gray-600">{row.label}</div>
-                        <div
-                          className="break-words text-sm text-gray-900 sm:min-w-0 sm:break-all"
-                          title={row.value.length > 120 ? row.value : undefined}
-                        >
-                          {row.value}
-                        </div>
-                      </div>
-                    ))
-                  : null}
-              </div>
+                  ))
+                : null}
             </div>
           )}
+          </div>
+          <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
+            <ApplicationDocumentPreviewPane
+              title={
+                selectedApplication ? `${selectedApplication} Preview` : "Application Preview"
+              }
+              htmlContent={previewHtml}
+              fileUrl={previewUrl}
+              isLoading={isPreviewLoading}
+              loadError={previewError}
+              notice={previewNotice}
+            />
+          </div>
         </div>
+        {showSplitLoader ? (
+          <div
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
+            <p className="mt-3 text-sm text-gray-500">Loading application…</p>
+          </div>
+        ) : null}
       </section>
 
       <DocumentPreviewModal

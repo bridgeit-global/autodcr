@@ -82,23 +82,35 @@ export default function NotificationBell() {
   useEffect(() => {
     let cancelled = false;
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let attachSeq = 0;
 
-    const teardown = () => {
-      if (channel) {
-        void supabase.removeChannel(channel);
-        channel = null;
-      }
+    const dropNotificationChannels = async (userId: string) => {
+      const topic = `realtime:notifications:${userId}`;
+      const stale = supabase.getChannels().filter((ch) => ch.topic === topic);
+      channel = null;
+      if (stale.length === 0) return;
+      await Promise.all(stale.map((ch) => supabase.removeChannel(ch)));
     };
 
     const attach = async (userId: string) => {
-      teardown();
-      if (cancelled) return;
+      const seq = ++attachSeq;
       setLoading(true);
       await loadInbox();
-      if (cancelled) return;
+      if (cancelled || seq !== attachSeq) return;
+
+      // getSession and onAuthStateChange both call attach. Supabase returns the
+      // existing channel for this topic, and .on() throws once it is subscribed.
+      await dropNotificationChannels(userId);
+      if (cancelled || seq !== attachSeq) return;
+
+      const topic = `notifications:${userId}`;
+      const stillSubscribed = supabase
+        .getChannels()
+        .some((ch) => ch.topic === `realtime:${topic}`);
+      if (stillSubscribed) return;
 
       channel = supabase
-        .channel(`notifications:${userId}`)
+        .channel(topic)
         .on(
           "postgres_changes",
           {
@@ -139,7 +151,10 @@ export default function NotificationBell() {
       if (session?.user?.id) {
         void attach(session.user.id);
       } else {
-        teardown();
+        attachSeq += 1;
+        const current = channel;
+        channel = null;
+        if (current) void supabase.removeChannel(current);
         setItems([]);
         setLoading(false);
       }
@@ -147,8 +162,11 @@ export default function NotificationBell() {
 
     return () => {
       cancelled = true;
+      attachSeq += 1;
       subscription.unsubscribe();
-      teardown();
+      const current = channel;
+      channel = null;
+      if (current) void supabase.removeChannel(current);
     };
   }, [loadInbox]);
 
