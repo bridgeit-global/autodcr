@@ -106,6 +106,7 @@ import {
   filterCatalogPlaceholdersUsedInTemplate,
   pickCatalogDocument,
   type ApplicationCatalogDocument,
+  type ApplicationCatalogType,
   type CatalogLetterFieldRow,
   type CatalogSigningInfo,
 } from "@/app/utils/applicationCatalog";
@@ -797,6 +798,8 @@ type BuildApplicationPreviewContextInput = {
   catalogDocumentId?: string | null;
   /** Session Letter fields overrides (catalog tokens / legacy keys). */
   fieldOverrides?: Record<string, string> | null;
+  /** When false, skip consultant/owner profile HTTP calls. Department forms already have project fields. */
+  includeConsultantProfiles?: boolean;
   /** @deprecated Use `letterVariant`. */
   architectHtmlVariant?: "appointment" | "acceptance";
 };
@@ -820,6 +823,7 @@ async function buildApplicationPreviewContext(
     catalogDocumentId,
     fieldOverrides,
     architectHtmlVariant,
+    includeConsultantProfiles = true,
   } = input;
 
   const localMeta = readLocalStoredUserMetadata();
@@ -828,8 +832,8 @@ async function buildApplicationPreviewContext(
   const [applicantDetailsFromTable, buildingProposalOfficesByKey, fireConsultantOfficesByKey] =
     await Promise.all([
       projectId ? fetchApplicantDetailsFromTable(supabase, projectId) : null,
-      fetchBuildingProposalOffices(supabase),
-      fetchFireConsultantOffices(supabase),
+      includeConsultantProfiles ? fetchBuildingProposalOffices(supabase) : Promise.resolve(null),
+      includeConsultantProfiles ? fetchFireConsultantOffices(supabase) : Promise.resolve(null),
     ]);
   const effectiveProjectData =
     mergeApplicantDetailsPreferTable(projectData, applicantDetailsFromTable) ?? projectData;
@@ -969,7 +973,7 @@ async function buildApplicationPreviewContext(
     templateType,
     effectiveProjectData
   );
-  if (consultantLookupUserIds.length === 0) {
+  if (includeConsultantProfiles && consultantLookupUserIds.length === 0) {
     const { data: authRow } = await supabase.auth.getUser();
     const role =
       typeof authRow.user?.user_metadata?.role === "string"
@@ -980,6 +984,7 @@ async function buildApplicationPreviewContext(
     }
   }
 
+  if (includeConsultantProfiles) {
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
@@ -1045,6 +1050,7 @@ async function buildApplicationPreviewContext(
     const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, consultantLookupUserIds);
     if (serverMeta) mergeConsultantMeta(serverMeta);
   }
+  }
 
   const ownerLookupUserIds = [
     ...new Set(
@@ -1061,11 +1067,13 @@ async function buildApplicationPreviewContext(
     ),
   ];
   let ownerMetaSnapshot: unknown = null;
-  const ownerMetaResults = await Promise.all(
-    ownerLookupUserIds.map((ownerLookupUserId) =>
-      fetchRawUserMetadataFromApi(userMetadata, [ownerLookupUserId], ownerApplicant?.email)
-    )
-  );
+  const ownerMetaResults = includeConsultantProfiles
+    ? await Promise.all(
+        ownerLookupUserIds.map((ownerLookupUserId) =>
+          fetchRawUserMetadataFromApi(userMetadata, [ownerLookupUserId], ownerApplicant?.email)
+        )
+      )
+    : [];
   for (const ownerMeta of ownerMetaResults) {
     if (!ownerMeta) continue;
     ownerMetaSnapshot = ownerMeta;
@@ -2069,6 +2077,8 @@ export default function ApplicationDetailsPage() {
   /** Which document the preview shows: a letter (appointment/acceptance) or the consultant's license. */
   const [previewDocKind, setPreviewDocKind] = useState<"letter" | "license">("letter");
   const [catalogDocuments, setCatalogDocuments] = useState<ApplicationCatalogDocument[]>([]);
+  const [catalogApplicationType, setCatalogApplicationType] =
+    useState<ApplicationCatalogType | null>(null);
   const [catalogDocumentsReady, setCatalogDocumentsReady] = useState(false);
   const [catalogTypeIsAppointment, setCatalogTypeIsAppointment] = useState(false);
   const [selectedCatalogDocumentId, setSelectedCatalogDocumentId] = useState<string | null>(null);
@@ -2077,6 +2087,7 @@ export default function ApplicationDetailsPage() {
     let cancelled = false;
     setCatalogDocumentsReady(false);
     setCatalogDocuments([]);
+    setCatalogApplicationType(null);
     setSelectedCatalogDocumentId(null);
     setPreviewDocKind("letter");
     setLetterVariant("appointment");
@@ -2093,6 +2104,7 @@ export default function ApplicationDetailsPage() {
       if (cancelled) return;
       if (!type) {
         setCatalogDocuments([]);
+        setCatalogApplicationType(null);
         setCatalogTypeIsAppointment(false);
         setCatalogDocumentsReady(true);
         return;
@@ -2100,6 +2112,7 @@ export default function ApplicationDetailsPage() {
       const docs = await fetchDocumentsForApplicationType(type.id);
       if (cancelled) return;
       setCatalogDocuments(docs);
+      setCatalogApplicationType(type);
       setCatalogTypeIsAppointment(type.category === "appointment_letter");
       const appointment = docs.find((d) => d.letter_variant === "appointment");
       setSelectedCatalogDocumentId(appointment?.id ?? docs[0]?.id ?? null);
@@ -2711,7 +2724,7 @@ export default function ApplicationDetailsPage() {
       }
 
       let workflowStageForPreview = applicationWorkflowStage;
-      if (applicationId) {
+      if (applicationId && !signingApplicationLoaded) {
         const { data: appRow } = await supabase
           .from("applications")
           .select("workflow_stage")
@@ -2726,18 +2739,31 @@ export default function ApplicationDetailsPage() {
         }
       }
 
-      const { fields, previewSource, templateType, fieldMapping } =
-        await buildApplicationPreviewContext({
-          userMetadata,
-          projectData: projectForPreview,
-          selectedApplication,
-          applicationNo,
-          applicationCreatedAt,
-          projectId,
-          letterVariant: variant,
-          catalogDocumentId: resolvedCatalogDocumentId,
-          fieldOverrides: letterFieldOverridesRef.current,
-        });
+      const knownCatalogDocumentEarly = pickCatalogDocument(catalogDocuments, {
+        documentId: resolvedCatalogDocumentId,
+        letterVariant: variant,
+      });
+      const [{ fields, previewSource, templateType, fieldMapping }, resolvedPlaceholders] =
+        await Promise.all([
+          buildApplicationPreviewContext({
+            userMetadata,
+            projectData: projectForPreview,
+            selectedApplication,
+            applicationNo,
+            applicationCreatedAt,
+            projectId,
+            letterVariant: variant,
+            catalogDocumentId: resolvedCatalogDocumentId,
+            fieldOverrides: letterFieldOverridesRef.current,
+            includeConsultantProfiles: catalogApplicationType?.category === "appointment_letter",
+          }),
+          catalogApplicationType
+            ? fetchResolvedPlaceholdersForApplication(
+                catalogApplicationType.id,
+                knownCatalogDocumentEarly?.id
+              )
+            : Promise.resolve(null),
+        ]);
       if (stale()) return;
 
       const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
@@ -2851,13 +2877,16 @@ export default function ApplicationDetailsPage() {
       const hasSignatureTimestamp = Boolean(
         ownerSignedAt?.trim() || architectSignedAt?.trim()
       );
-      const urlsRawForQr = projectId
-        ? await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
-            // Only force-refresh when a signature may have rewritten Storage URLs.
-            forceFresh:
-              workflowStageForPreview !== "draft" && hasSignatureTimestamp,
-          })
-        : undefined;
+      const urlsRawForQr =
+        !projectId
+          ? undefined
+          : workflowStageForPreview === "draft" && !hasSignatureTimestamp
+            ? projectForPreview.application_urls
+            : await fetchProjectApplicationUrls(projectId, projectForPreview.application_urls, {
+                // Only force-refresh when a signature may have rewritten Storage URLs.
+                forceFresh:
+                  workflowStageForPreview !== "draft" && hasSignatureTimestamp,
+              });
       if (stale()) return;
       const qrKey = applicationUrlsKeyFor(templateType, {
         letterVariant: resolvedPreviewVariant,
@@ -2899,6 +2928,7 @@ export default function ApplicationDetailsPage() {
       if (stale()) return;
       const previewAuthToken = previewSessionData.session?.access_token;
 
+      const knownCatalogDocument = knownCatalogDocumentEarly;
       let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
@@ -2908,6 +2938,13 @@ export default function ApplicationDetailsPage() {
           // Omit savedPdfUrlForQr until this document's PDF exists (draft → no QR).
           applicationUrlsKey: qrKey,
           ...(savedPdfUrlForQr ? { savedPdfUrlForQr } : {}),
+          ...(knownCatalogDocument ? { resolvedCatalogDocument: knownCatalogDocument } : {}),
+          ...(resolvedPlaceholders
+            ? {
+                resolvedPlaceholders,
+                resolvedApplicantType: catalogApplicationType?.applicant_type ?? null,
+              }
+            : {}),
         },
         previewAuthToken
       );
@@ -2984,6 +3021,14 @@ export default function ApplicationDetailsPage() {
   };
 
   const handlePreview = async () => {
+    const previewAlreadyLoaded =
+      previewReadyKey === previewDocSelection &&
+      Boolean(previewHtml || previewUrl) &&
+      !previewError;
+    if (previewAlreadyLoaded) {
+      setPreviewOpen(true);
+      return;
+    }
     if (previewDocKind === "license") {
       await loadLicensePreview({ keepModalOpen: false });
       return;
@@ -3094,19 +3139,15 @@ export default function ApplicationDetailsPage() {
   }, [selectedCatalogDocumentId, selectedApplication]);
 
   useEffect(() => {
-    if (!isReadOnlyMode || !projectId || !projectData) return;
+    if (!isReadOnlyMode || !projectId || !projectData || !catalogDocumentsReady) return;
     let cancelled = false;
     setDetailsFieldsLoading(true);
     setDetailsFieldsError(null);
     void (async () => {
       try {
-        const title = selectedApplication?.trim() || "";
-        const catalogType = title
-          ? await fetchApplicationCatalogTypeByTitle(title)
-          : null;
+        const catalogType = catalogApplicationType;
         if (catalogType) {
-          const docs = await fetchDocumentsForApplicationType(catalogType.id);
-          const variantDoc = pickCatalogDocument(docs, {
+          const variantDoc = pickCatalogDocument(catalogDocuments, {
             documentId: selectedCatalogDocumentId,
             letterVariant,
           });
@@ -3193,6 +3234,9 @@ export default function ApplicationDetailsPage() {
     userMetadata,
     letterVariant,
     selectedCatalogDocumentId,
+    catalogDocumentsReady,
+    catalogApplicationType,
+    catalogDocuments,
   ]);
 
   sidePreviewLoadRef.current = () => {
@@ -5078,7 +5122,7 @@ export default function ApplicationDetailsPage() {
   ];
 
   const fieldsKey = `${selectedApplication ?? ""}|${letterVariant}|${selectedCatalogDocumentId ?? ""}`;
-  const showSplitLoader = fieldsReadyKey !== fieldsKey || previewReadyKey !== previewDocSelection;
+  const showSplitLoader = fieldsReadyKey !== fieldsKey;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -5197,14 +5241,45 @@ export default function ApplicationDetailsPage() {
                         </span>
                       ) : null}
                     </div>
-                    <div className="sm:min-w-0">
+                    <div className="relative sm:min-w-0">
                       <input
                         type="text"
                         value={row.value}
-                        onChange={(e) => handleLetterFieldChange(row, e.target.value)}
-                        placeholder={`Enter ${row.label}`}
-                        className="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                        readOnly={row.readOnly}
+                        onChange={(e) => {
+                          if (!row.readOnly) handleLetterFieldChange(row, e.target.value);
+                        }}
+                        placeholder={row.readOnly ? undefined : `Enter ${row.label}`}
+                        aria-readonly={row.readOnly || undefined}
+                        title={
+                          row.readOnly
+                            ? "This value comes from the project and can’t be edited"
+                            : undefined
+                        }
+                        className={
+                          row.readOnly
+                            ? "w-full cursor-not-allowed rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-3 pr-8 text-sm text-gray-700 outline-none"
+                            : "w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                        }
                       />
+                      {row.readOnly ? (
+                        <span
+                          className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-rose-700"
+                          aria-hidden="true"
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="M6 18 18 6" />
+                          </svg>
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 );

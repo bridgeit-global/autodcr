@@ -8,13 +8,10 @@ import CustomSelect from "@/app/components/CustomSelect";
 import { supabase } from "@/app/utils/supabase";
 import {
   appointmentTypeIdsMatchingRoster,
-  catalogPlaceholderFieldMap,
   departmentsFromCatalog,
   fetchApplicationCatalogTypes,
-  fetchPlaceholdersForApplicationType,
   typesForDepartment,
   type ApplicationCatalogType,
-  type CatalogLinkedPlaceholder,
 } from "@/app/utils/applicationCatalog";
 import {
   createApplicationForOwner,
@@ -46,7 +43,6 @@ type PermissionType = {
   id: string;
   title: string;
   description: string;
-  icon: React.ReactNode;
 };
 
 const planningAuthorities: PlanningAuthority[] = [
@@ -61,131 +57,12 @@ const planningAuthorities: PlanningAuthority[] = [
 const iconClass = "h-8 w-8 text-gray-500";
 
 const DocumentIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
+  <svg viewBox="0 0 24 24" className={iconClass} aria-hidden="true">
     <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth={1.5} fill="none" />
     <path d="M14 3v4h4" stroke="currentColor" strokeWidth={1.5} fill="none" />
     <path d="M9 12h6M9 16h6" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
   </svg>
 );
-
-const BuildingIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <rect x="6" y="3" width="12" height="18" rx="1.5" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M9 7h2M13 7h2M9 11h2M13 11h2M11 15h2M10 21v-4h4v4" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const ClipboardIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <rect x="6" y="4" width="12" height="16" rx="2" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M9 4V2h6v2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-    <path d="M9 10h6M9 14h4" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const CheckIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M4 12l5 5 11-11" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-  </svg>
-);
-
-const ShieldIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M12 3l7 3v6c0 5-3 8-7 9-4-1-7-4-7-9V6l7-3z" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const TreeIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M12 2c3 0 5 2 5 5 0 2-1 4-1 4s2 1 2 4-2 4-5 4-5-1-5-4 2-4 2-4-1-2-1-4c0-3 2-5 5-5z" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M12 19v3" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const RoadIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M8 3h8l3 18H5L8 3z" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M12 5v3M12 12v3M12 18v2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const GearIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M12 5V3M12 21v-2M5 12H3m18 0h-2M6.343 6.343 4.929 4.929m14.142 14.142-1.414-1.414M17.657 6.343l1.414-1.414M6.343 17.657l-1.414 1.414" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const WaterIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M12 3s5 6 5 9-2.239 7-5 7-5-4-5-7 5-9 5-9z" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M9 16c.5.667 1.667 2 3 2s2.5-1 3-2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const WavesIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M4 9c1.5-1 3.5-1 5 0s3.5 1 5 0 3.5-1 5 0" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" fill="none" />
-    <path d="M4 15c1.5-1 3.5-1 5 0s3.5 1 5 0 3.5-1 5 0" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" fill="none" />
-  </svg>
-);
-
-const AssessmentIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M4 4h16v16H4z" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M8 16l2-3 2 2 4-5 2 3" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const NetworkIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <circle cx="12" cy="6" r="3" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <circle cx="6" cy="18" r="3" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <circle cx="18" cy="18" r="3" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M10 8.5l-3 7M14 8.5l3 7" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const PlaneIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M2 12l20-7-5 7 5 7-20-7z" stroke="currentColor" strokeWidth={1.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M12 12v8" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const WarningIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M12 3l9 16H3l9-16z" stroke="currentColor" strokeWidth={1.5} fill="none" />
-    <path d="M12 9v4M12 17h.01" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const FlowIcon = () => (
-  <svg viewBox="0 0 24 24" className={iconClass}>
-    <path d="M5 7h8a4 4 0 0 1 4 4v6" stroke="currentColor" strokeWidth={1.5} fill="none" strokeLinecap="round" />
-    <path d="M5 7l3 3M5 7l3-3" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-    <path d="M17 17l2-2m-2 2 2 2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-  </svg>
-);
-
-const CATALOG_ICON_BY_KEY: Record<string, React.ReactNode> = {
-  document: <DocumentIcon />,
-  building: <BuildingIcon />,
-  clipboard: <ClipboardIcon />,
-  check: <CheckIcon />,
-  shield: <ShieldIcon />,
-  tree: <TreeIcon />,
-  road: <RoadIcon />,
-  gear: <GearIcon />,
-  water: <WaterIcon />,
-  waves: <WavesIcon />,
-  assessment: <AssessmentIcon />,
-  network: <NetworkIcon />,
-  plane: <PlaneIcon />,
-  warning: <WarningIcon />,
-  flow: <FlowIcon />,
-};
 
 export default function CreateApplicationPage() {
   const router = useRouter();
@@ -194,7 +71,7 @@ export default function CreateApplicationPage() {
   const [selectedProject, setSelectedProject] = useState("");
   const [projects, setProjects] = useState<OwnerProjectSelectRow[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
-  const [selectedDepartment, setSelectedDepartment] = useState("General");
+  const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedPermission, setSelectedPermission] = useState<string | null>(null);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
@@ -202,7 +79,6 @@ export default function CreateApplicationPage() {
   const [existingPermissionTypes, setExistingPermissionTypes] = useState<string[]>([]);
   const [redirectOnModalOk, setRedirectOnModalOk] = useState(false);
   const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
-  const [catalogPlaceholders, setCatalogPlaceholders] = useState<CatalogLinkedPlaceholder[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -385,7 +261,6 @@ export default function CreateApplicationPage() {
         id: type.id,
         title: type.application_title,
         description: type.description,
-        icon: CATALOG_ICON_BY_KEY[type.icon_key] ?? <DocumentIcon />,
       })),
     [catalogTypesForDepartment]
   );
@@ -409,74 +284,6 @@ export default function CreateApplicationPage() {
   }, [catalogTypesForDepartment, selectedProject, selectedProjectData, permissionTypes]);
 
   const selectedPermissionRecord = visiblePermissionTypes.find((p) => p.id === selectedPermission);
-  const selectedCatalogType = catalogTypesForDepartment.find((type) => type.id === selectedPermission);
-
-  useEffect(() => {
-    if (!selectedPermission) {
-      setCatalogPlaceholders([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const rows = await fetchPlaceholdersForApplicationType(selectedPermission);
-      if (!cancelled) setCatalogPlaceholders(rows);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedPermission]);
-
-  const keyVariables = useMemo(() => {
-    if (!selectedProjectData) return [] as { field: string; value: string; source: string }[];
-    const projectSource = {
-      title: selectedProjectData.title,
-      project_info: selectedProjectData.project_info as Record<string, unknown> | null,
-      save_plot_details: selectedProjectData.save_plot_details as Record<string, unknown> | null,
-      building_details: selectedProjectData.building_details as Record<string, unknown> | null,
-      applicant_details: selectedProjectData.applicant_details as
-        | { applicants?: Record<string, unknown>[] }
-        | null,
-    };
-    if (catalogPlaceholders.length > 0) {
-      const mapped = catalogPlaceholderFieldMap(
-        catalogPlaceholders,
-        projectSource,
-        selectedCatalogType?.applicant_type
-      );
-      return catalogPlaceholders
-        .map((ph) => {
-          const value = mapped[ph.token] || "";
-          if (!value) return null;
-          return { field: ph.label, value, source: "Project Data" };
-        })
-        .filter((row): row is { field: string; value: string; source: string } => Boolean(row));
-    }
-    const info = selectedProjectData.project_info;
-    const plot = selectedProjectData.save_plot_details;
-    const building = selectedProjectData.building_details;
-    const display = getProjectDisplayData(selectedProjectData);
-    const rows: { field: string; value: string; source: string }[] = [];
-    const push = (field: string, value: string | number | undefined | null) => {
-      const text = value == null ? "" : String(value).trim();
-      if (!text) return;
-      rows.push({ field, value: text, source: "Project Data" });
-    };
-    push("Project Name", display.cleanTitle || selectedProjectData.title);
-    push("Proposal No", info?.proposalNo || display.proposalNo);
-    push("Plot Area", plot?.grossPlotArea);
-    push("Building Height", building?.height);
-    push("Planning Authority", plot?.planningAuthority || selectedAuthorityLabel);
-    push("Major Use of Plot", plot?.majorUseOfPlot);
-    push("Ward", plot?.ward);
-    push("Building Type", building?.buildingType);
-    push("Property Address", info?.propertyAddress);
-    return rows;
-  }, [
-    selectedProjectData,
-    selectedAuthorityLabel,
-    catalogPlaceholders,
-    selectedCatalogType,
-  ]);
 
   const handleProceed = async () => {
     if (!selectedProject || !selectedPermission) return;
@@ -587,14 +394,18 @@ export default function CreateApplicationPage() {
   }, [selectedAuthority, selectedDepartment]);
 
   useEffect(() => {
-    if (departmentOptions.length > 0 && !departmentOptions.includes(selectedDepartment)) {
-      setSelectedDepartment(departmentOptions.includes("General") ? "General" : departmentOptions[0]);
+    if (
+      selectedDepartment &&
+      departmentOptions.length > 0 &&
+      !departmentOptions.includes(selectedDepartment)
+    ) {
+      setSelectedDepartment("");
     }
   }, [selectedAuthority, selectedDepartment, departmentOptions]);
 
   useEffect(() => {
     if (!selectedProject) {
-      setSelectedDepartment("General");
+      setSelectedDepartment("");
     }
   }, [selectedProject]);
 
@@ -656,14 +467,6 @@ export default function CreateApplicationPage() {
     label: getProjectDisplayData(project).label,
   }));
 
-  const applicationSelectOptions = visiblePermissionTypes.map((type) => {
-    const already = existingPermissionTypes.includes(type.title);
-    return {
-      value: type.id,
-      label: already ? `${type.title} (Already added)` : type.title,
-    };
-  });
-
   const relatedRows = [
     { label: "Authority", value: selectedAuthorityLabel },
     { label: "Department", value: selectedDepartment || "—" },
@@ -692,18 +495,10 @@ export default function CreateApplicationPage() {
 
   return (
     <AppShell title="Create Application">
-      <div className="mx-auto w-full min-w-0 max-w-6xl px-4 py-6 md:px-6 md:py-8">
-        <div className="min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <div className="flex min-w-0 flex-col gap-4 border-b border-gray-100 px-5 py-5 lg:flex-row lg:items-start lg:justify-between md:px-6">
-            <div className="min-w-0 shrink-0 lg:max-w-sm">
-              <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
-                Create Application
-              </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                Select authority and project, then choose the application to create.
-              </p>
-            </div>
-            <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 lg:max-w-xl">
+      <div className="flex min-h-0 w-full flex-1 flex-col px-2 py-3 sm:px-3">
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-2 py-3">
+            <div className="grid min-w-0 gap-3 md:grid-cols-3">
               <div className="min-w-0">
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
                   Authority
@@ -735,128 +530,150 @@ export default function CreateApplicationPage() {
                   }
                   disabled={projectsLoading || filteredProjects.length === 0}
                 />
-                <p className="mt-1.5 min-h-4 text-xs text-gray-500">
-                  {!projectsLoading && filteredProjects.length === 0
-                    ? "Draft projects are not listed. Submit a project for this authority first."
-                    : "\u00a0"}
-                </p>
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Department
+                </label>
+                <CustomSelect
+                  value={selectedDepartment}
+                  onChange={setSelectedDepartment}
+                  options={departmentOptions.map((dept) => ({
+                    value: dept,
+                    label: dept,
+                  }))}
+                  placeholder="Select department"
+                  disabled={!selectedProject}
+                />
               </div>
             </div>
+            {!projectsLoading && filteredProjects.length === 0 ? (
+              <p className="mt-2 text-xs text-gray-500">
+                Draft projects are not listed. Submit a project for this authority first.
+              </p>
+            ) : null}
           </div>
 
-          <div className="grid min-w-0 gap-6 px-5 py-6 lg:grid-cols-3 md:px-6">
+          <div className="grid min-w-0 gap-6 px-2 py-4 lg:grid-cols-3">
             <div className="min-w-0 space-y-6 lg:col-span-2">
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-                <div className="min-w-0">
-                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                    Department
-                  </label>
-                  <CustomSelect
-                    value={selectedDepartment}
-                    onChange={setSelectedDepartment}
-                    options={departmentOptions.map((dept) => ({
-                      value: dept,
-                      label: dept,
-                    }))}
-                    placeholder="Select department"
-                    disabled={!selectedProject}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <label className="mb-1.5 block text-sm font-medium text-gray-800">
-                    Application type
-                  </label>
-                  {catalogTypesForDepartment.some((type) => type.requires_roster_match) &&
-                  selectedProject &&
-                  visiblePermissionTypes.length === 0 ? (
-                    <p className="min-h-11 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-sm leading-snug text-gray-700">
-                      No consultant roles match an appointment letter yet. Add matching roles in{" "}
-                      <Link
-                        href={`/dashboard/applicant?projectId=${encodeURIComponent(selectedProject)}`}
-                        className="font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy"
-                      >
-                        Applicant Details
-                      </Link>
-                      .
-                    </p>
-                  ) : (
-                    <CustomSelect
-                      value={selectedPermission ?? ""}
-                      onChange={(val) => {
-                        const type = visiblePermissionTypes.find((p) => p.id === val);
-                        if (type && existingPermissionTypes.includes(type.title)) {
-                          setModalMessage(
-                            "This permission type is already created for the selected project."
-                          );
-                          setRedirectOnModalOk(false);
-                          setShowInfoModal(true);
-                          return;
-                        }
-                        setSelectedPermission(val || null);
-                      }}
-                      options={applicationSelectOptions}
-                      placeholder={
-                        !selectedProject
-                          ? "Select a project first"
-                          : "Select application type"
-                      }
-                      disabled={!selectedProject || visiblePermissionTypes.length === 0}
-                    />
-                  )}
-                </div>
-              </div>
-
               <div>
-                <div className="mb-3 flex items-end justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-brand-navy">Key Variables</h2>
-                    <p className="text-xs text-gray-500">
-                      Pulled from the selected project. Empty fields are hidden.
-                    </p>
-                  </div>
+                <div className="mb-3">
+                  <h2 className="text-sm font-semibold text-brand-navy">Application type</h2>
+                  <p className="text-xs text-gray-500">Choose the application to create.</p>
                 </div>
-                <div className="overflow-hidden rounded-xl border border-gray-200">
-                  <div className="max-h-[280px] overflow-auto">
-                    <table className="w-full table-fixed text-left text-sm">
-                      <thead className="sticky top-0 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-                        <tr>
-                          <th className="w-[30%] px-4 py-3 font-medium">Field</th>
-                          <th className="w-[45%] px-4 py-3 font-medium">Value</th>
-                          <th className="w-[25%] px-4 py-3 font-medium">Source</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 bg-white">
-                        {!selectedProject ? (
-                          <tr>
-                            <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                              Select a project to view key variables.
-                            </td>
-                          </tr>
-                        ) : keyVariables.length === 0 ? (
-                          <tr>
-                            <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                              No project variables available yet.
-                            </td>
-                          </tr>
-                        ) : (
-                          keyVariables.map((row) => (
-                            <tr key={row.field}>
-                              <td className="truncate px-4 py-3 font-medium text-gray-800" title={row.field}>
-                                {row.field}
-                              </td>
-                              <td className="truncate px-4 py-3 text-gray-700" title={row.value}>
-                                {row.value}
-                              </td>
-                              <td className="truncate px-4 py-3 text-gray-500" title={row.source}>
-                                {row.source}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                {catalogTypesForDepartment.some((type) => type.requires_roster_match) &&
+                selectedProject &&
+                visiblePermissionTypes.length === 0 ? (
+                  <p className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-snug text-gray-700">
+                    No consultant roles match an appointment letter yet. Add matching roles in{" "}
+                    <Link
+                      href={`/dashboard/applicant?projectId=${encodeURIComponent(selectedProject)}`}
+                      className="font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy"
+                    >
+                      Applicant Details
+                    </Link>
+                    .
+                  </p>
+                ) : !selectedProject ? (
+                  <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                    Select a project first to see application types.
+                  </p>
+                ) : !selectedDepartment ? (
+                  <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                    Select a department to see application types.
+                  </p>
+                ) : visiblePermissionTypes.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                    No application types are available for this department.
+                  </p>
+                ) : (
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                    {visiblePermissionTypes.map((type) => {
+                      const already = existingPermissionTypes.includes(type.title);
+                      const selected = selectedPermission === type.id;
+                      return (
+                        <button
+                          key={type.id}
+                          type="button"
+                          aria-pressed={selected}
+                          aria-label={already ? `${type.title}, already added` : type.title}
+                          onClick={() => {
+                            if (already) {
+                              setModalMessage(
+                                "This permission type is already created for the selected project."
+                              );
+                              setRedirectOnModalOk(false);
+                              setShowInfoModal(true);
+                              return;
+                            }
+                            setSelectedPermission(type.id);
+                          }}
+                          className={`relative flex min-h-[7.25rem] w-full min-w-0 items-start gap-3 rounded-xl border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-blue/30 ${
+                            already
+                              ? "border-sky-200 bg-sky-50/80 hover:border-sky-300 hover:bg-sky-50"
+                              : selected
+                                ? "border-brand-blue bg-brand-blue/5 ring-2 ring-brand-blue/15"
+                                : "border-gray-200 bg-white hover:border-brand-blue/40 hover:bg-gray-50"
+                          }`}
+                        >
+                          <span
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                              already
+                                ? "bg-white"
+                                : selected
+                                  ? "bg-brand-blue/10"
+                                  : "bg-gray-100"
+                            }`}
+                          >
+                            <DocumentIcon />
+                          </span>
+                          <span className="min-w-0 flex-1 pt-0.5 pr-8">
+                            <span className="block text-sm font-semibold leading-snug text-brand-navy">
+                              {type.title}
+                            </span>
+                            {type.description ? (
+                              <span className="mt-1 line-clamp-2 block text-xs leading-relaxed text-gray-500">
+                                {type.description}
+                              </span>
+                            ) : null}
+                          </span>
+                          {already ? (
+                            <span className="group/added absolute right-3 top-3">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-navy text-white shadow-sm transition-transform group-hover/added:scale-110">
+                                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                                  <path
+                                    d="M5 12.5l4.2 4.2L19 7"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth={2.5}
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </span>
+                              <span className="pointer-events-none absolute right-0 top-9 z-10 hidden whitespace-nowrap rounded-md bg-brand-navy px-2 py-1 text-[11px] font-medium text-white shadow-md group-hover/added:block">
+                                Already added
+                              </span>
+                            </span>
+                          ) : selected ? (
+                            <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-brand-blue text-white">
+                              <svg viewBox="0 0 24 24" className="h-3 w-3" aria-hidden="true">
+                                <path
+                                  d="M5 12.5l4.2 4.2L19 7"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2.5}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
+                )}
               </div>
             </div>
 
@@ -885,7 +702,7 @@ export default function CreateApplicationPage() {
             </aside>
           </div>
 
-          <div className="flex flex-col-reverse gap-3 border-t border-gray-100 px-5 py-4 sm:flex-row sm:justify-end md:px-6">
+          <div className="flex flex-col-reverse gap-3 border-t border-gray-100 px-2 py-3 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={() => router.push("/userdashboard")}
