@@ -781,6 +781,22 @@ function surveyKindLabelForPlot(plotBelongs: unknown): string {
   }
 }
 
+/** Road / Street Name. Keep a single "Road" when the saved name already includes it. */
+function formatRoadNameToken(roadName: string): string {
+  const cleaned = roadName.trim();
+  if (!cleaned) return "";
+  if (/\broad\b/i.test(cleaned)) return cleaned;
+  return `${cleaned} Road`;
+}
+
+/** Ward. Keep a single "Ward" when the saved value already includes it, including values with spaces. */
+function formatWardToken(ward: string): string {
+  const cleaned = ward.trim().replace(/\s+/g, " ");
+  if (!cleaned) return "";
+  if (/\bward\b/i.test(cleaned)) return cleaned;
+  return `${cleaned} Ward`;
+}
+
 function formatPlotCsCtsToken(
   numbers: string,
   plotBelongs: unknown
@@ -886,6 +902,20 @@ export function catalogPlaceholderFieldMap(
     if (ph.token === "{{ZONE}}" || ph.id === "zone") {
       if (!value) continue;
       value = formatZoneTokenForTemplate(value);
+      if (!value) continue;
+      assignCatalogField(out, ph, value);
+      continue;
+    }
+    if (ph.token === "{{WARD_NO}}" || ph.id === "ward_no") {
+      if (!value) continue;
+      value = formatWardToken(value);
+      if (!value) continue;
+      assignCatalogField(out, ph, value);
+      continue;
+    }
+    if (ph.token === "{{ROAD_NAME}}" || ph.id === "road_name") {
+      if (!value) continue;
+      value = formatRoadNameToken(value);
       if (!value) continue;
       assignCatalogField(out, ph, value);
       continue;

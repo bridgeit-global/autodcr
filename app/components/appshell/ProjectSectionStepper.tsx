@@ -1,6 +1,7 @@
 "use client";
 
 import { useProjectSectionNavigation } from "@/app/hooks/useProjectSectionNavigation";
+import { ReadOnlyApplicationActions } from "@/app/components/appshell/ProjectWizardToolbar";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 import {
   APPLICATION_DETAILS_PATH,
@@ -41,30 +42,38 @@ export default function ProjectSectionStepper() {
     <>
       <nav
         aria-label="Project sections"
-        className="border-b border-gray-100 bg-white px-4 py-4 sm:px-6"
+        className="border-b border-gray-100 bg-white px-2 py-3"
       >
         {isReadOnlyMode && (
-          <div role="tablist" className="mb-3 flex items-center gap-6 border-b border-gray-100">
-            {[
-              { label: "Application", path: APPLICATION_DETAILS_PATH, active: isApplicationTab },
-              { label: "Project Data", path: PROJECT_LIBRARY_PATH, active: !isApplicationTab },
-            ].map((tab) => (
-              <button
-                key={tab.label}
-                type="button"
-                role="tab"
-                aria-selected={tab.active}
-                onClick={() => handleNavigation(tab.path)}
-                className={[
-                  "-mb-px border-b-2 px-1 pb-2 text-sm transition-colors",
-                  tab.active
-                    ? "border-brand-blue font-semibold text-brand-blue"
-                    : "border-transparent font-medium text-gray-500 hover:text-gray-700",
-                ].join(" ")}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div
+            className={[
+              "flex flex-wrap items-center justify-between gap-x-4 gap-y-2",
+              isApplicationTab ? "" : "mb-3 border-b border-gray-100 pb-2",
+            ].join(" ")}
+          >
+            <div role="tablist" className="flex items-center gap-6">
+              {[
+                { label: "Application", path: APPLICATION_DETAILS_PATH, active: isApplicationTab },
+                { label: "Project Data", path: PROJECT_LIBRARY_PATH, active: !isApplicationTab },
+              ].map((tab) => (
+                <button
+                  key={tab.label}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab.active}
+                  onClick={() => handleNavigation(tab.path)}
+                  className={[
+                    "border-b-2 px-1 pb-1 text-sm transition-colors",
+                    tab.active
+                      ? "border-brand-blue font-semibold text-brand-blue"
+                      : "border-transparent font-medium text-gray-500 hover:text-gray-700",
+                  ].join(" ")}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <ReadOnlyApplicationActions />
           </div>
         )}
 

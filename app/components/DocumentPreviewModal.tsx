@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useHtmlPreviewFrame } from "@/app/components/useHtmlPreviewFrame";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
@@ -105,7 +106,7 @@ export default function DocumentPreviewModal({
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const injectMockOwnerSignatureRef = useRef<() => Promise<void>>(async () => Promise.resolve());
-  const previewBlobUrlRef = useRef<string | null>(null);
+  useHtmlPreviewFrame(iframeRef, htmlContent, Boolean(open && htmlContent && !fileUrl));
   /** Sidebar auto-sign: afterInject / onMockSignComplete ran successfully once for this open+html. */
   const sidebarAutoCommitDoneRef = useRef(false);
   /** Prevents parallel afterInject when load + timer both fire. */
@@ -121,40 +122,6 @@ export default function DocumentPreviewModal({
       document.body.style.overflow = "auto";
     };
   }, [open]);
-
-  // Blob URL navigation gives a real `Window` on `contentDocument.defaultView`
-  // (unlike `srcDoc` / `document.write`, which break html2canvas on some browsers).
-  useLayoutEffect(() => {
-    if (!open || !htmlContent || fileUrl) {
-      if (previewBlobUrlRef.current) {
-        URL.revokeObjectURL(previewBlobUrlRef.current);
-        previewBlobUrlRef.current = null;
-      }
-      if (iframeRef.current && !fileUrl) {
-        iframeRef.current.src = "about:blank";
-      }
-      return;
-    }
-    const frame = iframeRef.current;
-    if (!frame) return;
-
-    if (previewBlobUrlRef.current) {
-      URL.revokeObjectURL(previewBlobUrlRef.current);
-      previewBlobUrlRef.current = null;
-    }
-    const url = URL.createObjectURL(
-      new Blob([htmlContent], { type: "text/html;charset=utf-8" })
-    );
-    previewBlobUrlRef.current = url;
-    frame.src = url;
-
-    return () => {
-      URL.revokeObjectURL(url);
-      if (previewBlobUrlRef.current === url) {
-        previewBlobUrlRef.current = null;
-      }
-    };
-  }, [open, htmlContent, fileUrl]);
 
   useEffect(() => {
     if (!open) {
