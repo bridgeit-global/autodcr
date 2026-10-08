@@ -111,6 +111,8 @@ export type CatalogLetterFieldRow = {
   value: string;
   required: boolean;
   uiGroup: string;
+  /** Value came from project/applicant data (or a resolved computed token). Not typed on this screen. */
+  readOnly: boolean;
 };
 
 const LETTER_FIELD_SKIP_TOKENS = new Set([
@@ -158,11 +160,14 @@ export function buildCatalogLetterFieldRows(
     const mapped =
       (mappedValues[ph.token] ?? "").trim() ||
       (legacyToken ? (mappedValues[legacyToken] ?? "").trim() : "");
+    // Project, applicant, and other stored sources stay locked. Blank `computed`
+    // letter tokens (road width, remarks, and the rest) stay editable.
+    const readOnly = ph.source_table !== "computed" || Boolean(mapped);
     const overrideRaw =
       overrides?.[ph.token] ??
       (legacyToken ? overrides?.[legacyToken] : undefined) ??
       (ph.legacy_token ? overrides?.[ph.legacy_token] : undefined);
-    const value = overrideRaw !== undefined ? String(overrideRaw) : mapped;
+    const value = !readOnly && overrideRaw !== undefined ? String(overrideRaw) : mapped;
     rows.push({
       id: ph.id,
       token: ph.token,
@@ -171,6 +176,7 @@ export function buildCatalogLetterFieldRows(
       value,
       required: ph.required,
       uiGroup: ph.ui_group,
+      readOnly,
     });
   }
   return rows;
@@ -423,12 +429,32 @@ export async function fetchApplicationCatalogTypes(
   return data.map((row) => mapTypeRow(row as Record<string, unknown>));
 }
 
+const catalogTypeByTitle = new Map<string, Promise<ApplicationCatalogType | null>>();
+const catalogDocsByType = new Map<string, Promise<ApplicationCatalogDocument[]>>();
+const placeholdersByType = new Map<string, Promise<CatalogLinkedPlaceholder[]>>();
+const placeholdersByDocument = new Map<string, Promise<CatalogLinkedPlaceholder[]>>();
+
 export async function fetchApplicationCatalogTypeByTitle(
   applicationTitle: string,
   client?: CatalogDb
 ): Promise<ApplicationCatalogType | null> {
   const title = applicationTitle.trim();
   if (!title) return null;
+  const cacheKey = title.toLowerCase();
+  const cached = catalogTypeByTitle.get(cacheKey);
+  if (cached) return cached;
+  const pending = loadApplicationCatalogTypeByTitle(title, client).then((type) => {
+    if (!type) catalogTypeByTitle.delete(cacheKey);
+    return type;
+  });
+  catalogTypeByTitle.set(cacheKey, pending);
+  return pending;
+}
+
+async function loadApplicationCatalogTypeByTitle(
+  title: string,
+  client?: CatalogDb
+): Promise<ApplicationCatalogType | null> {
   const db = await resolveClient(client);
   let { data, error } = await db
     .from("application_types")
@@ -465,6 +491,17 @@ async function selectDocumentsForType(
 }
 
 export async function fetchDocumentsForApplicationType(
+  applicationTypeId: string,
+  client?: CatalogDb
+): Promise<ApplicationCatalogDocument[]> {
+  const cached = catalogDocsByType.get(applicationTypeId);
+  if (cached) return cached;
+  const pending = loadDocumentsForApplicationType(applicationTypeId, client);
+  catalogDocsByType.set(applicationTypeId, pending);
+  return pending;
+}
+
+async function loadDocumentsForApplicationType(
   applicationTypeId: string,
   client?: CatalogDb
 ): Promise<ApplicationCatalogDocument[]> {
@@ -510,6 +547,17 @@ export async function fetchPlaceholdersForApplicationType(
   applicationTypeId: string,
   client?: CatalogDb
 ): Promise<CatalogLinkedPlaceholder[]> {
+  const cached = placeholdersByType.get(applicationTypeId);
+  if (cached) return cached;
+  const pending = loadPlaceholdersForApplicationType(applicationTypeId, client);
+  placeholdersByType.set(applicationTypeId, pending);
+  return pending;
+}
+
+async function loadPlaceholdersForApplicationType(
+  applicationTypeId: string,
+  client?: CatalogDb
+): Promise<CatalogLinkedPlaceholder[]> {
   const db = await resolveClient(client);
   const { data, error } = await db
     .from("application_type_placeholders")
@@ -527,6 +575,17 @@ export async function fetchPlaceholdersForApplicationType(
 }
 
 export async function fetchPlaceholdersForDocument(
+  documentId: string,
+  client?: CatalogDb
+): Promise<CatalogLinkedPlaceholder[]> {
+  const cached = placeholdersByDocument.get(documentId);
+  if (cached) return cached;
+  const pending = loadPlaceholdersForDocument(documentId, client);
+  placeholdersByDocument.set(documentId, pending);
+  return pending;
+}
+
+async function loadPlaceholdersForDocument(
   documentId: string,
   client?: CatalogDb
 ): Promise<CatalogLinkedPlaceholder[]> {
@@ -549,11 +608,15 @@ export async function fetchResolvedPlaceholdersForApplication(
   documentId?: string | null,
   client?: CatalogDb
 ): Promise<CatalogLinkedPlaceholder[]> {
-  const typeRows = await fetchPlaceholdersForApplicationType(applicationTypeId, client);
+  const [typeRows, docRows] = await Promise.all([
+    fetchPlaceholdersForApplicationType(applicationTypeId, client),
+    documentId
+      ? fetchPlaceholdersForDocument(documentId, client)
+      : Promise.resolve([] as CatalogLinkedPlaceholder[]),
+  ]);
   const byId = new Map<string, CatalogLinkedPlaceholder>();
   for (const row of typeRows) byId.set(row.id, row);
   if (documentId) {
-    const docRows = await fetchPlaceholdersForDocument(documentId, client);
     for (const row of docRows) {
       const existing = byId.get(row.id);
       if (existing) {

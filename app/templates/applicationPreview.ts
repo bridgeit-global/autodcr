@@ -35,6 +35,7 @@ import {
   fetchResolvedPlaceholdersForApplication,
   pickCatalogDocument,
   resolveCatalogDocumentForPreview,
+  type ApplicationCatalogDocument,
 } from "@/app/utils/applicationCatalog";
 import {
   isOwnerApplicantType,
@@ -99,6 +100,12 @@ export type ApplicationPreviewSource = {
   architectHtmlVariant?: "appointment" | "acceptance";
   /** Catalog `application_documents.id` — picks HTML/placeholders when letter_variant is not unique. */
   catalogDocumentId?: string | null;
+  /** Already loaded on the page — skips another catalog type/document round trip. */
+  resolvedCatalogDocument?: ApplicationCatalogDocument | null;
+  /** Placeholders already resolved for this document. */
+  resolvedPlaceholders?: import("@/app/utils/applicationCatalog").CatalogLinkedPlaceholder[] | null;
+  /** Catalog applicant_type used with resolvedPlaceholders. */
+  resolvedApplicantType?: string | null;
   /**
    * `projects.application_urls` key encoded in the saved-PDF QR.
    * For multi-doc department permissions this is `catalogDocumentId`; for dual-letter
@@ -2367,11 +2374,14 @@ export async function generateApplicationPreviewHtml(
     source?.letterVariant === "acceptance" || source?.architectHtmlVariant === "acceptance"
       ? "acceptance"
       : "appointment";
-  const catalogDoc = await resolveCatalogDocumentForPreview({
-    applicationTitle: source?.selectedApplication,
-    letterVariant,
-    documentId: source?.catalogDocumentId,
-  });
+  const catalogDoc =
+    source?.resolvedCatalogDocument !== undefined
+      ? source.resolvedCatalogDocument
+      : await resolveCatalogDocumentForPreview({
+          applicationTitle: source?.selectedApplication,
+          letterVariant,
+          documentId: source?.catalogDocumentId,
+        });
   const showLetterhead = catalogDocumentShowsLetterhead(catalogDoc);
   const preferConsultantLetterhead = catalogDocumentPrefersConsultantLetterhead(catalogDoc);
 
@@ -2408,7 +2418,37 @@ export async function fetchApplicationPreviewHtmlRaw(
 ): Promise<string> {
   const formValues = mapToPdfFieldValues(fields, source, templateType);
   const applicationTitle = source?.selectedApplication?.trim() || "";
-  if (applicationTitle) {
+  const preloadedPlaceholders = source?.resolvedPlaceholders;
+  const preloadedDoc = source?.resolvedCatalogDocument;
+  if (preloadedPlaceholders && preloadedDoc) {
+    const catalogFields = catalogPlaceholderFieldMap(
+      preloadedPlaceholders,
+      {
+        title: source?.projectData?.title,
+        project_info: source?.projectData?.project_info as Record<string, unknown> | null,
+        save_plot_details: source?.projectData?.save_plot_details as Record<string, unknown> | null,
+        building_details: (source?.projectData as { building_details?: Record<string, unknown> } | undefined)
+          ?.building_details,
+        applicant_details: source?.projectData?.applicant_details as
+          | { applicants?: Record<string, unknown>[] }
+          | null,
+      },
+      source?.resolvedApplicantType
+    );
+    Object.assign(formValues, catalogFields);
+    applyCatalogFieldOverrides(formValues, source?.fieldOverrides, preloadedPlaceholders);
+    if (!catalogDocumentShowsLetterhead(preloadedDoc)) {
+      delete formValues.project_Letterhead_Image_Url;
+      delete formValues["{{LETTERHEAD_URL}}"];
+    } else if (catalogDocumentPrefersConsultantLetterhead(preloadedDoc)) {
+      const consultantLetterhead =
+        source?.consultantLetterheadUrl?.trim() || source?.ownerLetterheadUrl?.trim() || "";
+      if (consultantLetterhead) {
+        formValues.project_Letterhead_Image_Url = consultantLetterhead;
+        formValues["{{LETTERHEAD_URL}}"] = consultantLetterhead;
+      }
+    }
+  } else if (applicationTitle) {
     try {
       const catalogType = await fetchApplicationCatalogTypeByTitle(applicationTitle);
       if (catalogType) {

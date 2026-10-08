@@ -109,10 +109,16 @@ export async function enrichConsultantAppointmentFields(
   fields: Record<string, string | undefined>,
   opts: EnrichOpts
 ): Promise<Record<string, string | undefined>> {
-  const out = { ...fields };
   const suffix = templateTypeToPdfTokenSuffix(opts.templateType);
   const primaryKeys = getConsultantAppointmentFieldKeys(suffix);
   const architectKeys = getConsultantAppointmentFieldKeys("Architect");
+  const primaryDone = primaryAddressComplete(fields, primaryKeys);
+  const architectDone =
+    opts.templateType === "Architect" || Boolean(fields[architectKeys.addr1]?.trim());
+  const companyDone = Boolean(fields[primaryKeys.company]?.trim());
+  if (primaryDone && architectDone && companyDone) return { ...fields };
+
+  const out = { ...fields };
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";

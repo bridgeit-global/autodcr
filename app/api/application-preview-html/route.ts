@@ -21,6 +21,10 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** Closer to this project's Supabase region when the function is deployed on Vercel. */
+export const preferredRegion = "bom1";
+
+const templateTextCache = new Map<string, string>();
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
@@ -116,6 +120,8 @@ function preferLocalApplicationTemplates(): boolean {
 async function readRepoApplicationTemplateHtml(
   objectPath: string
 ): Promise<string | null> {
+  const cached = templateTextCache.get(`repo:${objectPath}`);
+  if (cached !== undefined) return cached;
   const rawBase =
     process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() ||
     path.join("html");
@@ -128,6 +134,7 @@ async function readRepoApplicationTemplateHtml(
 
   try {
     const text = await readFile(abs, "utf8");
+    templateTextCache.set(`repo:${objectPath}`, text);
     if (process.env.NODE_ENV === "development") {
       console.log("[application-preview-html] using repo template:", abs);
     }
@@ -141,6 +148,8 @@ async function downloadStorageTemplateText(
   supabase: SupabaseClient,
   objectPath: string
 ): Promise<string | null> {
+  const cached = templateTextCache.get(`storage:${objectPath}`);
+  if (cached !== undefined) return cached;
   const { data: file, error: downloadError } = await supabase.storage
     .from(TEMPLATE_BUCKET)
     .download(objectPath);
@@ -151,11 +160,15 @@ async function downloadStorageTemplateText(
     );
   }
   if (!file) return null;
-  return await file.text();
+  const text = await file.text();
+  templateTextCache.set(`storage:${objectPath}`, text);
+  return text;
 }
 
 /** Bundled shared CSS shipped with the app (letterhead, layout, typography). */
 async function readBundledSharedApplicationCss(): Promise<string> {
+  const cached = templateTextCache.get("css:bundled");
+  if (cached !== undefined) return cached;
   const rawBase =
     process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() ||
     path.join("html");
@@ -166,7 +179,9 @@ async function readBundledSharedApplicationCss(): Promise<string> {
   const rel = path.relative(base, abs);
   if (rel.startsWith("..") || path.isAbsolute(rel)) return "";
   try {
-    return await readFile(abs, "utf8");
+    const text = await readFile(abs, "utf8");
+    templateTextCache.set("css:bundled", text);
+    return text;
   } catch {
     return "";
   }
@@ -175,19 +190,10 @@ async function readBundledSharedApplicationCss(): Promise<string> {
 /** Shared letter chrome — Storage `_shared/application-templates.css`, then repo fallback. */
 async function loadSharedArchitectApplicationCss(
   supabase?: SupabaseClient,
-  opts?: { preferBundledCss?: boolean }
+  _opts?: { preferBundledCss?: boolean }
 ): Promise<string> {
-  if (opts?.preferBundledCss) {
-    const bundled = await readBundledSharedApplicationCss();
-    if (bundled.trim()) {
-      if (process.env.NODE_ENV === "development") {
-        console.log(
-          "[application-preview-html] using bundled shared CSS (clean appointment)"
-        );
-      }
-      return bundled;
-    }
-  }
+  const bundled = await readBundledSharedApplicationCss();
+  if (bundled.trim()) return bundled;
 
   if (supabase && !preferLocalApplicationTemplates()) {
     try {
@@ -551,7 +557,7 @@ const ACCEPTANCE_APPLICATION_URL_KEY_MAP: Partial<Record<TemplateType, string>> 
 async function loadApplicationTemplateHtml(
   supabase: SupabaseClient,
   objectPath: string,
-  opts?: { templateType?: TemplateType; letterVariant?: "appointment" | "acceptance" }
+  _opts?: { templateType?: TemplateType; letterVariant?: "appointment" | "acceptance" }
 ): Promise<string | null> {
   const loadFromRepo = async (): Promise<string | null> =>
     readRepoApplicationTemplateHtml(objectPath);
@@ -566,45 +572,19 @@ async function loadApplicationTemplateHtml(
     return text;
   };
 
-  const preferRepoFirst =
-    preferLocalApplicationTemplates() ||
-    (opts?.letterVariant !== "acceptance" &&
-      opts?.templateType != null &&
-      CLEAN_APPOINTMENT_HTML_TYPES.has(opts.templateType));
-
-  if (preferRepoFirst) {
-    const repoHtml = await loadFromRepo();
-    if (repoHtml !== null) return repoHtml;
-    return loadFromStorage();
-  }
-
-  try {
-    const fromStorage = await loadFromStorage();
-    if (fromStorage !== null) return fromStorage;
-  } catch (error) {
-    const repoHtml = await loadFromRepo();
-    if (repoHtml !== null) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn(
-          `[application-preview-html] Storage failed for "${objectPath}"; using repo fallback.`
-        );
-      }
-      return repoHtml;
-    }
-    throw error;
-  }
-
   const repoHtml = await loadFromRepo();
-  if (repoHtml !== null) {
+  if (repoHtml !== null) return repoHtml;
+  try {
+    return await loadFromStorage();
+  } catch (error) {
     if (process.env.NODE_ENV === "development") {
       console.warn(
-        `[application-preview-html] Storage object missing for "${objectPath}"; using repo fallback.`
+        `[application-preview-html] Storage failed for "${objectPath}"; repo template missing.`,
+        error
       );
     }
-    return repoHtml;
+    return null;
   }
-
-  return loadFromStorage();
 }
 
 function createTemplateSupabaseClient(authorizationToken?: string | null): SupabaseClient {
@@ -776,7 +756,8 @@ export async function POST(request: NextRequest) {
     }
 
     let fieldsForTemplate = body.fields;
-    if (letterVariant !== "acceptance" && body.projectId?.trim() && token) {
+    const catalogIsForm = Boolean(catalogDocument) && !catalogIsLetter;
+    if (!catalogIsForm && letterVariant !== "acceptance" && body.projectId?.trim() && token) {
       fieldsForTemplate = await enrichConsultantAppointmentFields(body.fields, {
         projectId: body.projectId.trim(),
         token,
