@@ -54,27 +54,54 @@ export function ReadOnlyApplicationActions() {
         </button>
       )}
       {applicationPdfSaveSlot && (
-        <button
-          type="button"
-          onClick={() => void applicationPdfSaveSlot.onSave()}
-          disabled={
-            applicationPdfSaveSlot.disabled ||
-            applicationPdfSaveSlot.busy ||
-            applicationPdfSaveSlot.done
-          }
-          className={[
-            "inline-flex min-h-10 items-center rounded-lg px-4 text-sm font-semibold transition-colors",
-            applicationPdfSaveSlot.done && !applicationPdfSaveSlot.busy
-              ? "border border-status-success bg-green-50 text-status-success cursor-default"
-              : "border border-brand-blue text-brand-blue hover:bg-blue-50 disabled:opacity-50",
-          ].join(" ")}
-        >
-          {applicationPdfSaveSlot.busy
-            ? "Submitting…"
-            : applicationPdfSaveSlot.done
-              ? "Submitted"
-              : "Submit"}
-        </button>
+        <>
+          {applicationPdfSaveSlot.documentSaved ? (
+            <button
+              type="button"
+              onClick={() => void applicationPdfSaveSlot.onSaveDocument()}
+              disabled={
+                !applicationPdfSaveSlot.canSaveDocument ||
+                applicationPdfSaveSlot.saveDocumentBusy ||
+                applicationPdfSaveSlot.submitBusy
+              }
+              className="inline-flex min-h-10 items-center rounded-lg border border-brand-blue px-4 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-50 disabled:opacity-50"
+            >
+              {applicationPdfSaveSlot.saveDocumentBusy ? "Saving…" : "Re-save"}
+            </button>
+          ) : applicationPdfSaveSlot.canSaveDocument ? (
+            <button
+              type="button"
+              onClick={() => void applicationPdfSaveSlot.onSaveDocument()}
+              disabled={
+                applicationPdfSaveSlot.saveDocumentBusy || applicationPdfSaveSlot.submitBusy
+              }
+              className="inline-flex min-h-10 items-center rounded-lg border border-brand-blue px-4 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-50 disabled:opacity-50"
+            >
+              {applicationPdfSaveSlot.saveDocumentBusy ? "Saving…" : "Save document"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void applicationPdfSaveSlot.onSaveDraft()}
+              disabled={applicationPdfSaveSlot.saveDraftBusy || applicationPdfSaveSlot.submitBusy}
+              className="inline-flex min-h-10 items-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-brand-navy transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {applicationPdfSaveSlot.saveDraftBusy ? "Saving…" : "Save draft"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void applicationPdfSaveSlot.onSubmit()}
+            disabled={
+              !applicationPdfSaveSlot.canSubmit ||
+              applicationPdfSaveSlot.submitBusy ||
+              applicationPdfSaveSlot.saveDocumentBusy
+            }
+            className={`inline-flex min-h-10 items-center rounded-lg px-4 text-sm font-semibold disabled:opacity-50 ${BTN_PRIMARY}`}
+          >
+            {applicationPdfSaveSlot.submitBusy ? "Submitting…" : "Submit"}
+          </button>
+        </>
       )}
       {applicationSignSlot && (() => {
         const signAllowed = applicationSignSlot.actionAvailable !== false;

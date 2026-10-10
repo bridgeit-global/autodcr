@@ -53,6 +53,30 @@ export function sanitizeStorageSegment(value: string): string {
  * Department and slug come from `application_types`. Category comes from `application_documents`.
  * `projectId` stays the bucket prefix so projects do not share objects.
  */
+/**
+ * Confirmed document PDF. One folder per application type, then one folder per
+ * document, with a single file per project so a later save overwrites it.
+ * Example: `concession/fact-sheet/{projectId}.pdf`
+ */
+export function documentDraftPdfStoragePath(params: {
+  applicationTypeSlug: string;
+  documentSlug: string;
+  projectId: string;
+}): string {
+  const applicationTypeSlug = sanitizeStorageSegment(params.applicationTypeSlug);
+  const documentSlug = sanitizeStorageSegment(params.documentSlug);
+  const projectId = params.projectId.trim();
+  return `${applicationTypeSlug}/${documentSlug}/${projectId}.pdf`;
+}
+
+/** True for `{typeSlug}/{documentSlug}/{projectId}.pdf` (not a project-library upload). */
+export function isDocumentDraftStoragePath(path: string): boolean {
+  const parts = path.trim().replace(/^\/+/, "").split("/").filter(Boolean);
+  if (parts.length !== 3) return false;
+  const fileName = parts[2] ?? "";
+  return fileName.toLowerCase().endsWith(".pdf") && !fileName.includes("+");
+}
+
 export function savedApplicationPdfStoragePath(params: {
   projectId: string;
   department: string;
@@ -361,6 +385,15 @@ function publicUrlForStoragePath(path: string): string {
     throw new Error("Could not resolve public URL for saved application PDF.");
   }
   return url;
+}
+
+/** Public URL for `{typeSlug}/{documentSlug}/{projectId}.pdf`. */
+export function plannedDocumentDraftPdfPublicUrl(params: {
+  applicationTypeSlug: string;
+  documentSlug: string;
+  projectId: string;
+}): string {
+  return publicUrlForStoragePath(documentDraftPdfStoragePath(params));
 }
 
 /** Public URL for a new save. `savedAt` must be the same stamp the upload route stores. */

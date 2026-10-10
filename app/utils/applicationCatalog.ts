@@ -160,9 +160,9 @@ export function buildCatalogLetterFieldRows(
     const mapped =
       (mappedValues[ph.token] ?? "").trim() ||
       (legacyToken ? (mappedValues[legacyToken] ?? "").trim() : "");
-    // Project, applicant, and other stored sources stay locked. Blank `computed`
-    // letter tokens (road width, remarks, and the rest) stay editable.
-    const readOnly = ph.source_table !== "computed" || Boolean(mapped);
+    // A value already taken from the project, applicant, or a resolved token stays
+    // locked. A blank field stays editable, including when a project column is empty.
+    const readOnly = Boolean(mapped);
     const overrideRaw =
       overrides?.[ph.token] ??
       (legacyToken ? overrides?.[legacyToken] : undefined) ??

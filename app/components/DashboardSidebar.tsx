@@ -720,51 +720,75 @@ const DashboardSidebar = ({
         )}
 
         {applicationPdfSaveSlot && isReadOnlyMode && (
-          <div className="mb-4 shrink-0 w-full min-w-0">
-            {!collapsed && applicationPdfSaveSlot.subtitle && (
-              <p className="hidden md:block text-[11px] text-gray-600 leading-snug mb-1">
-                {applicationPdfSaveSlot.subtitle}
-              </p>
-            )}
+          <div className="mb-4 flex shrink-0 w-full min-w-0 flex-col gap-2">
             {!collapsed && applicationPdfSaveSlot.statusText && (
               <p className="hidden md:block text-[11px] text-amber-900 mb-1.5">
                 {applicationPdfSaveSlot.statusText}
               </p>
             )}
+            {applicationPdfSaveSlot.documentSaved ? (
+              <button
+                type="button"
+                onClick={() => void applicationPdfSaveSlot.onSaveDocument()}
+                disabled={
+                  !applicationPdfSaveSlot.canSaveDocument ||
+                  applicationPdfSaveSlot.saveDocumentBusy ||
+                  applicationPdfSaveSlot.submitBusy
+                }
+                className="w-full border border-brand-blue text-brand-blue hover:bg-blue-50 font-semibold py-2 px-4 rounded-xl transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
+              >
+                {applicationPdfSaveSlot.saveDocumentBusy
+                  ? collapsed
+                    ? "…"
+                    : "Saving…"
+                  : collapsed
+                    ? "Re"
+                    : "Re-save"}
+              </button>
+            ) : applicationPdfSaveSlot.canSaveDocument ? (
+              <button
+                type="button"
+                onClick={() => void applicationPdfSaveSlot.onSaveDocument()}
+                disabled={
+                  applicationPdfSaveSlot.saveDocumentBusy || applicationPdfSaveSlot.submitBusy
+                }
+                className="w-full border border-brand-blue text-brand-blue hover:bg-blue-50 font-semibold py-2 px-4 rounded-xl transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
+              >
+                {applicationPdfSaveSlot.saveDocumentBusy
+                  ? collapsed
+                    ? "…"
+                    : "Saving…"
+                  : collapsed
+                    ? "Save"
+                    : "Save document"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void applicationPdfSaveSlot.onSaveDraft()}
+                disabled={applicationPdfSaveSlot.saveDraftBusy || applicationPdfSaveSlot.submitBusy}
+                className="w-full border border-gray-300 text-brand-navy hover:bg-slate-50 font-semibold py-2 px-4 rounded-xl transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
+              >
+                {applicationPdfSaveSlot.saveDraftBusy
+                  ? collapsed
+                    ? "…"
+                    : "Saving…"
+                  : collapsed
+                    ? "Draft"
+                    : "Save draft"}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void applicationPdfSaveSlot.onSave()}
+              onClick={() => void applicationPdfSaveSlot.onSubmit()}
               disabled={
-                applicationPdfSaveSlot.disabled ||
-                applicationPdfSaveSlot.busy ||
-                applicationPdfSaveSlot.done
+                !applicationPdfSaveSlot.canSubmit ||
+                applicationPdfSaveSlot.submitBusy ||
+                applicationPdfSaveSlot.saveDocumentBusy
               }
-              className={
-                applicationPdfSaveSlot.done && !applicationPdfSaveSlot.busy
-                  ? "w-full border-2 border-emerald-500 bg-emerald-50 text-emerald-800 font-semibold py-2 px-4 rounded-xl mb-6 text-xs md:text-sm cursor-default shrink-0 transition-colors shadow-sm"
-                  : "w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50 disabled:pointer-events-none disabled:hover:bg-transparent"
-              }
-              aria-label={
-                applicationPdfSaveSlot.done && !applicationPdfSaveSlot.busy
-                  ? "Application submitted"
-                  : "Submit application"
-              }
+              className="w-full bg-brand-blue text-white hover:bg-brand-blue/90 font-semibold py-2 px-4 rounded-xl mb-6 transition-colors text-xs md:text-sm shadow-sm shrink-0 disabled:opacity-50"
             >
-              {applicationPdfSaveSlot.busy ? (
-                <span className="inline-flex items-center justify-center gap-2">
-                  <span
-                    className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
-                    aria-hidden
-                  />
-                  {!collapsed && <span>Submitting…</span>}
-                </span>
-              ) : applicationPdfSaveSlot.done ? (
-                collapsed ? "✓" : "Submitted"
-              ) : collapsed ? (
-                "Go"
-              ) : (
-                "Submit"
-              )}
+              {applicationPdfSaveSlot.submitBusy ? (collapsed ? "…" : "Submitting…") : collapsed ? "Go" : "Submit"}
             </button>
           </div>
         )}

@@ -10,13 +10,23 @@ import {
   type SetStateAction,
 } from "react";
 
-/** Draft application-details: save PDF from sidebar instead of modal / header. */
+/** Draft application-details: save fields, save one document PDF, then submit. */
 export type ApplicationPdfSaveSlot = {
+  onSaveDraft: () => Promise<void>;
+  onSaveDocument: () => Promise<void>;
+  onSubmit: () => Promise<void>;
+  /** Modal save still calls the current-document PDF save. */
   onSave: () => Promise<void>;
+  saveDraftBusy: boolean;
+  saveDocumentBusy: boolean;
+  submitBusy: boolean;
+  canSaveDocument: boolean;
+  /** Current document already has a saved PDF. */
+  documentSaved: boolean;
+  canSubmit: boolean;
   disabled: boolean;
   busy: boolean;
   done: boolean;
-  subtitle?: string;
   statusText?: string;
 } | null;
 
