@@ -4,12 +4,14 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ArrowLeft,
   CheckCircle2,
   ChevronRight,
   CircleDashed,
   FilePlus2,
   FileStack,
   FileText,
+  Folder,
   Loader2,
   RotateCcw,
   Trash2,
@@ -17,10 +19,16 @@ import {
 } from "lucide-react";
 import MetricCard from "@/app/components/ui/MetricCard";
 import Modal from "@/app/components/ui/Modal";
-import ApplicationHealthCard from "@/app/components/appshell/widgets/ApplicationHealthCard";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { supabase } from "@/app/utils/supabase";
+import {
+  catalogDocumentOptionLabel,
+  fetchApplicationCatalogTypes,
+  fetchDocumentsForApplicationType,
+  type ApplicationCatalogDocument,
+  type ApplicationCatalogType,
+} from "@/app/utils/applicationCatalog";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 import { normalizeProjectId } from "@/app/utils/applicantAppointmentPermissions";
 import { canCreateApplicationsRole } from "@/app/utils/projectAccess";
@@ -65,12 +73,6 @@ function formatCreatedAt(value?: string) {
   });
 }
 
-function filterToActiveSlice(
-  filter: ApplicationStageFilter
-): ApplicationWorkflowStage | undefined {
-  return filter === "all" ? undefined : filter;
-}
-
 function parseStageFilter(value: string | null): ApplicationStageFilter | null {
   if (
     value === "all" ||
@@ -110,6 +112,13 @@ function ApplicationsHubContent() {
   );
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
+  const [documentsByTypeId, setDocumentsByTypeId] = useState<
+    Record<string, ApplicationCatalogDocument[]>
+  >({});
+  const [selectedDepartmentKey, setSelectedDepartmentKey] = useState<string | null>(null);
+  const [selectedTypeKey, setSelectedTypeKey] = useState<string | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
   const canCreateApplications = canCreateApplicationsRole({
     role: isConsultant ? "Consultant" : "Owner",
@@ -171,6 +180,196 @@ function ApplicationsHubContent() {
     () => filterApplicationsByStage(applications, stageFilter),
     [applications, stageFilter]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchApplicationCatalogTypes().then((types) => {
+      if (!cancelled) setCatalogTypes(types);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const titles = new Set(
+      applications.map((app) => app.permissionType.trim().toLowerCase()).filter(Boolean)
+    );
+    const typeIds = catalogTypes
+      .filter((type) => titles.has(type.application_title.trim().toLowerCase()))
+      .map((type) => type.id);
+    if (typeIds.length === 0) {
+      setDocumentsByTypeId({});
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(
+      typeIds.map(async (id) => [id, await fetchDocumentsForApplicationType(id)] as const)
+    ).then((pairs) => {
+      if (cancelled) return;
+      const next: Record<string, ApplicationCatalogDocument[]> = {};
+      for (const [id, docs] of pairs) next[id] = docs;
+      setDocumentsByTypeId(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applications, catalogTypes]);
+
+  const typeByTitle = useMemo(
+    () =>
+      new Map(catalogTypes.map((type) => [type.application_title.trim().toLowerCase(), type])),
+    [catalogTypes]
+  );
+
+  const departmentFolders = useMemo(() => {
+    const departments = new Map<
+      string,
+      {
+        key: string;
+        title: string;
+        types: Map<
+          string,
+          {
+            key: string;
+            title: string;
+            typeId: string | null;
+            applications: DashboardApplication[];
+            direct: boolean;
+          }
+        >;
+      }
+    >();
+    for (const app of filtered) {
+      const title = app.permissionType.trim() || "Application";
+      const typeKey = title.toLowerCase();
+      const type = typeByTitle.get(typeKey);
+      if (type?.category === "appointment_letter") continue;
+      const departmentTitle =
+        type?.department?.trim() ||
+        (app.department && app.department !== "—" ? app.department.trim() : "") ||
+        "Other";
+      const departmentKey = departmentTitle.toLowerCase();
+      const department = departments.get(departmentKey) ?? {
+        key: departmentKey,
+        title: departmentTitle,
+        types: new Map(),
+      };
+      const entry = department.types.get(typeKey) ?? {
+        key: typeKey,
+        title: type?.application_title?.trim() || title,
+        typeId: type?.id ?? null,
+        applications: [],
+        direct: false,
+      };
+      entry.applications.push(app);
+      department.types.set(typeKey, entry);
+      departments.set(departmentKey, department);
+    }
+    const appointment: DashboardApplication[] = [];
+    const acceptance: DashboardApplication[] = [];
+    let letterDepartment = "General";
+    for (const app of filtered) {
+      const type = typeByTitle.get(app.permissionType.trim().toLowerCase());
+      if (!type || type.category !== "appointment_letter") continue;
+      if (type.department?.trim()) letterDepartment = type.department.trim();
+      appointment.push(app);
+      const docs = documentsByTypeId[type.id] ?? [];
+      if (docs.some((doc) => doc.letter_variant === "acceptance")) acceptance.push(app);
+    }
+    const letterFolders: {
+      key: string;
+      title: string;
+      typeId: string | null;
+      applications: DashboardApplication[];
+      direct: boolean;
+    }[] = [];
+    if (appointment.length > 0) {
+      letterFolders.push({
+        key: "letter:appointment",
+        title: "Appointment",
+        typeId: null,
+        applications: appointment,
+        direct: true,
+      });
+    }
+    if (acceptance.length > 0) {
+      letterFolders.push({
+        key: "letter:acceptance",
+        title: "Acceptance",
+        typeId: null,
+        applications: acceptance,
+        direct: true,
+      });
+    }
+    if (letterFolders.length > 0) {
+      const letterKey = letterDepartment.toLowerCase();
+      const existing = departments.get(letterKey) ?? {
+        key: letterKey,
+        title: letterDepartment,
+        types: new Map(),
+      };
+      for (const folder of letterFolders) {
+        existing.types.set(folder.key, folder);
+      }
+      departments.set(letterKey, existing);
+    }
+
+    return [...departments.values()]
+      .map((department) => ({
+        key: department.key,
+        title: department.title,
+        types: [...department.types.values()].sort((a, b) => {
+          const rank = (title: string) =>
+            title === "Appointment" ? 0 : title === "Acceptance" ? 1 : 2;
+          const diff = rank(a.title) - rank(b.title);
+          return diff !== 0 ? diff : a.title.localeCompare(b.title);
+        }),
+      }))
+      .sort((a, b) => {
+        if (a.title === "Building Permission") return -1;
+        if (b.title === "Building Permission") return 1;
+        return a.title.localeCompare(b.title);
+      });
+  }, [filtered, typeByTitle, documentsByTypeId]);
+
+  const selectedDepartment =
+    departmentFolders.find((folder) => folder.key === selectedDepartmentKey) ?? null;
+  const selectedTypeFolder =
+    selectedDepartment?.types.find((folder) => folder.key === selectedTypeKey) ?? null;
+  const selectedTypeDocuments =
+    selectedTypeFolder?.direct || !selectedTypeFolder?.typeId
+      ? []
+      : (documentsByTypeId[selectedTypeFolder.typeId] ?? []);
+  const selectedDocument =
+    selectedTypeDocuments.find((doc) => doc.id === selectedDocumentId) ?? null;
+
+  useEffect(() => {
+    if (!selectedDepartmentKey) return;
+    if (!departmentFolders.some((folder) => folder.key === selectedDepartmentKey)) {
+      setSelectedDepartmentKey(null);
+      setSelectedTypeKey(null);
+      setSelectedDocumentId(null);
+    }
+  }, [departmentFolders, selectedDepartmentKey]);
+
+  useEffect(() => {
+    if (!selectedTypeKey) return;
+    const typeStillVisible = selectedDepartment?.types.some(
+      (folder) => folder.key === selectedTypeKey
+    );
+    if (!typeStillVisible) {
+      setSelectedTypeKey(null);
+      setSelectedDocumentId(null);
+    }
+  }, [selectedDepartment, selectedTypeKey]);
+
+  useEffect(() => {
+    if (!selectedDocumentId) return;
+    if (!selectedTypeDocuments.some((doc) => doc.id === selectedDocumentId)) {
+      setSelectedDocumentId(null);
+    }
+  }, [selectedTypeDocuments, selectedDocumentId]);
 
   const loading = projectsLoading || applicationsLoading;
   const listTitle =
@@ -351,24 +550,57 @@ function ApplicationsHubContent() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5 xl:min-h-0 xl:flex-1">
-        <div className="min-h-0 lg:col-span-3 xl:overflow-y-auto">
-          <ApplicationHealthCard
-            health={health}
-            activeSlice={filterToActiveSlice(stageFilter) ?? "draft"}
-            onSliceChange={(stage) => setStageFilter(stage)}
-          />
-        </div>
-
-        <div className="flex flex-col lg:col-span-9 xl:min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm xl:min-h-0 xl:flex-1 xl:overflow-hidden">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
-              <div>
-                <h2 className="text-sm font-bold text-brand-navy">{listTitle}</h2>
+              <div className="min-w-0">
+                {selectedDepartment || selectedTypeFolder ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedDocument) {
+                        setSelectedDocumentId(null);
+                        return;
+                      }
+                      if (selectedTypeFolder) {
+                        setSelectedTypeKey(null);
+                        return;
+                      }
+                      setSelectedDepartmentKey(null);
+                    }}
+                    className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-brand-blue hover:text-brand-navy"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    {selectedDocument
+                      ? selectedTypeFolder?.title
+                      : selectedTypeFolder
+                        ? selectedDepartment?.title ?? listTitle
+                        : listTitle}
+                  </button>
+                ) : null}
+                <h2 className="truncate text-sm font-bold text-brand-navy">
+                  {selectedDocument
+                    ? catalogDocumentOptionLabel(selectedDocument)
+                    : selectedTypeFolder
+                      ? selectedTypeFolder.title
+                      : selectedDepartment
+                        ? selectedDepartment.title
+                        : listTitle}
+                </h2>
                 <p className="mt-0.5 text-xs text-gray-500">
                   {loading
                     ? "Loading…"
-                    : `${filtered.length} application${filtered.length === 1 ? "" : "s"}`}
+                    : selectedTypeFolder && selectedTypeDocuments.length > 0 && !selectedDocument
+                      ? `${selectedTypeDocuments.length} document${selectedTypeDocuments.length === 1 ? "" : "s"}`
+                      : selectedTypeFolder
+                        ? `${selectedTypeFolder.applications.length} application${
+                            selectedTypeFolder.applications.length === 1 ? "" : "s"
+                          }`
+                        : selectedDepartment
+                          ? `${selectedDepartment.types.length} type${
+                              selectedDepartment.types.length === 1 ? "" : "s"
+                            }`
+                          : `${filtered.length} application${filtered.length === 1 ? "" : "s"}`}
                 </p>
               </div>
               {stageFilter !== "all" && (
@@ -382,7 +614,7 @@ function ApplicationsHubContent() {
               )}
             </div>
 
-            <div className="xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
+            <div className="bg-slate-50/70 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
               {loading ? (
                 <p className="px-5 py-12 text-center text-sm text-gray-500">
                   Loading applications…
@@ -417,9 +649,93 @@ function ApplicationsHubContent() {
                       </button>
                     ))}
                 </div>
-              ) : (
-                <ul className="divide-y divide-gray-100">
-                  {filtered.map((app) => {
+              ) : !selectedDepartment && !selectedTypeFolder ? (
+                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {departmentFolders.map((folder) => {
+                    const applicationCount = new Set(
+                      folder.types.flatMap((type) => type.applications.map((app) => app.id))
+                    ).size;
+                    return (
+                      <button
+                        key={folder.key}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDocumentId(null);
+                          setSelectedTypeKey(null);
+                          setSelectedDepartmentKey(folder.key);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
+                      >
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                          <Folder className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-brand-navy">
+                            {folder.title}
+                          </p>
+                          <p className="mt-0.5 text-xs text-gray-500">
+                          {applicationCount} application{applicationCount === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : selectedDepartment && !selectedTypeFolder ? (
+                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {selectedDepartment.types.map((folder) => (
+                    <button
+                      key={folder.key}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDocumentId(null);
+                        setSelectedTypeKey(folder.key);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
+                    >
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                        <Folder className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-brand-navy">
+                          {folder.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {folder.applications.length} application{folder.applications.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+                    </button>
+                  ))}
+                </div>
+              ) : selectedTypeDocuments.length > 0 && !selectedDocument && selectedTypeFolder ? (
+                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {selectedTypeDocuments.map((doc) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => setSelectedDocumentId(doc.id)}
+                      className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
+                    >
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                        <Folder className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-brand-navy">
+                          {catalogDocumentOptionLabel(doc)}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {selectedTypeFolder.applications.length} application{selectedTypeFolder.applications.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+                    </button>
+                  ))}
+                </div>
+              ) : selectedTypeFolder ? (
+                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {selectedTypeFolder.applications.map((app) => {
                     const stage = getApplicationStage(app);
                     const canManage = canManageProjectApps(app.projectId);
                     const canReject = canManage && stage === "in_process";
@@ -431,132 +747,112 @@ function ApplicationsHubContent() {
                     const deleting = rowBusy && pendingAction?.type === "delete";
                     const backingToDraft =
                       rowBusy && pendingAction?.type === "back_to_draft";
-                    const meta = [
-                      app.projectTitle,
-                      app.department,
-                      formatCreatedAt(app.createdAt),
-                    ]
-                      .filter((part) => part && part !== "—")
-                      .join(" · ");
 
                     return (
-                      <li key={app.id} className="group">
-                        <div className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-slate-50/80 sm:px-5">
-                          <button
-                            type="button"
-                            onClick={() => router.push(applicationHref(app))}
-                            className="flex min-w-0 flex-1 items-center gap-3.5 text-left"
-                          >
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                              <FileText className="h-4 w-4" />
+                      <div
+                        key={app.id}
+                        className="flex flex-col rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => router.push(applicationHref(app))}
+                          className="flex min-w-0 items-start gap-3 text-left"
+                        >
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                            <FileText className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="line-clamp-2 text-sm font-semibold text-brand-navy">
+                                {app.projectTitle || app.permissionType}
+                              </p>
+                              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 items-center gap-2">
-                                <p className="truncate text-sm font-semibold text-brand-navy">
-                                  {app.permissionType}
-                                </p>
-                                <span
-                                  className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset sm:inline-flex ${STAGE_BADGE_CLASSES[stage]}`}
-                                >
-                                  {STAGE_LABELS[stage]}
-                                </span>
-                              </div>
-                              <p className="mt-0.5 truncate text-xs text-gray-500">{meta}</p>
-                              <span
-                                className={`mt-1.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset sm:hidden ${STAGE_BADGE_CLASSES[stage]}`}
+                            <span
+                              className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${STAGE_BADGE_CLASSES[stage]}`}
+                            >
+                              {STAGE_LABELS[stage]}
+                            </span>
+                            {selectedTypeFolder.direct && app.permissionType ? (
+                              <p className="mt-2 truncate text-xs text-gray-500">
+                                {app.permissionType}
+                              </p>
+                            ) : null}
+                            <p className="mt-1 truncate text-xs text-gray-500">
+                              {app.department && app.department !== "—"
+                                ? app.department
+                                : "No department"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-gray-400">
+                              {formatCreatedAt(app.createdAt)}
+                            </p>
+                          </div>
+                        </button>
+
+                        {(canReject || canDelete || canBackToDraft) && (
+                          <div className="mt-3 flex flex-wrap gap-1.5 border-t border-gray-100 pt-3">
+                            {canBackToDraft && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPendingAction({ type: "back_to_draft", app })
+                                }
+                                disabled={rowBusy || actionBusy}
+                                title="Back to draft"
+                                aria-label={`Back to draft ${app.permissionType}`}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-slate-50 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                {STAGE_LABELS[stage]}
-                              </span>
-                            </div>
-                          </button>
-
-                          {(canReject || canDelete || canBackToDraft) && (
-                            <div className="flex shrink-0 items-center overflow-hidden rounded-full border border-gray-200 bg-white shadow-sm">
-                              {canBackToDraft && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setPendingAction({ type: "back_to_draft", app })
-                                  }
-                                  disabled={rowBusy || actionBusy}
-                                  title="Back to draft"
-                                  aria-label={`Back to draft ${app.permissionType}`}
-                                  className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-slate-50 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
-                                >
-                                  {backingToDraft ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <RotateCcw className="h-3.5 w-3.5" />
-                                  )}
-                                  <span className="hidden sm:inline">
-                                    {backingToDraft ? "Moving…" : "Back to draft"}
-                                  </span>
-                                </button>
-                              )}
-                              {canBackToDraft && canReject && (
-                                <span className="h-4 w-px bg-gray-200" aria-hidden />
-                              )}
-                              {canReject && (
-                                <button
-                                  type="button"
-                                  onClick={() => setPendingAction({ type: "reject", app })}
-                                  disabled={rowBusy || actionBusy}
-                                  title="Reject application"
-                                  aria-label={`Reject ${app.permissionType}`}
-                                  className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-amber-50 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/40 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
-                                >
-                                  {rejecting ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <XCircle className="h-3.5 w-3.5" />
-                                  )}
-                                  <span className="hidden sm:inline">
-                                    {rejecting ? "Rejecting…" : "Reject"}
-                                  </span>
-                                </button>
-                              )}
-                              {canReject && canDelete && (
-                                <span className="h-4 w-px bg-gray-200" aria-hidden />
-                              )}
-                              {canDelete && (
-                                <button
-                                  type="button"
-                                  onClick={() => setPendingAction({ type: "delete", app })}
-                                  disabled={rowBusy || actionBusy}
-                                  title="Delete application"
-                                  aria-label={`Delete ${app.permissionType}`}
-                                  className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
-                                >
-                                  {deleting ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  )}
-                                  <span className="hidden sm:inline">
-                                    {deleting ? "Deleting…" : "Delete"}
-                                  </span>
-                                </button>
-                              )}
-                            </div>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => router.push(applicationHref(app))}
-                            className="hidden shrink-0 rounded-md p-1 text-gray-300 transition-colors hover:text-brand-blue group-hover:text-brand-blue sm:inline-flex"
-                            aria-label={`Open ${app.permissionType}`}
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </li>
+                                {backingToDraft ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                )}
+                                {backingToDraft ? "Moving…" : "Back to draft"}
+                              </button>
+                            )}
+                            {canReject && (
+                              <button
+                                type="button"
+                                onClick={() => setPendingAction({ type: "reject", app })}
+                                disabled={rowBusy || actionBusy}
+                                title="Reject application"
+                                aria-label={`Reject ${app.permissionType}`}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-amber-50 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/40 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {rejecting ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <XCircle className="h-3.5 w-3.5" />
+                                )}
+                                {rejecting ? "Rejecting…" : "Reject"}
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                onClick={() => setPendingAction({ type: "delete", app })}
+                                disabled={rowBusy || actionBusy}
+                                title="Delete application"
+                                aria-label={`Delete ${app.permissionType}`}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-500 transition-colors hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {deleting ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                                {deleting ? "Deleting…" : "Delete"}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
-                </ul>
-              )}
+                </div>
+              ) : null}
             </div>
           </div>
-        </div>
       </div>
 
       <Modal
