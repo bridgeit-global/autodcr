@@ -7,6 +7,7 @@ import {
 } from "@/app/utils/applicationSigning";
 import { isValidApplicationUrlsKey } from "@/app/utils/applicationPdfUrlKeys";
 import {
+  documentDraftPdfStoragePath,
   formatSavedApplicationTimestamp,
   isSavedApplicationTimestamp,
   savedApplicationPdfStoragePathForUrlKey,
@@ -181,6 +182,13 @@ export async function POST(request: NextRequest) {
           ) as Record<string, string>
         : {};
 
+    const applicationTypeSlugRaw = formData.get("applicationTypeSlug");
+    const documentSlugRaw = formData.get("documentSlug");
+    const applicationTypeSlug =
+      typeof applicationTypeSlugRaw === "string" ? applicationTypeSlugRaw.trim() : "";
+    const documentSlug = typeof documentSlugRaw === "string" ? documentSlugRaw.trim() : "";
+    const useDocumentFolder = applicationTypeSlug.length > 0 && documentSlug.length > 0;
+
     const readSavedAt = (value: FormDataEntryValue | null): string | null => {
       if (typeof value !== "string") return null;
       const stamp = value.trim();
@@ -210,14 +218,20 @@ export async function POST(request: NextRequest) {
         const existingUrl = prev[urlsKey];
         const existingPath = existingUrl ? storagePathFromPublicUrl(existingUrl) : null;
         const stamp = savedAt ?? (existingPath ? null : formatSavedApplicationTimestamp());
-        const storagePath = stamp
-          ? await savedApplicationPdfStoragePathForUrlKey({
+        const storagePath = useDocumentFolder
+          ? documentDraftPdfStoragePath({
+              applicationTypeSlug,
+              documentSlug,
               projectId,
-              urlsKey,
-              savedAt: stamp,
-              client: admin,
             })
-          : existingPath;
+          : stamp
+            ? await savedApplicationPdfStoragePathForUrlKey({
+                projectId,
+                urlsKey,
+                savedAt: stamp,
+                client: admin,
+              })
+            : existingPath;
         if (!storagePath) {
           throw new Error(`Could not resolve storage path for ${urlsKey}.`);
         }
@@ -270,10 +284,18 @@ export async function POST(request: NextRequest) {
       ? applicationUrlsKey
       : applicationUrlsKeyAcceptance;
     const publicUrl = nextUrls[primaryKey];
+    const primaryPath = useDocumentFolder
+      ? documentDraftPdfStoragePath({
+          applicationTypeSlug,
+          documentSlug,
+          projectId,
+        })
+      : null;
     return NextResponse.json({
       success: true,
       publicUrl,
       publicUrls: nextUrls,
+      storagePath: primaryPath,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Save failed.";

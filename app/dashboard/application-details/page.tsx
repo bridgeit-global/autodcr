@@ -62,10 +62,16 @@ import {
 } from "@/app/utils/ownerApplicationRpc";
 import {
   formatSavedApplicationTimestamp,
+  plannedDocumentDraftPdfPublicUrl,
   plannedSavedApplicationPdfPublicUrl,
   readApplicationUrlFromUrls,
   resolveSavedPdfUrlForQr,
 } from "@/app/utils/projectSavedApplicationPdfUrl";
+import {
+  fetchApplicationDocumentDrafts,
+  upsertApplicationDocumentDraft,
+  type ApplicationDocumentDraft,
+} from "@/app/utils/applicationDocumentDrafts";
 import { resolveApplicationUrlsKey } from "@/app/utils/applicationPdfUrlKeys";
 import { resolveOwnerEntityTypeForDesignation } from "@/app/utils/applicantRecordFields";
 import { templateTypeLicenseUrlKeys } from "@/app/utils/consultantTemplateTokens";
@@ -1819,7 +1825,10 @@ async function submitSavedApplicationPdfs(params: {
   savedAt?: string;
   /** New object stamp for the acceptance PDF. */
   savedAtAcceptance?: string;
-}): Promise<{ publicUrl?: string; publicUrls?: Record<string, string> }> {
+  /** When both are set, the PDF is stored at `{typeSlug}/{documentSlug}/{projectId}.pdf`. */
+  applicationTypeSlug?: string;
+  documentSlug?: string;
+}): Promise<{ publicUrl?: string; publicUrls?: Record<string, string>; storagePath?: string }> {
   const slug = (key: string) => key.replace(/[/\\]/g, "-").replace(/\s+/g, "_");
   const formData = new FormData();
   formData.append("projectId", params.projectId);
@@ -1834,6 +1843,10 @@ async function submitSavedApplicationPdfs(params: {
     formData.append("pdf_acceptance", params.acceptanceBlob, `${slug(params.acceptanceUrlsKey)}.pdf`);
     formData.append("applicationUrlsKey_acceptance", params.acceptanceUrlsKey);
     if (params.savedAtAcceptance) formData.append("savedAt_acceptance", params.savedAtAcceptance);
+  }
+  if (params.applicationTypeSlug && params.documentSlug) {
+    formData.append("applicationTypeSlug", params.applicationTypeSlug);
+    formData.append("documentSlug", params.documentSlug);
   }
 
   const response = await fetch("/api/save-application-pdf", {
@@ -1857,6 +1870,7 @@ async function submitSavedApplicationPdfs(params: {
   const jsonBody = (await response.json().catch(() => null)) as {
     publicUrl?: string;
     publicUrls?: Record<string, string>;
+    storagePath?: string;
   } | null;
   return {
     publicUrl:
@@ -1866,6 +1880,10 @@ async function submitSavedApplicationPdfs(params: {
     publicUrls:
       jsonBody?.publicUrls && typeof jsonBody.publicUrls === "object"
         ? jsonBody.publicUrls
+        : undefined,
+    storagePath:
+      typeof jsonBody?.storagePath === "string" && jsonBody.storagePath.trim()
+        ? jsonBody.storagePath.trim()
         : undefined,
   };
 }
@@ -2149,6 +2167,12 @@ export default function ApplicationDetailsPage() {
   /** Session overrides for catalog Letter fields — applied to preview + PDF. */
   const [letterFieldOverrides, setLetterFieldOverrides] = useState<Record<string, string>>({});
   const letterFieldOverridesRef = useRef<Record<string, string>>({});
+  const [documentDrafts, setDocumentDrafts] = useState<Record<string, ApplicationDocumentDraft>>({});
+  const documentDraftsRef = useRef<Record<string, ApplicationDocumentDraft>>({});
+  const [documentDraftsLoaded, setDocumentDraftsLoaded] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
+  const revertSavedDocumentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const letterFieldsPreviewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Drops stale letter/license preview results when a newer load starts. */
   const previewLoadRequestRef = useRef(0);
@@ -2250,7 +2274,8 @@ export default function ApplicationDetailsPage() {
   };
   const buildApplicationPreviewPdfBlob = async (
     _urlsRaw?: unknown,
-    accessToken?: string
+    accessToken?: string,
+    storage?: { applicationTypeSlug: string; documentSlug: string }
   ): Promise<{ blob: Blob; savedAt: string; urlsKey: string }> => {
     const ctx = previewPdfContextRef.current;
     if (!ctx) {
@@ -2265,11 +2290,13 @@ export default function ApplicationDetailsPage() {
         ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
     });
     const savedAt = formatSavedApplicationTimestamp();
-    const savedPdfUrlForQr = await plannedSavedApplicationPdfPublicUrl(
-      projectId,
-      urlsKey,
-      savedAt
-    );
+    const savedPdfUrlForQr = storage
+      ? plannedDocumentDraftPdfPublicUrl({
+          applicationTypeSlug: storage.applicationTypeSlug,
+          documentSlug: storage.documentSlug,
+          projectId,
+        })
+      : await plannedSavedApplicationPdfPublicUrl(projectId, urlsKey, savedAt);
     const html = await generateApplicationPreviewHtml(
       ctx.fields,
       ctx.templateType,
@@ -3133,10 +3160,53 @@ export default function ApplicationDetailsPage() {
   }, [letterFieldOverrides]);
 
   useEffect(() => {
-    setLetterFieldOverrides({});
-    letterFieldOverridesRef.current = {};
+    documentDraftsRef.current = documentDrafts;
+  }, [documentDrafts]);
+
+  useEffect(() => {
+    if (!isReadOnlyMode || !applicationId) {
+      setDocumentDrafts({});
+      documentDraftsRef.current = {};
+      setDocumentDraftsLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    setDocumentDraftsLoaded(false);
+    void (async () => {
+      try {
+        const rows = await fetchApplicationDocumentDrafts(applicationId);
+        if (cancelled) return;
+        const next: Record<string, ApplicationDocumentDraft> = {};
+        for (const row of rows) {
+          if (row.catalogDocumentId) next[row.catalogDocumentId] = row;
+        }
+        documentDraftsRef.current = next;
+        setDocumentDrafts(next);
+      } catch (err) {
+        console.error("Failed to load application document drafts:", err);
+        if (!cancelled) {
+          documentDraftsRef.current = {};
+          setDocumentDrafts({});
+        }
+      } finally {
+        if (!cancelled) setDocumentDraftsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isReadOnlyMode, applicationId]);
+
+  useEffect(() => {
+    const docId = selectedCatalogDocumentId;
+    const saved =
+      docId && documentDraftsLoaded
+        ? documentDraftsRef.current[docId]?.fieldValues ?? {}
+        : {};
+    letterFieldOverridesRef.current = saved;
+    setLetterFieldOverrides(saved);
     setDetailsFieldsDocumentLabel(null);
-  }, [selectedCatalogDocumentId, selectedApplication]);
+  }, [selectedCatalogDocumentId, selectedApplication, documentDraftsLoaded]);
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId || !projectData || !catalogDocumentsReady) return;
@@ -3237,6 +3307,7 @@ export default function ApplicationDetailsPage() {
     catalogDocumentsReady,
     catalogApplicationType,
     catalogDocuments,
+    documentDraftsLoaded,
   ]);
 
   sidePreviewLoadRef.current = () => {
@@ -3300,6 +3371,36 @@ export default function ApplicationDetailsPage() {
     }, 300);
   };
 
+  const rememberDocumentDraft = (draft: ApplicationDocumentDraft) => {
+    const next = { ...documentDraftsRef.current, [draft.catalogDocumentId]: draft };
+    documentDraftsRef.current = next;
+    setDocumentDrafts(next);
+  };
+
+  const persistDocumentDraft = async (
+    catalogDocumentId: string,
+    status: "draft" | "saved",
+    pdfPath: string | null,
+    fieldValues: Record<string, string>
+  ) => {
+    if (!applicationId) throw new Error("Missing application.");
+    await upsertApplicationDocumentDraft({
+      applicationId,
+      catalogDocumentId,
+      fieldValues,
+      status,
+      pdfPath,
+    });
+    rememberDocumentDraft({
+      applicationId,
+      catalogDocumentId,
+      fieldValues,
+      status,
+      pdfPath,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
   const handleLetterFieldChange = (row: CatalogLetterFieldRow, nextValue: string) => {
     setLetterFieldOverrides((prev) => {
       const next = { ...prev, [row.token]: nextValue };
@@ -3310,6 +3411,27 @@ export default function ApplicationDetailsPage() {
     setDetailsFieldRows((rows) =>
       rows.map((r) => (r.id === row.id ? { ...r, value: nextValue } : r))
     );
+    const docId = selectedCatalogDocumentId;
+    const existing = docId ? documentDraftsRef.current[docId] : undefined;
+    if (docId && applicationId && existing?.status === "saved") {
+      rememberDocumentDraft({
+        ...existing,
+        status: "draft",
+        pdfPath: null,
+        fieldValues: { ...letterFieldOverridesRef.current },
+      });
+      if (revertSavedDocumentTimerRef.current) {
+        clearTimeout(revertSavedDocumentTimerRef.current);
+      }
+      revertSavedDocumentTimerRef.current = setTimeout(() => {
+        revertSavedDocumentTimerRef.current = null;
+        void persistDocumentDraft(docId, "draft", null, {
+          ...letterFieldOverridesRef.current,
+        }).catch((err) => {
+          console.error("Failed to move document back to draft:", err);
+        });
+      }, 700);
+    }
     schedulePreviewRefreshForLetterFields();
   };
 
@@ -4522,6 +4644,10 @@ export default function ApplicationDetailsPage() {
     }
     saveInFlightRef.current = true;
     setIsSavingPdf(true);
+    if (revertSavedDocumentTimerRef.current) {
+      clearTimeout(revertSavedDocumentTimerRef.current);
+      revertSavedDocumentTimerRef.current = null;
+    }
     setSavePdfMessage(null);
     setSavePdfError(null);
     setSidebarPdfStatus(null);
@@ -4550,8 +4676,7 @@ export default function ApplicationDetailsPage() {
       }).catch(() => {});
       // #endregion
       const saveTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
-      const mustRefreshContextForSave =
-        stageBeforeSave === "draft" && isDualLetterType(saveTemplateType);
+      const mustRefreshContextForSave = true;
       if (mustRefreshContextForSave || !ctx) {
         let projectForSave = projectData;
         if (projectId) {
@@ -4583,9 +4708,7 @@ export default function ApplicationDetailsPage() {
           applicationCreatedAt,
           projectId,
           letterVariant,
-          catalogDocumentId: isDualLetterType(saveTemplateType)
-            ? undefined
-            : selectedCatalogDocumentId,
+          catalogDocumentId: selectedCatalogDocumentId,
           fieldOverrides: letterFieldOverridesRef.current,
         });
         previewPdfContextRef.current = {
@@ -4643,22 +4766,6 @@ export default function ApplicationDetailsPage() {
       }
       // #endregion
 
-      const uploadPdfBlob = async (
-        pdfBlob: Blob,
-        applicationUrlsKey: string,
-        savedAt?: string
-      ) => {
-        await submitSavedApplicationPdfs({
-          projectId,
-          templateType: ctx.templateType,
-          authToken,
-          authUserId: authUser.id,
-          appointmentBlob: pdfBlob,
-          applicationUrlsKey,
-          savedAt,
-        });
-      };
-
       const fetchApplicationUrls = async (): Promise<unknown> => {
         const { data: urlsRow } = await supabase
           .from("projects")
@@ -4668,162 +4775,42 @@ export default function ApplicationDetailsPage() {
         return urlsRow?.application_urls;
       };
 
-      if (stageBeforeSave === "draft" && isDualLetterType(ctx.templateType)) {
-        setSidebarPdfStatus("Saving appointment & acceptance…");
-        const urlsBeforeSave = await fetchApplicationUrls();
-
-        const previewBase: BuildApplicationPreviewContextInput = {
-          userMetadata,
-          projectData,
-          selectedApplication,
-          applicationNo,
-          applicationCreatedAt,
-          projectId,
-        };
-
-        const cachedBase: BuiltApplicationPreview = {
-          fields: ctx.fields,
-          templateType: ctx.templateType,
-          previewSource: ctx.previewSource,
-        };
-
-        const { appointment: appointmentCtx, acceptance: acceptanceCtx } = dualLetterBuiltContexts(
-          cachedBase,
-          ctx.templateType
-        );
-        // Save appointment first using the same single-pass renderer as the
-        // stable in-process flow, then save acceptance against fresh URLs.
-        const appointmentSavedAt = formatSavedApplicationTimestamp();
-        const appointmentBlob = await buildApplicationSavePdfBlob(
-          appointmentCtx,
-          ctx.templateType,
-          urlsBeforeSave,
-          projectId,
-          undefined,
-          appointmentSavedAt
-        );
-        await submitSavedApplicationPdfs({
-          projectId,
-          templateType: ctx.templateType,
-          authToken,
-          authUserId: authUser.id,
-          appointmentBlob,
-          applicationUrlsKey: ctx.templateType,
-          savedAt: appointmentSavedAt,
-        });
-
-        const urlsAfterAppointment = await fetchApplicationUrls();
-        const acceptanceKey =
-          ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE[ctx.templateType] ?? `${ctx.templateType}_acceptance`;
-        const acceptanceSavedAt = formatSavedApplicationTimestamp();
-        const acceptanceBlob = await buildApplicationSavePdfBlob(
-          acceptanceCtx,
-          acceptanceKey,
-          urlsAfterAppointment,
-          projectId,
-          undefined,
-          acceptanceSavedAt
-        );
-        await submitSavedApplicationPdfs({
-          projectId,
-          templateType: ctx.templateType,
-          authToken,
-          authUserId: authUser.id,
-          applicationUrlsKey: ctx.templateType,
-          acceptanceBlob,
-          acceptanceUrlsKey: acceptanceKey,
-          savedAtAcceptance: acceptanceSavedAt,
-        });
-
-        setPdfSavedForCurrentPreview(true);
-        setSidebarPdfStatus(null);
-
-        void (async () => {
-          const urlsAfterSave = await fetchApplicationUrls();
-          const pdfUrl = resolveStoredPreviewPdfUrl(
-            urlsAfterSave,
-            ctx.templateType,
-            letterVariant,
-            { ownerSignedAt, architectSignedAt }
-          );
-          if (!pdfUrl) return;
-          setStoredSigningPdfUrl(pdfUrl);
-          setPreviewHtml(null);
-          setPreviewDocKind("letter");
-          setPreviewNotice(null);
-          setPreviewUrl((prev) => {
-            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
-            return pdfUrl;
-          });
-        })();
-      } else {
-        const urlsRaw = await fetchApplicationUrls();
-        const { blob, savedAt, urlsKey } = await buildApplicationPreviewPdfBlob(
-          urlsRaw,
-          authToken
-        );
-        await uploadPdfBlob(blob, urlsKey, savedAt);
-        setPdfSavedForCurrentPreview(true);
-
-        void (async () => {
-          const urlsAfterSave = await fetchApplicationUrls();
-          const pdfUrl = resolveStoredPreviewPdfUrl(
-            urlsAfterSave,
-            ctx.templateType,
-            "appointment",
-            {
-              ownerSignedAt,
-              architectSignedAt,
-              catalogDocumentId:
-                ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId,
-            }
-          );
-          if (!pdfUrl) return;
-          setStoredSigningPdfUrl(pdfUrl);
-          setPreviewHtml(null);
-          setPreviewUrl((prev) => {
-            if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
-            return pdfUrl;
-          });
-        })();
+      const catalogDoc = catalogDocuments.find((d) => d.id === selectedCatalogDocumentId);
+      const typeSlug = catalogApplicationType?.slug?.trim() ?? "";
+      const documentSlug = catalogDoc?.slug?.trim() ?? "";
+      if (previewDocKind === "license" || !applicationId || !catalogDoc || !typeSlug || !documentSlug) {
+        throw new Error("Select a document before saving.");
       }
 
-      if (applicationId && stageBeforeSave === "draft") {
-        setPreviewOpen(false);
-        setSavePdfMessage(null);
+      setSidebarPdfStatus("Saving document…");
+      const urlsRaw = await fetchApplicationUrls();
+      const storage = { applicationTypeSlug: typeSlug, documentSlug };
+      const { blob, urlsKey } = await buildApplicationPreviewPdfBlob(urlsRaw, authToken, storage);
+      const uploaded = await submitSavedApplicationPdfs({
+        projectId,
+        templateType: ctx.templateType,
+        authToken,
+        authUserId: authUser.id,
+        appointmentBlob: blob,
+        applicationUrlsKey: urlsKey,
+        applicationTypeSlug: typeSlug,
+        documentSlug,
+      });
+      const pdfPath = uploaded.storagePath ?? `${typeSlug}/${documentSlug}/${projectId}.pdf`;
+      await persistDocumentDraft(catalogDoc.id, "saved", pdfPath, {
+        ...letterFieldOverridesRef.current,
+      });
+      setPdfSavedForCurrentPreview(true);
+      setSavePdfMessage("Document saved.");
 
-        const ownerIdForStage = await getAuthUserId();
-        const { ok: stageOk, error: stageErr } = ownerIdForStage
-          ? await updateApplicationForSigning(applicationId, ownerIdForStage, {
-              workflow_stage: "in_process",
-            })
-          : { ok: false, error: new Error("Not signed in") };
-
-        if (stageErr || !stageOk) {
-          console.error("Failed to update application workflow_stage:", stageErr);
-          setSavePdfMessage(
-            "Application PDF saved. Could not move application to In Process (check DB migration / permissions)."
-          );
-        } else {
-          setApplicationWorkflowStage("in_process");
-          fireApplicationNotification(applicationId, "saved");
-
-          let deptApp: { department?: string } | null = null;
-          if (ownerIdForStage) {
-            const deptFetch = await fetchApplicationForSigning(applicationId);
-            deptApp = deptFetch.data;
-          }
-          const dept =
-            typeof deptApp?.department === "string" ? deptApp.department.trim() : "";
-          const dashboardUrl =
-            dept.length > 0
-              ? `/userdashboard?department=${encodeURIComponent(dept)}`
-              : "/userdashboard";
-          setPendingDashboardUrl(dashboardUrl);
-          setApplicationPdfSavedDialogOpen(true);
-        }
-      } else {
-        setSavePdfMessage("Application PDF saved to project.");
+      const pdfUrl = uploaded.publicUrl;
+      if (pdfUrl) {
+        setStoredSigningPdfUrl(pdfUrl);
+        setPreviewHtml(null);
+        setPreviewUrl((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return pdfUrl;
+        });
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save PDF.";
@@ -4837,6 +4824,88 @@ export default function ApplicationDetailsPage() {
 
   saveApplicationPdfRef.current = handleSaveApplicationPdf;
 
+  const handleSaveApplicationDraft = async () => {
+    if (!applicationId || !selectedCatalogDocumentId || previewDocKind === "license") {
+      setSavePdfError("Select a document before saving a draft.");
+      return;
+    }
+    if (isSavingDraft || saveInFlightRef.current) return;
+    setIsSavingDraft(true);
+    setSavePdfError(null);
+    setSavePdfMessage(null);
+    try {
+      if (revertSavedDocumentTimerRef.current) {
+        clearTimeout(revertSavedDocumentTimerRef.current);
+        revertSavedDocumentTimerRef.current = null;
+      }
+      await persistDocumentDraft(selectedCatalogDocumentId, "draft", null, {
+        ...letterFieldOverridesRef.current,
+      });
+      setSavePdfMessage("Draft saved.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save draft.";
+      setSavePdfError(message);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const activeCatalogDocuments = catalogDocuments.filter((doc) => doc.is_active);
+  const canSaveDocument =
+    applicationWorkflowStage === "draft" &&
+    previewDocKind !== "license" &&
+    Boolean(applicationId && selectedCatalogDocumentId && catalogApplicationType?.slug) &&
+    !detailsFieldsLoading &&
+    !detailsFieldsError &&
+    (detailsFieldRows.length === 0
+      ? detailsFieldsFallbackRows.every((row) => row.value.trim().length > 0)
+      : detailsFieldRows.every((row) => row.readOnly || row.value.trim().length > 0));
+  const currentDocumentDraft = selectedCatalogDocumentId
+    ? documentDrafts[selectedCatalogDocumentId]
+    : undefined;
+  const documentSaved =
+    currentDocumentDraft?.status === "saved" && Boolean(currentDocumentDraft.pdfPath);
+  const canSubmit =
+    applicationWorkflowStage === "draft" &&
+    documentDraftsLoaded &&
+    activeCatalogDocuments.length > 0 &&
+    activeCatalogDocuments.every((doc) => {
+      const draft = documentDrafts[doc.id];
+      return draft?.status === "saved" && Boolean(draft.pdfPath);
+    });
+
+  const handleSubmitApplication = async () => {
+    if (!applicationId || !canSubmit || isSubmittingApplication) return;
+    setIsSubmittingApplication(true);
+    setSavePdfError(null);
+    setSavePdfMessage(null);
+    try {
+      const ownerIdForStage = await getAuthUserId();
+      const { ok: stageOk, error: stageErr } = ownerIdForStage
+        ? await updateApplicationForSigning(applicationId, ownerIdForStage, {
+            workflow_stage: "in_process",
+          })
+        : { ok: false, error: new Error("Not signed in") };
+      if (stageErr || !stageOk) {
+        throw stageErr ?? new Error("Could not move application to In Process.");
+      }
+      setApplicationWorkflowStage("in_process");
+      fireApplicationNotification(applicationId, "saved");
+      const deptFetch = await fetchApplicationForSigning(applicationId);
+      const dept =
+        typeof deptFetch.data?.department === "string" ? deptFetch.data.department.trim() : "";
+      const dashboardUrl =
+        dept.length > 0 ? `/userdashboard?department=${encodeURIComponent(dept)}` : "/userdashboard";
+      setPendingDashboardUrl(dashboardUrl);
+      setApplicationPdfSavedDialogOpen(true);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to submit application.";
+      setSavePdfError(message);
+    } finally {
+      setIsSubmittingApplication(false);
+    }
+  };
+
   useEffect(() => {
     if (!isReadOnlyMode || !projectId) {
       setSlot(null);
@@ -4847,14 +4916,19 @@ export default function ApplicationDetailsPage() {
       return;
     }
     setSlot({
+      onSaveDraft: handleSaveApplicationDraft,
+      onSaveDocument: () => saveApplicationPdfRef.current(),
+      onSubmit: handleSubmitApplication,
       onSave: () => saveApplicationPdfRef.current(),
-      disabled: pdfSavedForCurrentPreview,
-      busy: isSavingPdf,
-      done: pdfSavedForCurrentPreview,
-      subtitle:
-        isDualLetterType(previewTemplateType)
-          ? "Saves appointment and acceptance PDFs to the project."
-          : undefined,
+      saveDraftBusy: isSavingDraft,
+      saveDocumentBusy: isSavingPdf,
+      submitBusy: isSubmittingApplication,
+      canSaveDocument,
+      documentSaved,
+      canSubmit,
+      disabled: !canSaveDocument,
+      busy: isSavingPdf || isSavingDraft || isSubmittingApplication,
+      done: false,
       statusText: sidebarPdfStatus ?? undefined,
     });
     return () => {
@@ -4864,10 +4938,15 @@ export default function ApplicationDetailsPage() {
     isReadOnlyMode,
     projectId,
     applicationWorkflowStage,
-    pdfSavedForCurrentPreview,
     isSavingPdf,
-    previewTemplateType,
+    isSavingDraft,
+    isSubmittingApplication,
+    canSaveDocument,
+    documentSaved,
+    canSubmit,
     sidebarPdfStatus,
+    applicationId,
+    selectedCatalogDocumentId,
     setSlot,
   ]);
 
@@ -5381,7 +5460,7 @@ export default function ApplicationDetailsPage() {
             </div>
             <div className="px-6 py-5">
               <p className="text-sm text-gray-600">
-                Your application PDF has been saved to the project. The application is now in{" "}
+                Every document is saved. The application is now in{" "}
                 <span className="font-medium text-gray-800">In Process</span>.
               </p>
             </div>

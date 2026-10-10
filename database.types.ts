@@ -59,6 +59,51 @@ export type Database = {
         }
         Relationships: []
       }
+      application_document_drafts: {
+        Row: {
+          id: string
+          application_id: string
+          catalog_document_id: string
+          field_values: Json
+          status: string
+          pdf_path: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          application_id: string
+          catalog_document_id: string
+          field_values?: Json
+          status?: string
+          pdf_path?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          application_id?: string
+          catalog_document_id?: string
+          field_values?: Json
+          status?: string
+          pdf_path?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_document_drafts_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_document_drafts_catalog_document_id_fkey"
+            columns: ["catalog_document_id"]
+            isOneToOne: false
+            referencedRelation: "application_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       application_types: {
         Row: {
           applicant_type: string | null

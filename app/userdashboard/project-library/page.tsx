@@ -21,12 +21,9 @@ import {
   type ProjectLibraryExtraDocType,
 } from "@/app/utils/projectSections";
 import { getProjectLabel } from "@/app/userdashboard/administrationApplicants";
-import { fetchApplicationCatalogTypes } from "@/app/utils/applicationCatalog";
+import { fetchSavedApplicationDocuments } from "@/app/utils/applicationDocumentDrafts";
 import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
-import {
-  parseSavedApplicationPdf,
-  savedApplicationPdfLabel,
-} from "@/app/utils/projectSavedApplicationPdfUrl";
+import { isDocumentDraftStoragePath } from "@/app/utils/projectSavedApplicationPdfUrl";
 
 type FolderSection =
   | "pr-card"
@@ -57,6 +54,10 @@ type LibraryRow = {
   path: string;
   url: string;
   uploadedAt: string | null;
+  savedTypeSlug?: string;
+  savedTypeTitle?: string;
+  savedDocumentSlug?: string;
+  savedDocumentTitle?: string;
 };
 
 type FolderSummary = {
@@ -225,7 +226,7 @@ function storagePathCandidates(
 ): string[] {
   const raw = row.path.trim().replace(/^\/+/, "");
   if (!raw) return [];
-  if (raw.includes("/saved-applications/")) return [raw];
+  if (raw.includes("/saved-applications/") || isDocumentDraftStoragePath(raw)) return [raw];
 
   const candidates: string[] = [];
   const push = (path: string) => {
@@ -364,6 +365,8 @@ export default function ProjectLibraryBrowserPage() {
   const [selectedFolder, setSelectedFolder] = useState<FolderSection | null>(
     null
   );
+  const [selectedSavedType, setSelectedSavedType] = useState<string | null>(null);
+  const [selectedSavedDocument, setSelectedSavedDocument] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(
     null
   );
@@ -386,14 +389,14 @@ export default function ProjectLibraryBrowserPage() {
       }
 
       setFilesLoading(true);
-      const [records, catalogTypes] = await Promise.all([
+      const [records, savedDocuments] = await Promise.all([
         loadLibraryProjectRecords(projects),
-        fetchApplicationCatalogTypes(),
+        fetchSavedApplicationDocuments().catch((err) => {
+          console.error("Failed to load saved application documents:", err);
+          return [];
+        }),
       ]);
       if (cancelled) return;
-      const titleBySlug = new Map(
-        catalogTypes.map((type) => [type.slug, type.application_title])
-      );
 
       const nextRows: LibraryRow[] = [];
       for (const project of records) {
@@ -426,32 +429,38 @@ export default function ProjectLibraryBrowserPage() {
           });
         });
 
-        const savedUrls = project.application_urls;
-        if (savedUrls && typeof savedUrls === "object" && !Array.isArray(savedUrls)) {
-          for (const [key, value] of Object.entries(
-            savedUrls as Record<string, unknown>
-          )) {
-            if (typeof value !== "string" || !value.trim()) continue;
-            const url = value.trim();
-            const parts = parseSavedApplicationPdf(key, url);
-            nextRows.push({
-              id: `${project.id}-saved-${key}`,
-              projectId: project.id,
-              projectLabel,
-              authority,
-              fileName: savedApplicationPdfLabel(
-                parts,
-                key,
-                parts.slug ? titleBySlug.get(parts.slug) : null
-              ),
-              folder: "saved-applications",
-              folderLabel: FOLDER_LABELS["saved-applications"],
-              path: parts.storagePath ?? "",
-              url,
-              uploadedAt: parts.savedAtIso,
-            });
-          }
-        }
+      }
+
+      const recordById = new Map(records.map((project) => [project.id, project]));
+      for (const item of savedDocuments) {
+        const project = recordById.get(item.projectId);
+        const projectLabel = project
+          ? getProjectLabel({
+              title: project.title,
+              project_info: project.project_info as {
+                proposalNo?: string;
+                title?: string;
+              } | null,
+            })
+          : item.projectTitle || item.projectId;
+        nextRows.push({
+          id: `${item.projectId}-saved-${item.typeSlug}-${item.documentSlug}`,
+          projectId: item.projectId,
+          projectLabel,
+          authority: project
+            ? getPlanningAuthority(project.save_plot_details)
+            : "—",
+          fileName: projectLabel,
+          folder: "saved-applications",
+          folderLabel: FOLDER_LABELS["saved-applications"],
+          path: item.pdfPath,
+          url: publicUrlForPath(item.pdfPath),
+          uploadedAt: item.updatedAt || null,
+          savedTypeSlug: item.typeSlug,
+          savedTypeTitle: item.typeTitle,
+          savedDocumentSlug: item.documentSlug,
+          savedDocumentTitle: item.documentCategory,
+        });
       }
 
       setProjectRecords(records);
@@ -553,6 +562,75 @@ export default function ProjectLibraryBrowserPage() {
     if (!selectedFolder) return [];
     return filtered.filter((row) => row.folder === selectedFolder);
   }, [filtered, selectedFolder]);
+
+  const savedTypeFolders = useMemo(() => {
+    const byType = new Map<string, { title: string; documentCount: number; projectIds: Set<string> }>();
+    for (const row of folderDocuments) {
+      const slug = row.savedTypeSlug;
+      if (!slug) continue;
+      const entry = byType.get(slug) ?? {
+        title: row.savedTypeTitle || slug,
+        documentCount: 0,
+        projectIds: new Set<string>(),
+      };
+      entry.documentCount += 1;
+      entry.projectIds.add(row.projectId);
+      byType.set(slug, entry);
+    }
+    return [...byType.entries()]
+      .map(([slug, entry]) => ({
+        slug,
+        title: entry.title,
+        documentCount: entry.documentCount,
+        projectCount: entry.projectIds.size,
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [folderDocuments]);
+
+  const savedDocumentFolders = useMemo(() => {
+    if (!selectedSavedType) return [];
+    const byDocument = new Map<
+      string,
+      { title: string; documentCount: number; projectIds: Set<string> }
+    >();
+    for (const row of folderDocuments) {
+      if (row.savedTypeSlug !== selectedSavedType) continue;
+      const slug = row.savedDocumentSlug;
+      if (!slug) continue;
+      const entry = byDocument.get(slug) ?? {
+        title: row.savedDocumentTitle || slug,
+        documentCount: 0,
+        projectIds: new Set<string>(),
+      };
+      entry.documentCount += 1;
+      entry.projectIds.add(row.projectId);
+      byDocument.set(slug, entry);
+    }
+    return [...byDocument.entries()]
+      .map(([slug, entry]) => ({
+        slug,
+        title: entry.title,
+        documentCount: entry.documentCount,
+        projectCount: entry.projectIds.size,
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [folderDocuments, selectedSavedType]);
+
+  const savedDocumentFiles = useMemo(() => {
+    if (!selectedSavedType || !selectedSavedDocument) return [];
+    return folderDocuments.filter(
+      (row) =>
+        row.savedTypeSlug === selectedSavedType &&
+        row.savedDocumentSlug === selectedSavedDocument
+    );
+  }, [folderDocuments, selectedSavedType, selectedSavedDocument]);
+
+  const savedTypeTitle =
+    savedTypeFolders.find((folder) => folder.slug === selectedSavedType)?.title ??
+    selectedSavedType;
+  const savedDocumentTitle =
+    savedDocumentFolders.find((folder) => folder.slug === selectedSavedDocument)?.title ??
+    selectedSavedDocument;
 
   const loading = projectsLoading || filesLoading;
 
@@ -669,18 +747,113 @@ export default function ProjectLibraryBrowserPage() {
               <div className="flex items-center gap-2 border-b border-gray-50 px-5 py-3 md:px-6">
                 <button
                   type="button"
-                  onClick={() => setSelectedFolder(null)}
+                  onClick={() => {
+                    if (selectedSavedDocument) {
+                      setSelectedSavedDocument(null);
+                      return;
+                    }
+                    if (selectedSavedType) {
+                      setSelectedSavedType(null);
+                      return;
+                    }
+                    setSelectedFolder(null);
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-brand-blue hover:bg-brand-blue/5"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  All folders
+                  {selectedSavedDocument
+                    ? savedTypeTitle
+                    : selectedSavedType
+                      ? "Saved Applications"
+                      : "All folders"}
                 </button>
                 <span className="text-gray-300">/</span>
                 <span className="truncate text-sm font-medium text-brand-navy">
-                  {FOLDER_LABELS[selectedFolder]}
+                  {selectedSavedDocument
+                    ? savedDocumentTitle
+                    : selectedSavedType
+                      ? savedTypeTitle
+                      : FOLDER_LABELS[selectedFolder]}
                 </span>
               </div>
-              {folderDocuments.length === 0 ? (
+              {selectedFolder === "saved-applications" && !selectedSavedType ? (
+                savedTypeFolders.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+                    <CircleDashed className="h-8 w-8 text-gray-300" />
+                    <p className="text-sm text-gray-500">
+                      No saved application documents for the selected filters.
+                    </p>
+                  </div>
+                ) : (
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead className="sticky top-0 z-10 bg-white">
+                      <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                        <th className="px-5 py-3 font-semibold md:px-6">Folder</th>
+                        <th className="px-3 py-3 font-semibold">Documents</th>
+                        <th className="px-3 py-3 pr-5 font-semibold md:pr-6">Projects</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {savedTypeFolders.map((folder) => (
+                        <tr key={folder.slug} className="border-b border-gray-50 last:border-0">
+                          <td className="px-5 py-3 md:px-6">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedSavedDocument(null);
+                                setSelectedSavedType(folder.slug);
+                              }}
+                              className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue"
+                            >
+                              <Folder className="h-4 w-4 shrink-0 text-brand-blue" />
+                              <span className="truncate font-medium">{folder.title}</span>
+                            </button>
+                          </td>
+                          <td className="px-3 py-3 text-gray-600">{folder.documentCount}</td>
+                          <td className="px-3 py-3 pr-5 text-gray-600 md:pr-6">{folder.projectCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              ) : selectedFolder === "saved-applications" && selectedSavedType && !selectedSavedDocument ? (
+                savedDocumentFolders.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+                    <CircleDashed className="h-8 w-8 text-gray-300" />
+                    <p className="text-sm text-gray-500">
+                      No documents in this folder for the selected filters.
+                    </p>
+                  </div>
+                ) : (
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead className="sticky top-0 z-10 bg-white">
+                      <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                        <th className="px-5 py-3 font-semibold md:px-6">Folder</th>
+                        <th className="px-3 py-3 font-semibold">Documents</th>
+                        <th className="px-3 py-3 pr-5 font-semibold md:pr-6">Projects</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {savedDocumentFolders.map((folder) => (
+                        <tr key={folder.slug} className="border-b border-gray-50 last:border-0">
+                          <td className="px-5 py-3 md:px-6">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSavedDocument(folder.slug)}
+                              className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue"
+                            >
+                              <Folder className="h-4 w-4 shrink-0 text-brand-blue" />
+                              <span className="truncate font-medium">{folder.title}</span>
+                            </button>
+                          </td>
+                          <td className="px-3 py-3 text-gray-600">{folder.documentCount}</td>
+                          <td className="px-3 py-3 pr-5 text-gray-600 md:pr-6">{folder.projectCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              ) : (selectedFolder === "saved-applications" ? savedDocumentFiles : folderDocuments).length === 0 ? (
                 <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
                   <CircleDashed className="h-8 w-8 text-gray-300" />
                   <p className="text-sm text-gray-500">
@@ -701,7 +874,10 @@ export default function ProjectLibraryBrowserPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {folderDocuments.map((row) => (
+                    {(selectedFolder === "saved-applications"
+                      ? savedDocumentFiles
+                      : folderDocuments
+                    ).map((row) => (
                       <tr
                         key={row.id}
                         className="border-b border-gray-50 last:border-0"
@@ -778,7 +954,11 @@ export default function ProjectLibraryBrowserPage() {
                     <td className="px-5 py-3 md:px-6">
                       <button
                         type="button"
-                        onClick={() => setSelectedFolder(summary.folder)}
+                        onClick={() => {
+                          setSelectedSavedType(null);
+                          setSelectedSavedDocument(null);
+                          setSelectedFolder(summary.folder);
+                        }}
                         className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue"
                       >
                         <Folder className="h-4 w-4 shrink-0 text-brand-blue" />
