@@ -563,6 +563,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({
                             Select a project to edit:
                           </label>
                           <CustomSelect
+                            searchable
                             value={selectedProjectForEdit}
                             onChange={(val) => {
                               setSelectedProjectForEdit(val);
@@ -586,6 +587,7 @@ const ApplicationModal: React.FC<ApplicationModalProps> = ({
                             Select a project:
                           </label>
                           <CustomSelect
+                            searchable
                             value={selectedProjectForExistingApp}
                             onChange={(val) => {
                               setSelectedProjectForExistingApp(val);
@@ -1110,6 +1112,7 @@ function UserDashboardContent() {
               <div className="flex w-full items-center gap-3">
                 <div className="flex min-w-0 w-full items-center gap-2">
                   <CustomSelect
+                    searchable
                     value={selectedProject}
                     onChange={handleProjectFilterChange}
                     options={[

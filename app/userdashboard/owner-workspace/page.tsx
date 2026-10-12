@@ -9,6 +9,7 @@ import ConsultantProgressCard, {
   WorkspaceDetailRow,
 } from "@/app/userdashboard/components/ConsultantProgressCard";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import { supabase } from "@/app/utils/supabase";
 import {
   filterConsultantsByProject,
@@ -22,6 +23,7 @@ import {
 
 export default function OwnerWorkspacePage() {
   const { projects, loading: projectsLoading, isConsultant } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
 
   const [selectedProjectId, setSelectedProjectId] = useState("ALL");
   const [selectedConsultantType, setSelectedConsultantType] = useState("ALL");
@@ -30,6 +32,17 @@ export default function OwnerWorkspacePage() {
   const [viewing, setViewing] = useState<AssignedConsultantCard | null>(null);
 
   const nonDraftProjects = useMemo(() => filterNonDraftProjects(projects), [projects]);
+
+  useEffect(() => {
+    if (projectsLoading) return;
+    if (!masterProjectId) {
+      setSelectedProjectId("ALL");
+      return;
+    }
+    if (nonDraftProjects.some((project) => project.id === masterProjectId)) {
+      setSelectedProjectId(masterProjectId);
+    }
+  }, [masterProjectId, projectsLoading, nonDraftProjects]);
 
   const canViewWorkspace = !isConsultant;
 
@@ -119,8 +132,12 @@ export default function OwnerWorkspacePage() {
                 Project
               </label>
               <CustomSelect
+                searchable
                 value={selectedProjectId}
-                onChange={setSelectedProjectId}
+                onChange={(value) => {
+                  setSelectedProjectId(value);
+                  setMasterProjectId(value === "ALL" ? "" : value);
+                }}
                 options={[
                   { value: "ALL", label: "All projects" },
                   ...nonDraftProjects.map((p) => ({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 
 export interface CustomSelectOption {
@@ -19,6 +19,7 @@ interface CustomSelectProps {
   disabled?: boolean;
   id?: string;
   "aria-label"?: string;
+  searchable?: boolean;
 }
 
 type MenuPosition = {
@@ -36,27 +37,39 @@ export default function CustomSelect({
   disabled = false,
   id,
   "aria-label": ariaLabel,
+  searchable = false,
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const typeaheadBufferRef = useRef("");
   const typeaheadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const optionsContainerRef = useRef<HTMLDivElement>(null);
 
+  const visibleOptions = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!searchable || !needle) return options;
+    return options.filter((opt) => opt.label.toLowerCase().includes(needle));
+  }, [options, query, searchable]);
+
   const updateMenuPosition = useCallback(() => {
     const button = buttonRef.current;
     if (!button) return;
     const rect = button.getBoundingClientRect();
+    const width = searchable ? Math.max(rect.width, 280) : rect.width;
+    const maxLeft = Math.max(8, window.innerWidth - width - 8);
     setMenuPosition({
       top: rect.bottom + 4,
-      left: rect.left,
-      width: rect.width,
+      left: Math.min(rect.left, maxLeft),
+      width,
     });
-  }, []);
+  }, [searchable]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,11 +79,12 @@ export default function CustomSelect({
       const target = e.target as Node;
       if (
         ref.current?.contains(target) ||
-        optionsContainerRef.current?.contains(target)
+        menuRef.current?.contains(target)
       ) {
         return;
       }
       setOpen(false);
+      setQuery("");
     };
 
     const reposition = () => updateMenuPosition();
@@ -84,6 +98,12 @@ export default function CustomSelect({
       window.removeEventListener("scroll", reposition, true);
     };
   }, [open, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!open || !searchable) return;
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open, searchable]);
 
   useEffect(() => {
     if (!open || activeIndex < 0) return;
@@ -102,7 +122,7 @@ export default function CustomSelect({
     };
   }, []);
 
-  const enabledIndexes = options.reduce<number[]>((acc, opt, idx) => {
+  const enabledIndexes = visibleOptions.reduce<number[]>((acc, opt, idx) => {
     if (!opt.disabled) acc.push(idx);
     return acc;
   }, []);
@@ -146,7 +166,7 @@ export default function CustomSelect({
       typeaheadBufferRef.current = "";
     }, 600);
 
-    const matchedIndex = options.findIndex(
+    const matchedIndex = visibleOptions.findIndex(
       (opt) =>
         !opt.disabled && opt.label.toLowerCase().startsWith(nextBuffer)
     );
@@ -159,16 +179,66 @@ export default function CustomSelect({
     open && menuPosition && typeof window !== "undefined"
       ? createPortal(
           <div
-            ref={optionsContainerRef}
+            ref={menuRef}
             style={{
               position: "fixed",
               top: menuPosition.top,
               left: menuPosition.left,
               width: menuPosition.width,
             }}
-            className="z-[10050] max-h-60 overflow-x-hidden overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg"
+            className="z-[10050] flex max-h-72 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
           >
-            {options.map((opt, idx) => (
+            {searchable ? (
+              <div className="shrink-0 border-b border-gray-100 p-2">
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setActiveIndex(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setActiveIndex((prev) => nextEnabledIndex(prev, 1));
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setActiveIndex((prev) => nextEnabledIndex(prev, -1));
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const selected =
+                        visibleOptions[activeIndex] ??
+                        visibleOptions.find((opt) => !opt.disabled);
+                      if (selected && !selected.disabled) {
+                        onChange(selected.value);
+                        setOpen(false);
+                        setQuery("");
+                      }
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setOpen(false);
+                      setQuery("");
+                      buttonRef.current?.focus();
+                    }
+                  }}
+                  placeholder="Search projects"
+                  aria-label="Search projects"
+                  className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 outline-none focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20"
+                />
+              </div>
+            ) : null}
+            <div ref={optionsContainerRef} className="min-h-0 overflow-x-hidden overflow-y-auto">
+            {visibleOptions.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-gray-500">No matches</p>
+            ) : (
+            visibleOptions.map((opt, idx) => (
               <button
                 key={opt.value || `option-${idx}`}
                 ref={(el) => {
@@ -180,20 +250,23 @@ export default function CustomSelect({
                   if (opt.disabled) return;
                   onChange(opt.value);
                   setOpen(false);
+                  setQuery("");
                 }}
                 className={`w-full text-left px-3 py-2 text-sm break-words leading-snug ${
                   opt.disabled
                     ? "cursor-not-allowed text-gray-400"
                     : value === opt.value
                       ? "bg-blue-50 text-brand-blue font-medium hover:bg-blue-50"
-                      : activeIndex >= 0 && options[activeIndex]?.value === opt.value
+                      : activeIndex >= 0 && visibleOptions[activeIndex]?.value === opt.value
                         ? "bg-blue-50 text-gray-900 hover:bg-blue-50"
                         : "text-gray-900 hover:bg-blue-50"
                 }`}
               >
                 {renderHighlightedLabel(opt.label, opt.highlightedPart)}
               </button>
-            ))}
+            ))
+            )}
+            </div>
           </div>,
           document.body
         )
@@ -214,13 +287,22 @@ export default function CustomSelect({
             const next = !prev;
             if (next) {
               updateMenuPosition();
+            } else {
+              setQuery("");
             }
             return next;
           });
         }}
         onKeyDown={(e) => {
           if (disabled) return;
-          if (e.key.length === 1 && /\S/.test(e.key)) {
+          if (searchable && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && /\S/.test(e.key)) {
+            e.preventDefault();
+            setQuery((prev) => (open ? `${prev}${e.key}` : e.key));
+            setOpen(true);
+            updateMenuPosition();
+            return;
+          }
+          if (!searchable && e.key.length === 1 && /\S/.test(e.key)) {
             e.preventDefault();
             runTypeahead(e.key);
             return;
@@ -241,15 +323,17 @@ export default function CustomSelect({
           }
           if (e.key === "Enter" && open && activeIndex >= 0) {
             e.preventDefault();
-            const selected = options[activeIndex];
+            const selected = visibleOptions[activeIndex];
             if (selected && !selected.disabled) {
               onChange(selected.value);
               setOpen(false);
+              setQuery("");
             }
           }
           if (e.key === "Escape" && open) {
             e.preventDefault();
             setOpen(false);
+            setQuery("");
           }
         }}
         className={`flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${

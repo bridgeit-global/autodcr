@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { UserProvider } from "./contexts/UserContext";
 import { DashboardAlertModalProvider } from "./dashboard/context/DashboardAlertModalContext";
+import { MasterProjectFilterProvider } from "./components/appshell/MasterProjectFilterContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,7 +41,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased text-sm text-gray-900`}
       >
         <UserProvider>
-          <DashboardAlertModalProvider>{children}</DashboardAlertModalProvider>
+          <MasterProjectFilterProvider>
+            <DashboardAlertModalProvider>{children}</DashboardAlertModalProvider>
+          </MasterProjectFilterProvider>
         </UserProvider>
       </body>
     </html>

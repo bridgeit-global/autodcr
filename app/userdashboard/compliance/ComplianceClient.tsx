@@ -32,6 +32,7 @@ import CustomSelect from "@/app/components/CustomSelect";
 import Button from "@/app/components/ui/Button";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import {
   CHAT_MODELS,
   DEFAULT_CHAT_MODEL,
@@ -264,6 +265,7 @@ export default function ComplianceClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const nonDraftProjects = useMemo(
     () => filterNonDraftProjects(projects),
     [projects]
@@ -385,16 +387,24 @@ export default function ComplianceClient() {
   }, []);
 
   useEffect(() => {
-    if (projectsLoading || selectedProjectId) return;
+    if (projectsLoading) return;
+    if (!masterProjectId) {
+      setSelectedProjectId("");
+      return;
+    }
+    if (nonDraftProjects.some((project) => project.id === masterProjectId)) {
+      setSelectedProjectId(masterProjectId);
+      return;
+    }
     const fromQuery = searchParams.get("projectId")?.trim() || "";
-    if (fromQuery && nonDraftProjects.some((p) => p.id === fromQuery)) {
+    if (fromQuery && nonDraftProjects.some((project) => project.id === fromQuery)) {
       setSelectedProjectId(fromQuery);
       return;
     }
     if (nonDraftProjects[0]) {
       setSelectedProjectId(nonDraftProjects[0].id);
     }
-  }, [searchParams, projectsLoading, nonDraftProjects, selectedProjectId]);
+  }, [masterProjectId, searchParams, projectsLoading, nonDraftProjects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -460,6 +470,7 @@ export default function ComplianceClient() {
   function selectProject(projectId: string) {
     if (projectId === selectedProjectId) return;
     setSelectedProjectId(projectId);
+    setMasterProjectId(projectId);
     setActiveChatId(null);
     setMessages([]);
     setFiles([]);
@@ -956,6 +967,7 @@ export default function ComplianceClient() {
               Project
             </label>
             <CustomSelect
+              searchable
               value={selectedProjectId}
               onChange={selectProject}
               options={

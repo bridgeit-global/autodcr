@@ -16,6 +16,7 @@ import CustomSelect from "@/app/components/CustomSelect";
 import type { DocumentValidationResult } from "@/app/components/DocumentValidationResultModal";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import { getFieldLabel, formatWardDisplayValue } from "@/app/lib/documentValidation/fieldLabels";
 import { mapSelectedApplicationToTemplate } from "@/app/templates/applicationPreview";
 import { formatSavedApplicationTimestamp } from "@/app/utils/projectSavedApplicationPdfUrl";
@@ -83,6 +84,7 @@ function DocumentGeneratorContent() {
   const searchParams = useSearchParams();
   const { showAlert } = useDashboardAlertModal();
   const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
@@ -269,8 +271,20 @@ function DocumentGeneratorContent() {
     };
   }, [selectedProjectId]);
 
+  useEffect(() => {
+    if (projectsLoading) return;
+    if (!masterProjectId) {
+      setSelectedProjectId("");
+      return;
+    }
+    if (selectableProjects.some((project) => project.id === masterProjectId)) {
+      setSelectedProjectId(masterProjectId);
+    }
+  }, [masterProjectId, projectsLoading, selectableProjects]);
+
   const handleProjectChange = (projectId: string) => {
     setSelectedProjectId(projectId);
+    setMasterProjectId(projectId);
     setSelectedApplicationType("");
     setValidationResult(null);
     setEditableFields({});
@@ -690,6 +704,7 @@ function DocumentGeneratorContent() {
               Project
             </label>
             <CustomSelect
+              searchable
               value={selectedProjectId}
               onChange={handleProjectChange}
               options={selectableProjects.map((p) => ({

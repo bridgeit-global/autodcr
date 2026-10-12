@@ -17,6 +17,8 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import CustomSelect from "@/app/components/CustomSelect";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import MetricCard from "@/app/components/ui/MetricCard";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
@@ -97,6 +99,7 @@ function ApplicationsHubContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { showAlert } = useDashboardAlertModal();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const {
     projects,
     loading: projectsLoading,
@@ -174,11 +177,21 @@ function ApplicationsHubContent() {
     };
   }, [projects, projectsLoading, isConsultant]);
 
-  const health = useMemo(() => bucketApplicationHealth(applications), [applications]);
+  const effectiveProjectId = useMemo(() => {
+    if (!masterProjectId) return "";
+    return projects.some((project) => project.id === masterProjectId) ? masterProjectId : "";
+  }, [masterProjectId, projects]);
+
+  const projectScoped = useMemo(() => {
+    if (!effectiveProjectId) return applications;
+    return applications.filter((app) => app.projectId === effectiveProjectId);
+  }, [applications, effectiveProjectId]);
+
+  const health = useMemo(() => bucketApplicationHealth(projectScoped), [projectScoped]);
 
   const filtered = useMemo(
-    () => filterApplicationsByStage(applications, stageFilter),
-    [applications, stageFilter]
+    () => filterApplicationsByStage(projectScoped, stageFilter),
+    [projectScoped, stageFilter]
   );
 
   useEffect(() => {
@@ -603,15 +616,34 @@ function ApplicationsHubContent() {
                           : `${filtered.length} application${filtered.length === 1 ? "" : "s"}`}
                 </p>
               </div>
-              {stageFilter !== "all" && (
-                <button
-                  type="button"
-                  onClick={() => setStageFilter("all")}
-                  className="text-xs font-semibold text-brand-blue hover:text-brand-navy"
-                >
-                  Clear filter
-                </button>
-              )}
+              <div className="flex shrink-0 items-center gap-3">
+                <div className="w-44 min-w-0 sm:w-64">
+                  <CustomSelect
+                    aria-label="Project"
+                    searchable
+                    value={effectiveProjectId}
+                    onChange={setMasterProjectId}
+                    options={[
+                      { value: "", label: "All projects" },
+                      ...projects.map((project) => ({
+                        value: project.id,
+                        label: project.title,
+                      })),
+                    ]}
+                    placeholder={projectsLoading ? "Loading projects…" : "All projects"}
+                    disabled={projectsLoading}
+                  />
+                </div>
+                {stageFilter !== "all" && (
+                  <button
+                    type="button"
+                    onClick={() => setStageFilter("all")}
+                    className="shrink-0 text-xs font-semibold text-brand-blue hover:text-brand-navy"
+                  >
+                    Clear filter
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="bg-slate-50/70 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
@@ -623,8 +655,10 @@ function ApplicationsHubContent() {
                 <div className="flex flex-col items-center gap-3 px-5 py-12 text-center">
                   <CircleDashed className="h-8 w-8 text-gray-300" />
                   <p className="text-sm text-gray-500">
-                    {applications.length === 0
-                      ? "No applications yet. Create one to get started."
+                    {projectScoped.length === 0
+                      ? applications.length === 0
+                        ? "No applications yet. Create one to get started."
+                        : "No applications for this project."
                       : "No applications in this stage."}
                   </p>
                   {applications.length === 0 &&
