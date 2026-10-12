@@ -4,10 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { CircleDashed, Loader2, Users } from "lucide-react";
 import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
-import {
-  useDashboardProjects,
-  type DashboardProject,
-} from "@/app/hooks/useDashboardProjects";
+import { useDashboardProjects, type DashboardProject } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import { BTN_SECONDARY } from "@/app/utils/buttonClasses";
 import { normalizeProjectId } from "@/app/utils/applicantAppointmentPermissions";
 import { fetchApplicantDetailsMapForProjects } from "@/app/utils/resolveApplicantDetailsForProject";
@@ -73,6 +71,7 @@ export default function AdministrationPage() {
     isArchitectConsultant,
     architectDelegateProjectIds,
   } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
 
   const [selectedProjectId, setSelectedProjectId] = useState("ALL");
   const [roleTab, setRoleTab] = useState<AdministrationRoleTab>("all");
@@ -93,6 +92,17 @@ export default function AdministrationPage() {
       ),
     [projects, isConsultant, architectDelegateProjectIds]
   );
+
+  useEffect(() => {
+    if (projectsLoading) return;
+    if (!masterProjectId) {
+      setSelectedProjectId("ALL");
+      return;
+    }
+    if (allowedProjects.some((project) => project.id === masterProjectId)) {
+      setSelectedProjectId(masterProjectId);
+    }
+  }, [masterProjectId, projectsLoading, allowedProjects]);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,8 +174,12 @@ export default function AdministrationPage() {
               Project
             </label>
             <CustomSelect
+              searchable
               value={selectedProjectId}
-              onChange={setSelectedProjectId}
+                onChange={(value) => {
+                  setSelectedProjectId(value);
+                  setMasterProjectId(value === "ALL" ? "" : value);
+                }}
               options={[
                 { value: "ALL", label: "All projects" },
                 ...allowedProjects.map((p) => ({

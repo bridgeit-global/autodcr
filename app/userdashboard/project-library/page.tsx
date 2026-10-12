@@ -11,6 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import CustomSelect from "@/app/components/CustomSelect";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { supabase } from "@/app/utils/supabase";
@@ -355,12 +356,12 @@ async function resolvePreviewBlobUrl(
 
 export default function ProjectLibraryBrowserPage() {
   const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const [projectRecords, setProjectRecords] = useState<LibraryProjectRecord[]>(
     []
   );
   const [rows, setRows] = useState<LibraryRow[]>([]);
   const [filesLoading, setFilesLoading] = useState(true);
-  const [authorityFilter, setAuthorityFilter] = useState("ALL");
   const [projectFilter, setProjectFilter] = useState("ALL");
   const [selectedFolder, setSelectedFolder] = useState<FolderSection | null>(
     null
@@ -474,39 +475,36 @@ export default function ProjectLibraryBrowserPage() {
     };
   }, [projects, projectsLoading]);
 
-  const authorityOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const project of projectRecords) {
-      const authority = getPlanningAuthority(project.save_plot_details);
-      if (authority && authority !== "—") set.add(authority);
-    }
-    return [...set].sort();
+  const projectOptions = useMemo(() => {
+    return projectRecords.map((project) => ({
+      id: project.id,
+      label: getProjectLabel({
+        title: project.title,
+        project_info: project.project_info as {
+          proposalNo?: string;
+          title?: string;
+        } | null,
+      }),
+    }));
   }, [projectRecords]);
 
-  const projectsForAuthority = useMemo(() => {
-    return projectRecords
-      .filter((project) => {
-        if (authorityFilter === "ALL") return true;
-        return getPlanningAuthority(project.save_plot_details) === authorityFilter;
-      })
-      .map((project) => ({
-        id: project.id,
-        label: getProjectLabel({
-          title: project.title,
-          project_info: project.project_info as {
-            proposalNo?: string;
-            title?: string;
-          } | null,
-        }),
-      }));
-  }, [projectRecords, authorityFilter]);
+  useEffect(() => {
+    if (projectsLoading || filesLoading) return;
+    if (!masterProjectId) {
+      setProjectFilter("ALL");
+      return;
+    }
+    if (projectRecords.some((project) => project.id === masterProjectId)) {
+      setProjectFilter(masterProjectId);
+    }
+  }, [masterProjectId, projectsLoading, filesLoading, projectRecords]);
 
   useEffect(() => {
-    if (projectFilter === "ALL") return;
-    if (!projectsForAuthority.some((p) => p.id === projectFilter)) {
+    if (filesLoading || projectFilter === "ALL") return;
+    if (!projectOptions.some((p) => p.id === projectFilter)) {
       setProjectFilter("ALL");
     }
-  }, [projectFilter, projectsForAuthority]);
+  }, [filesLoading, projectFilter, projectOptions]);
 
   // Stay inside the current folder when filters change; if that folder has no
   // matching docs, show the in-folder empty state (do not bounce to folder list).
@@ -518,15 +516,12 @@ export default function ProjectLibraryBrowserPage() {
 
   const filtered = useMemo(() => {
     return rows.filter((row) => {
-      if (authorityFilter !== "ALL" && row.authority !== authorityFilter) {
-        return false;
-      }
       if (projectFilter !== "ALL" && row.projectId !== projectFilter) {
         return false;
       }
       return true;
     });
-  }, [rows, authorityFilter, projectFilter]);
+  }, [rows, projectFilter]);
 
   const folderSummaries = useMemo((): FolderSummary[] => {
     const byFolder = new Map<
@@ -696,43 +691,27 @@ export default function ProjectLibraryBrowserPage() {
               Uploaded library documents and saved application PDFs across your projects
             </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                Authority
-              </label>
-              <CustomSelect
-                value={authorityFilter}
-                onChange={setAuthorityFilter}
-                options={[
-                  { value: "ALL", label: "All authorities" },
-                  ...authorityOptions.map((authority) => ({
-                    value: authority,
-                    label: authority,
-                  })),
-                ]}
-                placeholder={loading ? "Loading…" : "All authorities"}
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                Project
-              </label>
-              <CustomSelect
-                value={projectFilter}
-                onChange={setProjectFilter}
-                options={[
-                  { value: "ALL", label: "All projects" },
-                  ...projectsForAuthority.map((project) => ({
-                    value: project.id,
-                    label: project.label,
-                  })),
-                ]}
-                placeholder={loading ? "Loading…" : "All projects"}
-                disabled={loading}
-              />
-            </div>
+          <div className="max-w-md">
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+              Project
+            </label>
+            <CustomSelect
+              searchable
+              value={projectFilter}
+              onChange={(value) => {
+                setProjectFilter(value);
+                setMasterProjectId(value === "ALL" ? "" : value);
+              }}
+              options={[
+                { value: "ALL", label: "All projects" },
+                ...projectOptions.map((project) => ({
+                  value: project.id,
+                  label: project.label,
+                })),
+              ]}
+              placeholder={loading ? "Loading…" : "All projects"}
+              disabled={loading}
+            />
           </div>
         </div>
 

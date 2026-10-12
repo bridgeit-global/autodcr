@@ -12,6 +12,9 @@ import { clearSessionExpiresAt } from "@/app/utils/sessionTimeout";
 import { AppSidebarMobileTrigger } from "./AppSidebar";
 import NotificationBell from "./NotificationBell";
 import SessionTimer from "./SessionTimer";
+import CustomSelect from "@/app/components/CustomSelect";
+import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "./MasterProjectFilterContext";
 
 type AppHeaderProps = {
   title: string;
@@ -105,6 +108,8 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
 
   const displayName = formatUserName(userMetadata);
   const role = getUserRole(userMetadata) || "User";
+  const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
 
   return (
     <>
@@ -115,6 +120,24 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
           <h1 className="hidden shrink-0 text-base font-bold text-brand-navy sm:block md:text-lg">
             {title}
           </h1>
+
+          <div className="min-w-0 w-full max-w-[220px] sm:max-w-xs">
+            <CustomSelect
+              aria-label="Project"
+              searchable
+              value={masterProjectId}
+              onChange={setMasterProjectId}
+              options={[
+                { value: "", label: "All projects" },
+                ...projects.map((project) => ({
+                  value: project.id,
+                  label: project.title,
+                })),
+              ]}
+              placeholder={projectsLoading ? "Loading projects…" : "All projects"}
+              disabled={projectsLoading}
+            />
+          </div>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <SessionTimer onExpire={() => void handleLogout()} />

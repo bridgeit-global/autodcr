@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { FolderKanban, IndianRupee, Loader2, MapPin } from "lucide-react";
 import CustomSelect from "@/app/components/CustomSelect";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import {
   filterNonDraftProjects,
   getProjectLabel,
@@ -63,6 +64,7 @@ const RATE_TYPES: ReadyReckonerRateType[] = [
 export default function GovernmentFeesClient() {
   const searchParams = useSearchParams();
   const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const nonDraftProjects = useMemo(
     () => filterNonDraftProjects(projects),
     [projects]
@@ -84,15 +86,23 @@ export default function GovernmentFeesClient() {
 
   useEffect(() => {
     if (projectsLoading) return;
+    if (!masterProjectId) {
+      setSelectedProjectId("");
+      return;
+    }
+    if (nonDraftProjects.some((project) => project.id === masterProjectId)) {
+      setSelectedProjectId(masterProjectId);
+      return;
+    }
     const fromQuery = searchParams.get("projectId");
-    if (fromQuery && nonDraftProjects.some((p) => p.id === fromQuery)) {
+    if (fromQuery && nonDraftProjects.some((project) => project.id === fromQuery)) {
       setSelectedProjectId(fromQuery);
       return;
     }
-    if (!selectedProjectId && nonDraftProjects[0]) {
+    if (nonDraftProjects[0]) {
       setSelectedProjectId(nonDraftProjects[0].id);
     }
-  }, [searchParams, projectsLoading, nonDraftProjects, selectedProjectId]);
+  }, [masterProjectId, searchParams, projectsLoading, nonDraftProjects]);
 
   useEffect(() => {
     if (surveyNumbers.length === 0) {
@@ -185,8 +195,12 @@ export default function GovernmentFeesClient() {
             Project
           </label>
           <CustomSelect
+            searchable
             value={selectedProjectId}
-            onChange={setSelectedProjectId}
+            onChange={(value) => {
+              setSelectedProjectId(value);
+              setMasterProjectId(value);
+            }}
             options={
               projectsLoading
                 ? []

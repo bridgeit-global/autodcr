@@ -38,6 +38,7 @@ import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import {
   filterNonDraftProjects,
   getProjectLabel,
@@ -115,6 +116,7 @@ export default function DrawingReviewClient() {
   const searchParams = useSearchParams();
   const { userMetadata } = useUserMetadata();
   const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const nonDraftProjects = useMemo(() => filterNonDraftProjects(projects), [projects]);
 
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -313,16 +315,24 @@ export default function DrawingReviewClient() {
   }, [cadFullscreen, editing, setCadFullscreenMode]);
 
   useEffect(() => {
-    const fromQuery = searchParams.get("projectId")?.trim() || "";
     if (projectsLoading) return;
+    if (!masterProjectId) {
+      setSelectedProjectId("");
+      return;
+    }
+    if (nonDraftProjects.some((project) => project.id === masterProjectId)) {
+      setSelectedProjectId(masterProjectId);
+      return;
+    }
+    const fromQuery = searchParams.get("projectId")?.trim() || "";
     if (fromQuery && nonDraftProjects.some((project) => project.id === fromQuery)) {
       setSelectedProjectId(fromQuery);
       return;
     }
-    if (!selectedProjectId && nonDraftProjects[0]) {
+    if (nonDraftProjects[0]) {
       setSelectedProjectId(nonDraftProjects[0].id);
     }
-  }, [searchParams, projectsLoading, nonDraftProjects, selectedProjectId]);
+  }, [masterProjectId, searchParams, projectsLoading, nonDraftProjects]);
 
   useEffect(() => {
     if (!projectValue) {
@@ -816,8 +826,12 @@ export default function DrawingReviewClient() {
                   Project
                 </label>
                 <CustomSelect
+                  searchable
                   value={projectValue}
-                  onChange={setSelectedProjectId}
+                  onChange={(value) => {
+                    setSelectedProjectId(value);
+                    setMasterProjectId(value);
+                  }}
                   options={
                     projectsLoading
                       ? []

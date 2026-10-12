@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AppShell from "@/app/components/appshell/AppShell";
+import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import CustomSelect from "@/app/components/CustomSelect";
 import { supabase } from "@/app/utils/supabase";
 import {
@@ -30,29 +31,15 @@ import {
   canCreateProjectAsArchitect,
 } from "@/app/utils/projectAccess";
 import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
+import { normalizePlanningAuthority } from "@/app/lib/projectDocumentAutofill/utils";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
-
-type PlanningAuthority = {
-  id: string;
-  label: string;
-  description?: string;
-};
 
 type PermissionType = {
   id: string;
   title: string;
   description: string;
 };
-
-const planningAuthorities: PlanningAuthority[] = [
-  { id: "bmc", label: "BMC" },
-  { id: "sra", label: "SRA" },
-  { id: "mhada", label: "MHADA" },
-  { id: "mmrda", label: "MMRDA" },
-  { id: "cidco", label: "CIDCO" },
-  { id: "midc", label: "MIDC" },
-];
 
 const iconClass = "h-8 w-8 text-gray-500";
 
@@ -67,7 +54,7 @@ const DocumentIcon = () => (
 export default function CreateApplicationPage() {
   const router = useRouter();
   const { showAlert } = useDashboardAlertModal();
-  const [selectedAuthority, setSelectedAuthority] = useState("bmc");
+  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const [selectedProject, setSelectedProject] = useState("");
   const [projects, setProjects] = useState<OwnerProjectSelectRow[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -130,8 +117,8 @@ export default function CreateApplicationPage() {
         return;
       }
       const rows = canCreateProjectAsArchitect({ role, consultant_type: consultantType })
-        ? await fetchManageableProjectsForSelect()
-        : await fetchOwnerProjectsForSelect();
+        ? await fetchManageableProjectsForSelect({ includeDrafts: true })
+        : await fetchOwnerProjectsForSelect({ includeDrafts: true });
       if (!cancelled) {
         setProjects(rows);
         setProjectsLoading(false);
@@ -206,16 +193,6 @@ export default function CreateApplicationPage() {
     };
   }, [selectedProject]);
 
-  const authorityLabelMap: Record<string, string> = {
-    bmc: "BMC",
-    sra: "SRA",
-    mhada: "MHADA",
-    mmrda: "MMRDA",
-    cidco: "CIDCO",
-    midc: "MIDC",
-  };
-  const selectedAuthorityLabel = authorityLabelMap[selectedAuthority];
-
   const getProjectDisplayData = (project: {
     title: string;
     project_info?: { proposalNo?: string; title?: string } | null;
@@ -237,23 +214,29 @@ export default function CreateApplicationPage() {
     };
   };
 
-  const filteredProjects = projects.filter(
-    (project) =>
-      isProjectEligibleForNewApplication(project.status) &&
-      getProjectPlanningAuthority(project) === selectedAuthorityLabel
-  );
+  const selectedProjectData = projects.find((project) => project.id === selectedProject);
+  const selectedAuthorityId = (
+    normalizePlanningAuthority(selectedProjectData?.save_plot_details?.planningAuthority) || "BMC"
+  ).toLowerCase();
 
   useEffect(() => {
-    if (selectedProject && !filteredProjects.some((project) => project.id === selectedProject)) {
+    if (projectsLoading) return;
+    if (!masterProjectId) {
       setSelectedProject("");
+      return;
     }
-  }, [filteredProjects, selectedProject]);
+    if (projects.some((project) => project.id === masterProjectId)) {
+      setSelectedProject(masterProjectId);
+      return;
+    }
+    setSelectedProject("");
+  }, [masterProjectId, projectsLoading, projects]);
 
   const catalogTypesForDepartment = useMemo(
-    () => typesForDepartment(catalogTypes, selectedDepartment, selectedAuthority),
-    [catalogTypes, selectedDepartment, selectedAuthority]
+    () => typesForDepartment(catalogTypes, selectedDepartment, selectedAuthorityId),
+    [catalogTypes, selectedDepartment, selectedAuthorityId]
   );
-  const departmentOptions = departmentsFromCatalog(catalogTypes, selectedAuthority);
+  const departmentOptions = departmentsFromCatalog(catalogTypes, selectedAuthorityId);
 
   const permissionTypes = useMemo(
     () =>
@@ -264,8 +247,6 @@ export default function CreateApplicationPage() {
       })),
     [catalogTypesForDepartment]
   );
-
-  const selectedProjectData = filteredProjects.find((project) => project.id === selectedProject);
 
   const visiblePermissionTypes = useMemo(() => {
     const needsRoster = catalogTypesForDepartment.some((type) => type.requires_roster_match);
@@ -288,7 +269,7 @@ export default function CreateApplicationPage() {
   const handleProceed = async () => {
     if (!selectedProject || !selectedPermission) return;
 
-    const selectedProjectRecord = filteredProjects.find((project) => project.id === selectedProject);
+    const selectedProjectRecord = projects.find((project) => project.id === selectedProject);
     const selectedPermissionRec = visiblePermissionTypes.find(
       (permission) => permission.id === selectedPermission
     );
@@ -391,7 +372,7 @@ export default function CreateApplicationPage() {
 
   useEffect(() => {
     setSelectedPermission(null);
-  }, [selectedAuthority, selectedDepartment]);
+  }, [selectedAuthorityId, selectedDepartment]);
 
   useEffect(() => {
     if (
@@ -401,7 +382,7 @@ export default function CreateApplicationPage() {
     ) {
       setSelectedDepartment("");
     }
-  }, [selectedAuthority, selectedDepartment, departmentOptions]);
+  }, [selectedAuthorityId, selectedDepartment, departmentOptions]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -462,13 +443,13 @@ export default function CreateApplicationPage() {
       existingPermissionTypes.includes(selectedPermissionRecord?.title ?? "")
     );
 
-  const projectSelectOptions = filteredProjects.map((project) => ({
+  const projectSelectOptions = projects.map((project) => ({
     value: project.id,
     label: getProjectDisplayData(project).label,
   }));
 
   const relatedRows = [
-    { label: "Authority", value: selectedAuthorityLabel },
+    { label: "Authority", value: selectedProjectData ? getProjectPlanningAuthority(selectedProjectData) : "—" },
     { label: "Department", value: selectedDepartment || "—" },
     {
       label: "Application",
@@ -498,37 +479,27 @@ export default function CreateApplicationPage() {
       <div className="flex min-h-0 w-full flex-1 flex-col px-2 py-3 sm:px-3">
         <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
           <div className="border-b border-gray-100 px-2 py-3">
-            <div className="grid min-w-0 gap-3 md:grid-cols-3">
-              <div className="min-w-0">
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                  Authority
-                </label>
-                <CustomSelect
-                  value={selectedAuthority}
-                  onChange={setSelectedAuthority}
-                  options={planningAuthorities.map((a) => ({
-                    value: a.id,
-                    label: a.label,
-                  }))}
-                  placeholder="Select authority"
-                />
-              </div>
+            <div className="grid min-w-0 gap-3 md:grid-cols-2">
               <div className="min-w-0">
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
                   Project
                 </label>
                 <CustomSelect
+                  searchable
                   value={selectedProject}
-                  onChange={(val) => setSelectedProject(val)}
+                  onChange={(val) => {
+                    setSelectedProject(val);
+                    setMasterProjectId(val);
+                  }}
                   options={projectSelectOptions}
                   placeholder={
                     projectsLoading
                       ? "Loading projects…"
-                      : filteredProjects.length === 0
-                        ? "No submitted projects"
+                      : projects.length === 0
+                        ? "No projects"
                         : "Select project"
                   }
-                  disabled={projectsLoading || filteredProjects.length === 0}
+                  disabled={projectsLoading || projects.length === 0}
                 />
               </div>
               <div className="min-w-0">
@@ -547,10 +518,8 @@ export default function CreateApplicationPage() {
                 />
               </div>
             </div>
-            {!projectsLoading && filteredProjects.length === 0 ? (
-              <p className="mt-2 text-xs text-gray-500">
-                Draft projects are not listed. Submit a project for this authority first.
-              </p>
+            {!projectsLoading && projects.length === 0 ? (
+              <p className="mt-2 text-xs text-gray-500">No projects are available yet.</p>
             ) : null}
           </div>
 

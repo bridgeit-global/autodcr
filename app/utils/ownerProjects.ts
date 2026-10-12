@@ -52,7 +52,9 @@ export function isProjectEligibleForNewApplication(status: string | null | undef
   return (status ?? "").trim().toLowerCase() !== "draft";
 }
 
-export async function fetchOwnerProjectsForSelect(): Promise<OwnerProjectSelectRow[]> {
+export async function fetchOwnerProjectsForSelect(options?: {
+  includeDrafts?: boolean;
+}): Promise<OwnerProjectSelectRow[]> {
   const { data: authData } = await supabase.auth.getUser();
   const userId = authData?.user?.id;
   if (!userId) return [];
@@ -79,13 +81,15 @@ export async function fetchOwnerProjectsForSelect(): Promise<OwnerProjectSelectR
     rows = (data ?? []) as ProjectRow[];
   }
 
-  const eligible = rows.filter((row) => isProjectEligibleForNewApplication(row.status));
+  const listed = options?.includeDrafts
+    ? rows
+    : rows.filter((row) => isProjectEligibleForNewApplication(row.status));
   const rosterByProject = await fetchApplicantDetailsMapForProjects(
     supabase,
-    eligible.map((row) => row.id)
+    listed.map((row) => row.id)
   );
 
-  return eligible.map((row) => ({
+  return listed.map((row) => ({
     id: row.id,
     title: row.title,
     status: row.status ?? undefined,
@@ -102,7 +106,9 @@ type ConsultantProjectRpcRow = ProjectRow & {
 };
 
 /** Projects an architect consultant can manage (appointed architect on the project). */
-export async function fetchManageableProjectsForSelect(): Promise<OwnerProjectSelectRow[]> {
+export async function fetchManageableProjectsForSelect(options?: {
+  includeDrafts?: boolean;
+}): Promise<OwnerProjectSelectRow[]> {
   const { data: authData } = await supabase.auth.getUser();
   const userId = authData?.user?.id;
   if (!userId) return [];
@@ -120,13 +126,15 @@ export async function fetchManageableProjectsForSelect(): Promise<OwnerProjectSe
     isAppointedArchitect(row, userId)
   );
 
-  const eligible = rows.filter((row) => isProjectEligibleForNewApplication(row.status));
+  const listed = options?.includeDrafts
+    ? rows
+    : rows.filter((row) => isProjectEligibleForNewApplication(row.status));
   const rosterByProject = await fetchApplicantDetailsMapForProjects(
     supabase,
-    eligible.map((row) => row.id)
+    listed.map((row) => row.id)
   );
 
-  return eligible.map((row) => ({
+  return listed.map((row) => ({
     id: row.id,
     title: row.title,
     status: row.status ?? undefined,
