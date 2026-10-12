@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
+  ChevronRight,
   CircleDashed,
-  Eye,
   FileText,
   Folder,
   Library,
@@ -22,9 +21,26 @@ import {
   type ProjectLibraryExtraDocType,
 } from "@/app/utils/projectSections";
 import { getProjectLabel } from "@/app/userdashboard/administrationApplicants";
+import {
+  fetchApplicationsList,
+  type DashboardApplication,
+} from "@/app/userdashboard/applicationsList";
+import {
+  catalogDocumentOptionLabel,
+  fetchApplicationCatalogTypes,
+  fetchDocumentsForApplicationType,
+  type ApplicationCatalogDocument,
+  type ApplicationCatalogType,
+} from "@/app/utils/applicationCatalog";
 import { fetchSavedApplicationDocuments } from "@/app/utils/applicationDocumentDrafts";
 import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
-import { isDocumentDraftStoragePath } from "@/app/utils/projectSavedApplicationPdfUrl";
+import { isDocumentDraftStoragePath, readApplicationUrlFromUrls } from "@/app/utils/projectSavedApplicationPdfUrl";
+import {
+  generateApplicationPreviewHtml,
+  mapApplicationPreviewFields,
+  mapSelectedApplicationToTemplate,
+  type ApplicationPreviewSource,
+} from "@/app/templates/applicationPreview";
 
 type FolderSection =
   | "pr-card"
@@ -61,11 +77,12 @@ type LibraryRow = {
   savedDocumentTitle?: string;
 };
 
-type FolderSummary = {
-  folder: FolderSection;
+type LibrarySection = "documents" | "applications";
+
+type ProjectFolderSummary = {
+  id: string;
   label: string;
   documentCount: number;
-  projectCount: number;
 };
 
 const FOLDER_LABELS: Record<FolderSection, string> = {
@@ -186,6 +203,10 @@ async function loadLibraryProjectRecords(
     if (row) records.push(row);
   }
   return records;
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
 function formatUploadedAt(value: string | null): string {
@@ -354,23 +375,76 @@ async function resolvePreviewBlobUrl(
   }
 }
 
+function FolderCard({
+  title,
+  subtitle,
+  onClick,
+  active = false,
+}: {
+  title: string;
+  subtitle: string;
+  onClick: () => void;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-xl border bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md ${
+        active ? "border-brand-blue/40 ring-2 ring-brand-blue/20" : "border-gray-100"
+      }`}
+    >
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+        <Folder className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-brand-navy">{title}</p>
+        <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+    </button>
+  );
+}
+
+type ApplicationTypeFolder = {
+  key: string;
+  title: string;
+  applications: DashboardApplication[];
+};
+
+type ApplicationDepartmentFolder = {
+  key: string;
+  title: string;
+  types: ApplicationTypeFolder[];
+};
+
 export default function ProjectLibraryBrowserPage() {
-  const { projects, loading: projectsLoading } = useDashboardProjects();
+  const { projects, loading: projectsLoading, isConsultant } = useDashboardProjects();
   const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
   const [projectRecords, setProjectRecords] = useState<LibraryProjectRecord[]>(
     []
   );
   const [rows, setRows] = useState<LibraryRow[]>([]);
+  const [applications, setApplications] = useState<DashboardApplication[]>([]);
   const [filesLoading, setFilesLoading] = useState(true);
   const [projectFilter, setProjectFilter] = useState("ALL");
+  const [section, setSection] = useState<LibrarySection | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<FolderSection | null>(
     null
   );
-  const [selectedSavedType, setSelectedSavedType] = useState<string | null>(null);
-  const [selectedSavedDocument, setSelectedSavedDocument] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ url: string; title: string } | null>(
-    null
-  );
+  const [selectedDepartmentKey, setSelectedDepartmentKey] = useState<string | null>(null);
+  const [selectedTypeKey, setSelectedTypeKey] = useState<string | null>(null);
+  const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
+  const [catalogTypesLoaded, setCatalogTypesLoaded] = useState(false);
+  const [documentsByTypeId, setDocumentsByTypeId] = useState<
+    Record<string, ApplicationCatalogDocument[]>
+  >({});
+  const [preview, setPreview] = useState<{
+    url: string;
+    title: string;
+    html?: string | null;
+  } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewBlobRef = useRef<string | null>(null);
@@ -384,18 +458,31 @@ export default function ProjectLibraryBrowserPage() {
         if (!cancelled) {
           setProjectRecords([]);
           setRows([]);
+          setApplications([]);
           setFilesLoading(false);
         }
         return;
       }
 
       setFilesLoading(true);
-      const [records, savedDocuments] = await Promise.all([
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData.user?.id;
+      const [records, savedDocuments, applicationList] = await Promise.all([
         loadLibraryProjectRecords(projects),
         fetchSavedApplicationDocuments().catch((err) => {
           console.error("Failed to load saved application documents:", err);
           return [];
         }),
+        userId
+          ? fetchApplicationsList({
+              userId,
+              isConsultant,
+              projectIds: projects.map((project) => String(project.id)),
+            }).catch((err) => {
+              console.error("Failed to load applications:", err);
+              return [] as DashboardApplication[];
+            })
+          : Promise.resolve([] as DashboardApplication[]),
       ]);
       if (cancelled) return;
 
@@ -466,6 +553,7 @@ export default function ProjectLibraryBrowserPage() {
 
       setProjectRecords(records);
       setRows(nextRows);
+      setApplications(applicationList);
       setFilesLoading(false);
     }
 
@@ -473,7 +561,7 @@ export default function ProjectLibraryBrowserPage() {
     return () => {
       cancelled = true;
     };
-  }, [projects, projectsLoading]);
+  }, [projects, projectsLoading, isConsultant]);
 
   const projectOptions = useMemo(() => {
     return projectRecords.map((project) => ({
@@ -506,14 +594,6 @@ export default function ProjectLibraryBrowserPage() {
     }
   }, [filesLoading, projectFilter, projectOptions]);
 
-  // Stay inside the current folder when filters change; if that folder has no
-  // matching docs, show the in-folder empty state (do not bounce to folder list).
-  useEffect(() => {
-    if (!selectedFolder) return;
-    const stillExists = rows.some((row) => row.folder === selectedFolder);
-    if (!stillExists) setSelectedFolder(null);
-  }, [rows, selectedFolder]);
-
   const filtered = useMemo(() => {
     return rows.filter((row) => {
       if (projectFilter !== "ALL" && row.projectId !== projectFilter) {
@@ -523,109 +603,303 @@ export default function ProjectLibraryBrowserPage() {
     });
   }, [rows, projectFilter]);
 
-  const folderSummaries = useMemo((): FolderSummary[] => {
-    const byFolder = new Map<
-      FolderSection,
-      { documentCount: number; projectIds: Set<string> }
-    >();
+  const documentRows = useMemo(
+    () => filtered.filter((row) => row.folder !== "saved-applications"),
+    [filtered]
+  );
 
-    for (const row of filtered) {
-      const entry = byFolder.get(row.folder) ?? {
+  const filteredApplications = useMemo(() => {
+    if (projectFilter === "ALL") return applications;
+    return applications.filter((app) => app.projectId === projectFilter);
+  }, [applications, projectFilter]);
+
+  const documentProjectFolders = useMemo((): ProjectFolderSummary[] => {
+    const byProject = new Map<string, ProjectFolderSummary>();
+    for (const row of documentRows) {
+      const entry = byProject.get(row.projectId) ?? {
+        id: row.projectId,
+        label: row.projectLabel,
         documentCount: 0,
-        projectIds: new Set<string>(),
       };
       entry.documentCount += 1;
-      entry.projectIds.add(row.projectId);
-      byFolder.set(row.folder, entry);
+      byProject.set(row.projectId, entry);
     }
+    return [...byProject.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [documentRows]);
 
-    return FOLDER_ORDER.flatMap((folder) => {
-      const entry = byFolder.get(folder);
-      if (!entry || entry.documentCount === 0) return [];
-      return [
-        {
-          folder,
-          label: FOLDER_LABELS[folder],
-          documentCount: entry.documentCount,
-          projectCount: entry.projectIds.size,
-        },
-      ];
-    });
-  }, [filtered]);
-
-  const folderDocuments = useMemo(() => {
-    if (!selectedFolder) return [];
-    return filtered.filter((row) => row.folder === selectedFolder);
-  }, [filtered, selectedFolder]);
-
-  const savedTypeFolders = useMemo(() => {
-    const byType = new Map<string, { title: string; documentCount: number; projectIds: Set<string> }>();
-    for (const row of folderDocuments) {
-      const slug = row.savedTypeSlug;
-      if (!slug) continue;
-      const entry = byType.get(slug) ?? {
-        title: row.savedTypeTitle || slug,
+  const applicationProjectFolders = useMemo((): ProjectFolderSummary[] => {
+    const byProject = new Map<string, ProjectFolderSummary>();
+    for (const app of filteredApplications) {
+      const entry = byProject.get(app.projectId) ?? {
+        id: app.projectId,
+        label:
+          projectOptions.find((project) => project.id === app.projectId)?.label ||
+          app.projectTitle ||
+          "Project",
         documentCount: 0,
-        projectIds: new Set<string>(),
       };
       entry.documentCount += 1;
-      entry.projectIds.add(row.projectId);
-      byType.set(slug, entry);
+      byProject.set(app.projectId, entry);
     }
-    return [...byType.entries()]
-      .map(([slug, entry]) => ({
-        slug,
-        title: entry.title,
-        documentCount: entry.documentCount,
-        projectCount: entry.projectIds.size,
-      }))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }, [folderDocuments]);
+    return [...byProject.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [filteredApplications, projectOptions]);
 
-  const savedDocumentFolders = useMemo(() => {
-    if (!selectedSavedType) return [];
-    const byDocument = new Map<
-      string,
-      { title: string; documentCount: number; projectIds: Set<string> }
-    >();
-    for (const row of folderDocuments) {
-      if (row.savedTypeSlug !== selectedSavedType) continue;
-      const slug = row.savedDocumentSlug;
-      if (!slug) continue;
-      const entry = byDocument.get(slug) ?? {
-        title: row.savedDocumentTitle || slug,
-        documentCount: 0,
-        projectIds: new Set<string>(),
-      };
-      entry.documentCount += 1;
-      entry.projectIds.add(row.projectId);
-      byDocument.set(slug, entry);
-    }
-    return [...byDocument.entries()]
-      .map(([slug, entry]) => ({
-        slug,
-        title: entry.title,
-        documentCount: entry.documentCount,
-        projectCount: entry.projectIds.size,
-      }))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }, [folderDocuments, selectedSavedType]);
-
-  const savedDocumentFiles = useMemo(() => {
-    if (!selectedSavedType || !selectedSavedDocument) return [];
-    return folderDocuments.filter(
-      (row) =>
-        row.savedTypeSlug === selectedSavedType &&
-        row.savedDocumentSlug === selectedSavedDocument
+  const applicationRootFolderCount = useMemo(() => {
+    if (projectFilter === "ALL") return applicationProjectFolders.length;
+    const departments = new Set(
+      filteredApplications.map((app) =>
+        (app.department && app.department !== "—" ? app.department.trim() : "Other").toLowerCase()
+      )
     );
-  }, [folderDocuments, selectedSavedType, selectedSavedDocument]);
+    return departments.size;
+  }, [projectFilter, applicationProjectFolders.length, filteredApplications]);
 
-  const savedTypeTitle =
-    savedTypeFolders.find((folder) => folder.slug === selectedSavedType)?.title ??
-    selectedSavedType;
-  const savedDocumentTitle =
-    savedDocumentFolders.find((folder) => folder.slug === selectedSavedDocument)?.title ??
-    selectedSavedDocument;
+  const projectRows = useMemo(() => {
+    if (!selectedProjectId) return [];
+    return documentRows.filter((row) => row.projectId === selectedProjectId);
+  }, [documentRows, selectedProjectId]);
+
+  const documentTypeFolders = useMemo(() => {
+    if (section !== "documents" || !selectedProjectId) return [];
+    const byFolder = new Map<FolderSection, number>();
+    for (const row of projectRows) {
+      byFolder.set(row.folder, (byFolder.get(row.folder) ?? 0) + 1);
+    }
+    return FOLDER_ORDER.flatMap((folder) => {
+      if (folder === "saved-applications") return [];
+      const documentCount = byFolder.get(folder) ?? 0;
+      if (documentCount === 0) return [];
+      return [{ folder, label: FOLDER_LABELS[folder], documentCount }];
+    });
+  }, [section, selectedProjectId, projectRows]);
+
+  const documentFiles = useMemo(() => {
+    if (section !== "documents" || !selectedFolder) return [];
+    return projectRows.filter((row) => row.folder === selectedFolder);
+  }, [section, projectRows, selectedFolder]);
+
+  const applicationDepartments = useMemo((): ApplicationDepartmentFolder[] => {
+    if (!selectedProjectId) return [];
+    const departments = new Map<
+      string,
+      { title: string; types: Map<string, ApplicationTypeFolder> }
+    >();
+    for (const app of filteredApplications) {
+      if (app.projectId !== selectedProjectId) continue;
+      const departmentTitle =
+        app.department && app.department !== "—" ? app.department.trim() : "Other";
+      const departmentKey = departmentTitle.toLowerCase();
+      const department = departments.get(departmentKey) ?? {
+        title: departmentTitle,
+        types: new Map<string, ApplicationTypeFolder>(),
+      };
+      const typeTitle = app.permissionType.trim() || "Application";
+      const typeKey = typeTitle.toLowerCase();
+      const typeFolder = department.types.get(typeKey) ?? {
+        key: typeKey,
+        title: typeTitle,
+        applications: [],
+      };
+      typeFolder.applications.push(app);
+      department.types.set(typeKey, typeFolder);
+      departments.set(departmentKey, department);
+    }
+    return [...departments.entries()]
+      .map(([key, department]) => ({
+        key,
+        title: department.title,
+        types: [...department.types.values()].sort((a, b) => a.title.localeCompare(b.title)),
+      }))
+      .sort((a, b) => {
+        if (a.title === "Building Permission") return -1;
+        if (b.title === "Building Permission") return 1;
+        return a.title.localeCompare(b.title);
+      });
+  }, [filteredApplications, selectedProjectId]);
+
+  const selectedDepartment =
+    applicationDepartments.find((folder) => folder.key === selectedDepartmentKey) ?? null;
+  const selectedTypeFolder =
+    selectedDepartment?.types.find((folder) => folder.key === selectedTypeKey) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchApplicationCatalogTypes().then((types) => {
+      if (cancelled) return;
+      setCatalogTypes(types);
+      setCatalogTypesLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedCatalogType = useMemo(() => {
+    const title = selectedTypeFolder?.title.trim().toLowerCase();
+    if (!title) return null;
+    return (
+      catalogTypes.find((type) => type.application_title.trim().toLowerCase() === title) ?? null
+    );
+  }, [catalogTypes, selectedTypeFolder]);
+
+  useEffect(() => {
+    const typeId = selectedCatalogType?.id;
+    if (!typeId || documentsByTypeId[typeId]) return;
+    let cancelled = false;
+    void fetchDocumentsForApplicationType(typeId).then((docs) => {
+      if (cancelled) return;
+      setDocumentsByTypeId((prev) => ({ ...prev, [typeId]: docs }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCatalogType, documentsByTypeId]);
+
+  const selectedTypeDocuments = selectedCatalogType
+    ? (documentsByTypeId[selectedCatalogType.id] ?? [])
+    : [];
+
+  const selectedProjectLabel =
+    (section === "applications" ? applicationProjectFolders : documentProjectFolders).find(
+      (folder) => folder.id === selectedProjectId
+    )?.label ?? "Project";
+
+  const clearDeeperThanSection = () => {
+    setSelectedProjectId(null);
+    setSelectedFolder(null);
+    setSelectedDepartmentKey(null);
+    setSelectedTypeKey(null);
+  };
+
+  const clearDeeperThanProject = () => {
+    setSelectedFolder(null);
+    setSelectedDepartmentKey(null);
+    setSelectedTypeKey(null);
+  };
+
+  useEffect(() => {
+    if (!section || !selectedProjectId) return;
+    const stillExists =
+      section === "documents"
+        ? documentRows.some((row) => row.projectId === selectedProjectId)
+        : filteredApplications.some((app) => app.projectId === selectedProjectId);
+    if (!stillExists) {
+      setSelectedProjectId(null);
+      setSelectedFolder(null);
+      setSelectedDepartmentKey(null);
+      setSelectedTypeKey(null);
+    }
+  }, [section, documentRows, filteredApplications, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedFolder) return;
+    if (!documentTypeFolders.some((folder) => folder.folder === selectedFolder)) {
+      setSelectedFolder(null);
+    }
+  }, [documentTypeFolders, selectedFolder]);
+
+  useEffect(() => {
+    if (!selectedDepartmentKey) return;
+    if (!applicationDepartments.some((folder) => folder.key === selectedDepartmentKey)) {
+      setSelectedDepartmentKey(null);
+      setSelectedTypeKey(null);
+    }
+  }, [applicationDepartments, selectedDepartmentKey]);
+
+  useEffect(() => {
+    if (!selectedTypeKey) return;
+    if (!selectedDepartment?.types.some((folder) => folder.key === selectedTypeKey)) {
+      setSelectedTypeKey(null);
+    }
+  }, [selectedDepartment, selectedTypeKey]);
+
+  const sectionTitle =
+    section === "documents"
+      ? "Project Documents"
+      : section === "applications"
+        ? "Project Applications"
+        : "All folders";
+
+  const projectIsFiltered = projectFilter !== "ALL";
+
+  const panelTitle = selectedTypeFolder
+    ? selectedTypeFolder.title
+    : selectedDepartment
+      ? selectedDepartment.title
+      : selectedFolder
+        ? FOLDER_LABELS[selectedFolder]
+        : selectedProjectId && !projectIsFiltered
+          ? selectedProjectLabel
+          : sectionTitle;
+
+  const fileRows = section === "documents" && selectedFolder ? documentFiles : null;
+  const visibleProjectFolders =
+    section === "applications" ? applicationProjectFolders : documentProjectFolders;
+
+  const typeDocumentsReady =
+    catalogTypesLoaded &&
+    (!selectedCatalogType || selectedCatalogType.id in documentsByTypeId);
+
+  const panelCount = fileRows
+    ? countLabel(fileRows.length, "document")
+    : selectedTypeFolder && selectedTypeDocuments.length > 0
+      ? countLabel(selectedTypeDocuments.length, "document")
+      : selectedTypeFolder && !typeDocumentsReady
+        ? "Loading…"
+      : selectedTypeFolder
+      ? countLabel(selectedTypeFolder.applications.length, "application")
+      : selectedDepartment
+        ? countLabel(selectedDepartment.types.length, "folder")
+        : selectedProjectId && section === "documents"
+          ? countLabel(documentTypeFolders.length, "folder")
+          : selectedProjectId && section === "applications"
+            ? countLabel(applicationDepartments.length, "folder")
+            : section
+              ? countLabel(visibleProjectFolders.length, "project")
+              : "2 folders";
+
+  const openSection = (next: LibrarySection) => {
+    setSelectedFolder(null);
+    setSelectedDepartmentKey(null);
+    setSelectedTypeKey(null);
+    setSection(next);
+    setSelectedProjectId(projectFilter === "ALL" ? null : projectFilter);
+  };
+
+  const onLibraryChange = (value: string) => {
+    if (value !== "documents" && value !== "applications") {
+      setSection(null);
+      clearDeeperThanSection();
+      return;
+    }
+    openSection(value);
+  };
+
+  const onPathProjectChange = (value: string) => {
+    clearDeeperThanProject();
+    setSelectedProjectId(value || null);
+  };
+
+  const onDocumentTypeChange = (value: string) => {
+    setSelectedFolder(value ? (value as FolderSection) : null);
+  };
+
+  const onDepartmentChange = (value: string) => {
+    setSelectedTypeKey(null);
+    setSelectedDepartmentKey(value || null);
+  };
+
+  const onApplicationTypeChange = (value: string) => {
+    setSelectedTypeKey(value || null);
+  };
+
+  useEffect(() => {
+    if (!section) return;
+    setSelectedFolder(null);
+    setSelectedDepartmentKey(null);
+    setSelectedTypeKey(null);
+    setSelectedProjectId(projectFilter === "ALL" ? null : projectFilter);
+  }, [projectFilter, section]);
 
   const loading = projectsLoading || filesLoading;
 
@@ -636,6 +910,107 @@ export default function ProjectLibraryBrowserPage() {
     if (previewBlobRef.current) {
       URL.revokeObjectURL(previewBlobRef.current);
       previewBlobRef.current = null;
+    }
+  };
+
+  const savedRowForCatalogDocument = (doc: ApplicationCatalogDocument): LibraryRow | null => {
+    if (!selectedProjectId || !selectedTypeFolder) return null;
+    const typeTitle = selectedTypeFolder.title.trim().toLowerCase();
+    const typeSlug = selectedCatalogType?.slug.trim().toLowerCase() || "";
+    const docSlug = doc.slug.trim().toLowerCase();
+    const category = doc.category.trim().toLowerCase();
+    return (
+      rows.find((row) => {
+        if (row.folder !== "saved-applications" || row.projectId !== selectedProjectId) return false;
+        const rowType = (row.savedTypeTitle || "").trim().toLowerCase();
+        const rowTypeSlug = (row.savedTypeSlug || "").trim().toLowerCase();
+        const typeMatches = rowType === typeTitle || (typeSlug && rowTypeSlug === typeSlug);
+        if (!typeMatches) return false;
+        const rowDoc = (row.savedDocumentSlug || "").trim().toLowerCase();
+        const rowTitle = (row.savedDocumentTitle || "").trim().toLowerCase();
+        return rowDoc === docSlug || rowTitle === category;
+      }) ?? null
+    );
+  };
+
+  const savedRowForApplicationType = (): LibraryRow | null => {
+    if (!selectedProjectId || !selectedTypeFolder) return null;
+    const typeTitle = selectedTypeFolder.title.trim().toLowerCase();
+    const typeSlug = selectedCatalogType?.slug.trim().toLowerCase() || "";
+    return (
+      rows.find((row) => {
+        if (row.folder !== "saved-applications" || row.projectId !== selectedProjectId) return false;
+        const rowType = (row.savedTypeTitle || "").trim().toLowerCase();
+        const rowTypeSlug = (row.savedTypeSlug || "").trim().toLowerCase();
+        return rowType === typeTitle || (typeSlug && rowTypeSlug === typeSlug);
+      }) ?? null
+    );
+  };
+
+  const openApplicationHtmlPreview = async (
+    title: string,
+    doc?: ApplicationCatalogDocument | null
+  ) => {
+    if (!selectedProjectId || !selectedTypeFolder) {
+      setPreviewLoading(false);
+      setPreview({ url: "", title, html: null });
+      setPreviewError("Could not load the saved PDF.");
+      return;
+    }
+    const project = projectRecords.find((record) => record.id === selectedProjectId);
+    const storedUrl = doc
+      ? readApplicationUrlFromUrls(project?.application_urls, doc.slug) ||
+        readApplicationUrlFromUrls(project?.application_urls, doc.id)
+      : undefined;
+    if (storedUrl) {
+      setPreviewLoading(false);
+      setPreviewError(null);
+      setPreview({ url: storedUrl, title, html: null });
+      return;
+    }
+
+    setPreviewError(null);
+    setPreviewLoading(true);
+    setPreview({ url: "", title, html: null });
+    try {
+      const templateType = mapSelectedApplicationToTemplate(selectedTypeFolder.title);
+      const createdAt = selectedTypeFolder.applications[0]?.createdAt ?? null;
+      const source: ApplicationPreviewSource = {
+        projectId: selectedProjectId,
+        selectedApplication: selectedTypeFolder.title,
+        applicationCreatedAt: createdAt,
+        catalogDocumentId: doc?.id ?? null,
+        resolvedCatalogDocument: doc ?? null,
+        resolvedApplicantType: selectedCatalogType?.applicant_type ?? null,
+        letterVariant: doc?.letter_variant === "acceptance" ? "acceptance" : "appointment",
+        projectData: {
+          title: project?.title,
+          project_info: project?.project_info as NonNullable<
+            ApplicationPreviewSource["projectData"]
+          >["project_info"],
+          save_plot_details: project?.save_plot_details as NonNullable<
+            ApplicationPreviewSource["projectData"]
+          >["save_plot_details"],
+        },
+      };
+      const html = await generateApplicationPreviewHtml(
+        mapApplicationPreviewFields(source, templateType),
+        templateType,
+        source
+      );
+      if (!html.trim()) {
+        setPreview({ url: "", title, html: null });
+        setPreviewError("Could not load the saved PDF.");
+        return;
+      }
+      setPreviewError(null);
+      setPreview({ url: "", title, html });
+    } catch (err) {
+      console.error("Failed to build application preview:", err);
+      setPreview({ url: "", title, html: null });
+      setPreviewError("Could not load the saved PDF.");
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -670,11 +1045,12 @@ export default function ProjectLibraryBrowserPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 overflow-hidden px-4 py-4 md:px-6 md:py-6">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden px-2 py-3 sm:px-3">
       <DocumentPreviewModal
         open={Boolean(preview) || previewLoading || Boolean(previewError)}
         onClose={closePreview}
-        fileUrl={preview?.url || null}
+        fileUrl={preview?.html ? null : preview?.url || null}
+        htmlContent={preview?.html || null}
         title={preview?.title || "Document Preview"}
         hideSaveButton
         isLoading={previewLoading}
@@ -682,16 +1058,8 @@ export default function ProjectLibraryBrowserPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="flex shrink-0 flex-col gap-4 border-b border-gray-100 px-5 py-4 md:px-6">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
-              Project Library
-            </h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Uploaded library documents and saved application PDFs across your projects
-            </p>
-          </div>
-          <div className="max-w-md">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-2 py-3 md:flex-row md:items-end">
+          <div className="w-full min-w-0 md:max-w-md md:flex-1">
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
               Project
             </label>
@@ -713,249 +1081,296 @@ export default function ProjectLibraryBrowserPage() {
               disabled={loading}
             />
           </div>
+          <div className="grid min-w-0 flex-[2] grid-cols-1 gap-3 sm:grid-cols-2">
+            <FolderCard
+              title="Project Documents"
+              subtitle={countLabel(documentRows.length, "document")}
+              active={section === "documents"}
+              onClick={() => openSection("documents")}
+            />
+            <FolderCard
+              title="Project Applications"
+              subtitle={countLabel(applicationRootFolderCount, "folder")}
+              active={section === "applications"}
+              onClick={() => openSection("applications")}
+            />
+          </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        {section ? (
+        <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-2 py-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <CustomSelect
+                aria-label="Library"
+                value={section}
+                onChange={onLibraryChange}
+                options={[
+                  { value: "", label: "All folders" },
+                  { value: "documents", label: "Project Documents" },
+                  { value: "applications", label: "Project Applications" },
+                ]}
+              />
+              {!projectIsFiltered ? (
+                <CustomSelect
+                  aria-label="Project folder"
+                  searchable
+                  value={selectedProjectId ?? ""}
+                  onChange={onPathProjectChange}
+                  options={[
+                    { value: "", label: "All projects" },
+                    ...visibleProjectFolders.map((folder) => ({
+                      value: folder.id,
+                      label: folder.label,
+                    })),
+                  ]}
+                />
+              ) : null}
+              {section === "documents" && selectedProjectId ? (
+                <CustomSelect
+                  aria-label="Document type"
+                  searchable
+                  value={selectedFolder ?? ""}
+                  onChange={onDocumentTypeChange}
+                  options={[
+                    { value: "", label: "All types" },
+                    ...documentTypeFolders.map((folder) => ({
+                      value: folder.folder,
+                      label: folder.label,
+                    })),
+                  ]}
+                />
+              ) : null}
+              {section === "applications" && selectedProjectId ? (
+                <CustomSelect
+                  aria-label="Department"
+                  searchable
+                  value={selectedDepartmentKey ?? ""}
+                  onChange={onDepartmentChange}
+                  options={[
+                    { value: "", label: "All departments" },
+                    ...applicationDepartments.map((folder) => ({
+                      value: folder.key,
+                      label: folder.title,
+                    })),
+                  ]}
+                />
+              ) : null}
+              {section === "applications" && selectedDepartment ? (
+                <CustomSelect
+                  aria-label="Application type"
+                  searchable
+                  value={selectedTypeKey ?? ""}
+                  onChange={onApplicationTypeChange}
+                  options={[
+                    { value: "", label: "All types" },
+                    ...selectedDepartment.types.map((folder) => ({
+                      value: folder.key,
+                      label: folder.title,
+                    })),
+                  ]}
+                />
+              ) : null}
+            </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-bold text-brand-navy">{panelTitle}</h2>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {loading ? "Loading…" : panelCount}
+            </p>
+          </div>
+        </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 overscroll-contain">
           {loading ? (
             <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-gray-500">
               <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
               Loading documents…
             </div>
-          ) : selectedFolder ? (
-            <>
-              <div className="flex items-center gap-2 border-b border-gray-50 px-5 py-3 md:px-6">
+          ) : !section ? null : !selectedProjectId ? (
+            visibleProjectFolders.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+                {section === "documents" ? (
+                  <Library className="h-8 w-8 text-gray-300" />
+                ) : (
+                  <CircleDashed className="h-8 w-8 text-gray-300" />
+                )}
+                <p className="text-sm text-gray-500">
+                  {section === "documents"
+                    ? "No library documents uploaded yet."
+                    : "No applications for this project."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+                {visibleProjectFolders.map((folder) => (
+                  <FolderCard
+                    key={folder.id}
+                    title={folder.label}
+                    subtitle={countLabel(
+                      folder.documentCount,
+                      section === "applications" ? "application" : "document"
+                    )}
+                    onClick={() => {
+                      clearDeeperThanProject();
+                      setSelectedProjectId(folder.id);
+                    }}
+                  />
+                ))}
+              </div>
+            )
+          ) : section === "documents" && !selectedFolder ? (
+            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+              {documentTypeFolders.map((folder) => (
+                <FolderCard
+                  key={folder.folder}
+                  title={folder.label}
+                  subtitle={countLabel(folder.documentCount, "document")}
+                  onClick={() => setSelectedFolder(folder.folder)}
+                />
+              ))}
+            </div>
+          ) : section === "applications" && !selectedDepartment ? (
+            applicationDepartments.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+                <CircleDashed className="h-8 w-8 text-gray-300" />
+                <p className="text-sm text-gray-500">No applications for this project.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+                {applicationDepartments.map((folder) => {
+                  const applicationCount = folder.types.reduce(
+                    (total, type) => total + type.applications.length,
+                    0
+                  );
+                  return (
+                    <FolderCard
+                      key={folder.key}
+                      title={folder.title}
+                      subtitle={countLabel(applicationCount, "application")}
+                      onClick={() => {
+                        setSelectedTypeKey(null);
+                        setSelectedDepartmentKey(folder.key);
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )
+          ) : section === "applications" && selectedDepartment && !selectedTypeFolder ? (
+            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+              {selectedDepartment.types.map((folder) => (
+                <FolderCard
+                  key={folder.key}
+                  title={folder.title}
+                  subtitle={countLabel(folder.applications.length, "application")}
+                  onClick={() => setSelectedTypeKey(folder.key)}
+                />
+              ))}
+            </div>
+          ) : section === "applications" && selectedTypeFolder && !typeDocumentsReady ? (
+            <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
+              Loading documents…
+            </div>
+          ) : section === "applications" && selectedTypeFolder && selectedTypeDocuments.length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+              {selectedTypeDocuments.map((doc) => (
                 <button
+                  key={doc.id}
                   type="button"
                   onClick={() => {
-                    if (selectedSavedDocument) {
-                      setSelectedSavedDocument(null);
+                    const saved = savedRowForCatalogDocument(doc);
+                    if (saved) {
+                      void openPreview(saved);
                       return;
                     }
-                    if (selectedSavedType) {
-                      setSelectedSavedType(null);
-                      return;
-                    }
-                    setSelectedFolder(null);
+                    void openApplicationHtmlPreview(catalogDocumentOptionLabel(doc), doc);
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-brand-blue hover:bg-brand-blue/5"
+                  className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
                 >
-                  <ArrowLeft className="h-4 w-4" />
-                  {selectedSavedDocument
-                    ? savedTypeTitle
-                    : selectedSavedType
-                      ? "Saved Applications"
-                      : "All folders"}
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                    <Folder className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-brand-navy">
+                      {catalogDocumentOptionLabel(doc)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {countLabel(selectedTypeFolder.applications.length, "application")}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
                 </button>
-                <span className="text-gray-300">/</span>
-                <span className="truncate text-sm font-medium text-brand-navy">
-                  {selectedSavedDocument
-                    ? savedDocumentTitle
-                    : selectedSavedType
-                      ? savedTypeTitle
-                      : FOLDER_LABELS[selectedFolder]}
-                </span>
-              </div>
-              {selectedFolder === "saved-applications" && !selectedSavedType ? (
-                savedTypeFolders.length === 0 ? (
-                  <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-                    <CircleDashed className="h-8 w-8 text-gray-300" />
-                    <p className="text-sm text-gray-500">
-                      No saved application documents for the selected filters.
+              ))}
+            </div>
+          ) : section === "applications" && selectedTypeFolder ? (
+            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+              {selectedTypeFolder.applications.map((app) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  onClick={() => {
+                    const saved = savedRowForApplicationType();
+                    if (saved) {
+                      void openPreview(saved);
+                      return;
+                    }
+                    void openApplicationHtmlPreview(
+                      app.permissionType || app.projectTitle || "Application"
+                    );
+                  }}
+                  className="flex w-full items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-sm font-semibold text-brand-navy">
+                      {app.projectTitle || app.permissionType}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-gray-500">{app.permissionType}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      {formatUploadedAt(app.createdAt ?? null)}
                     </p>
                   </div>
-                ) : (
-                  <table className="w-full min-w-[560px] text-left text-sm">
-                    <thead className="sticky top-0 z-10 bg-white">
-                      <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                        <th className="px-5 py-3 font-semibold md:px-6">Folder</th>
-                        <th className="px-3 py-3 font-semibold">Documents</th>
-                        <th className="px-3 py-3 pr-5 font-semibold md:pr-6">Projects</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {savedTypeFolders.map((folder) => (
-                        <tr key={folder.slug} className="border-b border-gray-50 last:border-0">
-                          <td className="px-5 py-3 md:px-6">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedSavedDocument(null);
-                                setSelectedSavedType(folder.slug);
-                              }}
-                              className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue"
-                            >
-                              <Folder className="h-4 w-4 shrink-0 text-brand-blue" />
-                              <span className="truncate font-medium">{folder.title}</span>
-                            </button>
-                          </td>
-                          <td className="px-3 py-3 text-gray-600">{folder.documentCount}</td>
-                          <td className="px-3 py-3 pr-5 text-gray-600 md:pr-6">{folder.projectCount}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )
-              ) : selectedFolder === "saved-applications" && selectedSavedType && !selectedSavedDocument ? (
-                savedDocumentFolders.length === 0 ? (
-                  <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-                    <CircleDashed className="h-8 w-8 text-gray-300" />
-                    <p className="text-sm text-gray-500">
-                      No documents in this folder for the selected filters.
+                  <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
+                </button>
+              ))}
+            </div>
+          ) : fileRows && fileRows.length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
+              {fileRows.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => void openPreview(row)}
+                  disabled={!row.url && !row.path}
+                  className="flex w-full items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-sm font-semibold text-brand-navy">
+                      {row.fileName}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-gray-500">{row.projectLabel}</p>
+                    <p className="mt-0.5 truncate text-xs text-gray-500">{row.authority}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      {formatUploadedAt(row.uploadedAt)}
                     </p>
                   </div>
-                ) : (
-                  <table className="w-full min-w-[560px] text-left text-sm">
-                    <thead className="sticky top-0 z-10 bg-white">
-                      <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                        <th className="px-5 py-3 font-semibold md:px-6">Folder</th>
-                        <th className="px-3 py-3 font-semibold">Documents</th>
-                        <th className="px-3 py-3 pr-5 font-semibold md:pr-6">Projects</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {savedDocumentFolders.map((folder) => (
-                        <tr key={folder.slug} className="border-b border-gray-50 last:border-0">
-                          <td className="px-5 py-3 md:px-6">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedSavedDocument(folder.slug)}
-                              className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue"
-                            >
-                              <Folder className="h-4 w-4 shrink-0 text-brand-blue" />
-                              <span className="truncate font-medium">{folder.title}</span>
-                            </button>
-                          </td>
-                          <td className="px-3 py-3 text-gray-600">{folder.documentCount}</td>
-                          <td className="px-3 py-3 pr-5 text-gray-600 md:pr-6">{folder.projectCount}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )
-              ) : (selectedFolder === "saved-applications" ? savedDocumentFiles : folderDocuments).length === 0 ? (
-                <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-                  <CircleDashed className="h-8 w-8 text-gray-300" />
-                  <p className="text-sm text-gray-500">
-                    No documents in this folder for the selected filters.
-                  </p>
-                </div>
-              ) : (
-                <table className="w-full min-w-[720px] text-left text-sm">
-                  <thead className="sticky top-0 z-10 bg-white">
-                    <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      <th className="px-5 py-3 font-semibold md:px-6">Document</th>
-                      <th className="px-3 py-3 font-semibold">Project</th>
-                      <th className="px-3 py-3 font-semibold">Authority</th>
-                      <th className="px-3 py-3 font-semibold">Date</th>
-                      <th className="px-3 py-3 pr-5 font-semibold md:pr-6">
-                        Preview
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(selectedFolder === "saved-applications"
-                      ? savedDocumentFiles
-                      : folderDocuments
-                    ).map((row) => (
-                      <tr
-                        key={row.id}
-                        className="border-b border-gray-50 last:border-0"
-                      >
-                        <td className="px-5 py-3 md:px-6">
-                          <button
-                            type="button"
-                            onClick={() => void openPreview(row)}
-                            disabled={!row.url && !row.path}
-                            className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:text-gray-400"
-                          >
-                            <FileText className="h-4 w-4 shrink-0 text-brand-blue" />
-                            <span className="truncate font-medium">
-                              {row.fileName}
-                            </span>
-                          </button>
-                        </td>
-                        <td className="px-3 py-3 text-gray-600">
-                          {row.projectLabel}
-                        </td>
-                        <td className="px-3 py-3 text-gray-600">
-                          {row.authority}
-                        </td>
-                        <td className="px-3 py-3 text-gray-500">
-                          {formatUploadedAt(row.uploadedAt)}
-                        </td>
-                        <td className="px-3 py-3 pr-5 md:pr-6">
-                          <button
-                            type="button"
-                            onClick={() => void openPreview(row)}
-                            disabled={!row.url && !row.path}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-brand-blue hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-100 disabled:text-gray-400 disabled:hover:bg-white"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                            Preview
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-              {rows.length === 0 ? (
-                <Library className="h-8 w-8 text-gray-300" />
-              ) : (
-                <CircleDashed className="h-8 w-8 text-gray-300" />
-              )}
-              <p className="text-sm text-gray-500">
-                {rows.length === 0
-                  ? "No library documents uploaded yet."
-                  : "No documents match these filters."}
-              </p>
+                  <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
+                </button>
+              ))}
             </div>
           ) : (
-            <table className="w-full min-w-[560px] text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-white">
-                <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  <th className="px-5 py-3 font-semibold md:px-6">Folder</th>
-                  <th className="px-3 py-3 font-semibold">Documents</th>
-                  <th className="px-3 py-3 pr-5 font-semibold md:pr-6">
-                    Projects
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {folderSummaries.map((summary) => (
-                  <tr
-                    key={summary.folder}
-                    className="border-b border-gray-50 last:border-0"
-                  >
-                    <td className="px-5 py-3 md:px-6">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedSavedType(null);
-                          setSelectedSavedDocument(null);
-                          setSelectedFolder(summary.folder);
-                        }}
-                        className="flex max-w-full items-center gap-2 text-left text-brand-navy hover:text-brand-blue"
-                      >
-                        <Folder className="h-4 w-4 shrink-0 text-brand-blue" />
-                        <span className="truncate font-medium">
-                          {summary.label}
-                        </span>
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-gray-600">
-                      {summary.documentCount}
-                    </td>
-                    <td className="px-3 py-3 pr-5 text-gray-600 md:pr-6">
-                      {summary.projectCount}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+              <CircleDashed className="h-8 w-8 text-gray-300" />
+              <p className="text-sm text-gray-500">
+                No documents in this folder for the selected filters.
+              </p>
+            </div>
           )}
         </div>
       </div>
