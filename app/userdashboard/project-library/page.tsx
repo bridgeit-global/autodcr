@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   CircleDashed,
@@ -375,6 +375,30 @@ async function resolvePreviewBlobUrl(
   }
 }
 
+function PathStep({
+  step,
+  label,
+  children,
+}: {
+  step: number;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white p-2.5 shadow-sm">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-blue to-brand-navy text-[11px] font-bold text-white shadow-sm">
+          {step}
+        </span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          {label}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function FolderCard({
   title,
   subtitle,
@@ -420,14 +444,13 @@ type ApplicationDepartmentFolder = {
 
 export default function ProjectLibraryBrowserPage() {
   const { projects, loading: projectsLoading, isConsultant } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
   const [projectRecords, setProjectRecords] = useState<LibraryProjectRecord[]>(
     []
   );
   const [rows, setRows] = useState<LibraryRow[]>([]);
   const [applications, setApplications] = useState<DashboardApplication[]>([]);
   const [filesLoading, setFilesLoading] = useState(true);
-  const [projectFilter, setProjectFilter] = useState("ALL");
   const [section, setSection] = useState<LibrarySection | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<FolderSection | null>(
@@ -576,23 +599,10 @@ export default function ProjectLibraryBrowserPage() {
     }));
   }, [projectRecords]);
 
-  useEffect(() => {
-    if (projectsLoading || filesLoading) return;
-    if (!masterProjectId) {
-      setProjectFilter("ALL");
-      return;
-    }
-    if (projectRecords.some((project) => project.id === masterProjectId)) {
-      setProjectFilter(masterProjectId);
-    }
-  }, [masterProjectId, projectsLoading, filesLoading, projectRecords]);
-
-  useEffect(() => {
-    if (filesLoading || projectFilter === "ALL") return;
-    if (!projectOptions.some((p) => p.id === projectFilter)) {
-      setProjectFilter("ALL");
-    }
-  }, [filesLoading, projectFilter, projectOptions]);
+  const projectFilter =
+    masterProjectId && projectRecords.some((project) => project.id === masterProjectId)
+      ? masterProjectId
+      : "ALL";
 
   const filtered = useMemo(() => {
     return rows.filter((row) => {
@@ -1058,30 +1068,8 @@ export default function ProjectLibraryBrowserPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-2 py-3 md:flex-row md:items-end">
-          <div className="w-full min-w-0 md:max-w-md md:flex-1">
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Project
-            </label>
-            <CustomSelect
-              searchable
-              value={projectFilter}
-              onChange={(value) => {
-                setProjectFilter(value);
-                setMasterProjectId(value === "ALL" ? "" : value);
-              }}
-              options={[
-                { value: "ALL", label: "All projects" },
-                ...projectOptions.map((project) => ({
-                  value: project.id,
-                  label: project.label,
-                })),
-              ]}
-              placeholder={loading ? "Loading…" : "All projects"}
-              disabled={loading}
-            />
-          </div>
-          <div className="grid min-w-0 flex-[2] grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="shrink-0 border-b border-gray-100 px-2 py-3">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-3xl">
             <FolderCard
               title="Project Documents"
               subtitle={countLabel(documentRows.length, "document")}
@@ -1098,86 +1086,118 @@ export default function ProjectLibraryBrowserPage() {
         </div>
 
         {section ? (
-        <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-2 py-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <CustomSelect
-                aria-label="Library"
-                value={section}
-                onChange={onLibraryChange}
-                options={[
-                  { value: "", label: "All folders" },
-                  { value: "documents", label: "Project Documents" },
-                  { value: "applications", label: "Project Applications" },
-                ]}
-              />
-              {!projectIsFiltered ? (
+          <div className="shrink-0 border-b border-slate-200/80 bg-gradient-to-br from-blue-50/80 via-slate-50 to-white px-3 py-3">
+            <div className="flex flex-col gap-2.5 lg:flex-row lg:items-stretch">
+              <PathStep step={1} label="Library">
                 <CustomSelect
-                  aria-label="Project folder"
-                  searchable
-                  value={selectedProjectId ?? ""}
-                  onChange={onPathProjectChange}
+                  aria-label="Library"
+                  value={section}
+                  onChange={onLibraryChange}
                   options={[
-                    { value: "", label: "All projects" },
-                    ...visibleProjectFolders.map((folder) => ({
-                      value: folder.id,
-                      label: folder.label,
-                    })),
+                    { value: "", label: "All folders" },
+                    { value: "documents", label: "Project Documents" },
+                    { value: "applications", label: "Project Applications" },
                   ]}
                 />
+              </PathStep>
+              {!projectIsFiltered ? (
+                <>
+                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
+                  <PathStep step={2} label="Project">
+                    <CustomSelect
+                      aria-label="Project folder"
+                      searchable
+                      value={selectedProjectId ?? ""}
+                      onChange={onPathProjectChange}
+                      options={[
+                        { value: "", label: "All projects" },
+                        ...visibleProjectFolders.map((folder) => ({
+                          value: folder.id,
+                          label: folder.label,
+                        })),
+                      ]}
+                    />
+                  </PathStep>
+                </>
               ) : null}
               {section === "documents" && selectedProjectId ? (
-                <CustomSelect
-                  aria-label="Document type"
-                  searchable
-                  value={selectedFolder ?? ""}
-                  onChange={onDocumentTypeChange}
-                  options={[
-                    { value: "", label: "All types" },
-                    ...documentTypeFolders.map((folder) => ({
-                      value: folder.folder,
-                      label: folder.label,
-                    })),
-                  ]}
-                />
+                <>
+                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
+                  <PathStep step={projectIsFiltered ? 2 : 3} label="Document type">
+                    <CustomSelect
+                      aria-label="Document type"
+                      searchable
+                      value={selectedFolder ?? ""}
+                      onChange={onDocumentTypeChange}
+                      options={[
+                        { value: "", label: "All types" },
+                        ...documentTypeFolders.map((folder) => ({
+                          value: folder.folder,
+                          label: folder.label,
+                        })),
+                      ]}
+                    />
+                  </PathStep>
+                </>
               ) : null}
               {section === "applications" && selectedProjectId ? (
-                <CustomSelect
-                  aria-label="Department"
-                  searchable
-                  value={selectedDepartmentKey ?? ""}
-                  onChange={onDepartmentChange}
-                  options={[
-                    { value: "", label: "All departments" },
-                    ...applicationDepartments.map((folder) => ({
-                      value: folder.key,
-                      label: folder.title,
-                    })),
-                  ]}
-                />
+                <>
+                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
+                  <PathStep step={projectIsFiltered ? 2 : 3} label="Department">
+                    <CustomSelect
+                      aria-label="Department"
+                      searchable
+                      value={selectedDepartmentKey ?? ""}
+                      onChange={onDepartmentChange}
+                      options={[
+                        { value: "", label: "All departments" },
+                        ...applicationDepartments.map((folder) => ({
+                          value: folder.key,
+                          label: folder.title,
+                        })),
+                      ]}
+                    />
+                  </PathStep>
+                </>
               ) : null}
               {section === "applications" && selectedDepartment ? (
-                <CustomSelect
-                  aria-label="Application type"
-                  searchable
-                  value={selectedTypeKey ?? ""}
-                  onChange={onApplicationTypeChange}
-                  options={[
-                    { value: "", label: "All types" },
-                    ...selectedDepartment.types.map((folder) => ({
-                      value: folder.key,
-                      label: folder.title,
-                    })),
-                  ]}
-                />
+                <>
+                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
+                  <PathStep step={projectIsFiltered ? 3 : 4} label="Application">
+                    <CustomSelect
+                      aria-label="Application type"
+                      searchable
+                      value={selectedTypeKey ?? ""}
+                      onChange={onApplicationTypeChange}
+                      options={[
+                        { value: "", label: "All types" },
+                        ...selectedDepartment.types.map((folder) => ({
+                          value: folder.key,
+                          label: folder.title,
+                        })),
+                      ]}
+                    />
+                  </PathStep>
+                </>
               ) : null}
             </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-bold text-brand-navy">{panelTitle}</h2>
-            <p className="mt-0.5 text-xs text-gray-500">
-              {loading ? "Loading…" : panelCount}
-            </p>
+            <div className="mt-3 flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-white px-3 py-2.5 shadow-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-blue to-brand-navy text-white shadow-sm">
+                  <Folder className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Current folder
+                  </p>
+                  <p className="truncate text-sm font-semibold text-brand-navy">{panelTitle}</p>
+                </div>
+              </div>
+              <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-brand-blue ring-1 ring-blue-100">
+                {loading ? "Loading…" : panelCount}
+              </span>
+            </div>
           </div>
-        </div>
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 overscroll-contain">
