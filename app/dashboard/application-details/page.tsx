@@ -1026,16 +1026,6 @@ async function buildApplicationPreviewContext(
 
   mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
 
-  const needsConsultantRegRefresh =
-    templateType === "Licensed Surveyor"
-      ? !lbsLicenseNo || !lbsExpiryDate
-      : !coaRegNo || !coaExpiryDate;
-
-  if (needsConsultantRegRefresh) {
-    await supabase.auth.refreshSession();
-    mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
-  }
-
   // Always load the appointed consultant profile from server when we know their user id.
   // JWT may have COA/reg only while address/company live in admin user_metadata.
   const consultantProfileLookupIds =
