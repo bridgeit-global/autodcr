@@ -21,7 +21,10 @@ import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectF
 import MetricCard from "@/app/components/ui/MetricCard";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
-import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import {
+  readRememberedDashboardProjectIds,
+  useDashboardProjects,
+} from "@/app/hooks/useDashboardProjects";
 import { supabase } from "@/app/utils/supabase";
 import {
   catalogDocumentOptionLabel,
@@ -37,6 +40,7 @@ import {
   applicationHref,
   bucketApplicationHealth,
   fetchApplicationsList,
+  readCachedApplicationsList,
   filterApplicationsByStage,
   getApplicationStage,
   type ApplicationStageFilter,
@@ -169,26 +173,55 @@ function ApplicationsHubContent() {
     let cancelled = false;
 
     async function load() {
-      if (projectsLoading) return;
-
-      setApplicationsLoading(true);
-      try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      let userId = sessionData.session?.user?.id ?? null;
+      if (!userId) {
         const { data: authData } = await supabase.auth.getUser();
-        const userId = authData.user?.id;
-        if (!userId) {
-          if (!cancelled) setApplications([]);
-          return;
+        userId = authData.user?.id ?? null;
+      }
+      if (!userId) {
+        if (!cancelled) {
+          setApplications([]);
+          setApplicationsLoading(false);
         }
+        return;
+      }
 
-        const rows = await fetchApplicationsList({
-          userId,
-          isConsultant,
-          projectIds: projects.map((p) => String(p.id)),
-        });
+      const liveProjectIds = projects.map((project) => String(project.id));
+      const projectIds = masterProjectId
+        ? [masterProjectId]
+        : liveProjectIds.length > 0
+          ? liveProjectIds
+          : readRememberedDashboardProjectIds(userId);
+      if (projectIds.length === 0) {
+        if (!projectsLoading && !masterProjectId) {
+          setApplications([]);
+          setApplicationsLoading(false);
+        }
+        return;
+      }
+
+      const request = {
+        userId,
+        isConsultant,
+        projectIds,
+      };
+      const cached = readCachedApplicationsList(request);
+      if (cached) {
+        if (!cancelled) {
+          setApplications(cached);
+          setApplicationsLoading(false);
+        }
+      } else if (!cancelled) {
+        setApplicationsLoading(true);
+      }
+
+      try {
+        const rows = await fetchApplicationsList(request);
         if (!cancelled) setApplications(rows);
       } catch (err) {
         console.error("Failed to load applications:", err);
-        if (!cancelled) setApplications([]);
+        if (!cancelled && !cached) setApplications([]);
       } finally {
         if (!cancelled) setApplicationsLoading(false);
       }
@@ -198,7 +231,7 @@ function ApplicationsHubContent() {
     return () => {
       cancelled = true;
     };
-  }, [projects, projectsLoading, isConsultant]);
+  }, [projects, projectsLoading, isConsultant, masterProjectId]);
 
   const effectiveProjectId = useMemo(() => {
     if (!masterProjectId) return "";
@@ -231,26 +264,36 @@ function ApplicationsHubContent() {
     const titles = new Set(
       applications.map((app) => app.permissionType.trim().toLowerCase()).filter(Boolean)
     );
+    const openTypeId =
+      selectedTypeKey && !selectedTypeKey.startsWith("letter:")
+        ? catalogTypes.find(
+            (type) => type.application_title.trim().toLowerCase() === selectedTypeKey
+          )?.id
+        : null;
     const typeIds = catalogTypes
-      .filter((type) => titles.has(type.application_title.trim().toLowerCase()))
+      .filter((type) => {
+        const title = type.application_title.trim().toLowerCase();
+        if (!titles.has(title)) return false;
+        if (type.category === "appointment_letter") return true;
+        return Boolean(openTypeId && type.id === openTypeId);
+      })
       .map((type) => type.id);
-    if (typeIds.length === 0) {
-      setDocumentsByTypeId({});
-      return;
-    }
+    if (typeIds.length === 0) return;
     let cancelled = false;
     void Promise.all(
       typeIds.map(async (id) => [id, await fetchDocumentsForApplicationType(id)] as const)
     ).then((pairs) => {
       if (cancelled) return;
-      const next: Record<string, ApplicationCatalogDocument[]> = {};
-      for (const [id, docs] of pairs) next[id] = docs;
-      setDocumentsByTypeId(next);
+      setDocumentsByTypeId((current) => {
+        const next = { ...current };
+        for (const [id, docs] of pairs) next[id] = docs;
+        return next;
+      });
     });
     return () => {
       cancelled = true;
     };
-  }, [applications, catalogTypes]);
+  }, [applications, catalogTypes, selectedTypeKey]);
 
   const typeByTitle = useMemo(
     () =>

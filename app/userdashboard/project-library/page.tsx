@@ -12,7 +12,10 @@ import {
 import CustomSelect from "@/app/components/CustomSelect";
 import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
-import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
+import {
+  readRememberedDashboardProjectIds,
+  useDashboardProjects,
+} from "@/app/hooks/useDashboardProjects";
 import { supabase } from "@/app/utils/supabase";
 import {
   PROJECT_LIBRARY_DOCUMENT_NAMES,
@@ -203,6 +206,18 @@ async function loadLibraryProjectRecords(
     if (row) records.push(row);
   }
   return records;
+}
+
+type LibrarySnapshot = {
+  records: LibraryProjectRecord[];
+  rows: LibraryRow[];
+  applications: DashboardApplication[];
+};
+
+const librarySnapshotCache = new Map<string, LibrarySnapshot>();
+
+function librarySnapshotKey(projectIds: string[]): string {
+  return [...projectIds].sort().join(",");
 }
 
 function countLabel(count: number, singular: string): string {
@@ -476,9 +491,23 @@ export default function ProjectLibraryBrowserPage() {
     let cancelled = false;
 
     async function load() {
-      if (projectsLoading) return;
-      if (projects.length === 0) {
-        if (!cancelled) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      let userId = sessionData.session?.user?.id ?? null;
+      if (!userId) {
+        const { data: authData } = await supabase.auth.getUser();
+        userId = authData.user?.id ?? null;
+      }
+
+      const liveProjectIds = projects.map((project) => String(project.id));
+      const projectIds = masterProjectId
+        ? [masterProjectId]
+        : liveProjectIds.length > 0
+          ? liveProjectIds
+          : userId
+            ? readRememberedDashboardProjectIds(userId)
+            : [];
+      if (projectIds.length === 0) {
+        if (!projectsLoading && !masterProjectId && !cancelled) {
           setProjectRecords([]);
           setRows([]);
           setApplications([]);
@@ -487,11 +516,20 @@ export default function ProjectLibraryBrowserPage() {
         return;
       }
 
-      setFilesLoading(true);
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData.user?.id;
+      const cacheKey = librarySnapshotKey(projectIds);
+      const cached = librarySnapshotCache.get(cacheKey);
+      if (cached && !cancelled) {
+        setProjectRecords(cached.records);
+        setRows(cached.rows);
+        setApplications(cached.applications);
+        setFilesLoading(false);
+      } else if (!cancelled) {
+        setFilesLoading(true);
+      }
+
+      const libraryProjects = projectIds.map((id) => ({ id }));
       const [records, savedDocuments, applicationList] = await Promise.all([
-        loadLibraryProjectRecords(projects),
+        loadLibraryProjectRecords(libraryProjects),
         fetchSavedApplicationDocuments().catch((err) => {
           console.error("Failed to load saved application documents:", err);
           return [];
@@ -500,7 +538,7 @@ export default function ProjectLibraryBrowserPage() {
           ? fetchApplicationsList({
               userId,
               isConsultant,
-              projectIds: projects.map((project) => String(project.id)),
+              projectIds,
             }).catch((err) => {
               console.error("Failed to load applications:", err);
               return [] as DashboardApplication[];
@@ -543,7 +581,9 @@ export default function ProjectLibraryBrowserPage() {
       }
 
       const recordById = new Map(records.map((project) => [project.id, project]));
+      const projectIdSet = new Set(projectIds);
       for (const item of savedDocuments) {
+        if (!projectIdSet.has(item.projectId)) continue;
         const project = recordById.get(item.projectId);
         const projectLabel = project
           ? getProjectLabel({
@@ -574,6 +614,12 @@ export default function ProjectLibraryBrowserPage() {
         });
       }
 
+      const snapshot = {
+        records,
+        rows: nextRows,
+        applications: applicationList,
+      };
+      librarySnapshotCache.set(cacheKey, snapshot);
       setProjectRecords(records);
       setRows(nextRows);
       setApplications(applicationList);
@@ -584,7 +630,7 @@ export default function ProjectLibraryBrowserPage() {
     return () => {
       cancelled = true;
     };
-  }, [projects, projectsLoading, isConsultant]);
+  }, [projects, projectsLoading, isConsultant, masterProjectId]);
 
   const projectOptions = useMemo(() => {
     return projectRecords.map((project) => ({
@@ -911,7 +957,7 @@ export default function ProjectLibraryBrowserPage() {
     setSelectedProjectId(projectFilter === "ALL" ? null : projectFilter);
   }, [projectFilter, section]);
 
-  const loading = projectsLoading || filesLoading;
+  const loading = filesLoading;
 
   const closePreview = () => {
     setPreview(null);

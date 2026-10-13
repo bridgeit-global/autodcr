@@ -2501,12 +2501,13 @@ export async function fetchApplicationPreviewHtmlRaw(
   applyCatalogFieldOverrides(formValues, source?.fieldOverrides);
 
   let access_token = opts?.accessToken?.trim();
-  if (!access_token && !opts?.skipSessionRefresh) {
-    await supabase.auth.refreshSession();
-  }
   if (!access_token) {
     const { data: sessionData } = await supabase.auth.getSession();
     access_token = sessionData.session?.access_token;
+  }
+  if (!access_token && !opts?.skipSessionRefresh) {
+    const refreshed = await supabase.auth.refreshSession();
+    access_token = refreshed.data.session?.access_token;
   }
 
   const response = await fetch("/api/application-preview-html", {

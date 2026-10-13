@@ -2160,8 +2160,6 @@ export default function ApplicationDetailsPage() {
   const [, setDetailsFieldsDocumentLabel] = useState<string | null>(null);
   const [detailsFieldsLoading, setDetailsFieldsLoading] = useState(false);
   const [detailsFieldsError, setDetailsFieldsError] = useState<string | null>(null);
-  /** Document key whose letter fields have finished loading (including an empty or error result). */
-  const [fieldsReadyKey, setFieldsReadyKey] = useState<string | null>(null);
   /** Preview selection whose document has finished loading (including an error or notice). */
   const [previewReadyKey, setPreviewReadyKey] = useState<string | null>(null);
   /** Session overrides for catalog Letter fields — applied to preview + PDF. */
@@ -2359,15 +2357,6 @@ export default function ApplicationDetailsPage() {
     setSigningApplicationLoaded(false);
     setSigningApplicationRow(null);
     const loadApplication = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (cancelled) return;
-      if (!user?.id) {
-        console.error("Failed to load application: not authenticated");
-        setSigningApplicationRow(null);
-        setSigningApplicationLoaded(true);
-        return;
-      }
-
       const { data, error } = await fetchApplicationForSigning(applicationId);
       if (cancelled) return;
       if (error || !data) {
@@ -2402,45 +2391,22 @@ export default function ApplicationDetailsPage() {
       setApplicationAccessState("granted");
       return;
     }
-    if (!projectData || !signingApplicationLoaded) return;
+    if (!projectData || !signingApplicationLoaded || !authUserId) return;
 
-    let cancelled = false;
-    const verifyAccess = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (cancelled) return;
-      if (!user?.id) {
-        setApplicationAccessState("denied");
-        return;
-      }
+    const data = signingApplicationRow;
+    if (!data) {
+      setApplicationAccessState("denied");
+      return;
+    }
 
-      let data = signingApplicationRow;
-      if (!data) {
-        const fetched = await fetchApplicationForSigning(applicationId);
-        if (cancelled) return;
-        if (fetched.error || !fetched.data) {
-          setApplicationAccessState("denied");
-          return;
-        }
-        data = fetched.data;
-      }
-
-      const applicants = projectData?.applicant_details?.applicants ?? [];
-      const granted = canUserAccessApplication({
-        authUserId: user.id,
-        project: projectData,
-        applicants,
-        permissionType: selectedApplication || data.permission_type || "",
-      });
-      setApplicationAccessState(granted ? "granted" : "denied");
-    };
-
-    setApplicationAccessState("loading");
-    void verifyAccess();
-    return () => {
-      cancelled = true;
-    };
+    const applicants = projectData.applicant_details?.applicants ?? [];
+    const granted = canUserAccessApplication({
+      authUserId,
+      project: projectData,
+      applicants,
+      permissionType: selectedApplication || data.permission_type || "",
+    });
+    setApplicationAccessState(granted ? "granted" : "denied");
   }, [
     isReadOnlyMode,
     applicationId,
@@ -2449,6 +2415,7 @@ export default function ApplicationDetailsPage() {
     selectedApplication,
     signingApplicationRow,
     signingApplicationLoaded,
+    authUserId,
   ]);
 
   const handleAccessDeniedLogout = async () => {
@@ -2474,13 +2441,20 @@ export default function ApplicationDetailsPage() {
       return;
     }
     let cancelled = false;
-    void supabase.auth.getUser().then(({ data, error }) => {
+    void supabase.auth.getSession().then(async ({ data }) => {
       if (cancelled) return;
-      if (error || !data.user?.id) {
+      const sessionUserId = data.session?.user?.id;
+      if (sessionUserId) {
+        setAuthUserId(sessionUserId);
+        return;
+      }
+      const { data: userData, error } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (error || !userData.user?.id) {
         setAuthUserId(null);
         return;
       }
-      setAuthUserId(data.user.id);
+      setAuthUserId(userData.user.id);
     });
     return () => {
       cancelled = true;
@@ -3210,6 +3184,7 @@ export default function ApplicationDetailsPage() {
 
   useEffect(() => {
     if (!isReadOnlyMode || !projectId || !projectData || !catalogDocumentsReady) return;
+    if (!documentDraftsLoaded) return;
     let cancelled = false;
     setDetailsFieldsLoading(true);
     setDetailsFieldsError(null);
@@ -3221,12 +3196,10 @@ export default function ApplicationDetailsPage() {
             documentId: selectedCatalogDocumentId,
             letterVariant,
           });
-          const placeholders = await fetchResolvedPlaceholdersForApplication(
-            catalogType.id,
-            variantDoc?.id
-          );
-          // Document-wise: only placeholders that appear in this HTML template.
-          const templateHtml = await fetchCatalogTemplateHtmlForFields(variantDoc?.html);
+          const [placeholders, templateHtml] = await Promise.all([
+            fetchResolvedPlaceholdersForApplication(catalogType.id, variantDoc?.id),
+            fetchCatalogTemplateHtmlForFields(variantDoc?.html),
+          ]);
           const docPlaceholders = filterCatalogPlaceholdersUsedInTemplate(
             placeholders,
             templateHtml
@@ -3285,9 +3258,6 @@ export default function ApplicationDetailsPage() {
       } finally {
         if (!cancelled) {
           setDetailsFieldsLoading(false);
-          setFieldsReadyKey(
-            `${selectedApplication ?? ""}|${letterVariant}|${selectedCatalogDocumentId ?? ""}`
-          );
         }
       }
     })();
@@ -3324,10 +3294,6 @@ export default function ApplicationDetailsPage() {
       openModal: false,
     });
   };
-
-  useEffect(() => {
-    setFieldsReadyKey(null);
-  }, [selectedApplication, letterVariant, selectedCatalogDocumentId]);
 
   useEffect(() => {
     if (letterFieldsPreviewDebounceRef.current) {
@@ -5200,9 +5166,6 @@ export default function ApplicationDetailsPage() {
       : []),
   ];
 
-  const fieldsKey = `${selectedApplication ?? ""}|${letterVariant}|${selectedCatalogDocumentId ?? ""}`;
-  const showSplitLoader = fieldsReadyKey !== fieldsKey;
-
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
       <section className="relative flex min-h-0 w-full flex-1 flex-col">
@@ -5395,17 +5358,6 @@ export default function ApplicationDetailsPage() {
             />
           </div>
         </div>
-        {showSplitLoader ? (
-          <div
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white"
-            role="status"
-            aria-live="polite"
-            aria-busy="true"
-          >
-            <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-brand-blue" />
-            <p className="mt-3 text-sm text-gray-500">Loading application…</p>
-          </div>
-        ) : null}
       </section>
 
       <DocumentPreviewModal
