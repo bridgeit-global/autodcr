@@ -111,7 +111,38 @@ export function filterApplicationsByStage(
   return sorted.filter((app) => getApplicationStage(app) === filter);
 }
 
+const applicationsListCache = new Map<string, DashboardApplication[]>();
+
+export function applicationsListCacheKey(params: {
+  userId: string;
+  isConsultant: boolean;
+  projectIds: string[];
+}): string {
+  return `${params.isConsultant ? "c" : "o"}:${params.userId}:${[...params.projectIds].sort().join(",")}`;
+}
+
+export function readCachedApplicationsList(params: {
+  userId: string;
+  isConsultant: boolean;
+  projectIds: string[];
+}): DashboardApplication[] | null {
+  if (params.projectIds.length === 0) return [];
+  return applicationsListCache.get(applicationsListCacheKey(params)) ?? null;
+}
+
 export async function fetchApplicationsList(params: {
+  userId: string;
+  isConsultant: boolean;
+  projectIds: string[];
+}): Promise<DashboardApplication[]> {
+  const rows = await loadApplicationsList(params);
+  if (params.projectIds.length > 0) {
+    applicationsListCache.set(applicationsListCacheKey(params), rows);
+  }
+  return rows;
+}
+
+async function loadApplicationsList(params: {
   userId: string;
   isConsultant: boolean;
   projectIds: string[];

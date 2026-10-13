@@ -93,7 +93,20 @@ function firstRecord(value: unknown): NestedRecord | null {
 }
 
 /** Saved documents across projects the caller can read. One query. */
-export async function fetchSavedApplicationDocuments(): Promise<SavedApplicationDocumentListItem[]> {
+let savedApplicationDocumentsPromise: Promise<SavedApplicationDocumentListItem[]> | null =
+  null;
+
+export function fetchSavedApplicationDocuments(): Promise<SavedApplicationDocumentListItem[]> {
+  if (!savedApplicationDocumentsPromise) {
+    savedApplicationDocumentsPromise = loadSavedApplicationDocuments().catch((err) => {
+      savedApplicationDocumentsPromise = null;
+      throw err;
+    });
+  }
+  return savedApplicationDocumentsPromise;
+}
+
+async function loadSavedApplicationDocuments(): Promise<SavedApplicationDocumentListItem[]> {
   const { data, error } = await supabase
     .from("application_document_drafts")
     .select(

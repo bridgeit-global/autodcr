@@ -34,6 +34,33 @@ type ProjectRow = {
   architect_user_id?: string | null;
 };
 
+const DASHBOARD_PROJECT_IDS_KEY = "dashboard-project-ids";
+
+function rememberDashboardProjectIds(userId: string, ids: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(
+      DASHBOARD_PROJECT_IDS_KEY,
+      JSON.stringify({ userId, ids })
+    );
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+export function readRememberedDashboardProjectIds(userId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(DASHBOARD_PROJECT_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { userId?: string; ids?: unknown };
+    if (parsed.userId !== userId || !Array.isArray(parsed.ids)) return [];
+    return parsed.ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 function mapProjectRows(rows: ProjectRow[]): DashboardProject[] {
   return rows.map((row) => ({
     id: row.id,
@@ -62,9 +89,23 @@ export function useDashboardProjects() {
   const loadProjects = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        console.error("Error fetching auth user:", authError);
+      const { data: sessionData } = await supabase.auth.getSession();
+      let authUser = sessionData.session?.user ?? null;
+      if (!authUser) {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) {
+          console.error("Error fetching auth user:", authError);
+          setProjects([]);
+          setPermissionTitlesByProject({});
+          setConsultantType(null);
+          setIsConsultant(false);
+          setIsArchitectConsultant(false);
+          setArchitectDelegateProjectIds(new Set());
+          return;
+        }
+        authUser = authData.user;
+      }
+      if (!authUser) {
         setProjects([]);
         setPermissionTitlesByProject({});
         setConsultantType(null);
@@ -74,7 +115,7 @@ export function useDashboardProjects() {
         return;
       }
 
-      const user = authData.user;
+      const user = authUser;
       const userId = user?.id;
       if (!userId) {
         setProjects([]);
@@ -147,6 +188,10 @@ export function useDashboardProjects() {
         }
         setArchitectDelegateProjectIds(delegateIds);
         setProjects(mapProjectRows(projectRows));
+        rememberDashboardProjectIds(
+          userId,
+          projectRows.map((row) => String(row.id))
+        );
 
         const defaultTitle = resolvedConsultantType
           ? applicantTypeToPermissionTitle(resolvedConsultantType)
@@ -195,6 +240,10 @@ export function useDashboardProjects() {
       }
 
       setProjects(mapProjectRows(ownerRows));
+      rememberDashboardProjectIds(
+        userId,
+        ownerRows.map((row) => String(row.id))
+      );
       setPermissionTitlesByProject({});
       setArchitectDelegateProjectIds(new Set());
       setConsultantType(null);

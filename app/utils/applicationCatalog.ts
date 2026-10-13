@@ -217,22 +217,31 @@ export function filterCatalogPlaceholdersUsedInTemplate(
   return filtered.length > 0 ? filtered : placeholders;
 }
 
+const templateHtmlByFile = new Map<string, Promise<string | null>>();
+
 /** Load catalog template HTML from repo via API (for token scanning). */
 export async function fetchCatalogTemplateHtmlForFields(
   htmlFileName: string | null | undefined
 ): Promise<string | null> {
   const file = htmlFileName?.trim() || "";
   if (!file) return null;
-  try {
-    const res = await fetch(
-      `/api/application-template-html?file=${encodeURIComponent(file)}`,
-      { cache: "no-store" }
-    );
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
+  const cached = templateHtmlByFile.get(file);
+  if (cached) return cached;
+  const pending = (async () => {
+    try {
+      const res = await fetch(
+        `/api/application-template-html?file=${encodeURIComponent(file)}`
+      );
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
+  })();
+  templateHtmlByFile.set(file, pending);
+  const html = await pending;
+  if (html == null) templateHtmlByFile.delete(file);
+  return html;
 }
 
 /**
@@ -401,7 +410,28 @@ const TYPE_COLUMNS =
 const TYPE_COLUMNS_LEGACY =
   "id, department, application_title, description, category, applicant_type, planning_authorities, requires_roster_match, is_active, sort_order, icon_key";
 
+const catalogTypesCache = new Map<string, Promise<ApplicationCatalogType[]>>();
+
 export async function fetchApplicationCatalogTypes(
+  client?: CatalogDb
+): Promise<ApplicationCatalogType[]> {
+  if (client) return loadApplicationCatalogTypes(client);
+  const cached = catalogTypesCache.get("default");
+  if (cached) return cached;
+  const pending = loadApplicationCatalogTypes()
+    .then((types) => {
+      if (types.length === 0) catalogTypesCache.delete("default");
+      return types;
+    })
+    .catch((err) => {
+      catalogTypesCache.delete("default");
+      throw err;
+    });
+  catalogTypesCache.set("default", pending);
+  return pending;
+}
+
+async function loadApplicationCatalogTypes(
   client?: CatalogDb
 ): Promise<ApplicationCatalogType[]> {
   const db = await resolveClient(client);
