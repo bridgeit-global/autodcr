@@ -2339,7 +2339,7 @@ ${SAVED_PDF_QR_LOCK_SCRIPT_INLINE}
  * The API replaces the sentinel with a QR image of the matching `application_urls` entry
  * (`templateType`, or `Architect_acceptance` for the Architect acceptance letter).
  */
-/** One session refresh, parallel HTML fetches (dual appointment + acceptance). */
+/** Parallel HTML fetches (dual appointment + acceptance). Refresh only if no session exists. */
 export async function generateApplicationPreviewHtmlBatch(
   items: Array<{
     fields: TemplateFields;
@@ -2350,9 +2350,12 @@ export async function generateApplicationPreviewHtmlBatch(
 ): Promise<string[]> {
   let token = accessToken?.trim();
   if (!token) {
-    await supabase.auth.refreshSession();
     const { data: sessionData } = await supabase.auth.getSession();
     token = sessionData.session?.access_token?.trim();
+  }
+  if (!token) {
+    const refreshed = await supabase.auth.refreshSession();
+    token = refreshed.data.session?.access_token?.trim();
   }
   return Promise.all(
     items.map((item) =>
