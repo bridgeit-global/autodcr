@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { supabase } from "@/app/utils/supabase";
@@ -12,9 +12,6 @@ import { clearSessionExpiresAt } from "@/app/utils/sessionTimeout";
 import { AppSidebarMobileTrigger } from "./AppSidebar";
 import NotificationBell from "./NotificationBell";
 import SessionTimer from "./SessionTimer";
-import CustomSelect from "@/app/components/CustomSelect";
-import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
-import { useMasterProjectFilter } from "./MasterProjectFilterContext";
 
 type AppHeaderProps = {
   title: string;
@@ -77,27 +74,31 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
     };
   }, [userMenuOpen]);
 
+  const clearClientAuth = useCallback(() => {
+    clearUserMetadata();
+    clearSessionExpiresAt();
+    ["consultantId", "consultantUserId", "consultantType", "userMetadata"].forEach((key) =>
+      localStorage.removeItem(key)
+    );
+    Object.keys(localStorage).forEach((key) => {
+      if (
+        key.startsWith("sb-") ||
+        key.startsWith("draft-") ||
+        key.startsWith("saved-") ||
+        key.startsWith("baseline-") ||
+        key.startsWith("dirty-")
+      ) {
+        localStorage.removeItem(key);
+      }
+    });
+    sessionStorage.clear();
+    setUserMenuOpen(false);
+  }, [clearUserMetadata]);
+
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut({ scope: "global" });
-      clearUserMetadata();
-      clearSessionExpiresAt();
-      ["consultantId", "consultantUserId", "consultantType", "userMetadata"].forEach((key) =>
-        localStorage.removeItem(key)
-      );
-      Object.keys(localStorage).forEach((key) => {
-        if (
-          key.startsWith("sb-") ||
-          key.startsWith("draft-") ||
-          key.startsWith("saved-") ||
-          key.startsWith("baseline-") ||
-          key.startsWith("dirty-")
-        ) {
-          localStorage.removeItem(key);
-        }
-      });
-      sessionStorage.clear();
-      setUserMenuOpen(false);
+      clearClientAuth();
       router.push("/login");
     } catch (error) {
       console.error("Error during logout:", error);
@@ -106,10 +107,46 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
     }
   };
 
+  useEffect(() => {
+    let stopped = false;
+
+    const replacedByAnotherLogin = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) return;
+
+      const { data, error } = await supabase.rpc("is_current_login_active");
+      if (stopped || error || data !== false) return;
+
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch (signOutError) {
+        console.error("Error signing out replaced session:", signOutError);
+      }
+      if (stopped) return;
+      clearClientAuth();
+      router.push("/login");
+    };
+
+    void replacedByAnotherLogin();
+    const id = window.setInterval(() => {
+      void replacedByAnotherLogin();
+    }, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void replacedByAnotherLogin();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [router, clearClientAuth]);
+
   const displayName = formatUserName(userMetadata);
   const role = getUserRole(userMetadata) || "User";
-  const { projects, loading: projectsLoading } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
 
   return (
     <>
@@ -120,24 +157,6 @@ export default function AppHeader({ title, onOpenMobileSidebar }: AppHeaderProps
           <h1 className="hidden shrink-0 text-base font-bold text-brand-navy sm:block md:text-lg">
             {title}
           </h1>
-
-          <div className="min-w-0 w-full max-w-[220px] sm:max-w-xs">
-            <CustomSelect
-              aria-label="Project"
-              searchable
-              value={masterProjectId}
-              onChange={setMasterProjectId}
-              options={[
-                { value: "", label: "All projects" },
-                ...projects.map((project) => ({
-                  value: project.id,
-                  label: project.title,
-                })),
-              ]}
-              placeholder={projectsLoading ? "Loading projects…" : "All projects"}
-              disabled={projectsLoading}
-            />
-          </div>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <SessionTimer onExpire={() => void handleLogout()} />

@@ -20,6 +20,7 @@ interface CustomSelectProps {
   id?: string;
   "aria-label"?: string;
   searchable?: boolean;
+  triggerClassName?: string;
 }
 
 type MenuPosition = {
@@ -38,6 +39,7 @@ export default function CustomSelect({
   id,
   "aria-label": ariaLabel,
   searchable = false,
+  triggerClassName = "",
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -338,7 +340,7 @@ export default function CustomSelect({
         }}
         className={`flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-left outline-none transition-colors focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 ${
           disabled ? "cursor-not-allowed bg-gray-100 text-gray-400" : "hover:border-gray-300"
-        }`}
+        } ${triggerClassName}`}
       >
         <span
           className={`block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm ${

@@ -19,6 +19,7 @@ export type DashboardProject = {
   architect_user_id?: string;
   project_info?: { proposalNo?: string };
   save_plot_details?: {
+    planningAuthority?: string;
     selectedSurveyNos?: string[];
     plotEntries?: Array<{ ctsNumber?: string }>;
   };

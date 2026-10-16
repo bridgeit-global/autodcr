@@ -46,6 +46,20 @@ function isDraftStatus(status: string | null | undefined) {
   return (status ?? "").trim().toLowerCase() === "draft";
 }
 
+function applicationStagePillClass(stage: string) {
+  const value = stage.trim().toLowerCase();
+  if (value === "draft") return "bg-amber-50 text-amber-700";
+  if (
+    value === "submitted" ||
+    value === "approved" ||
+    value === "approved_verified" ||
+    value.includes("approved")
+  ) {
+    return "bg-green-50 text-status-success";
+  }
+  return "bg-gray-100 text-gray-600";
+}
+
 function projectHref(project: DashboardProject) {
   return `/dashboard/project-details?projectId=${encodeURIComponent(project.id)}`;
 }
@@ -56,6 +70,7 @@ export default function UserDashboardPage() {
   const [applications, setApplications] = useState<DashboardApplication[]>([]);
   const [applicationsLoading, setApplicationsLoading] = useState(true);
   const [activePanel, setActivePanel] = useState<ListPanel | null>(null);
+  const [proposalQuery, setProposalQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -177,48 +192,69 @@ export default function UserDashboardPage() {
   const showingApplications = activePanel === "total-applications";
   const isEditPicker = activePanel === "edit-project";
 
+  const proposalNoByProjectId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const project of projects) {
+      const proposalNo = project.project_info?.proposalNo?.trim();
+      if (proposalNo) map.set(String(project.id), proposalNo);
+    }
+    return map;
+  }, [projects]);
+
+  const filteredApplications = useMemo(() => {
+    const query = proposalQuery.trim().toLowerCase();
+    if (!query) return applications;
+    return applications.filter((app) =>
+      (proposalNoByProjectId.get(app.projectId) ?? "").toLowerCase().includes(query)
+    );
+  }, [applications, proposalNoByProjectId, proposalQuery]);
+
   const openEditProjectPicker = () => {
     setActivePanel("edit-project");
   };
 
   const closePanel = () => {
     setActivePanel(null);
+    setProposalQuery("");
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:col-span-9 lg:grid-cols-4">
-          {metrics.map((metric) => (
-            <MetricCard
-              key={metric.id}
-              label={metric.label}
-              value={metric.value}
-              hint={metric.hint}
-              icon={METRIC_ICONS[metric.id as MetricId]}
-              onClick={() => setActivePanel(metric.id as MetricId)}
+    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
+        <div className="flex min-h-0 flex-col gap-4 lg:col-span-9 lg:gap-5">
+          <div className="grid grid-cols-2 content-start items-start gap-3 sm:gap-4 lg:grid-cols-4">
+            {metrics.map((metric) => (
+              <MetricCard
+                key={metric.id}
+                label={metric.label}
+                value={metric.value}
+                hint={metric.hint}
+                icon={METRIC_ICONS[metric.id as MetricId]}
+                onClick={() => setActivePanel(metric.id as MetricId)}
+              />
+            ))}
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
+            <div className="h-full lg:col-span-4">
+              <ProjectHealthCard health={projectHealth} />
+            </div>
+            <div className="h-full lg:col-span-8">
+              <UpcomingDeadlinesCard deadlines={UPCOMING_DEADLINES} />
+            </div>
+          </div>
+        </div>
+        <div className="flex h-full min-h-0 flex-col gap-4 lg:col-span-3 lg:gap-5">
+          <div className="min-h-0 flex-1">
+            <AiAssistantCard insights={AI_INSIGHTS} />
+          </div>
+          <div className="min-h-0 flex-1">
+            <QuickActionsCard
+              actions={QUICK_ACTIONS}
+              onActionClick={(actionId) => {
+                if (actionId === "edit-project") openEditProjectPicker();
+              }}
             />
-          ))}
-        </div>
-        <div className="lg:col-span-3">
-          <AiAssistantCard insights={AI_INSIGHTS} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
-        <div className="lg:col-span-3">
-          <ProjectHealthCard health={projectHealth} />
-        </div>
-        <div className="lg:col-span-6">
-          <UpcomingDeadlinesCard deadlines={UPCOMING_DEADLINES} />
-        </div>
-        <div className="lg:col-span-3">
-          <QuickActionsCard
-            actions={QUICK_ACTIONS}
-            onActionClick={(actionId) => {
-              if (actionId === "edit-project") openEditProjectPicker();
-            }}
-          />
+          </div>
         </div>
       </div>
 
@@ -234,39 +270,73 @@ export default function UserDashboardPage() {
           ) : applications.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-500">No applications found.</p>
           ) : (
-            <ul className="divide-y divide-gray-100">
-              {applications.map((app) => (
-                <li key={app.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closePanel();
-                      router.push(applicationHref(app));
-                    }}
-                    className="flex w-full items-center gap-3 px-1 py-3 text-left transition-colors hover:bg-blue-50/60"
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-blue">
-                      <FileText className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-brand-navy">
-                        {app.permissionType}
-                      </p>
-                      <p className="truncate text-xs text-gray-500">
-                        {app.projectTitle}
-                        {app.department ? ` · ${app.department}` : ""}
-                      </p>
-                    </div>
-                    {app.workflowStage && (
-                      <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-                        {app.workflowStage}
-                      </span>
-                    )}
-                    <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <label className="mb-4 block">
+                <span className="mb-1.5 block text-xs font-medium text-gray-600">
+                  Proposal no
+                </span>
+                <input
+                  type="search"
+                  value={proposalQuery}
+                  onChange={(event) => setProposalQuery(event.target.value)}
+                  placeholder="Filter by proposal no"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-brand-navy outline-none focus:border-brand-blue"
+                />
+              </label>
+              {filteredApplications.length === 0 ? (
+                <p className="py-8 text-center text-sm text-gray-500">
+                  No applications match this proposal number.
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {filteredApplications.map((app) => {
+                    const proposalNo = proposalNoByProjectId.get(app.projectId);
+                    const rest = [app.projectTitle, app.department].filter(Boolean).join(" · ");
+                    return (
+                      <li key={app.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            closePanel();
+                            router.push(applicationHref(app));
+                          }}
+                          className="flex w-full items-center gap-3 px-1 py-3 text-left transition-colors hover:bg-blue-50/60"
+                        >
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-blue">
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-brand-navy">
+                              {app.permissionType}
+                            </p>
+                            <p className="truncate text-xs text-gray-500">
+                              {proposalNo ? (
+                                <span className="font-semibold text-brand-blue">
+                                  {proposalNo}
+                                </span>
+                              ) : null}
+                              {proposalNo && rest ? " · " : ""}
+                              {rest}
+                            </p>
+                          </div>
+                          {app.workflowStage && (
+                            <span
+                              className={[
+                                "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                                applicationStagePillClass(app.workflowStage),
+                              ].join(" ")}
+                            >
+                              {app.workflowStage}
+                            </span>
+                          )}
+                          <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
           )
         ) : projectsLoading ? (
           <p className="py-8 text-center text-sm text-gray-500">Loading projects…</p>
