@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  ChevronDown,
   ChevronRight,
   CircleDashed,
   FileText,
   Folder,
-  Library,
   Loader2,
 } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
 import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import {
@@ -109,6 +108,54 @@ const FOLDER_ORDER: FolderSection[] = [
   "saved-applications",
   "other",
 ];
+
+function documentTypesForProject(rows: LibraryRow[], projectId: string) {
+  const byFolder = new Map<FolderSection, number>();
+  for (const row of rows) {
+    if (row.projectId !== projectId || row.folder === "saved-applications") continue;
+    byFolder.set(row.folder, (byFolder.get(row.folder) ?? 0) + 1);
+  }
+  return FOLDER_ORDER.flatMap((folder) => {
+    if (folder === "saved-applications") return [];
+    const documentCount = byFolder.get(folder) ?? 0;
+    if (documentCount === 0) return [];
+    return [{ folder, label: FOLDER_LABELS[folder], documentCount }];
+  });
+}
+
+function groupApplications(apps: DashboardApplication[]): ApplicationDepartmentFolder[] {
+  const departments = new Map<string, { title: string; types: Map<string, ApplicationTypeFolder> }>();
+  for (const app of apps) {
+    const departmentTitle =
+      app.department && app.department !== "—" ? app.department.trim() : "Other";
+    const departmentKey = departmentTitle.toLowerCase();
+    const department = departments.get(departmentKey) ?? {
+      title: departmentTitle,
+      types: new Map<string, ApplicationTypeFolder>(),
+    };
+    const typeTitle = app.permissionType.trim() || "Application";
+    const typeKey = typeTitle.toLowerCase();
+    const typeFolder = department.types.get(typeKey) ?? {
+      key: typeKey,
+      title: typeTitle,
+      applications: [],
+    };
+    typeFolder.applications.push(app);
+    department.types.set(typeKey, typeFolder);
+    departments.set(departmentKey, department);
+  }
+  return [...departments.entries()]
+    .map(([key, department]) => ({
+      key,
+      title: department.title,
+      types: [...department.types.values()].sort((a, b) => a.title.localeCompare(b.title)),
+    }))
+    .sort((a, b) => {
+      if (a.title === "Building Permission") return -1;
+      if (b.title === "Building Permission") return 1;
+      return a.title.localeCompare(b.title);
+    });
+}
 
 function folderSectionFromPath(path: string): FolderSection {
   const kind = classifyProjectLibraryStoragePath(path);
@@ -390,58 +437,208 @@ async function resolvePreviewBlobUrl(
   }
 }
 
-function PathStep({
-  step,
-  label,
-  children,
-}: {
-  step: number;
+type LibraryBrowseNode = {
+  id: string;
   label: string;
-  children: ReactNode;
+  hint?: string;
+  children?: LibraryBrowseNode[];
+};
+
+function selectedBrowsePath(nodes: LibraryBrowseNode[], targetId: string): LibraryBrowseNode[] {
+  const walk = (list: LibraryBrowseNode[], trail: LibraryBrowseNode[]): LibraryBrowseNode[] | null => {
+    for (const node of list) {
+      const next = [...trail, node];
+      if (node.id === targetId) return next;
+      if (node.children) {
+        const found = walk(node.children, next);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return walk(nodes, []) ?? [];
+}
+
+function LibraryBrowse({
+  nodes,
+  selectedId,
+  countLabel,
+  onSelect,
+}: {
+  nodes: LibraryBrowseNode[];
+  selectedId: string;
+  countLabel: string;
+  onSelect: (id: string) => void;
 }) {
+  const steps = [
+    { id: "all", label: "All folders" },
+    ...(selectedId === "all" ? [] : selectedBrowsePath(nodes, selectedId)),
+  ];
+
   return (
-    <div className="min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white p-2.5 shadow-sm">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-blue to-brand-navy text-[11px] font-bold text-white shadow-sm">
-          {step}
-        </span>
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-          {label}
-        </span>
-      </div>
-      {children}
+    <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+      {steps.map((step, index) => {
+        const last = index === steps.length - 1;
+        return (
+          <div key={step.id} className="flex min-w-0 shrink-0 items-center gap-2">
+            {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /> : null}
+            <button
+              type="button"
+              onClick={() => onSelect(step.id)}
+              aria-current={last ? "page" : undefined}
+              className={`flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors ${
+                last
+                  ? "border border-slate-300 bg-white shadow-sm"
+                  : "border border-slate-200 bg-white shadow-sm hover:border-slate-300"
+              }`}
+            >
+              {index === 0 ? (
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+                  <Folder className="h-4 w-4" />
+                </span>
+              ) : null}
+              <span className="min-w-0">
+                {index === 0 ? (
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Browse
+                  </span>
+                ) : null}
+                <span className="block max-w-[220px] truncate text-sm font-semibold text-slate-900">
+                  {step.label}
+                </span>
+              </span>
+              {last ? (
+                <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                  {countLabel}
+                </span>
+              ) : null}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function FolderCard({
+function DropdownRow({
   title,
   subtitle,
+  selected = false,
+  expandable = false,
+  open = false,
   onClick,
-  active = false,
+  icon = "folder",
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
+  selected?: boolean;
+  expandable?: boolean;
+  open?: boolean;
   onClick: () => void;
-  active?: boolean;
+  icon?: "folder" | "file";
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-xl border bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md ${
-        active ? "border-brand-blue/40 ring-2 ring-brand-blue/20" : "border-gray-100"
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+        selected
+          ? "border border-slate-300 bg-white shadow-sm"
+          : "border border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
       }`}
     >
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-        <Folder className="h-5 w-5" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-brand-navy">{title}</p>
-        <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          selected ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"
+        }`}
+      >
+        {icon === "file" ? <FileText className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-slate-900">{title}</span>
+        {subtitle ? <span className="block truncate text-xs text-gray-500">{subtitle}</span> : null}
+      </span>
+      {expandable ? (
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "" : "-rotate-90"}`} />
+      ) : (
+        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+      )}
     </button>
+  );
+}
+
+function LibraryDropdown({
+  nodes,
+  selectedId,
+  onSelect,
+  leaf,
+}: {
+  nodes: LibraryBrowseNode[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  leaf: ReactNode;
+}) {
+  const path = selectedId === "all" ? [] : selectedBrowsePath(nodes, selectedId);
+  const resolved: LibraryBrowseNode[] = [];
+  let level = nodes;
+  for (const step of path) {
+    const next = level.find((node) => node.id === step.id) ?? step;
+    resolved.push(next);
+    level = next.children ?? [];
+  }
+  const deepest = resolved[resolved.length - 1];
+  const choices = resolved.length === 0 ? nodes : (deepest?.children ?? []);
+  const showLeaf = resolved.length > 0 && choices.length === 0;
+
+  const renderSelected = (index: number): ReactNode => {
+    const node = resolved[index];
+    if (!node) return null;
+    return (
+      <div className="mt-1 ml-6 border-l border-slate-200 pl-3">
+        <DropdownRow
+          title={node.label}
+          subtitle={node.hint}
+          selected
+          expandable
+          open
+          onClick={() => onSelect(node.id)}
+        />
+        {index < resolved.length - 1 ? renderSelected(index + 1) : null}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 bg-slate-50/70 px-3 pt-3">
+        <DropdownRow
+          title="All folders"
+          selected
+          expandable
+          open
+          onClick={() => onSelect("all")}
+        />
+        {renderSelected(0)}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
+        <div
+          className="mt-1 flex flex-col gap-1 border-l border-slate-200 pl-3"
+          style={{ marginLeft: `${(resolved.length + 1) * 1.5}rem` }}
+        >
+          {showLeaf
+            ? leaf
+            : choices.map((node) => (
+                <DropdownRow
+                  key={node.id}
+                  title={node.label}
+                  subtitle={node.hint}
+                  expandable={Boolean(node.children?.length)}
+                  onClick={() => onSelect(node.id)}
+                />
+              ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -736,41 +933,9 @@ export default function ProjectLibraryBrowserPage() {
 
   const applicationDepartments = useMemo((): ApplicationDepartmentFolder[] => {
     if (!selectedProjectId) return [];
-    const departments = new Map<
-      string,
-      { title: string; types: Map<string, ApplicationTypeFolder> }
-    >();
-    for (const app of filteredApplications) {
-      if (app.projectId !== selectedProjectId) continue;
-      const departmentTitle =
-        app.department && app.department !== "—" ? app.department.trim() : "Other";
-      const departmentKey = departmentTitle.toLowerCase();
-      const department = departments.get(departmentKey) ?? {
-        title: departmentTitle,
-        types: new Map<string, ApplicationTypeFolder>(),
-      };
-      const typeTitle = app.permissionType.trim() || "Application";
-      const typeKey = typeTitle.toLowerCase();
-      const typeFolder = department.types.get(typeKey) ?? {
-        key: typeKey,
-        title: typeTitle,
-        applications: [],
-      };
-      typeFolder.applications.push(app);
-      department.types.set(typeKey, typeFolder);
-      departments.set(departmentKey, department);
-    }
-    return [...departments.entries()]
-      .map(([key, department]) => ({
-        key,
-        title: department.title,
-        types: [...department.types.values()].sort((a, b) => a.title.localeCompare(b.title)),
-      }))
-      .sort((a, b) => {
-        if (a.title === "Building Permission") return -1;
-        if (b.title === "Building Permission") return 1;
-        return a.title.localeCompare(b.title);
-      });
+    return groupApplications(
+      filteredApplications.filter((app) => app.projectId === selectedProjectId)
+    );
   }, [filteredApplications, selectedProjectId]);
 
   const selectedDepartment =
@@ -815,19 +980,8 @@ export default function ProjectLibraryBrowserPage() {
     ? (documentsByTypeId[selectedCatalogType.id] ?? [])
     : [];
 
-  const selectedProjectLabel =
-    (section === "applications" ? applicationProjectFolders : documentProjectFolders).find(
-      (folder) => folder.id === selectedProjectId
-    )?.label ?? "Project";
-
   const clearDeeperThanSection = () => {
     setSelectedProjectId(null);
-    setSelectedFolder(null);
-    setSelectedDepartmentKey(null);
-    setSelectedTypeKey(null);
-  };
-
-  const clearDeeperThanProject = () => {
     setSelectedFolder(null);
     setSelectedDepartmentKey(null);
     setSelectedTypeKey(null);
@@ -869,25 +1023,6 @@ export default function ProjectLibraryBrowserPage() {
     }
   }, [selectedDepartment, selectedTypeKey]);
 
-  const sectionTitle =
-    section === "documents"
-      ? "Project Documents"
-      : section === "applications"
-        ? "Project Applications"
-        : "All folders";
-
-  const projectIsFiltered = projectFilter !== "ALL";
-
-  const panelTitle = selectedTypeFolder
-    ? selectedTypeFolder.title
-    : selectedDepartment
-      ? selectedDepartment.title
-      : selectedFolder
-        ? FOLDER_LABELS[selectedFolder]
-        : selectedProjectId && !projectIsFiltered
-          ? selectedProjectLabel
-          : sectionTitle;
-
   const fileRows = section === "documents" && selectedFolder ? documentFiles : null;
   const visibleProjectFolders =
     section === "applications" ? applicationProjectFolders : documentProjectFolders;
@@ -922,40 +1057,128 @@ export default function ProjectLibraryBrowserPage() {
     setSelectedProjectId(projectFilter === "ALL" ? null : projectFilter);
   };
 
-  const onLibraryChange = (value: string) => {
-    if (value !== "documents" && value !== "applications") {
+  const browseNodes = useMemo((): LibraryBrowseNode[] => {
+    const projectScoped = projectFilter !== "ALL";
+    const documentProjects = projectScoped
+      ? documentProjectFolders.filter((folder) => folder.id === projectFilter)
+      : documentProjectFolders;
+    const applicationProjects = projectScoped
+      ? applicationProjectFolders.filter((folder) => folder.id === projectFilter)
+      : applicationProjectFolders;
+
+    const documentTypeNodes = (projectId: string): LibraryBrowseNode[] =>
+      documentTypesForProject(documentRows, projectId).map((folder) => ({
+        id: `documents|${projectId}|${folder.folder}`,
+        label: folder.label,
+        hint: countLabel(folder.documentCount, "document"),
+      }));
+
+    const departmentNodes = (projectId: string): LibraryBrowseNode[] =>
+      groupApplications(filteredApplications.filter((app) => app.projectId === projectId)).map(
+        (department) => ({
+          id: `applications|${projectId}|${encodeURIComponent(department.key)}`,
+          label: department.title,
+          hint: countLabel(department.types.length, "folder"),
+          children: department.types.map((type) => ({
+            id: `applications|${projectId}|${encodeURIComponent(department.key)}|${encodeURIComponent(type.key)}`,
+            label: type.title,
+            hint: countLabel(type.applications.length, "application"),
+          })),
+        })
+      );
+
+    const documentChildren: LibraryBrowseNode[] = projectScoped
+      ? documentTypeNodes(projectFilter)
+      : documentProjects.map((project) => ({
+          id: `documents|${project.id}`,
+          label: project.label,
+          hint: countLabel(project.documentCount, "document"),
+          children: documentTypeNodes(project.id),
+        }));
+
+    const applicationChildren: LibraryBrowseNode[] = projectScoped
+      ? departmentNodes(projectFilter)
+      : applicationProjects.map((project) => ({
+          id: `applications|${project.id}`,
+          label: project.label,
+          hint: countLabel(project.documentCount, "application"),
+          children: departmentNodes(project.id),
+        }));
+
+    return [
+      {
+        id: "documents",
+        label: "Project Documents",
+        hint: countLabel(documentRows.length, "document"),
+        children: documentChildren,
+      },
+      {
+        id: "applications",
+        label: "Project Applications",
+        hint: countLabel(applicationRootFolderCount, "folder"),
+        children: applicationChildren,
+      },
+    ];
+  }, [
+    projectFilter,
+    documentProjectFolders,
+    applicationProjectFolders,
+    documentRows,
+    filteredApplications,
+    applicationRootFolderCount,
+  ]);
+
+  const selectedBrowseId = !section
+    ? "all"
+    : section === "documents"
+      ? selectedFolder && selectedProjectId
+        ? `documents|${selectedProjectId}|${selectedFolder}`
+        : selectedProjectId && projectFilter === "ALL"
+          ? `documents|${selectedProjectId}`
+          : "documents"
+      : selectedTypeKey && selectedDepartmentKey && selectedProjectId
+        ? `applications|${selectedProjectId}|${encodeURIComponent(selectedDepartmentKey)}|${encodeURIComponent(selectedTypeKey)}`
+        : selectedDepartmentKey && selectedProjectId
+          ? `applications|${selectedProjectId}|${encodeURIComponent(selectedDepartmentKey)}`
+          : selectedProjectId && projectFilter === "ALL"
+            ? `applications|${selectedProjectId}`
+            : "applications";
+
+  const onBrowseSelect = (id: string) => {
+    if (id === "all") {
       setSection(null);
       clearDeeperThanSection();
       return;
     }
-    openSection(value);
-  };
-
-  const onPathProjectChange = (value: string) => {
-    clearDeeperThanProject();
-    setSelectedProjectId(value || null);
-  };
-
-  const onDocumentTypeChange = (value: string) => {
-    setSelectedFolder(value ? (value as FolderSection) : null);
-  };
-
-  const onDepartmentChange = (value: string) => {
+    if (id === "documents" || id === "applications") {
+      openSection(id);
+      return;
+    }
+    const [kind, projectId, third, fourth] = id.split("|");
+    if (!projectId) return;
+    setSelectedFolder(null);
+    setSelectedDepartmentKey(null);
     setSelectedTypeKey(null);
-    setSelectedDepartmentKey(value || null);
+    setSelectedProjectId(projectId);
+    if (kind === "documents") {
+      setSection("documents");
+      if (third) setSelectedFolder(third as FolderSection);
+      return;
+    }
+    setSection("applications");
+    if (third) setSelectedDepartmentKey(decodeURIComponent(third));
+    if (fourth) setSelectedTypeKey(decodeURIComponent(fourth));
   };
 
-  const onApplicationTypeChange = (value: string) => {
-    setSelectedTypeKey(value || null);
-  };
-
+  const sectionRef = useRef(section);
+  sectionRef.current = section;
   useEffect(() => {
-    if (!section) return;
+    if (!sectionRef.current) return;
     setSelectedFolder(null);
     setSelectedDepartmentKey(null);
     setSelectedTypeKey(null);
     setSelectedProjectId(projectFilter === "ALL" ? null : projectFilter);
-  }, [projectFilter, section]);
+  }, [projectFilter]);
 
   const loading = filesLoading;
 
@@ -1114,329 +1337,91 @@ export default function ProjectLibraryBrowserPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="shrink-0 border-b border-gray-100 px-2 py-3">
-          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-3xl">
-            <FolderCard
-              title="Project Documents"
-              subtitle={countLabel(documentRows.length, "document")}
-              active={section === "documents"}
-              onClick={() => openSection("documents")}
-            />
-            <FolderCard
-              title="Project Applications"
-              subtitle={countLabel(applicationRootFolderCount, "folder")}
-              active={section === "applications"}
-              onClick={() => openSection("applications")}
-            />
-          </div>
+        <div className="shrink-0 border-b border-slate-200/80 bg-slate-50 px-3 py-3">
+          <LibraryBrowse
+            nodes={browseNodes}
+            selectedId={selectedBrowseId}
+            countLabel={loading ? "Loading…" : panelCount}
+            onSelect={onBrowseSelect}
+          />
         </div>
 
-        {section ? (
-          <div className="shrink-0 border-b border-slate-200/80 bg-gradient-to-br from-blue-50/80 via-slate-50 to-white px-3 py-3">
-            <div className="flex flex-col gap-2.5 lg:flex-row lg:items-stretch">
-              <PathStep step={1} label="Library">
-                <CustomSelect
-                  aria-label="Library"
-                  value={section}
-                  onChange={onLibraryChange}
-                  options={[
-                    { value: "", label: "All folders" },
-                    { value: "documents", label: "Project Documents" },
-                    { value: "applications", label: "Project Applications" },
-                  ]}
-                />
-              </PathStep>
-              {!projectIsFiltered ? (
-                <>
-                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
-                  <PathStep step={2} label="Project">
-                    <CustomSelect
-                      aria-label="Project folder"
-                      searchable
-                      value={selectedProjectId ?? ""}
-                      onChange={onPathProjectChange}
-                      options={[
-                        { value: "", label: "All projects" },
-                        ...visibleProjectFolders.map((folder) => ({
-                          value: folder.id,
-                          label: folder.label,
-                        })),
-                      ]}
-                    />
-                  </PathStep>
-                </>
-              ) : null}
-              {section === "documents" && selectedProjectId ? (
-                <>
-                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
-                  <PathStep step={projectIsFiltered ? 2 : 3} label="Document type">
-                    <CustomSelect
-                      aria-label="Document type"
-                      searchable
-                      value={selectedFolder ?? ""}
-                      onChange={onDocumentTypeChange}
-                      options={[
-                        { value: "", label: "All types" },
-                        ...documentTypeFolders.map((folder) => ({
-                          value: folder.folder,
-                          label: folder.label,
-                        })),
-                      ]}
-                    />
-                  </PathStep>
-                </>
-              ) : null}
-              {section === "applications" && selectedProjectId ? (
-                <>
-                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
-                  <PathStep step={projectIsFiltered ? 2 : 3} label="Department">
-                    <CustomSelect
-                      aria-label="Department"
-                      searchable
-                      value={selectedDepartmentKey ?? ""}
-                      onChange={onDepartmentChange}
-                      options={[
-                        { value: "", label: "All departments" },
-                        ...applicationDepartments.map((folder) => ({
-                          value: folder.key,
-                          label: folder.title,
-                        })),
-                      ]}
-                    />
-                  </PathStep>
-                </>
-              ) : null}
-              {section === "applications" && selectedDepartment ? (
-                <>
-                  <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
-                  <PathStep step={projectIsFiltered ? 3 : 4} label="Application">
-                    <CustomSelect
-                      aria-label="Application type"
-                      searchable
-                      value={selectedTypeKey ?? ""}
-                      onChange={onApplicationTypeChange}
-                      options={[
-                        { value: "", label: "All types" },
-                        ...selectedDepartment.types.map((folder) => ({
-                          value: folder.key,
-                          label: folder.title,
-                        })),
-                      ]}
-                    />
-                  </PathStep>
-                </>
-              ) : null}
-            </div>
-            <div className="mt-3 flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-white px-3 py-2.5 shadow-sm">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-blue to-brand-navy text-white shadow-sm">
-                  <Folder className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Current folder
-                  </p>
-                  <p className="truncate text-sm font-semibold text-brand-navy">{panelTitle}</p>
-                </div>
-              </div>
-              <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-brand-blue ring-1 ring-blue-100">
-                {loading ? "Loading…" : panelCount}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 overscroll-contain">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50/70">
           {loading ? (
             <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-gray-500">
               <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
               Loading documents…
             </div>
-          ) : !section ? null : !selectedProjectId ? (
-            visibleProjectFolders.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-                {section === "documents" ? (
-                  <Library className="h-8 w-8 text-gray-300" />
-                ) : (
-                  <CircleDashed className="h-8 w-8 text-gray-300" />
-                )}
-                <p className="text-sm text-gray-500">
-                  {section === "documents"
-                    ? "No library documents uploaded yet."
-                    : "No applications for this project."}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleProjectFolders.map((folder) => (
-                  <FolderCard
-                    key={folder.id}
-                    title={folder.label}
-                    subtitle={countLabel(
-                      folder.documentCount,
-                      section === "applications" ? "application" : "document"
-                    )}
-                    onClick={() => {
-                      clearDeeperThanProject();
-                      setSelectedProjectId(folder.id);
-                    }}
-                  />
-                ))}
-              </div>
-            )
-          ) : section === "documents" && !selectedFolder ? (
-            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-              {documentTypeFolders.map((folder) => (
-                <FolderCard
-                  key={folder.folder}
-                  title={folder.label}
-                  subtitle={countLabel(folder.documentCount, "document")}
-                  onClick={() => setSelectedFolder(folder.folder)}
-                />
-              ))}
-            </div>
-          ) : section === "applications" && !selectedDepartment ? (
-            applicationDepartments.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-                <CircleDashed className="h-8 w-8 text-gray-300" />
-                <p className="text-sm text-gray-500">No applications for this project.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-                {applicationDepartments.map((folder) => {
-                  const applicationCount = folder.types.reduce(
-                    (total, type) => total + type.applications.length,
-                    0
-                  );
-                  return (
-                    <FolderCard
-                      key={folder.key}
-                      title={folder.title}
-                      subtitle={countLabel(applicationCount, "application")}
+          ) : (
+            <LibraryDropdown
+              nodes={browseNodes}
+              selectedId={selectedBrowseId}
+              onSelect={onBrowseSelect}
+              leaf={
+                section === "applications" && selectedTypeFolder && !typeDocumentsReady ? (
+                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
+                    <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
+                    Loading documents…
+                  </div>
+                ) : section === "applications" &&
+                  selectedTypeFolder &&
+                  selectedTypeDocuments.length > 0 ? (
+                  selectedTypeDocuments.map((doc) => (
+                    <DropdownRow
+                      key={doc.id}
+                      title={catalogDocumentOptionLabel(doc)}
+                      subtitle={countLabel(selectedTypeFolder.applications.length, "application")}
                       onClick={() => {
-                        setSelectedTypeKey(null);
-                        setSelectedDepartmentKey(folder.key);
+                        const saved = savedRowForCatalogDocument(doc);
+                        if (saved) {
+                          void openPreview(saved);
+                          return;
+                        }
+                        void openApplicationHtmlPreview(catalogDocumentOptionLabel(doc), doc);
                       }}
                     />
-                  );
-                })}
-              </div>
-            )
-          ) : section === "applications" && selectedDepartment && !selectedTypeFolder ? (
-            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-              {selectedDepartment.types.map((folder) => (
-                <FolderCard
-                  key={folder.key}
-                  title={folder.title}
-                  subtitle={countLabel(folder.applications.length, "application")}
-                  onClick={() => setSelectedTypeKey(folder.key)}
-                />
-              ))}
-            </div>
-          ) : section === "applications" && selectedTypeFolder && !typeDocumentsReady ? (
-            <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
-              Loading documents…
-            </div>
-          ) : section === "applications" && selectedTypeFolder && selectedTypeDocuments.length > 0 ? (
-            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-              {selectedTypeDocuments.map((doc) => (
-                <button
-                  key={doc.id}
-                  type="button"
-                  onClick={() => {
-                    const saved = savedRowForCatalogDocument(doc);
-                    if (saved) {
-                      void openPreview(saved);
-                      return;
-                    }
-                    void openApplicationHtmlPreview(catalogDocumentOptionLabel(doc), doc);
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                    <Folder className="h-5 w-5" />
+                  ))
+                ) : section === "applications" && selectedTypeFolder ? (
+                  selectedTypeFolder.applications.length > 0 ? (
+                    selectedTypeFolder.applications.map((app) => (
+                      <DropdownRow
+                        key={app.id}
+                        title={app.projectTitle || app.permissionType}
+                        subtitle={`${app.permissionType} · ${formatUploadedAt(app.createdAt ?? null)}`}
+                        icon="file"
+                        onClick={() => {
+                          const saved = savedRowForApplicationType();
+                          if (saved) {
+                            void openPreview(saved);
+                            return;
+                          }
+                          void openApplicationHtmlPreview(
+                            app.permissionType || app.projectTitle || "Application"
+                          );
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <p className="px-3 py-3 text-sm text-gray-500">No applications in this folder.</p>
+                  )
+                ) : fileRows && fileRows.length > 0 ? (
+                  fileRows.map((row) => (
+                    <DropdownRow
+                      key={row.id}
+                      title={row.fileName}
+                      subtitle={`${row.projectLabel} · ${formatUploadedAt(row.uploadedAt)}`}
+                      icon="file"
+                      onClick={() => void openPreview(row)}
+                    />
+                  ))
+                ) : section ? (
+                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
+                    <CircleDashed className="h-4 w-4 text-gray-300" />
+                    No documents in this folder.
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-brand-navy">
-                      {catalogDocumentOptionLabel(doc)}
-                    </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      {countLabel(selectedTypeFolder.applications.length, "application")}
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
-                </button>
-              ))}
-            </div>
-          ) : section === "applications" && selectedTypeFolder ? (
-            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-              {selectedTypeFolder.applications.map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  onClick={() => {
-                    const saved = savedRowForApplicationType();
-                    if (saved) {
-                      void openPreview(saved);
-                      return;
-                    }
-                    void openApplicationHtmlPreview(
-                      app.permissionType || app.projectTitle || "Application"
-                    );
-                  }}
-                  className="flex w-full items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="line-clamp-2 text-sm font-semibold text-brand-navy">
-                      {app.projectTitle || app.permissionType}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-gray-500">{app.permissionType}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">
-                      {formatUploadedAt(app.createdAt ?? null)}
-                    </p>
-                  </div>
-                  <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
-                </button>
-              ))}
-            </div>
-          ) : fileRows && fileRows.length > 0 ? (
-            <div className="grid grid-cols-1 gap-3 px-2 py-3 sm:grid-cols-2 lg:grid-cols-3">
-              {fileRows.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  onClick={() => void openPreview(row)}
-                  disabled={!row.url && !row.path}
-                  className="flex w-full items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="line-clamp-2 text-sm font-semibold text-brand-navy">
-                      {row.fileName}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-gray-500">{row.projectLabel}</p>
-                    <p className="mt-0.5 truncate text-xs text-gray-500">{row.authority}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">
-                      {formatUploadedAt(row.uploadedAt)}
-                    </p>
-                  </div>
-                  <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-              <CircleDashed className="h-8 w-8 text-gray-300" />
-              <p className="text-sm text-gray-500">
-                No documents in this folder for the selected filters.
-              </p>
-            </div>
+                ) : null
+              }
+            />
           )}
         </div>
       </div>

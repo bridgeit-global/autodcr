@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleDashed,
   FilePlus2,
@@ -16,7 +17,6 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
 import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
 import MetricCard from "@/app/components/ui/MetricCard";
 import Modal from "@/app/components/ui/Modal";
@@ -27,7 +27,6 @@ import {
 } from "@/app/hooks/useDashboardProjects";
 import { supabase } from "@/app/utils/supabase";
 import {
-  catalogDocumentOptionLabel,
   fetchApplicationCatalogTypes,
   fetchDocumentsForApplicationType,
   type ApplicationCatalogDocument,
@@ -61,6 +60,8 @@ const STAGE_BADGE_CLASSES: Record<ApplicationWorkflowStage, string> = {
   approved_verified: "bg-emerald-50 text-emerald-800 ring-emerald-200",
   rejected: "bg-rose-50 text-rose-800 ring-rose-200",
 };
+
+const ALL_DEPARTMENTS = "__all_departments__";
 
 type PendingAction = {
   type: "reject" | "delete" | "back_to_draft";
@@ -98,26 +99,221 @@ function apiErrorMessage(errBody: { error?: string; details?: string } | null, f
   return fallback;
 }
 
-function PathStep({
-  step,
-  label,
-  children,
+type NestedTypeFolder = {
+  key: string;
+  title: string;
+  applications: DashboardApplication[];
+};
+
+type NestedDepartment = {
+  key: string;
+  title: string;
+  types: NestedTypeFolder[];
+};
+
+function folderCountLabel(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function DropdownRow({
+  title,
+  subtitle,
+  selected = false,
+  expandable = false,
+  open = false,
+  onClick,
 }: {
-  step: number;
-  label: string;
-  children: ReactNode;
+  title: string;
+  subtitle?: string;
+  selected?: boolean;
+  expandable?: boolean;
+  open?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white p-2.5 shadow-sm">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-blue to-brand-navy text-[11px] font-bold text-white shadow-sm">
-          {step}
-        </span>
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-          {label}
-        </span>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+        selected
+          ? "border border-slate-300 bg-white shadow-sm"
+          : "border border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          selected ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"
+        }`}
+      >
+        <Folder className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-slate-900">{title}</span>
+        {subtitle ? <span className="block truncate text-xs text-gray-500">{subtitle}</span> : null}
+      </span>
+      {expandable ? (
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "" : "-rotate-90"}`} />
+      ) : (
+        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+      )}
+    </button>
+  );
+}
+
+function ApplicationsBrowse({
+  department,
+  typeTitle,
+  countLabel,
+  stageFilter,
+  onClearStage,
+  onSelectAll,
+  onSelectDepartment,
+}: {
+  department: NestedDepartment | null;
+  typeTitle: string | null;
+  countLabel: string;
+  stageFilter: ApplicationStageFilter;
+  onClearStage: () => void;
+  onSelectAll: () => void;
+  onSelectDepartment: () => void;
+}) {
+  const steps = [
+    { id: "all", label: "All departments", onSelect: onSelectAll },
+    ...(department
+      ? [{ id: department.key, label: department.title, onSelect: onSelectDepartment }]
+      : []),
+    ...(department && typeTitle
+      ? [{ id: `${department.key}:type`, label: typeTitle, onSelect: () => undefined }]
+      : []),
+  ];
+
+  return (
+    <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+      {steps.map((step, index) => {
+        const last = index === steps.length - 1;
+        return (
+          <div key={step.id} className="flex min-w-0 shrink-0 items-center gap-2">
+            {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /> : null}
+            <button
+              type="button"
+              onClick={step.onSelect}
+              aria-current={last ? "page" : undefined}
+              className={`flex min-w-0 items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors ${
+                last
+                  ? "border border-slate-300 bg-white shadow-sm"
+                  : "border border-slate-200 bg-white shadow-sm hover:border-slate-300"
+              }`}
+            >
+              {index === 0 ? (
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+                  <Folder className="h-4 w-4" />
+                </span>
+              ) : null}
+              <span className="min-w-0">
+                {index === 0 ? (
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Browse
+                  </span>
+                ) : null}
+                <span className="block max-w-[220px] truncate text-sm font-semibold text-slate-900">
+                  {step.label}
+                </span>
+              </span>
+              {last ? (
+                <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                  {countLabel}
+                </span>
+              ) : null}
+            </button>
+          </div>
+        );
+      })}
+      {stageFilter !== "all" ? (
+        <button
+          type="button"
+          onClick={onClearStage}
+          className="shrink-0 text-xs font-semibold text-slate-500 hover:text-slate-900"
+        >
+          Clear filter
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ApplicationsDropdown({
+  departments,
+  selectedDepartment,
+  selectedType,
+  onSelectAll,
+  onSelectDepartment,
+  onSelectType,
+  leaf,
+}: {
+  departments: NestedDepartment[];
+  selectedDepartment: NestedDepartment | null;
+  selectedType: NestedTypeFolder | null;
+  onSelectAll: () => void;
+  onSelectDepartment: (key: string) => void;
+  onSelectType: (folder: NestedTypeFolder) => void;
+  leaf: ReactNode;
+}) {
+  const choiceIndent = selectedType ? "ml-[4.5rem]" : selectedDepartment ? "ml-12" : "ml-6";
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 bg-slate-50/70 px-3 pt-3">
+        <DropdownRow title="All departments" selected expandable open onClick={onSelectAll} />
+        {selectedDepartment ? (
+          <div className="mt-1 ml-6 border-l border-slate-200 pl-3">
+            <DropdownRow
+              title={selectedDepartment.title}
+              subtitle={folderCountLabel(selectedDepartment.types.length, "folder")}
+              selected
+              expandable
+              open
+              onClick={() => onSelectDepartment(selectedDepartment.key)}
+            />
+            {selectedType ? (
+              <div className="mt-1 ml-6 border-l border-slate-200 pl-3">
+                <DropdownRow
+                  title={selectedType.title}
+                  subtitle={folderCountLabel(selectedType.applications.length, "application")}
+                  selected
+                  expandable
+                  open
+                  onClick={() => onSelectType(selectedType)}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-      {children}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
+        <div className={`mt-1 flex flex-col gap-1 border-l border-slate-200 pl-3 ${choiceIndent}`}>
+          {selectedType
+            ? leaf
+            : selectedDepartment
+              ? selectedDepartment.types.map((folder) => (
+                  <DropdownRow
+                    key={folder.key}
+                    title={folder.title}
+                    subtitle={folderCountLabel(folder.applications.length, "application")}
+                    expandable
+                    onClick={() => onSelectType(folder)}
+                  />
+                ))
+              : departments.map((folder) => (
+                  <DropdownRow
+                    key={folder.key}
+                    title={folder.title}
+                    subtitle={folderCountLabel(folder.types.length, "folder")}
+                    expandable
+                    onClick={() => onSelectDepartment(folder.key)}
+                  />
+                ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -146,9 +342,10 @@ function ApplicationsHubContent() {
   const [documentsByTypeId, setDocumentsByTypeId] = useState<
     Record<string, ApplicationCatalogDocument[]>
   >({});
-  const [selectedDepartmentKey, setSelectedDepartmentKey] = useState<string | null>(null);
+  const [selectedDepartmentKey, setSelectedDepartmentKey] = useState<string | null>(
+    ALL_DEPARTMENTS
+  );
   const [selectedTypeKey, setSelectedTypeKey] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
   const canCreateApplications = canCreateApplicationsRole({
     role: isConsultant ? "Consultant" : "Owner",
@@ -416,19 +613,12 @@ function ApplicationsHubContent() {
     departmentFolders.find((folder) => folder.key === selectedDepartmentKey) ?? null;
   const selectedTypeFolder =
     selectedDepartment?.types.find((folder) => folder.key === selectedTypeKey) ?? null;
-  const selectedTypeDocuments =
-    selectedTypeFolder?.direct || !selectedTypeFolder?.typeId
-      ? []
-      : (documentsByTypeId[selectedTypeFolder.typeId] ?? []);
-  const selectedDocument =
-    selectedTypeDocuments.find((doc) => doc.id === selectedDocumentId) ?? null;
 
   useEffect(() => {
-    if (!selectedDepartmentKey) return;
+    if (!selectedDepartmentKey || selectedDepartmentKey === ALL_DEPARTMENTS) return;
     if (!departmentFolders.some((folder) => folder.key === selectedDepartmentKey)) {
       setSelectedDepartmentKey(null);
       setSelectedTypeKey(null);
-      setSelectedDocumentId(null);
     }
   }, [departmentFolders, selectedDepartmentKey]);
 
@@ -439,20 +629,21 @@ function ApplicationsHubContent() {
     );
     if (!typeStillVisible) {
       setSelectedTypeKey(null);
-      setSelectedDocumentId(null);
     }
   }, [selectedDepartment, selectedTypeKey]);
 
-  useEffect(() => {
-    if (!selectedDocumentId) return;
-    if (!selectedTypeDocuments.some((doc) => doc.id === selectedDocumentId)) {
-      setSelectedDocumentId(null);
-    }
-  }, [selectedTypeDocuments, selectedDocumentId]);
+  const openTypeFolder = useCallback(
+    (folder: { key: string; applications: DashboardApplication[] }) => {
+      if (effectiveProjectId && folder.applications.length === 1) {
+        router.push(applicationHref(folder.applications[0]));
+        return;
+      }
+      setSelectedTypeKey(folder.key);
+    },
+    [effectiveProjectId, router]
+  );
 
   const loading = projectsLoading || applicationsLoading;
-  const listTitle =
-    stageFilter === "all" ? "All Applications" : `${STAGE_LABELS[stageFilter]} Applications`;
   const actionBusy = Boolean(busyId);
 
   const getAuthToken = useCallback(async () => {
@@ -554,7 +745,7 @@ function ApplicationsHubContent() {
   }, [pendingAction, busyId, getAuthToken, showAlert]);
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6 md:py-8 xl:min-h-0 xl:flex-1 xl:overflow-hidden">
+    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-6 overflow-hidden px-4 py-6 md:px-6 md:py-8">
       <div className="flex shrink-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
@@ -630,120 +821,31 @@ function ApplicationsHubContent() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm xl:min-h-0 xl:flex-1 xl:overflow-hidden">
-            <div className="shrink-0 border-b border-slate-200/80 bg-gradient-to-br from-blue-50/80 via-slate-50 to-white px-3 py-3">
-              {selectedDepartment ? (
-                <div className="flex flex-col gap-2.5 lg:flex-row lg:items-stretch">
-                  <PathStep step={1} label="Department">
-                    <CustomSelect
-                      aria-label="Department"
-                      searchable
-                      value={selectedDepartmentKey ?? ""}
-                      onChange={(value) => {
-                        setSelectedDocumentId(null);
-                        setSelectedTypeKey(null);
-                        setSelectedDepartmentKey(value || null);
-                      }}
-                      options={[
-                        { value: "", label: "All departments" },
-                        ...departmentFolders.map((folder) => ({
-                          value: folder.key,
-                          label: folder.title,
-                        })),
-                      ]}
-                    />
-                  </PathStep>
-                  {selectedTypeFolder ? (
-                    <>
-                      <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
-                      <PathStep step={2} label="Application">
-                        <CustomSelect
-                          aria-label="Application type"
-                          searchable
-                          value={selectedTypeKey ?? ""}
-                          onChange={(value) => {
-                            setSelectedDocumentId(null);
-                            setSelectedTypeKey(value || null);
-                          }}
-                          options={[
-                            { value: "", label: "All types" },
-                            ...selectedDepartment.types.map((folder) => ({
-                              value: folder.key,
-                              label: folder.title,
-                            })),
-                          ]}
-                        />
-                      </PathStep>
-                    </>
-                  ) : null}
-                  {selectedDocument ? (
-                    <>
-                      <ChevronRight className="hidden h-4 w-4 shrink-0 self-center text-brand-blue/40 lg:block" />
-                      <PathStep step={3} label="Document">
-                        <CustomSelect
-                          aria-label="Document"
-                          searchable
-                          value={selectedDocumentId ?? ""}
-                          onChange={(value) => setSelectedDocumentId(value || null)}
-                          options={[
-                            { value: "", label: "All documents" },
-                            ...selectedTypeDocuments.map((doc) => ({
-                              value: doc.id,
-                              label: catalogDocumentOptionLabel(doc),
-                            })),
-                          ]}
-                        />
-                      </PathStep>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
-              <div className={`${selectedDepartment ? "mt-3" : ""} flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-white px-3 py-2.5 shadow-sm`}>
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-blue to-brand-navy text-white shadow-sm">
-                    <Folder className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Current folder
-                    </p>
-                    <p className="truncate text-sm font-semibold text-brand-navy">
-                      {selectedDocument
-                        ? catalogDocumentOptionLabel(selectedDocument)
-                        : selectedTypeFolder
-                          ? selectedTypeFolder.title
-                          : selectedDepartment
-                            ? selectedDepartment.title
-                            : listTitle}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-brand-blue ring-1 ring-blue-100">
-                    {loading
-                      ? "Loading…"
-                      : selectedTypeFolder && selectedTypeDocuments.length > 0 && !selectedDocument
-                        ? `${selectedTypeDocuments.length} document${selectedTypeDocuments.length === 1 ? "" : "s"}`
-                        : selectedTypeFolder
-                          ? `${selectedTypeFolder.applications.length} application${selectedTypeFolder.applications.length === 1 ? "" : "s"}`
-                          : selectedDepartment
-                            ? `${selectedDepartment.types.length} folder${selectedDepartment.types.length === 1 ? "" : "s"}`
-                            : `${departmentFolders.length} folder${departmentFolders.length === 1 ? "" : "s"}`}
-                  </span>
-                  {stageFilter !== "all" && (
-                    <button
-                      type="button"
-                      onClick={() => setStageFilter("all")}
-                      className="text-xs font-semibold text-brand-blue hover:text-brand-navy"
-                    >
-                      Clear filter
-                    </button>
-                  )}
-                </div>
-              </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+            <div className="shrink-0 border-b border-slate-200/80 bg-slate-50 px-3 py-3">
+              <ApplicationsBrowse
+                department={selectedDepartment}
+                typeTitle={selectedTypeFolder?.title ?? null}
+                countLabel={
+                  loading
+                    ? "Loading…"
+                    : selectedTypeFolder
+                      ? folderCountLabel(selectedTypeFolder.applications.length, "application")
+                      : selectedDepartment
+                        ? folderCountLabel(selectedDepartment.types.length, "folder")
+                        : folderCountLabel(departmentFolders.length, "folder")
+                }
+                stageFilter={stageFilter}
+                onClearStage={() => setStageFilter("all")}
+                onSelectAll={() => {
+                  setSelectedTypeKey(null);
+                  setSelectedDepartmentKey(ALL_DEPARTMENTS);
+                }}
+                onSelectDepartment={() => setSelectedTypeKey(null)}
+              />
             </div>
 
-            <div className="bg-slate-50/70 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50/70">
               {loading ? (
                 <p className="px-5 py-12 text-center text-sm text-gray-500">
                   Loading applications…
@@ -780,90 +882,29 @@ function ApplicationsHubContent() {
                       </button>
                     ))}
                 </div>
-              ) : !selectedDepartment && !selectedTypeFolder ? (
-                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {departmentFolders.map((folder) => {
-                    const folderCount = folder.types.length;
-                    return (
-                      <button
-                        key={folder.key}
-                        type="button"
-                        onClick={() => {
-                          setSelectedDocumentId(null);
-                          setSelectedTypeKey(null);
-                          setSelectedDepartmentKey(folder.key);
-                        }}
-                        className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
-                      >
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                          <Folder className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-brand-navy">
-                            {folder.title}
-                          </p>
-                          <p className="mt-0.5 text-xs text-gray-500">
-                          {folderCount} folder{folderCount === 1 ? "" : "s"}
-                          </p>
-                        </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
-                      </button>
+              ) : (
+                <ApplicationsDropdown
+                  departments={departmentFolders}
+                  selectedDepartment={selectedDepartment}
+                  selectedType={selectedTypeFolder}
+                  onSelectAll={() => {
+                    setSelectedTypeKey(null);
+                    setSelectedDepartmentKey(ALL_DEPARTMENTS);
+                  }}
+                  onSelectDepartment={(key) => {
+                    setSelectedTypeKey(null);
+                    setSelectedDepartmentKey(key);
+                  }}
+                  onSelectType={(folder) => {
+                    const department = departmentFolders.find((item) =>
+                      item.types.some((type) => type.key === folder.key)
                     );
-                  })}
-                </div>
-              ) : selectedDepartment && !selectedTypeFolder ? (
-                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {selectedDepartment.types.map((folder) => (
-                    <button
-                      key={folder.key}
-                      type="button"
-                      onClick={() => {
-                        setSelectedDocumentId(null);
-                        setSelectedTypeKey(folder.key);
-                      }}
-                      className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
-                    >
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                        <Folder className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-brand-navy">
-                          {folder.title}
-                        </p>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          {folder.applications.length} application{folder.applications.length === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
-                    </button>
-                  ))}
-                </div>
-              ) : selectedTypeDocuments.length > 0 && !selectedDocument && selectedTypeFolder ? (
-                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {selectedTypeDocuments.map((doc) => (
-                    <button
-                      key={doc.id}
-                      type="button"
-                      onClick={() => setSelectedDocumentId(doc.id)}
-                      className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
-                    >
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
-                        <Folder className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-brand-navy">
-                          {catalogDocumentOptionLabel(doc)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          {selectedTypeFolder.applications.length} application{selectedTypeFolder.applications.length === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
-                    </button>
-                  ))}
-                </div>
-              ) : selectedTypeFolder ? (
-                <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                    if (department) setSelectedDepartmentKey(department.key);
+                    openTypeFolder(folder);
+                  }}
+                  leaf={
+                    selectedTypeFolder ? (
+                <div className="flex flex-col gap-2">
                   {selectedTypeFolder.applications.map((app) => {
                     const stage = getApplicationStage(app);
                     const canManage = canManageProjectApps(app.projectId);
@@ -880,19 +921,19 @@ function ApplicationsHubContent() {
                     return (
                       <div
                         key={app.id}
-                        className="flex flex-col rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all hover:border-brand-blue/30 hover:shadow-md"
+                        className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-slate-300"
                       >
                         <button
                           type="button"
                           onClick={() => router.push(applicationHref(app))}
                           className="flex min-w-0 items-start gap-3 text-left"
                         >
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue ring-1 ring-blue-100/80">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
                             <FileText className="h-5 w-5" />
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-2">
-                              <p className="line-clamp-2 text-sm font-semibold text-brand-navy">
+                              <p className="line-clamp-2 text-sm font-semibold text-slate-900">
                                 {app.projectTitle || app.permissionType}
                               </p>
                               <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
@@ -979,7 +1020,10 @@ function ApplicationsHubContent() {
                     );
                   })}
                 </div>
-              ) : null}
+                    ) : null
+                  }
+                />
+              )}
             </div>
           </div>
       </div>
