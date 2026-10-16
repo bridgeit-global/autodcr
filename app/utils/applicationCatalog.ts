@@ -99,6 +99,8 @@ export type ApplicationCatalogPlaceholder = {
 export type CatalogLinkedPlaceholder = ApplicationCatalogPlaceholder & {
   required: boolean;
   sort_order: number;
+  /** Heading on this document only (`application_document_placeholders.section_label`). */
+  sectionLabel?: string | null;
 };
 
 /** One row in Application Details “Letter fields” (catalog-driven). */
@@ -111,6 +113,8 @@ export type CatalogLetterFieldRow = {
   value: string;
   required: boolean;
   uiGroup: string;
+  /** Document heading from `section_label`, when set in Supabase. */
+  sectionLabel?: string | null;
   /** Value came from project/applicant data (or a resolved computed token). Not typed on this screen. */
   readOnly: boolean;
 };
@@ -176,6 +180,7 @@ export function buildCatalogLetterFieldRows(
       value,
       required: ph.required,
       uiGroup: ph.ui_group,
+      sectionLabel: ph.sectionLabel?.trim() || null,
       readOnly,
     });
   }
@@ -215,6 +220,29 @@ export function filterCatalogPlaceholdersUsedInTemplate(
     return false;
   });
   return filtered.length > 0 ? filtered : placeholders;
+}
+
+export type CatalogLetterFieldSection = {
+  title: string;
+  rows: CatalogLetterFieldRow[];
+};
+
+/** Group letter fields by `section_label` from Supabase. */
+export function groupCatalogLetterFieldRows(
+  rows: CatalogLetterFieldRow[]
+): CatalogLetterFieldSection[] {
+  if (!rows.length) return [];
+  if (!rows.some((row) => row.sectionLabel?.trim())) {
+    return [{ title: "Details", rows }];
+  }
+  const sections: CatalogLetterFieldSection[] = [];
+  for (const row of rows) {
+    const title = row.sectionLabel?.trim() || "Other fields";
+    const existing = sections.find((section) => section.title === title);
+    if (existing) existing.rows.push(row);
+    else sections.push({ title, rows: [row] });
+  }
+  return sections;
 }
 
 const templateHtmlByFile = new Map<string, Promise<string | null>>();
@@ -568,6 +596,7 @@ function mapLinkedPlaceholderRows(data: unknown[]): CatalogLinkedPlaceholder[] {
       ...mapPlaceholderRow(ph),
       required: rec.required !== false,
       sort_order: typeof rec.sort_order === "number" ? rec.sort_order : 100,
+      sectionLabel: typeof rec.section_label === "string" ? rec.section_label.trim() || null : null,
     });
   }
   return rows;
@@ -620,13 +649,24 @@ async function loadPlaceholdersForDocument(
   client?: CatalogDb
 ): Promise<CatalogLinkedPlaceholder[]> {
   const db = await resolveClient(client);
-  const { data, error } = await db
+  const withSection = await db
     .from("application_document_placeholders")
     .select(
-      "required, sort_order, placeholders ( id, token, legacy_token, label, source_table, source_column, ui_group, is_active )"
+      "required, sort_order, section_label, placeholders ( id, token, legacy_token, label, source_table, source_column, ui_group, is_active )"
     )
     .eq("document_id", documentId)
     .order("sort_order");
+
+  const missingSectionColumn = /section_label/i.test(withSection.error?.message ?? "");
+  const { data, error } = missingSectionColumn
+    ? await db
+        .from("application_document_placeholders")
+        .select(
+          "required, sort_order, placeholders ( id, token, legacy_token, label, source_table, source_column, ui_group, is_active )"
+        )
+        .eq("document_id", documentId)
+        .order("sort_order")
+    : withSection;
 
   if (error || !Array.isArray(data)) return [];
   return mapLinkedPlaceholderRows(data);
@@ -654,6 +694,7 @@ export async function fetchResolvedPlaceholdersForApplication(
           ...existing,
           required: existing.required || row.required,
           sort_order: Math.min(existing.sort_order, row.sort_order),
+          sectionLabel: row.sectionLabel?.trim() || existing.sectionLabel || null,
         });
       } else {
         byId.set(row.id, row);

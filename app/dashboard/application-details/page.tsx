@@ -104,6 +104,7 @@ import {
   catalogDocumentOptionLabel,
   catalogPlaceholderFieldMap,
   buildCatalogLetterFieldRows,
+  groupCatalogLetterFieldRows,
   fetchApplicationCatalogTypeByTitle,
   fetchCatalogSigningByTitle,
   fetchCatalogTemplateHtmlForFields,
@@ -2144,6 +2145,14 @@ export default function ApplicationDetailsPage() {
   const [previewReadyForSave, setPreviewReadyForSave] = useState(false);
   const [pdfSavedForCurrentPreview, setPdfSavedForCurrentPreview] = useState(false);
   const [detailsFieldRows, setDetailsFieldRows] = useState<CatalogLetterFieldRow[]>([]);
+  const detailsFieldSections = useMemo(
+    () => groupCatalogLetterFieldRows(detailsFieldRows),
+    [detailsFieldRows]
+  );
+  const [openFieldSections, setOpenFieldSections] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setOpenFieldSections({});
+  }, [selectedCatalogDocumentId]);
   const [detailsFieldsFallbackRows, setDetailsFieldsFallbackRows] = useState<PdfDetailsFieldRow[]>(
     []
   );
@@ -5257,63 +5266,77 @@ export default function ApplicationDetailsPage() {
             !detailsFieldsError ? (
             <p className="text-sm text-gray-500">No letter fields to show yet.</p>
           ) : (
-            <div className="divide-y divide-gray-100">
-              {detailsFieldRows.map((row) => {
-                const empty = !row.value.trim();
+            <div className="space-y-1.5 pr-1">
+              {detailsFieldSections.map((section, sectionIndex) => {
+                const sectionKey = `${section.title}-${sectionIndex}`;
+                const open = openFieldSections[sectionKey] ?? sectionIndex === 0;
                 return (
-                  <div
-                    key={row.id}
-                    className="grid grid-cols-1 gap-1 py-2 sm:grid-cols-[minmax(8rem,11rem)_1fr] sm:gap-3 sm:items-start"
+              <section
+                key={sectionKey}
+                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+              >
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() =>
+                    setOpenFieldSections((current) => ({
+                      ...current,
+                      [sectionKey]: !open,
+                    }))
+                  }
+                  className="flex w-full items-center gap-2 bg-slate-50 px-2.5 py-1.5 text-left hover:bg-slate-100"
+                >
+                  <svg
+                    viewBox="0 0 20 20"
+                    className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform ${open ? "rotate-90" : ""}`}
+                    aria-hidden="true"
                   >
-                    <div className="text-sm font-medium text-gray-600">
+                    <path d="M7 5l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-brand-navy">
+                    {section.title}
+                  </span>
+                  <span className="shrink-0 text-[10px] font-medium text-slate-400">
+                    {section.rows.length}
+                  </span>
+                </button>
+              {open ? (
+              <div className="divide-y divide-slate-100 px-2">
+              {section.rows.map((row) => {
+                return (
+                  <label
+                    key={row.id}
+                    className="grid grid-cols-1 items-center gap-1 py-1.5 sm:grid-cols-[minmax(6.5rem,9rem)_1fr] sm:gap-2"
+                  >
+                    <span className="min-w-0 truncate text-xs font-medium text-slate-500">
                       {row.label}
-                      {row.required && empty ? (
-                        <span className="ml-1 text-xs font-normal text-amber-600">
-                          required
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="relative sm:min-w-0">
-                      <input
-                        type="text"
-                        value={row.value}
-                        readOnly={row.readOnly}
-                        onChange={(e) => {
-                          if (!row.readOnly) handleLetterFieldChange(row, e.target.value);
-                        }}
-                        placeholder={row.readOnly ? undefined : `Enter ${row.label}`}
-                        aria-readonly={row.readOnly || undefined}
-                        title={
-                          row.readOnly
-                            ? "This value comes from the project and can’t be edited"
-                            : undefined
-                        }
-                        className={
-                          row.readOnly
-                            ? "w-full cursor-not-allowed rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-3 pr-8 text-sm text-gray-700 outline-none"
-                            : "w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
-                        }
-                      />
-                      {row.readOnly ? (
-                        <span
-                          className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-rose-700"
-                          aria-hidden="true"
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="M6 18 18 6" />
-                          </svg>
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
+                    </span>
+                    <input
+                      type="text"
+                      value={row.value}
+                      readOnly={row.readOnly}
+                      onChange={(e) => {
+                        if (!row.readOnly) handleLetterFieldChange(row, e.target.value);
+                      }}
+                      placeholder={row.readOnly ? undefined : `Enter ${row.label}`}
+                      aria-readonly={row.readOnly || undefined}
+                      title={
+                        row.readOnly
+                          ? "This value comes from the project and can’t be edited"
+                          : undefined
+                      }
+                      className={
+                        row.readOnly
+                          ? "w-full cursor-default rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-700 outline-none"
+                          : "w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-900 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20"
+                      }
+                    />
+                  </label>
+                );
+              })}
+              </div>
+              ) : null}
+              </section>
                 );
               })}
               {detailsFieldRows.length === 0

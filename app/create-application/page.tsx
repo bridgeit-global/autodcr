@@ -523,7 +523,7 @@ export default function CreateApplicationPage() {
             ) : null}
           </div>
 
-          <div className="grid min-w-0 gap-6 px-2 py-4 lg:grid-cols-3">
+          <div className="grid min-h-0 min-w-0 flex-1 gap-6 overflow-y-auto px-2 py-4 lg:grid-cols-3">
             <div className="min-w-0 space-y-6 lg:col-span-2">
               <div>
                 <div className="mb-3">

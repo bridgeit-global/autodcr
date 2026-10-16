@@ -288,18 +288,21 @@ export type Database = {
           document_id: string
           placeholder_id: string
           required: boolean
+          section_label: string | null
           sort_order: number
         }
         Insert: {
           document_id: string
           placeholder_id: string
           required?: boolean
+          section_label?: string | null
           sort_order?: number
         }
         Update: {
           document_id?: string
           placeholder_id?: string
           required?: boolean
+          section_label?: string | null
           sort_order?: number
         }
         Relationships: [
