@@ -337,6 +337,8 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
         setIsCurrentPasswordVerified(false);
         setCurrentPasswordError("Current password is incorrect");
       } else {
+        await supabase.auth.signOut({ scope: "others" });
+        await supabase.rpc("adopt_current_login");
         setIsCurrentPasswordVerified(true);
         setCurrentPasswordError(null);
       }
@@ -393,6 +395,9 @@ const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
         setIsSubmitting(false);
         return;
       }
+
+      await supabase.auth.signOut({ scope: "others" });
+      await supabase.rpc("adopt_current_login");
 
       // Step 3: Update password
       const { error: updateError } = await supabase.auth.updateUser({

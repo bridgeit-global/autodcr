@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "next/navigation";
 import { Eye, EyeOff, ChevronLeft, ChevronRight } from "lucide-react";
@@ -13,6 +13,7 @@ import { sanitizeReturnUrl } from "@/app/utils/applicationDeepLink";
 import { setSessionExpiresAt } from "@/app/utils/sessionTimeout";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
+import Modal from "./ui/Modal";
 import CaptchaBox, { generateCaptchaValue } from "./ui/CaptchaBox";
 
 type HeroSectionProps = {
@@ -24,6 +25,18 @@ type LoginForm = {
   password: string;
   captcha: string;
 };
+
+type LoginSuccess = {
+  conflict: false;
+  access_token: string;
+  refresh_token: string;
+  user_id: string;
+  consultant_user_id: string;
+  consultant_type: string;
+  metadata: Record<string, unknown>;
+};
+
+type LoginResult = LoginSuccess | { conflict: true };
 
 const fieldClassName =
   "w-full rounded-lg border border-gray-200 px-3 py-2 text-base text-gray-900 placeholder:text-gray-400 outline-none transition-colors focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 sm:py-2.5 sm:text-sm";
@@ -46,9 +59,92 @@ const Login = ({ slides }: HeroSectionProps) => {
   } = useForm<LoginForm>();
 
   const [loginError, setLoginError] = useState<string>("");
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const pendingLoginRef = useRef<{ username: string; password: string } | null>(null);
 
   const regenerateCaptcha = () => {
     setCaptcha(generateCaptchaValue());
+  };
+
+  const finishLogin = async (result: LoginSuccess) => {
+    const { error } = await supabase.auth.setSession({
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+    });
+    if (error) {
+      throw error;
+    }
+
+    localStorage.setItem("consultantId", result.user_id);
+    localStorage.setItem("consultantUserId", result.consultant_user_id);
+    localStorage.setItem("consultantType", result.consultant_type);
+    setSessionExpiresAt();
+
+    if (result.metadata && Object.keys(result.metadata).length > 0) {
+      localStorage.setItem("userMetadata", JSON.stringify(result.metadata));
+    }
+
+    // Full navigation so middleware re-reads auth cookies (soft push can stay logged out).
+    window.location.assign(returnUrl);
+  };
+
+  const requestLogin = async (username: string, password: string, takeover: boolean) => {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, takeover }),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | (LoginResult & { error?: string })
+      | { error?: string }
+      | null;
+    if (!response.ok) {
+      throw new Error(
+        payload && "error" in payload && payload.error
+          ? payload.error
+          : "An error occurred during login. Please try again."
+      );
+    }
+    if (!payload || !("conflict" in payload)) {
+      throw new Error("An error occurred during login. Please try again.");
+    }
+    return payload;
+  };
+
+  const declineTakeover = () => {
+    if (isLoading) return;
+    pendingLoginRef.current = null;
+    setConflictOpen(false);
+    regenerateCaptcha();
+  };
+
+  const confirmTakeover = async () => {
+    const pending = pendingLoginRef.current;
+    if (!pending) {
+      setConflictOpen(false);
+      return;
+    }
+
+    setLoginError("");
+    setIsLoading(true);
+    try {
+      const result = await requestLogin(pending.username, pending.password, true);
+      pendingLoginRef.current = null;
+      setConflictOpen(false);
+      if (result.conflict) {
+        setLoginError("An error occurred during login. Please try again.");
+        regenerateCaptcha();
+        setIsLoading(false);
+        return;
+      }
+      await finishLogin(result);
+    } catch (error) {
+      setLoginError(
+        error instanceof Error ? error.message : "An error occurred during login. Please try again."
+      );
+      regenerateCaptcha();
+      setIsLoading(false);
+    }
   };
 
   const onSubmit = async (data: LoginForm) => {
@@ -63,71 +159,22 @@ const Login = ({ slides }: HeroSectionProps) => {
     }
 
     try {
-      const { data: rows, error: rpcError } = await supabase.rpc("get_user_email_by_user_id", {
-        lookup_user_id: data.username.trim(),
-      });
-
-      if (rpcError || !rows || !Array.isArray(rows) || rows.length === 0) {
-        setLoginError("Invalid username or password. Please try again.");
-        regenerateCaptcha();
+      const result = await requestLogin(data.username.trim(), data.password, false);
+      if (result.conflict) {
+        pendingLoginRef.current = {
+          username: data.username.trim(),
+          password: data.password,
+        };
+        setConflictOpen(true);
         setIsLoading(false);
         return;
       }
-
-      const row = rows[0] as {
-        email?: string | null;
-        user_id?: string | null;
-        consultant_type?: string | null;
-        raw_user_meta_data?: Record<string, unknown> | null;
-        metadata?: Record<string, unknown> | null;
-      };
-
-      if (!row.email) {
-        setLoginError("Invalid username or password. Please try again.");
-        regenerateCaptcha();
-        setIsLoading(false);
-        return;
-      }
-
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: row.email,
-        password: data.password,
-      });
-
-      if (authError || !authData.user) {
-        setLoginError("Invalid username or password. Please try again.");
-        regenerateCaptcha();
-        setIsLoading(false);
-        return;
-      }
-
-      localStorage.setItem("consultantId", authData.user.id);
-      localStorage.setItem("consultantUserId", row.user_id || data.username);
-      localStorage.setItem("consultantType", row.consultant_type || "");
-      setSessionExpiresAt();
-
-      const jwtMeta =
-        authData.user.user_metadata && typeof authData.user.user_metadata === "object"
-          ? authData.user.user_metadata
-          : {};
-      const rpcMeta =
-        row.raw_user_meta_data && typeof row.raw_user_meta_data === "object"
-          ? row.raw_user_meta_data
-          : row.metadata && typeof row.metadata === "object"
-            ? row.metadata
-            : {};
-      const metadataToStore = { ...jwtMeta, ...rpcMeta };
-      if (Object.keys(metadataToStore).length > 0) {
-        localStorage.setItem("userMetadata", JSON.stringify(metadataToStore));
-      }
-
-      // Full navigation so middleware re-reads auth cookies (soft push can stay logged out).
-      window.location.assign(returnUrl);
-      return;
-    } catch {
-      setLoginError("An error occurred during login. Please try again.");
+      await finishLogin(result);
+    } catch (error) {
+      setLoginError(
+        error instanceof Error ? error.message : "An error occurred during login. Please try again."
+      );
       regenerateCaptcha();
-    } finally {
       setIsLoading(false);
     }
   };
@@ -151,6 +198,25 @@ const Login = ({ slides }: HeroSectionProps) => {
     <>
       <ForgotPasswordModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
       <ForgetUsernameModal open={userforgotOpen} onClose={() => setUserForgotOpen(false)} />
+      <Modal
+        open={conflictOpen}
+        onClose={declineTakeover}
+        title="Already signed in"
+        maxWidth="sm"
+      >
+        <p className="text-sm text-gray-700">
+          One user is currently logged in with this account. Do you still want to log in? Choosing
+          yes signs out the other session.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={declineTakeover} disabled={isLoading}>
+            No
+          </Button>
+          <Button type="button" onClick={() => void confirmTakeover()} disabled={isLoading}>
+            {isLoading ? "Signing in..." : "Yes"}
+          </Button>
+        </div>
+      </Modal>
 
       <div className="fixed inset-0 flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden supports-[height:100svh]:h-[100svh] md:static md:inset-auto md:h-dvh md:max-h-dvh md:flex-row">
         {/* Hero — full panel on tablet+ only */}

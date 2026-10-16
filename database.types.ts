@@ -954,6 +954,22 @@ export type Database = {
           user_id: string
         }[]
       }
+      count_other_live_sessions: {
+        Args: { p_user_id: string; p_session_id: string }
+        Returns: number
+      }
+      claim_active_login: {
+        Args: { p_user_id: string; p_session_id: string }
+        Returns: undefined
+      }
+      is_current_login_active: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      adopt_current_login: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       get_applicant_details_for_project: {
         Args: { p_project_id: string }
         Returns: Json
