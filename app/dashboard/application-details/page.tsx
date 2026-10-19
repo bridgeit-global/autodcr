@@ -5254,8 +5254,8 @@ export default function ApplicationDetailsPage() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 pt-3 lg:flex-row">
-          <div className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain lg:w-2/5 lg:flex-none">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 lg:flex-row lg:items-start">
+          <div className="w-full lg:w-2/5 lg:flex-none">
           {detailsFieldsLoading &&
           detailsFieldRows.length === 0 &&
           detailsFieldsFallbackRows.length === 0 &&
@@ -5358,7 +5358,7 @@ export default function ApplicationDetailsPage() {
             </div>
           )}
           </div>
-          <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
+          <div className="w-full min-w-0 lg:flex-1">
             <ApplicationDocumentPreviewPane
               title={
                 selectedApplication ? `${selectedApplication} Preview` : "Application Preview"

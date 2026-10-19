@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useHtmlPreviewFrame } from "@/app/components/useHtmlPreviewFrame";
 
 const ApplicationStoredPdfViewer = dynamic(() => import("./ApplicationStoredPdfViewer"), {
   ssr: false,
-}) as React.ComponentType<{ fileUrl: string }>;
+}) as React.ComponentType<{ fileUrl: string; expand?: boolean }>;
 
 const IMAGE_URL_PATTERN = /\.(png|jpe?g|webp|gif|bmp)(\?|#|$)/i;
 
@@ -31,16 +31,50 @@ export default function ApplicationDocumentPreviewPane({
   const showHtml = Boolean(htmlContent) && !fileUrl;
   useHtmlPreviewFrame(iframeRef, htmlContent, showHtml);
 
+  useEffect(() => {
+    if (!showHtml) return;
+    const frame = iframeRef.current;
+    if (!frame) return;
+
+    let observer: ResizeObserver | null = null;
+    const syncHeight = () => {
+      const doc = frame.contentDocument;
+      if (!doc?.documentElement) return;
+      const height = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0);
+      if (height > 0) frame.style.height = `${height}px`;
+      doc.documentElement.style.overflow = "hidden";
+      if (doc.body) doc.body.style.overflow = "hidden";
+    };
+    const onLoad = () => {
+      syncHeight();
+      observer?.disconnect();
+      const doc = frame.contentDocument;
+      if (!doc?.documentElement) return;
+      observer = new ResizeObserver(() => syncHeight());
+      observer.observe(doc.documentElement);
+      if (doc.body) observer.observe(doc.body);
+    };
+
+    frame.addEventListener("load", onLoad);
+    if (frame.contentDocument?.readyState === "complete" && frame.src && frame.src !== "about:blank") {
+      onLoad();
+    }
+    return () => {
+      frame.removeEventListener("load", onLoad);
+      observer?.disconnect();
+    };
+  }, [showHtml, htmlContent]);
+
   const hasContent = Boolean(fileUrl) || Boolean(htmlContent);
   const isImagePreview = Boolean(fileUrl) && IMAGE_URL_PATTERN.test(fileUrl ?? "");
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
+    <div className="flex flex-col rounded-xl border border-gray-200 bg-gray-50">
       <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-2.5">
         <h3 className="text-sm font-semibold text-gray-900">Document preview</h3>
         {title ? <p className="mt-0.5 truncate text-xs text-gray-500">{title}</p> : null}
       </div>
-      <div className="relative min-h-0 flex-1 overflow-auto">
+      <div className="relative">
         {isLoading && !hasContent ? (
           <div className="flex h-full min-h-48 items-center justify-center text-sm text-gray-500">
             Loading preview…
@@ -58,7 +92,7 @@ export default function ApplicationDocumentPreviewPane({
             ref={iframeRef}
             title={title || "Document preview"}
             src="about:blank"
-            className="block h-full min-h-[32rem] w-full border-0 bg-white"
+            className="block min-h-[32rem] w-full border-0 bg-white"
           />
         ) : fileUrl && isImagePreview ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -68,7 +102,7 @@ export default function ApplicationDocumentPreviewPane({
             className="block h-auto w-full bg-white"
           />
         ) : fileUrl ? (
-          <ApplicationStoredPdfViewer fileUrl={fileUrl} />
+          <ApplicationStoredPdfViewer fileUrl={fileUrl} expand />
         ) : (
           <div className="flex h-full min-h-48 items-center justify-center px-6 text-center text-sm text-gray-500">
             Preview will appear here.

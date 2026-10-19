@@ -10,9 +10,14 @@ const SIDEBAR_COLLAPSED_KEY = "appSidebarCollapsed";
 type AppShellProps = {
   title: string;
   children: ReactNode;
+  showMasterProjectFilter?: boolean;
 };
 
-export default function AppShell({ title, children }: AppShellProps) {
+export default function AppShell({
+  title,
+  children,
+  showMasterProjectFilter = true,
+}: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -50,7 +55,7 @@ export default function AppShell({ title, children }: AppShellProps) {
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <AppHeader title={title} onOpenMobileSidebar={() => setMobileOpen(true)} />
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <MasterProjectFilterBar />
+          {showMasterProjectFilter ? <MasterProjectFilterBar /> : null}
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
             {children}
           </div>

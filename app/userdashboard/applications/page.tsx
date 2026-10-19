@@ -261,7 +261,7 @@ function ApplicationsDropdown({
   const choiceIndent = selectedType ? "ml-[4.5rem]" : selectedDepartment ? "ml-12" : "ml-6";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       <div className="shrink-0 bg-slate-50/70 px-3 pt-3">
         <DropdownRow title="All departments" selected expandable open onClick={onSelectAll} />
         {selectedDepartment ? (
@@ -289,7 +289,7 @@ function ApplicationsDropdown({
           </div>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
+      <div className="px-3 pb-3">
         <div className={`mt-1 flex flex-col gap-1 border-l border-slate-200 pl-3 ${choiceIndent}`}>
           {selectedType
             ? leaf
@@ -745,7 +745,7 @@ function ApplicationsHubContent() {
   }, [pendingAction, busyId, getAuthToken, showAlert]);
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-6 overflow-hidden px-4 py-6 md:px-6 md:py-8">
+    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 py-6 md:px-6 md:py-8">
       <div className="flex shrink-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-brand-navy md:text-2xl">
@@ -820,8 +820,8 @@ function ApplicationsHubContent() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+      <div className="flex flex-col">
+          <div className="flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm">
             <div className="shrink-0 border-b border-slate-200/80 bg-slate-50 px-3 py-3">
               <ApplicationsBrowse
                 department={selectedDepartment}
@@ -845,7 +845,7 @@ function ApplicationsHubContent() {
               />
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50/70">
+            <div className="flex flex-col bg-slate-50/70">
               {loading ? (
                 <p className="px-5 py-12 text-center text-sm text-gray-500">
                   Loading applications…

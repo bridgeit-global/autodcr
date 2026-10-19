@@ -219,9 +219,9 @@ export default function UserDashboardPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
-        <div className="flex min-h-0 flex-col gap-4 lg:col-span-9 lg:gap-5">
+    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-6 sm:px-6 lg:px-8">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
+        <div className="flex flex-col gap-4 lg:col-span-9 lg:gap-5">
           <div className="grid grid-cols-2 content-start items-start gap-3 sm:gap-4 lg:grid-cols-4">
             {metrics.map((metric) => (
               <MetricCard
@@ -234,20 +234,20 @@ export default function UserDashboardPage() {
               />
             ))}
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
-            <div className="h-full lg:col-span-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
+            <div className="lg:col-span-4">
               <ProjectHealthCard health={projectHealth} />
             </div>
-            <div className="h-full lg:col-span-8">
+            <div className="lg:col-span-8">
               <UpcomingDeadlinesCard deadlines={UPCOMING_DEADLINES} />
             </div>
           </div>
         </div>
-        <div className="flex h-full min-h-0 flex-col gap-4 lg:col-span-3 lg:gap-5">
-          <div className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 lg:col-span-3 lg:gap-5">
+          <div>
             <AiAssistantCard insights={AI_INSIGHTS} />
           </div>
-          <div className="min-h-0 flex-1">
+          <div>
             <QuickActionsCard
               actions={QUICK_ACTIONS}
               onActionClick={(actionId) => {
