@@ -10,6 +10,8 @@ const PDF_WORKER_URL = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.m
 
 type ApplicationStoredPdfViewerProps = {
   fileUrl: string;
+  /** Grow with the pages so a parent section scrolls, instead of scrolling inside the viewer. */
+  expand?: boolean;
 };
 
 /** Minimal link service for annotation-layer rendering (signature widgets). */
@@ -60,7 +62,10 @@ const previewDownloadManager: PreviewDownloadManager = {
  * Renders pages edge-to-edge at container width — matches the HTML iframe preview
  * without browser PDF chrome or react-pdf-viewer page shadows.
  */
-export default function ApplicationStoredPdfViewer({ fileUrl }: ApplicationStoredPdfViewerProps) {
+export default function ApplicationStoredPdfViewer({
+  fileUrl,
+  expand = false,
+}: ApplicationStoredPdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -155,8 +160,12 @@ export default function ApplicationStoredPdfViewer({ fileUrl }: ApplicationStore
     <div className="relative w-full bg-white">
       <div
         ref={containerRef}
-        className="application-stored-pdf-viewer w-full overflow-y-auto overflow-x-hidden bg-white"
-        style={{ height: "78vh", minHeight: "600px" }}
+        className={
+          expand
+            ? "application-stored-pdf-viewer w-full overflow-visible bg-white"
+            : "application-stored-pdf-viewer w-full overflow-y-auto overflow-x-hidden bg-white"
+        }
+        style={expand ? undefined : { height: "78vh", minHeight: "600px" }}
       />
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-white text-sm text-gray-500">

@@ -26,6 +26,11 @@ export const preferredRegion = "bom1";
 
 const templateTextCache = new Map<string, string>();
 
+function readTemplateCache(key: string): string | undefined {
+  if (process.env.NODE_ENV === "development") return undefined;
+  return templateTextCache.get(key);
+}
+
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
 const supabaseAnonKey =
@@ -120,7 +125,7 @@ function preferLocalApplicationTemplates(): boolean {
 async function readRepoApplicationTemplateHtml(
   objectPath: string
 ): Promise<string | null> {
-  const cached = templateTextCache.get(`repo:${objectPath}`);
+  const cached = readTemplateCache(`repo:${objectPath}`);
   if (cached !== undefined) return cached;
   const rawBase =
     process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() ||
@@ -134,7 +139,9 @@ async function readRepoApplicationTemplateHtml(
 
   try {
     const text = await readFile(abs, "utf8");
-    templateTextCache.set(`repo:${objectPath}`, text);
+    if (process.env.NODE_ENV !== "development") {
+      templateTextCache.set(`repo:${objectPath}`, text);
+    }
     if (process.env.NODE_ENV === "development") {
       console.log("[application-preview-html] using repo template:", abs);
     }
@@ -148,7 +155,7 @@ async function downloadStorageTemplateText(
   supabase: SupabaseClient,
   objectPath: string
 ): Promise<string | null> {
-  const cached = templateTextCache.get(`storage:${objectPath}`);
+  const cached = readTemplateCache(`storage:${objectPath}`);
   if (cached !== undefined) return cached;
   const { data: file, error: downloadError } = await supabase.storage
     .from(TEMPLATE_BUCKET)
@@ -167,7 +174,7 @@ async function downloadStorageTemplateText(
 
 /** Bundled shared CSS shipped with the app (letterhead, layout, typography). */
 async function readBundledSharedApplicationCss(): Promise<string> {
-  const cached = templateTextCache.get("css:bundled");
+  const cached = readTemplateCache("css:bundled");
   if (cached !== undefined) return cached;
   const rawBase =
     process.env.APPLICATION_TEMPLATES_LOCAL_DIR?.trim() ||

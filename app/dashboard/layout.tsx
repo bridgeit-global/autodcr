@@ -1270,10 +1270,9 @@ function DashboardLayoutContent({
     : isEditMode
       ? "Edit Project"
       : "Create Project";
-
   return (
     <>
-      <AppShell title={shellTitle}>
+      <AppShell title={shellTitle} showMasterProjectFilter={!isReadOnlyMode}>
         <ApplicationPdfSaveSlotProvider>
           <ApplicationSignSlotProvider>
             <ApplicationLifecycleActionsSlotProvider>

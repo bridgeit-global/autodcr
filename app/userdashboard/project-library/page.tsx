@@ -609,7 +609,7 @@ function LibraryDropdown({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       <div className="shrink-0 bg-slate-50/70 px-3 pt-3">
         <DropdownRow
           title="All folders"
@@ -620,7 +620,7 @@ function LibraryDropdown({
         />
         {renderSelected(0)}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
+      <div className="px-3 pb-3">
         <div
           className="mt-1 flex flex-col gap-1 border-l border-slate-200 pl-3"
           style={{ marginLeft: `${(resolved.length + 1) * 1.5}rem` }}
@@ -1324,7 +1324,7 @@ export default function ProjectLibraryBrowserPage() {
   };
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden px-2 py-3 sm:px-3">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-2 py-3 sm:px-3">
       <DocumentPreviewModal
         open={Boolean(preview) || previewLoading || Boolean(previewError)}
         onClose={closePreview}
@@ -1336,7 +1336,7 @@ export default function ProjectLibraryBrowserPage() {
         loadError={previewError}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div className="flex flex-col rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="shrink-0 border-b border-slate-200/80 bg-slate-50 px-3 py-3">
           <LibraryBrowse
             nodes={browseNodes}
@@ -1346,7 +1346,7 @@ export default function ProjectLibraryBrowserPage() {
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50/70">
+        <div className="flex flex-col bg-slate-50/70">
           {loading ? (
             <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-gray-500">
               <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />

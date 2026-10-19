@@ -54,7 +54,7 @@ const DocumentIcon = () => (
 export default function CreateApplicationPage() {
   const router = useRouter();
   const { showAlert } = useDashboardAlertModal();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
   const [selectedProject, setSelectedProject] = useState("");
   const [projects, setProjects] = useState<OwnerProjectSelectRow[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -443,11 +443,6 @@ export default function CreateApplicationPage() {
       existingPermissionTypes.includes(selectedPermissionRecord?.title ?? "")
     );
 
-  const projectSelectOptions = projects.map((project) => ({
-    value: project.id,
-    label: getProjectDisplayData(project).label,
-  }));
-
   const relatedRows = [
     { label: "Authority", value: selectedProjectData ? getProjectPlanningAuthority(selectedProjectData) : "—" },
     { label: "Department", value: selectedDepartment || "—" },
@@ -479,44 +474,20 @@ export default function CreateApplicationPage() {
       <div className="flex min-h-0 w-full flex-1 flex-col px-2 py-3 sm:px-3">
         <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
           <div className="border-b border-gray-100 px-2 py-3">
-            <div className="grid min-w-0 gap-3 md:grid-cols-2">
-              <div className="min-w-0">
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                  Project
-                </label>
-                <CustomSelect
-                  searchable
-                  value={selectedProject}
-                  onChange={(val) => {
-                    setSelectedProject(val);
-                    setMasterProjectId(val);
-                  }}
-                  options={projectSelectOptions}
-                  placeholder={
-                    projectsLoading
-                      ? "Loading projects…"
-                      : projects.length === 0
-                        ? "No projects"
-                        : "Select project"
-                  }
-                  disabled={projectsLoading || projects.length === 0}
-                />
-              </div>
-              <div className="min-w-0">
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                  Department
-                </label>
-                <CustomSelect
-                  value={selectedDepartment}
-                  onChange={setSelectedDepartment}
-                  options={departmentOptions.map((dept) => ({
-                    value: dept,
-                    label: dept,
-                  }))}
-                  placeholder="Select department"
-                  disabled={!selectedProject}
-                />
-              </div>
+            <div className="min-w-0 max-w-xl">
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                Department
+              </label>
+              <CustomSelect
+                value={selectedDepartment}
+                onChange={setSelectedDepartment}
+                options={departmentOptions.map((dept) => ({
+                  value: dept,
+                  label: dept,
+                }))}
+                placeholder="Select department"
+                disabled={!selectedProject}
+              />
             </div>
             {!projectsLoading && projects.length === 0 ? (
               <p className="mt-2 text-xs text-gray-500">No projects are available yet.</p>

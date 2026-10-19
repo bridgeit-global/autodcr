@@ -554,9 +554,46 @@ export async function fetchDocumentsForApplicationType(
 ): Promise<ApplicationCatalogDocument[]> {
   const cached = catalogDocsByType.get(applicationTypeId);
   if (cached) return cached;
-  const pending = loadDocumentsForApplicationType(applicationTypeId, client);
+  const pending = loadDocumentsForApplicationType(applicationTypeId, client).then((docs) => {
+    // An empty list is often "not migrated yet" or a request that could not see rows.
+    // Do not pin that result for the life of the dev server.
+    if (docs.length === 0) catalogDocsByType.delete(applicationTypeId);
+    return docs;
+  });
   catalogDocsByType.set(applicationTypeId, pending);
   return pending;
+}
+
+async function loadCatalogDocumentByIdOrSlug(
+  documentId: string,
+  client?: CatalogDb
+): Promise<ApplicationCatalogDocument | null> {
+  const db = await resolveClient(client);
+  const id = documentId.trim();
+  if (!id) return null;
+
+  const selectOne = async (column: "id" | "slug", columns: string) =>
+    db.from("application_documents").select(columns).eq(column, id).eq("is_active", true).maybeSingle();
+
+  let { data, error } = await selectOne("id", DOCUMENT_COLUMNS);
+  if (error || !data) {
+    const bySlug = await selectOne("slug", DOCUMENT_COLUMNS);
+    if (!bySlug.error && bySlug.data) {
+      data = bySlug.data;
+      error = null;
+    } else if (error) {
+      const legacy = await selectOne("id", DOCUMENT_COLUMNS_NO_LETTERHEAD_SOURCE);
+      const legacySlug = legacy.error || !legacy.data
+        ? await selectOne("slug", DOCUMENT_COLUMNS_NO_LETTERHEAD_SOURCE)
+        : legacy;
+      if (!legacySlug.error && legacySlug.data) {
+        data = legacySlug.data;
+        error = null;
+      }
+    }
+  }
+  if (error || !data) return null;
+  return mapDocumentRow(data as Record<string, unknown>);
 }
 
 async function loadDocumentsForApplicationType(
@@ -1113,6 +1150,11 @@ export async function resolveCatalogDocumentForPreview(opts: {
   documentId?: string | null;
   client?: CatalogDb;
 }): Promise<ApplicationCatalogDocument | null> {
+  const documentId = opts.documentId?.trim();
+  if (documentId) {
+    const byId = await loadCatalogDocumentByIdOrSlug(documentId, opts.client);
+    if (byId?.html) return byId;
+  }
   const title = opts.applicationTitle?.trim();
   if (!title) return null;
   const type = await fetchApplicationCatalogTypeByTitle(title, opts.client);
