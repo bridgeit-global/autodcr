@@ -34,7 +34,6 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
@@ -116,7 +115,7 @@ export default function DrawingReviewClient() {
   const searchParams = useSearchParams();
   const { userMetadata } = useUserMetadata();
   const { projects, loading: projectsLoading } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
   const nonDraftProjects = useMemo(() => filterNonDraftProjects(projects), [projects]);
 
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -820,29 +819,6 @@ export default function DrawingReviewClient() {
                 <p className="mt-1 text-sm text-gray-500">
                   Review CAD versions, overlay changes, edit geometry, and leave remarks.
                 </p>
-              </div>
-              <div className="w-full lg:max-w-sm">
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                  Project
-                </label>
-                <CustomSelect
-                  searchable
-                  value={projectValue}
-                  onChange={(value) => {
-                    setSelectedProjectId(value);
-                    setMasterProjectId(value);
-                  }}
-                  options={
-                    projectsLoading
-                      ? []
-                      : nonDraftProjects.map((project) => ({
-                          value: project.id,
-                          label: getProjectLabel(project),
-                        }))
-                  }
-                  placeholder={projectsLoading ? "Loading projects…" : "Select a project"}
-                  disabled={projectsLoading || nonDraftProjects.length === 0}
-                />
               </div>
             </div>
           )}

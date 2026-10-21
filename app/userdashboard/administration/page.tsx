@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CircleDashed, Loader2, Users } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardProjects, type DashboardProject } from "@/app/hooks/useDashboardProjects";
 import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
@@ -15,7 +14,6 @@ import {
   classifyApplicantRole,
   filterApplicantsByRole,
   flattenApplicantRosters,
-  getProjectLabel,
   type AdministrationApplicantRow,
   type AdministrationRoleTab,
 } from "@/app/userdashboard/administrationApplicants";
@@ -71,7 +69,7 @@ export default function AdministrationPage() {
     isArchitectConsultant,
     architectDelegateProjectIds,
   } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
 
   const [selectedProjectId, setSelectedProjectId] = useState("ALL");
   const [roleTab, setRoleTab] = useState<AdministrationRoleTab>("all");
@@ -168,28 +166,6 @@ export default function AdministrationPage() {
             <p className="mt-1 text-sm text-gray-500">
               Applicants on your projects
             </p>
-          </div>
-          <div className="w-full sm:max-w-xs">
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Project
-            </label>
-            <CustomSelect
-              searchable
-              value={selectedProjectId}
-                onChange={(value) => {
-                  setSelectedProjectId(value);
-                  setMasterProjectId(value === "ALL" ? "" : value);
-                }}
-              options={[
-                { value: "ALL", label: "All projects" },
-                ...allowedProjects.map((p) => ({
-                  value: p.id,
-                  label: getProjectLabel(p),
-                })),
-              ]}
-              placeholder={projectsLoading ? "Loading projects…" : "All projects"}
-              disabled={projectsLoading || allowedProjects.length === 0}
-            />
           </div>
         </div>
 

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Briefcase, CircleDashed, Loader2 } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import ConsultantProgressCard, {
   WorkspaceDetailRow,
@@ -14,7 +13,6 @@ import { supabase } from "@/app/utils/supabase";
 import {
   filterConsultantsByProject,
   filterNonDraftProjects,
-  getProjectLabel,
   loadConsultantWorkspaceCards,
   type AssignedConsultantCard,
 } from "@/app/userdashboard/ownerWorkspaceConsultants";
@@ -22,7 +20,7 @@ import {
 export default function ConsultantWorkspacePage() {
   const { projects, loading: projectsLoading, isConsultant, consultantType } =
     useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
 
   const [selectedProjectId, setSelectedProjectId] = useState("ALL");
   const [cardsLoading, setCardsLoading] = useState(true);
@@ -103,28 +101,6 @@ export default function ConsultantWorkspacePage() {
             <p className="mt-1 text-sm text-gray-500">
               Your assigned projects and work progress
             </p>
-          </div>
-          <div className="w-full sm:max-w-xs">
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Project
-            </label>
-            <CustomSelect
-              searchable
-              value={selectedProjectId}
-              onChange={(value) => {
-                setSelectedProjectId(value);
-                setMasterProjectId(value === "ALL" ? "" : value);
-              }}
-              options={[
-                { value: "ALL", label: "All projects" },
-                ...nonDraftProjects.map((p) => ({
-                  value: p.id,
-                  label: getProjectLabel(p),
-                })),
-              ]}
-              placeholder={projectsLoading ? "Loading projects…" : "All projects"}
-              disabled={projectsLoading || nonDraftProjects.length === 0}
-            />
           </div>
         </div>
 

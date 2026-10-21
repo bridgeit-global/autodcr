@@ -1998,7 +1998,9 @@ function injectPaginatedStyles(
   html, body {
     margin: 0;
     padding: 0;
-    background: #f3f4f6;
+    background-color: #f3f4f6 !important;
+    background-image: none !important;
+    overflow-x: hidden !important;
   }
 
   /* Normalize root wrapper width only (do not zero out paddings/margins that
@@ -2103,8 +2105,13 @@ function injectPaginatedStyles(
     font-size: 0 !important;
   }
 
-  /* Paged.js page boxes — styled to look like real sheets of A4 paper. */
+  /* Paged.js page boxes — one centered column, even when the pane is wider than two A4 sheets. */
   .pagedjs_pages {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    width: 100% !important;
     padding: 12px 0;
   }
   .pagedjs_page,
@@ -2116,16 +2123,21 @@ function injectPaginatedStyles(
     ${letterheadCssUrl ? "background-position: top center !important;" : ""}
   }
   .pagedjs_page {
+    display: block !important;
+    float: none !important;
+    clear: both !important;
+    flex: 0 0 auto !important;
+    width: var(--pagedjs-width) !important;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    margin: 0 auto 16px auto;
-    overflow: visible;
+    margin: 0 auto 16px auto !important;
+    overflow: hidden !important;
+  }
+  .pagedjs_sheet {
+    overflow: hidden !important;
   }
   ${
     letterheadCssUrl
       ? `
-  html, body {
-    background: #fff url('${letterheadCssUrl}') top center / 210mm 297mm no-repeat !important;
-  }
   .pagedjs_page_content,
   .pagedjs_page_content > div,
   .pagedjs_page_content .page,
@@ -2166,9 +2178,21 @@ function injectPaginatedStyles(
 
   /* During print, drop the shadow / background — only the actual content. */
   @media print {
-    html, body { background: #ffffff; }
-    .pagedjs_pages { padding: 0; }
-    .pagedjs_page { box-shadow: none; margin: 0; }
+    html, body {
+      background: #ffffff !important;
+      background-image: none !important;
+      overflow: visible !important;
+    }
+    .pagedjs_pages {
+      display: block !important;
+      padding: 0 !important;
+      width: auto !important;
+    }
+    .pagedjs_page {
+      box-shadow: none !important;
+      margin: 0 !important;
+      overflow: hidden !important;
+    }
   }
   ${acceptanceLetterBodyPagedCss}
   ${authorityAppointmentPagedCss}
@@ -2239,18 +2263,30 @@ function injectPlumberPreviewPages(
   html, body {
     margin: 0;
     padding: 0;
-    background: #f3f4f6;
+    background-color: #f3f4f6 !important;
+    background-image: none !important;
+    overflow-x: hidden !important;
   }
   .preview-pages {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    width: 100% !important;
     padding: 4px 0;
   }
   .preview-sheet {
-    width: 210mm;
+    display: block !important;
+    float: none !important;
+    clear: both !important;
+    flex: 0 0 auto !important;
+    width: 210mm !important;
     min-height: 297mm;
     background: #ffffff;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    margin: 0 auto 8px auto;
+    margin: 0 auto 8px auto !important;
     box-sizing: border-box;
+    overflow: hidden !important;
   }
   .preview-sheet--first {
     ${letterheadUrl ? `background-image: url('${letterheadUrl}');` : ""}
@@ -2300,9 +2336,20 @@ function injectPlumberPreviewPages(
     margin-left: auto !important;
   }
   @media print {
-    html, body { background: #ffffff; }
-    .preview-pages { padding: 0; }
-    .preview-sheet { box-shadow: none; margin: 0; }
+    html, body {
+      background: #ffffff !important;
+      background-image: none !important;
+      overflow: visible !important;
+    }
+    .preview-pages {
+      display: block !important;
+      padding: 0 !important;
+      width: auto !important;
+    }
+    .preview-sheet {
+      box-shadow: none !important;
+      margin: 0 !important;
+    }
   }
 </style>`;
 

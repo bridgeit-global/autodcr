@@ -30,7 +30,6 @@ import {
   fetchExistingPermissionTypesForProject,
   getAuthUserId,
 } from "@/app/utils/ownerApplicationRpc";
-import { getProjectBaseTitle } from "@/app/utils/projectTitleProposal";
 import {
   appointmentTypeIdsMatchingRoster,
   fetchApplicationCatalogTypes,
@@ -56,19 +55,6 @@ function isDraftStatus(status: string | null | undefined) {
   return (status ?? "").trim().toLowerCase() === "draft";
 }
 
-function getProjectLabel(project: {
-  title: string;
-  project_info?: { proposalNo?: string; title?: string } | null;
-}) {
-  const proposalNo = project.project_info?.proposalNo?.trim() || "";
-  const cleanTitle = getProjectBaseTitle(
-    project.title,
-    proposalNo,
-    project.project_info?.title
-  );
-  return proposalNo ? `${cleanTitle} (${proposalNo})` : cleanTitle;
-}
-
 function getPlanningAuthority(project: {
   save_plot_details?: { planningAuthority?: string } | null | unknown;
 }): string {
@@ -84,7 +70,7 @@ function DocumentGeneratorContent() {
   const searchParams = useSearchParams();
   const { showAlert } = useDashboardAlertModal();
   const { projects, loading: projectsLoading } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
@@ -281,14 +267,6 @@ function DocumentGeneratorContent() {
       setSelectedProjectId(masterProjectId);
     }
   }, [masterProjectId, projectsLoading, selectableProjects]);
-
-  const handleProjectChange = (projectId: string) => {
-    setSelectedProjectId(projectId);
-    setMasterProjectId(projectId);
-    setSelectedApplicationType("");
-    setValidationResult(null);
-    setEditableFields({});
-  };
 
   // Keep application type in sync with project-filtered options
   useEffect(() => {
@@ -698,25 +676,7 @@ function DocumentGeneratorContent() {
         </div>
 
         {/* Selectors */}
-        <div className="grid shrink-0 gap-3 border-b border-gray-100 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 md:px-6">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Project
-            </label>
-            <CustomSelect
-              searchable
-              value={selectedProjectId}
-              onChange={handleProjectChange}
-              options={selectableProjects.map((p) => ({
-                value: p.id,
-                label: getProjectLabel(p),
-              }))}
-              placeholder={
-                projectsLoading ? "Loading projects…" : "Select project"
-              }
-              disabled={projectsLoading || selectableProjects.length === 0}
-            />
-          </div>
+        <div className="grid shrink-0 gap-3 border-b border-gray-100 px-5 py-4 sm:grid-cols-2 md:px-6">
           <div>
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
               Document / Application type

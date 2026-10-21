@@ -3,14 +3,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FolderKanban, IndianRupee, Loader2, MapPin } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
+import { IndianRupee, Loader2, MapPin } from "lucide-react";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
 import { useMasterProjectFilter } from "@/app/components/appshell/MasterProjectFilterContext";
-import {
-  filterNonDraftProjects,
-  getProjectLabel,
-} from "@/app/userdashboard/ownerWorkspaceConsultants";
+import { filterNonDraftProjects } from "@/app/userdashboard/ownerWorkspaceConsultants";
 import {
   formatIndianCurrency,
   majorUseToRateType,
@@ -64,7 +60,7 @@ const RATE_TYPES: ReadyReckonerRateType[] = [
 export default function GovernmentFeesClient() {
   const searchParams = useSearchParams();
   const { projects, loading: projectsLoading } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
   const nonDraftProjects = useMemo(
     () => filterNonDraftProjects(projects),
     [projects]
@@ -188,36 +184,6 @@ export default function GovernmentFeesClient() {
           <p className="mt-1 text-sm text-gray-500">
             Ready reckoner rates based on your project village and survey number.
           </p>
-        </div>
-        <div className="w-full min-w-0 lg:max-w-sm">
-          <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">
-            <FolderKanban className="h-3.5 w-3.5" />
-            Project
-          </label>
-          <CustomSelect
-            searchable
-            value={selectedProjectId}
-            onChange={(value) => {
-              setSelectedProjectId(value);
-              setMasterProjectId(value);
-            }}
-            options={
-              projectsLoading
-                ? []
-                : nonDraftProjects.map((project) => ({
-                    value: project.id,
-                    label: getProjectLabel(project),
-                  }))
-            }
-            placeholder={
-              projectsLoading
-                ? "Loading projects…"
-                : nonDraftProjects.length === 0
-                  ? "No submitted projects"
-                  : "Select a project"
-            }
-            disabled={projectsLoading || nonDraftProjects.length === 0}
-          />
         </div>
       </div>
 
