@@ -16,14 +16,13 @@ import {
   filterConsultantsByType,
   filterNonDraftProjects,
   getConsultantTypeOptions,
-  getProjectLabel,
   loadOwnerWorkspaceConsultants,
   type AssignedConsultantCard,
 } from "@/app/userdashboard/ownerWorkspaceConsultants";
 
 export default function OwnerWorkspacePage() {
   const { projects, loading: projectsLoading, isConsultant } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
 
   const [selectedProjectId, setSelectedProjectId] = useState("ALL");
   const [selectedConsultantType, setSelectedConsultantType] = useState("ALL");
@@ -126,30 +125,8 @@ export default function OwnerWorkspacePage() {
               Assigned consultants and their work progress
             </p>
           </div>
-          <div className="flex w-full flex-col gap-3 sm:max-w-xl sm:flex-row">
-            <div className="w-full sm:flex-1">
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                Project
-              </label>
-              <CustomSelect
-                searchable
-                value={selectedProjectId}
-                onChange={(value) => {
-                  setSelectedProjectId(value);
-                  setMasterProjectId(value === "ALL" ? "" : value);
-                }}
-                options={[
-                  { value: "ALL", label: "All projects" },
-                  ...nonDraftProjects.map((p) => ({
-                    value: p.id,
-                    label: getProjectLabel(p),
-                  })),
-                ]}
-                placeholder={projectsLoading ? "Loading projects…" : "All projects"}
-                disabled={projectsLoading || nonDraftProjects.length === 0}
-              />
-            </div>
-            <div className="w-full sm:flex-1">
+          <div className="w-full sm:max-w-xs">
+            <div className="w-full">
               <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
                 Consultant
               </label>

@@ -13,7 +13,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronDown,
   FileText,
-  FolderKanban,
   History,
   Loader2,
   Maximize2,
@@ -28,7 +27,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import CustomSelect from "@/app/components/CustomSelect";
 import Button from "@/app/components/ui/Button";
 import Modal from "@/app/components/ui/Modal";
 import { useDashboardProjects } from "@/app/hooks/useDashboardProjects";
@@ -265,7 +263,7 @@ export default function ComplianceClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { projects, loading: projectsLoading } = useDashboardProjects();
-  const { masterProjectId, setMasterProjectId } = useMasterProjectFilter();
+  const { masterProjectId } = useMasterProjectFilter();
   const nonDraftProjects = useMemo(
     () => filterNonDraftProjects(projects),
     [projects]
@@ -466,20 +464,6 @@ export default function ComplianceClient() {
     // Only reload when the project changes; chatId query is applied from the fetched list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId]);
-
-  function selectProject(projectId: string) {
-    if (projectId === selectedProjectId) return;
-    setSelectedProjectId(projectId);
-    setMasterProjectId(projectId);
-    setActiveChatId(null);
-    setMessages([]);
-    setFiles([]);
-    setAttachedFilename(null);
-    setError(null);
-    setQuestion("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    replaceQuery(projectId, null);
-  }
 
   useEffect(() => {
     if (!activeChatId) {
@@ -960,33 +944,6 @@ export default function ComplianceClient() {
                 )}
               </div>
             </div>
-          </div>
-          <div className="min-w-0 lg:w-80 lg:flex-none">
-            <label className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">
-              <FolderKanban className="h-3.5 w-3.5" />
-              Project
-            </label>
-            <CustomSelect
-              searchable
-              value={selectedProjectId}
-              onChange={selectProject}
-              options={
-                projectsLoading
-                  ? []
-                  : nonDraftProjects.map((project) => ({
-                      value: project.id,
-                      label: getProjectLabel(project),
-                    }))
-              }
-              placeholder={
-                projectsLoading
-                  ? "Loading projects…"
-                  : nonDraftProjects.length === 0
-                    ? "No submitted projects"
-                    : "Select a project"
-              }
-              disabled={projectsLoading || nonDraftProjects.length === 0}
-            />
           </div>
         </div>
         {contextPills.length > 0 ? (
