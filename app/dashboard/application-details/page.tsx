@@ -2050,6 +2050,23 @@ function fireApplicationNotification(
   });
 }
 
+function scrollDocumentViewToTop(scroller: HTMLElement | null) {
+  if (!scroller) return;
+  const reset = () => {
+    scroller.scrollTop = 0;
+    let parent = scroller.parentElement;
+    while (parent) {
+      const overflowY = window.getComputedStyle(parent).overflowY;
+      if ((overflowY === "auto" || overflowY === "scroll") && parent.scrollTop !== 0) {
+        parent.scrollTop = 0;
+      }
+      parent = parent.parentElement;
+    }
+  };
+  reset();
+  requestAnimationFrame(reset);
+}
+
 export default function ApplicationDetailsPage() {
   const { userMetadata } = useUserMetadata();
   const router = useRouter();
@@ -3090,6 +3107,8 @@ export default function ApplicationDetailsPage() {
       : usingCatalogDocs
         ? selectedCatalogDocumentId ?? ""
         : letterVariant;
+
+  const documentPaneScrollRef = useRef<HTMLDivElement | null>(null);
 
   const handlePreviewDocSelectionChange = (next: string) => {
     if (next === previewDocSelection) return;
@@ -5189,9 +5208,10 @@ export default function ApplicationDetailsPage() {
                     role="tab"
                     aria-selected={selected}
                     disabled={disabled}
-                    onClick={() =>
-                      handlePreviewDocSelectionChange(normalizePreviewDocSelection(opt.value))
-                    }
+                    onClick={() => {
+                      handlePreviewDocSelectionChange(normalizePreviewDocSelection(opt.value));
+                      scrollDocumentViewToTop(documentPaneScrollRef.current);
+                    }}
                     className={[
                       "rounded-lg px-3 py-2 text-left text-sm font-medium leading-snug transition-colors",
                       disabled
@@ -5254,7 +5274,10 @@ export default function ApplicationDetailsPage() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 lg:flex-row lg:items-start">
+        <div
+          ref={documentPaneScrollRef}
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 lg:flex-row lg:items-start"
+        >
           <div className="w-full lg:w-2/5 lg:flex-none">
           {detailsFieldsLoading &&
           detailsFieldRows.length === 0 &&

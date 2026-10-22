@@ -37,9 +37,26 @@ export default function ApplicationDocumentPreviewPane({
     if (!frame) return;
 
     let observer: ResizeObserver | null = null;
+    frame.style.height = "";
     const syncHeight = () => {
       const doc = frame.contentDocument;
       if (!doc?.documentElement) return;
+      const pages = doc.querySelector(".pagedjs_pages") as HTMLElement | null;
+      const page = doc.querySelector(".pagedjs_page") as HTMLElement | null;
+      if (pages && page) {
+        const available = frame.clientWidth;
+        // offsetWidth stays the unscaled sheet width, so don't divide by the current zoom.
+        const natural = page.offsetWidth;
+        const next =
+          available > 40 && natural > available + 1 ? available / natural : 1;
+        const applied = pages.style.zoom || "1";
+        const nextZoom = next === 1 ? "" : String(next);
+        if (applied !== nextZoom && Math.abs(Number(applied || "1") - next) > 0.01) {
+          pages.style.zoom = nextZoom;
+        }
+      }
+      // Collapse first so the previous letter's tall frame cannot inflate scrollHeight.
+      frame.style.height = "0px";
       const height = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0);
       if (height > 0) frame.style.height = `${height}px`;
       doc.documentElement.style.overflow = "hidden";
