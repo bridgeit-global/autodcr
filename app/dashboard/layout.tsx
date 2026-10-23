@@ -43,6 +43,7 @@ import {
 } from "../utils/projectAccess";
 import { ensureProjectOwnerOnRoster } from "../utils/ownerApplicantRoster";
 import { combineProjectTitleWithProposalNo } from "../utils/projectTitleProposal";
+import { seedDefaultProjectApplications } from "../utils/seedDefaultProjectApplications";
 import {
   CREATE_PROJECT_SECTIONS,
   LIBRARY_GATE_ALERT,
@@ -1247,6 +1248,23 @@ function DashboardLayoutContent({
             );
           }
         });
+      }
+
+      if (!isSubmittedProject && finalProjectId) {
+        const seeded = await seedDefaultProjectApplications({
+          projectId: finalProjectId,
+          projectTitle: finalProjectTitle,
+        });
+        if (seeded.error || seeded.failedTitles.length > 0) {
+          const failed =
+            seeded.failedTitles.length > 0
+              ? `These applications could not be created: ${seeded.failedTitles.join(", ")}.`
+              : "";
+          showAlert({
+            title: "Some applications were not created",
+            message: [seeded.error, failed].filter(Boolean).join(" "),
+          });
+        }
       }
 
       // Clear drafts for a fresh new project the next time user comes in (only in create mode)
