@@ -1290,7 +1290,7 @@ function DashboardLayoutContent({
       : "Create Project";
   return (
     <>
-      <AppShell title={shellTitle} showMasterProjectFilter={!isReadOnlyMode}>
+      <AppShell title={shellTitle} showMasterProjectFilter={isEditMode && !isReadOnlyMode}>
         <ApplicationPdfSaveSlotProvider>
           <ApplicationSignSlotProvider>
             <ApplicationLifecycleActionsSlotProvider>
@@ -1319,7 +1319,7 @@ function DashboardLayoutContent({
                     <ProjectSectionStepper />
                   </Suspense>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-4">
                   {children}
                 </div>
               </div>
