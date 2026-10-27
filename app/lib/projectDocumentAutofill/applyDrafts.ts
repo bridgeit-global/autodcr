@@ -110,9 +110,15 @@ export function applyProjectAutofillDrafts(autofill: ProjectAutofillResult): voi
     "draft-project-details-project",
     PROJECT_DEFAULTS
   );
+  // Create Project locks name/address to the logged-in profile — never overwrite from docs.
+  const {
+    fullNameOfApplicant: _ignoredFullName,
+    addressOfApplicant: _ignoredAddress,
+    ...projectInfoPatch
+  } = autofill.projectInfo;
   const projectDraft = mergeDefined(
     { ...PROJECT_DEFAULTS, ...existingProject },
-    autofill.projectInfo
+    projectInfoPatch
   );
   saveDraft("draft-project-details-project", projectDraft);
 

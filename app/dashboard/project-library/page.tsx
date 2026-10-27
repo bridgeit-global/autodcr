@@ -370,13 +370,16 @@ type DocumentRowProps = {
   upload?: UploadRecord;
   isReadOnlyMode: boolean;
   onPreview: () => void;
+  onDelete?: () => void;
 };
 
 function AttachedSummaryRow({
   serial,
   label,
   upload,
+  isReadOnlyMode,
   onPreview,
+  onDelete,
 }: DocumentRowProps) {
   if (!upload) return null;
   return (
@@ -391,25 +394,37 @@ function AttachedSummaryRow({
             {serial ? ` · ${serial}` : ""}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onPreview}
-          className="inline-flex shrink-0 items-center justify-center w-9 h-9 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-brand-blue shadow-sm"
-          aria-label="Preview document"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onPreview}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-brand-blue shadow-sm hover:bg-gray-50"
+            aria-label="Preview document"
           >
-            <path d="M5 4h9l5 5v11H5z" />
-            <path d="M9 12h6" />
-            <path d="M9 16h3" />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M5 4h9l5 5v11H5z" />
+              <path d="M9 12h6" />
+              <path d="M9 16h3" />
+            </svg>
+          </button>
+          {!isReadOnlyMode && onDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+              aria-label={`Delete ${upload.name}`}
+            >
+              Delete
+            </button>
+          ) : null}
+        </div>
       </div>
     </li>
   );
@@ -623,11 +638,13 @@ export default function ProjectLibraryPage() {
   ): Promise<{
     error: string | null;
     extraSlotIds: string[];
+    fixedIndexes: number[];
     nextFixed: (UploadRecord | undefined)[];
     nextExtra: ExtraDocSlot[];
   }> => {
     const emptyAssign = {
       extraSlotIds: [] as string[],
+      fixedIndexes: [] as number[],
       nextFixed: [] as (UploadRecord | undefined)[],
       nextExtra: [] as ExtraDocSlot[],
     };
@@ -639,6 +656,7 @@ export default function ProjectLibraryPage() {
     const nextFixed = normalizeFixedUploads([...uploads]);
     const nextExtra = [...extraDocs];
     const newExtraSlotIds: string[] = [];
+    const newFixedIndexes: number[] = [];
     const attachedNames = new Set<string>();
     for (const upload of nextFixed) {
       if (upload?.name) attachedNames.add(fileIdentityKey(upload.name));
@@ -664,6 +682,7 @@ export default function ProjectLibraryPage() {
           file,
           projectLibraryFixedRelativeStem(slotIndex)
         );
+        newFixedIndexes.push(slotIndex);
         attachedNames.add(nameKey);
         addedCount += 1;
         continue;
@@ -697,6 +716,7 @@ export default function ProjectLibraryPage() {
     return {
       error: null,
       extraSlotIds: newExtraSlotIds,
+      fixedIndexes: newFixedIndexes,
       nextFixed,
       nextExtra,
     };
@@ -707,6 +727,7 @@ export default function ProjectLibraryPage() {
   ): Promise<{
     ok: boolean;
     extraSlotIds: string[];
+    fixedIndexes: number[];
     nextFixed: (UploadRecord | undefined)[];
     nextExtra: ExtraDocSlot[];
   }> => {
@@ -721,17 +742,29 @@ export default function ProjectLibraryPage() {
       setDetectError(
         "Could not detect every document. Set the type manually for unknown files, then try again."
       );
-      return { ok: false, extraSlotIds: [], nextFixed: [], nextExtra: [] };
+      return {
+        ok: false,
+        extraSlotIds: [],
+        fixedIndexes: [],
+        nextFixed: [],
+        nextExtra: [],
+      };
     }
 
-    const { error, extraSlotIds, nextFixed, nextExtra } =
+    const { error, extraSlotIds, fixedIndexes, nextFixed, nextExtra } =
       await applyAssignedFiles(typed);
     if (error) {
       setDetectError(error);
-      return { ok: false, extraSlotIds: [], nextFixed: [], nextExtra: [] };
+      return {
+        ok: false,
+        extraSlotIds: [],
+        fixedIndexes: [],
+        nextFixed: [],
+        nextExtra: [],
+      };
     }
     setDetectError(null);
-    return { ok: true, extraSlotIds, nextFixed, nextExtra };
+    return { ok: true, extraSlotIds, fixedIndexes, nextFixed, nextExtra };
   };
 
   const classifyStagingItems = async (
@@ -901,6 +934,30 @@ export default function ProjectLibraryPage() {
     markLibraryDirty();
   };
 
+  const removeFixedUpload = async (index: number) => {
+    if (isReadOnlyMode) return;
+    await deleteProjectLibraryFile(index);
+    setUploads((prev) => {
+      const next = [...prev];
+      next[index] = undefined;
+      const normalized = normalizeFixedUploads(next);
+      saveDraft("draft-project-library-uploads", normalized);
+      return normalized;
+    });
+    markLibraryDirty();
+  };
+
+  const removeExtraDoc = async (slotId: string) => {
+    if (isReadOnlyMode) return;
+    await deleteExtraLibraryDoc(slotId);
+    setExtraDocs((prev) => {
+      const next = prev.filter((slot) => slot.id !== slotId);
+      persistExtraDocs(next);
+      return next;
+    });
+    markLibraryDirty();
+  };
+
   const attachedExtraCount = extraDocs.filter((s) => s.upload).length;
   const totalAttached = uploads.filter(Boolean).length + attachedExtraCount;
   const showSavedButton =
@@ -919,6 +976,7 @@ export default function ProjectLibraryPage() {
     if (isReadOnlyMode || isExtracting || isDetecting) return;
 
     let working = staging;
+    let fixedIndexesForExtraction: number[] = [];
     let extraJobsForExtraction: Array<{ id: string; type: LibraryDocType }> = [];
     let savedFixed = uploads;
     let savedExtra = extraDocs;
@@ -936,6 +994,8 @@ export default function ProjectLibraryPage() {
       const assigned = await detectAndAssign(working);
       if (!assigned.ok) return;
       const newExtraIds = new Set(assigned.extraSlotIds);
+      // Only newly attached files are verified — already-saved docs are left alone.
+      fixedIndexesForExtraction = assigned.fixedIndexes;
       extraJobsForExtraction = assigned.nextExtra
         .filter(
           (s) =>
@@ -947,10 +1007,6 @@ export default function ProjectLibraryPage() {
       savedFixed = assigned.nextFixed;
       savedExtra = assigned.nextExtra;
       setStaging([]);
-    } else {
-      extraJobsForExtraction = extraDocs
-        .filter((s) => s.upload && EXTRACTABLE_EXTRA_TYPES.includes(s.type))
-        .map((s) => ({ id: s.id, type: s.type }));
     }
 
     const attachedCount = await countAttachedProjectLibraryFiles(
@@ -966,7 +1022,10 @@ export default function ProjectLibraryPage() {
       return;
     }
 
-    const outcome = await runExtraction(extraJobsForExtraction);
+    const outcome = await runExtraction({
+      fixedIndexes: fixedIndexesForExtraction,
+      extraDocs: extraJobsForExtraction,
+    });
 
     if (outcome.primaryPrFailed) {
       const failureLines = outcome.failures
@@ -1288,6 +1347,7 @@ export default function ProjectLibraryPage() {
                   uploads[0]?.url
                 )
               }
+              onDelete={() => void removeFixedUpload(0)}
             />
             {extrasOfType(extraDocs, "pr-card").map((slot, slotIndex) => (
               <AttachedSummaryRow
@@ -1303,6 +1363,7 @@ export default function ProjectLibraryPage() {
                     slot.upload?.url
                   )
                 }
+                onDelete={() => void removeExtraDoc(slot.id)}
               />
             ))}
             <AttachedSummaryRow
@@ -1317,6 +1378,7 @@ export default function ProjectLibraryPage() {
                   uploads[1]?.url
                 )
               }
+              onDelete={() => void removeFixedUpload(1)}
             />
             {(() => {
               const dpExtras = [
@@ -1338,6 +1400,7 @@ export default function ProjectLibraryPage() {
                       slot.upload?.url
                     )
                   }
+                  onDelete={() => void removeExtraDoc(slot.id)}
                 />
               ));
             })()}
@@ -1356,6 +1419,7 @@ export default function ProjectLibraryPage() {
                       uploads[2]?.url
                     )
                   }
+                  onDelete={() => void removeFixedUpload(2)}
                 />
                 {extrasOfType(extraDocs, "crz-remarks").map((slot, slotIndex) => (
                   <AttachedSummaryRow
@@ -1371,6 +1435,7 @@ export default function ProjectLibraryPage() {
                         slot.upload?.url
                       )
                     }
+                    onDelete={() => void removeExtraDoc(slot.id)}
                   />
                 ))}
               </>
@@ -1390,6 +1455,7 @@ export default function ProjectLibraryPage() {
                       uploads[3]?.url
                     )
                   }
+                  onDelete={() => void removeFixedUpload(3)}
                 />
                 {extrasOfType(extraDocs, "power-of-attorney").map((slot, slotIndex) => (
                   <AttachedSummaryRow
@@ -1405,6 +1471,7 @@ export default function ProjectLibraryPage() {
                         slot.upload?.url
                       )
                     }
+                    onDelete={() => void removeExtraDoc(slot.id)}
                   />
                 ))}
               </>
@@ -1425,6 +1492,7 @@ export default function ProjectLibraryPage() {
                       uploads[4]?.url
                     )
                   }
+                  onDelete={() => void removeFixedUpload(4)}
                 />
                 {extrasOfType(extraDocs, "assessment-department").map(
                   (slot, slotIndex) => (
@@ -1441,6 +1509,7 @@ export default function ProjectLibraryPage() {
                           slot.upload?.url
                         )
                       }
+                      onDelete={() => void removeExtraDoc(slot.id)}
                     />
                   )
                 )}
@@ -1462,6 +1531,7 @@ export default function ProjectLibraryPage() {
                       uploads[5]?.url
                     )
                   }
+                  onDelete={() => void removeFixedUpload(5)}
                 />
                 {extrasOfType(extraDocs, "airport-authority-of-india").map(
                   (slot, slotIndex) => (
@@ -1478,6 +1548,7 @@ export default function ProjectLibraryPage() {
                           slot.upload?.url
                         )
                       }
+                      onDelete={() => void removeExtraDoc(slot.id)}
                     />
                   )
                 )}

@@ -158,12 +158,28 @@ export function useProjectLibraryExtraction() {
   const [isExtracting, setIsExtracting] = useState(false);
 
   const runExtraction = useCallback(
-    async (
-      extraDocs: Array<{ id: string; type: string }>
-    ): Promise<ProjectLibraryExtractionOutcome> => {
+    async (input?: {
+      /** Primary library slots filled on this Save — only these are re-verified. */
+      fixedIndexes?: number[];
+      /** Extra/additional docs added on this Save — only these are re-verified. */
+      extraDocs?: Array<{ id: string; type: string }>;
+    }): Promise<ProjectLibraryExtractionOutcome> => {
+      const fixedIndexes = input?.fixedIndexes ?? [];
+      const extraDocs = input?.extraDocs ?? [];
+
+      if (fixedIndexes.length === 0 && extraDocs.length === 0) {
+        return {
+          extractions: [],
+          autofill: null,
+          primaryPrFailed: false,
+          failures: [],
+        };
+      }
+
       setIsExtracting(true);
 
       try {
+        const fixedIndexSet = new Set(fixedIndexes);
         const extraJobs: ExtractionJob[] = extraDocs
           .filter((slot): slot is { id: string; type: ExtractableExtraType } =>
             isExtractableExtraType(slot.type)
@@ -180,11 +196,13 @@ export function useProjectLibraryExtraction() {
           });
 
         const candidateJobs: ExtractionJob[] = [
-          ...FIXED_JOBS.map(({ index, ...rest }) => ({
-            ...rest,
-            fixedIndex: index,
-            loadBlob: () => getProjectLibraryFile(index),
-          })),
+          ...FIXED_JOBS.filter(({ index }) => fixedIndexSet.has(index)).map(
+            ({ index, ...rest }) => ({
+              ...rest,
+              fixedIndex: index,
+              loadBlob: () => getProjectLibraryFile(index),
+            })
+          ),
           ...extraJobs,
         ];
 
