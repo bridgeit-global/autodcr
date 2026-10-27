@@ -252,6 +252,43 @@ function readProjectFormDraft(): ProjectFormData {
   };
 }
 
+function loggedInApplicantFields(userMetadata: Record<string, unknown> | null | undefined): {
+  fullNameOfApplicant: string;
+  addressOfApplicant: string;
+} {
+  if (!userMetadata) return { fullNameOfApplicant: "", addressOfApplicant: "" };
+  const fullName = [userMetadata.first_name, userMetadata.middle_name, userMetadata.last_name]
+    .filter((part) => typeof part === "string" && part.trim())
+    .map((part) => String(part).trim())
+    .join(" ");
+  const address =
+    typeof userMetadata.address === "string" ? userMetadata.address.trim() : "";
+  return { fullNameOfApplicant: fullName, addressOfApplicant: address };
+}
+
+/** Keep Create Project name/address locked to the signed-in profile in form + draft. */
+function lockCreateProjectApplicantToLoggedInUser(
+  userMetadata: Record<string, unknown> | null | undefined,
+  setProjectValue: (name: "fullNameOfApplicant" | "addressOfApplicant", value: string) => void
+) {
+  const { fullNameOfApplicant, addressOfApplicant } = loggedInApplicantFields(userMetadata);
+  if (fullNameOfApplicant) setProjectValue("fullNameOfApplicant", fullNameOfApplicant);
+  if (addressOfApplicant) setProjectValue("addressOfApplicant", addressOfApplicant);
+
+  const draft = loadDraft<ProjectFormData>("draft-project-details-project", {} as ProjectFormData);
+  const nextDraft: ProjectFormData = {
+    ...draft,
+    ...(fullNameOfApplicant ? { fullNameOfApplicant } : {}),
+    ...(addressOfApplicant ? { addressOfApplicant } : {}),
+  };
+  if (
+    nextDraft.fullNameOfApplicant !== draft.fullNameOfApplicant ||
+    nextDraft.addressOfApplicant !== draft.addressOfApplicant
+  ) {
+    saveDraft("draft-project-details-project", nextDraft);
+  }
+}
+
 function readSavePlotFormDraft(): SavePlotFormData {
   const stored = loadDraft<Partial<SavePlotFormData>>(
     "draft-project-details-save-plot",
@@ -383,20 +420,10 @@ export default function ProjectDetailsClient() {
     setProjectValue("proposalAsPer", "DCPR 2034");
   }, [isEditMode, setProjectValue]);
 
-  // Auto-fill applicant name and address from logged-in user metadata (only for new projects)
+  // Create Project: always lock name/address to the logged-in profile (not draft or document autofill).
   useEffect(() => {
     if (isEditMode || !userMetadata) return;
-    const draft = loadDraft<ProjectFormData>("draft-project-details-project", {} as ProjectFormData);
-    if (draft.fullNameOfApplicant || draft.addressOfApplicant) return;
-
-    const fullName =
-      [userMetadata.first_name, userMetadata.middle_name, userMetadata.last_name]
-        .filter(Boolean)
-        .join(" ") || "";
-    const address = userMetadata.address || "";
-
-    if (fullName) setProjectValue("fullNameOfApplicant", fullName);
-    if (address) setProjectValue("addressOfApplicant", address);
+    lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
   }, [isEditMode, userMetadata, setProjectValue]);
 
   const {
@@ -720,6 +747,7 @@ export default function ProjectDetailsClient() {
     const hydrateFromAutofillDrafts = () => {
       setIsInitialLoad(true);
       resetProject(readProjectFormDraft());
+      lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
       const savePlotDraft = readSavePlotFormDraft();
       resetSavePlot(savePlotDraft);
       syncCascadeRefs(savePlotDraft);
@@ -729,7 +757,7 @@ export default function ProjectDetailsClient() {
     };
 
     return subscribeProjectAutofillApplied(hydrateFromAutofillDrafts);
-  }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot]);
+  }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot, setProjectValue, userMetadata]);
 
   // If user navigates here after Library Save, hydrate from the latest autofill timestamp.
   useEffect(() => {
@@ -739,13 +767,14 @@ export default function ProjectDetailsClient() {
     lastAutofillHydratedRef.current = autofillAt;
     setIsInitialLoad(true);
     resetProject(readProjectFormDraft());
+    lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
     const savePlotDraft = readSavePlotFormDraft();
     resetSavePlot(savePlotDraft);
     syncCascadeRefs(savePlotDraft);
     setIsProjectInfoSaved(false);
     setIsSavePlotSaved(false);
     window.setTimeout(() => setIsInitialLoad(false), 500);
-  }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot]);
+  }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot, setProjectValue, userMetadata]);
 
   // After hydration, backfill village/CTS from enriched draft if cascade effects cleared them.
   useEffect(() => {
@@ -1151,7 +1180,7 @@ export default function ProjectDetailsClient() {
 
         const { data: duplicates } = await query;
         if (duplicates && duplicates.length > 0) {
-          setProjectError("title", { type: "manual", message: "A project with this Title and Proposal No combination already exists. Please change the title or proposal number." });
+          setProjectError("title", { type: "manual", message: "A project with this Title and Building Proposal No. combination already exists. Please change the title or building proposal number." });
           return;
         }
       }
@@ -1709,15 +1738,15 @@ export default function ProjectDetailsClient() {
               </div>
               <div>
                 <label className={labelClasses}>
-                  Proposal No {requiredMark}
+                  Building Proposal No. {requiredMark}
                 </label>
                 <input
                   {...registerProject("proposalNo", {
-                    required: "Proposal number is required",
+                    required: "Building proposal number is required",
                   })}
                   type="text"
                   className={inputClasses}
-                  placeholder="Enter proposal number"
+                  placeholder="Enter building proposal number"
                 />
                 {projectErrors.proposalNo && <p className={errorClasses}>{projectErrors.proposalNo.message}</p>}
               </div>
