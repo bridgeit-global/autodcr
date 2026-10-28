@@ -571,73 +571,114 @@ function LibraryDropdown({
   nodes,
   selectedId,
   onSelect,
-  leaf,
+  renderLeaf,
 }: {
   nodes: LibraryBrowseNode[];
   selectedId: string;
   onSelect: (id: string) => void;
-  leaf: ReactNode;
+  renderLeaf: (nodeId: string) => ReactNode;
 }) {
-  const path = selectedId === "all" ? [] : selectedBrowsePath(nodes, selectedId);
-  const resolved: LibraryBrowseNode[] = [];
-  let level = nodes;
-  for (const step of path) {
-    const next = level.find((node) => node.id === step.id) ?? step;
-    resolved.push(next);
-    level = next.children ?? [];
-  }
-  const deepest = resolved[resolved.length - 1];
-  const choices = resolved.length === 0 ? nodes : (deepest?.children ?? []);
-  const showLeaf = resolved.length > 0 && choices.length === 0;
+  const pathIds = useMemo(() => {
+    const path = selectedId === "all" ? [] : selectedBrowsePath(nodes, selectedId);
+    return new Set(path.map((node) => node.id));
+  }, [nodes, selectedId]);
+  const pathKey = useMemo(() => [...pathIds].join("|"), [pathIds]);
+  const [rootOpen, setRootOpen] = useState(true);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(pathIds));
 
-  const renderSelected = (index: number): ReactNode => {
-    const node = resolved[index];
-    if (!node) return null;
-    return (
-      <div className="mt-1 ml-6 border-l border-slate-200 pl-3">
-        <DropdownRow
-          title={node.label}
-          subtitle={node.hint}
-          selected
-          expandable
-          open
-          onClick={() => onSelect(node.id)}
-        />
-        {index < resolved.length - 1 ? renderSelected(index + 1) : null}
-      </div>
-    );
+  useEffect(() => {
+    if (!pathKey) return;
+    setRootOpen(true);
+    setExpandedIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of pathKey.split("|")) {
+        if (!id) continue;
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pathKey]);
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
+
+  const renderNodes = (list: LibraryBrowseNode[]): ReactNode =>
+    list.map((node) => {
+      const hasChildren = Boolean(node.children?.length);
+      const isSelected = node.id === selectedId;
+      const isLeafNode = !hasChildren;
+      const isOpen = expandedIds.has(node.id);
+      const canExpand = hasChildren || isLeafNode;
+      const showChildren = hasChildren && isOpen;
+      const showLeaf = isLeafNode && isOpen;
+
+      return (
+        <div key={node.id} className="flex flex-col gap-1">
+          <DropdownRow
+            title={node.label}
+            subtitle={node.hint}
+            selected={isSelected}
+            expandable={canExpand}
+            open={isOpen}
+            onClick={() => {
+              onSelect(node.id);
+              if (!canExpand) return;
+              if (isSelected && isOpen) {
+                toggleExpanded(node.id);
+                return;
+              }
+              setExpandedIds((prev) => new Set(prev).add(node.id));
+            }}
+          />
+          {showChildren ? (
+            <div className="ml-6 flex flex-col gap-1 border-l border-slate-200 pl-3">
+              {renderNodes(node.children ?? [])}
+            </div>
+          ) : null}
+          {showLeaf ? (
+            <div className="ml-6 flex flex-col gap-1 border-l border-slate-200 pl-3">
+              {renderLeaf(node.id)}
+            </div>
+          ) : null}
+        </div>
+      );
+    });
 
   return (
     <div className="flex flex-col">
       <div className="shrink-0 bg-slate-50/70 px-3 pt-3">
         <DropdownRow
           title="All folders"
-          selected
+          selected={selectedId === "all"}
           expandable
-          open
-          onClick={() => onSelect("all")}
+          open={rootOpen}
+          onClick={() => {
+            if (selectedId === "all") {
+              setRootOpen((open) => !open);
+              return;
+            }
+            onSelect("all");
+            setRootOpen(true);
+          }}
         />
-        {renderSelected(0)}
       </div>
-      <div className="px-3 pb-3">
-        <div
-          className="mt-1 flex flex-col gap-1 border-l border-slate-200 pl-3"
-          style={{ marginLeft: `${(resolved.length + 1) * 1.5}rem` }}
-        >
-          {showLeaf
-            ? leaf
-            : choices.map((node) => (
-                <DropdownRow
-                  key={node.id}
-                  title={node.label}
-                  subtitle={node.hint}
-                  expandable={Boolean(node.children?.length)}
-                  onClick={() => onSelect(node.id)}
-                />
-              ))}
+      {rootOpen ? (
+        <div className="max-h-[min(60vh,420px)] overflow-y-auto px-3 pb-3">
+          <div className="mt-1 ml-6 flex flex-col gap-1 border-l border-slate-200 pl-3">
+            {renderNodes(nodes)}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -1357,20 +1398,65 @@ export default function ProjectLibraryBrowserPage() {
               nodes={browseNodes}
               selectedId={selectedBrowseId}
               onSelect={onBrowseSelect}
-              leaf={
-                section === "applications" && selectedTypeFolder && !typeDocumentsReady ? (
-                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
-                    <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
-                    Loading documents…
-                  </div>
-                ) : section === "applications" &&
+              renderLeaf={(nodeId) => {
+                const [kind, projectId, third, fourth] = nodeId.split("|");
+                if (!projectId || !third) return null;
+
+                if (kind === "documents") {
+                  const files = documentRows.filter(
+                    (row) => row.projectId === projectId && row.folder === third
+                  );
+                  if (files.length === 0) {
+                    return (
+                      <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
+                        <CircleDashed className="h-4 w-4 text-gray-300" />
+                        No documents in this folder.
+                      </div>
+                    );
+                  }
+                  return files.map((row) => (
+                    <DropdownRow
+                      key={row.id}
+                      title={row.fileName}
+                      subtitle={`${row.projectLabel} · ${formatUploadedAt(row.uploadedAt)}`}
+                      icon="file"
+                      onClick={() => void openPreview(row)}
+                    />
+                  ));
+                }
+
+                if (kind !== "applications" || !fourth) return null;
+
+                const departmentKey = decodeURIComponent(third);
+                const typeKey = decodeURIComponent(fourth);
+                const typeFolder = groupApplications(
+                  filteredApplications.filter((app) => app.projectId === projectId)
+                )
+                  .find((department) => department.key === departmentKey)
+                  ?.types.find((type) => type.key === typeKey);
+
+                if (!typeFolder) return null;
+
+                const isActiveLeaf = nodeId === selectedBrowseId;
+                if (isActiveLeaf && selectedTypeFolder && !typeDocumentsReady) {
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin text-brand-blue" />
+                      Loading documents…
+                    </div>
+                  );
+                }
+
+                if (
+                  isActiveLeaf &&
                   selectedTypeFolder &&
-                  selectedTypeDocuments.length > 0 ? (
-                  selectedTypeDocuments.map((doc) => (
+                  selectedTypeDocuments.length > 0
+                ) {
+                  return selectedTypeDocuments.map((doc) => (
                     <DropdownRow
                       key={doc.id}
                       title={catalogDocumentOptionLabel(doc)}
-                      subtitle={countLabel(selectedTypeFolder.applications.length, "application")}
+                      subtitle={countLabel(typeFolder.applications.length, "application")}
                       onClick={() => {
                         const saved = savedRowForCatalogDocument(doc);
                         if (saved) {
@@ -1380,47 +1466,40 @@ export default function ProjectLibraryBrowserPage() {
                         void openApplicationHtmlPreview(catalogDocumentOptionLabel(doc), doc);
                       }}
                     />
-                  ))
-                ) : section === "applications" && selectedTypeFolder ? (
-                  selectedTypeFolder.applications.length > 0 ? (
-                    selectedTypeFolder.applications.map((app) => (
-                      <DropdownRow
-                        key={app.id}
-                        title={app.projectTitle || app.permissionType}
-                        subtitle={`${app.permissionType} · ${formatUploadedAt(app.createdAt ?? null)}`}
-                        icon="file"
-                        onClick={() => {
-                          const saved = savedRowForApplicationType();
-                          if (saved) {
-                            void openPreview(saved);
-                            return;
-                          }
-                          void openApplicationHtmlPreview(
-                            app.permissionType || app.projectTitle || "Application"
-                          );
-                        }}
-                      />
-                    ))
-                  ) : (
-                    <p className="px-3 py-3 text-sm text-gray-500">No applications in this folder.</p>
-                  )
-                ) : fileRows && fileRows.length > 0 ? (
-                  fileRows.map((row) => (
-                    <DropdownRow
-                      key={row.id}
-                      title={row.fileName}
-                      subtitle={`${row.projectLabel} · ${formatUploadedAt(row.uploadedAt)}`}
-                      icon="file"
-                      onClick={() => void openPreview(row)}
-                    />
-                  ))
-                ) : section ? (
-                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
-                    <CircleDashed className="h-4 w-4 text-gray-300" />
-                    No documents in this folder.
-                  </div>
-                ) : null
-              }
+                  ));
+                }
+
+                if (typeFolder.applications.length === 0) {
+                  return (
+                    <p className="px-3 py-3 text-sm text-gray-500">
+                      No applications in this folder.
+                    </p>
+                  );
+                }
+
+                return typeFolder.applications.map((app) => (
+                  <DropdownRow
+                    key={app.id}
+                    title={app.projectTitle || app.permissionType}
+                    subtitle={`${app.permissionType} · ${formatUploadedAt(app.createdAt ?? null)}`}
+                    icon="file"
+                    onClick={() => {
+                      if (isActiveLeaf) {
+                        const saved = savedRowForApplicationType();
+                        if (saved) {
+                          void openPreview(saved);
+                          return;
+                        }
+                        void openApplicationHtmlPreview(
+                          app.permissionType || app.projectTitle || "Application"
+                        );
+                        return;
+                      }
+                      onBrowseSelect(nodeId);
+                    }}
+                  />
+                ));
+              }}
             />
           )}
         </div>

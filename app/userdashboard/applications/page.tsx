@@ -103,6 +103,7 @@ type NestedTypeFolder = {
   key: string;
   title: string;
   applications: DashboardApplication[];
+  direct?: boolean;
 };
 
 type NestedDepartment = {
@@ -245,75 +246,162 @@ function ApplicationsDropdown({
   departments,
   selectedDepartment,
   selectedType,
+  openSingleApplicationDirectly = false,
   onSelectAll,
   onSelectDepartment,
   onSelectType,
-  leaf,
+  renderLeaf,
 }: {
   departments: NestedDepartment[];
   selectedDepartment: NestedDepartment | null;
   selectedType: NestedTypeFolder | null;
+  openSingleApplicationDirectly?: boolean;
   onSelectAll: () => void;
   onSelectDepartment: (key: string) => void;
-  onSelectType: (folder: NestedTypeFolder) => void;
-  leaf: ReactNode;
+  onSelectType: (folder: NestedTypeFolder) => boolean;
+  renderLeaf: (folder: NestedTypeFolder) => ReactNode;
 }) {
-  const choiceIndent = selectedType ? "ml-[4.5rem]" : selectedDepartment ? "ml-12" : "ml-6";
+  const [rootOpen, setRootOpen] = useState(true);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    const initial = new Set<string>();
+    if (selectedDepartment) initial.add(selectedDepartment.key);
+    if (selectedType) initial.add(`${selectedDepartment?.key ?? ""}:${selectedType.key}`);
+    return initial;
+  });
+
+  const selectedPathKey = [
+    selectedDepartment?.key ?? "",
+    selectedType?.key ?? "",
+  ].join("|");
+
+  useEffect(() => {
+    const [departmentKey, typeKey] = selectedPathKey.split("|");
+    if (!departmentKey) return;
+    setRootOpen(true);
+    setExpandedIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      if (!next.has(departmentKey)) {
+        next.add(departmentKey);
+        changed = true;
+      }
+      if (typeKey) {
+        const typeId = `${departmentKey}:${typeKey}`;
+        if (!next.has(typeId)) {
+          next.add(typeId);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedPathKey]);
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col">
       <div className="shrink-0 bg-slate-50/70 px-3 pt-3">
-        <DropdownRow title="All departments" selected expandable open onClick={onSelectAll} />
-        {selectedDepartment ? (
-          <div className="mt-1 ml-6 border-l border-slate-200 pl-3">
-            <DropdownRow
-              title={selectedDepartment.title}
-              subtitle={folderCountLabel(selectedDepartment.types.length, "folder")}
-              selected
-              expandable
-              open
-              onClick={() => onSelectDepartment(selectedDepartment.key)}
-            />
-            {selectedType ? (
-              <div className="mt-1 ml-6 border-l border-slate-200 pl-3">
-                <DropdownRow
-                  title={selectedType.title}
-                  subtitle={folderCountLabel(selectedType.applications.length, "application")}
-                  selected
-                  expandable
-                  open
-                  onClick={() => onSelectType(selectedType)}
-                />
-              </div>
-            ) : null}
+        <DropdownRow
+          title="All departments"
+          selected={!selectedDepartment}
+          expandable
+          open={rootOpen}
+          onClick={() => {
+            if (!selectedDepartment) {
+              setRootOpen((open) => !open);
+              return;
+            }
+            onSelectAll();
+            setRootOpen(true);
+          }}
+        />
+      </div>
+      {rootOpen ? (
+        <div className="max-h-[min(60vh,420px)] overflow-y-auto px-3 pb-3">
+          <div className="mt-1 ml-6 flex flex-col gap-1 border-l border-slate-200 pl-3">
+            {departments.map((department) => {
+              const departmentSelected = selectedDepartment?.key === department.key;
+              const departmentOpen = expandedIds.has(department.key);
+
+              return (
+                <div key={department.key} className="flex flex-col gap-1">
+                  <DropdownRow
+                    title={department.title}
+                    subtitle={folderCountLabel(department.types.length, "folder")}
+                    selected={departmentSelected && !selectedType}
+                    expandable
+                    open={departmentOpen}
+                    onClick={() => {
+                      onSelectDepartment(department.key);
+                      if (departmentSelected && !selectedType && departmentOpen) {
+                        toggleExpanded(department.key);
+                        return;
+                      }
+                      setExpandedIds((prev) => new Set(prev).add(department.key));
+                    }}
+                  />
+                  {departmentOpen ? (
+                    <div className="ml-6 flex flex-col gap-1 border-l border-slate-200 pl-3">
+                      {department.types.map((folder) => {
+                        const typeId = `${department.key}:${folder.key}`;
+                        const typeSelected =
+                          departmentSelected && selectedType?.key === folder.key;
+                        const typeOpen = expandedIds.has(typeId);
+
+                        return (
+                          <div key={folder.key} className="flex flex-col gap-1">
+                            <DropdownRow
+                              title={folder.title}
+                              subtitle={folderCountLabel(
+                                folder.applications.length,
+                                "application"
+                              )}
+                              selected={typeSelected}
+                              expandable={
+                                !(
+                                  openSingleApplicationDirectly &&
+                                  folder.applications.length === 1
+                                )
+                              }
+                              open={typeOpen}
+                              onClick={() => {
+                                const openedDirectly = onSelectType(folder);
+                                if (openedDirectly) return;
+                                if (typeSelected && typeOpen) {
+                                  toggleExpanded(typeId);
+                                  return;
+                                }
+                                setExpandedIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(department.key);
+                                  next.add(typeId);
+                                  return next;
+                                });
+                              }}
+                            />
+                            {typeOpen ? (
+                              <div className="ml-6 flex flex-col gap-1 border-l border-slate-200 pl-3">
+                                {renderLeaf(folder)}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
-        ) : null}
-      </div>
-      <div className="px-3 pb-3">
-        <div className={`mt-1 flex flex-col gap-1 border-l border-slate-200 pl-3 ${choiceIndent}`}>
-          {selectedType
-            ? leaf
-            : selectedDepartment
-              ? selectedDepartment.types.map((folder) => (
-                  <DropdownRow
-                    key={folder.key}
-                    title={folder.title}
-                    subtitle={folderCountLabel(folder.applications.length, "application")}
-                    expandable
-                    onClick={() => onSelectType(folder)}
-                  />
-                ))
-              : departments.map((folder) => (
-                  <DropdownRow
-                    key={folder.key}
-                    title={folder.title}
-                    subtitle={folderCountLabel(folder.types.length, "folder")}
-                    expandable
-                    onClick={() => onSelectDepartment(folder.key)}
-                  />
-                ))}
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -636,9 +724,10 @@ function ApplicationsHubContent() {
     (folder: { key: string; applications: DashboardApplication[] }) => {
       if (effectiveProjectId && folder.applications.length === 1) {
         router.push(applicationHref(folder.applications[0]));
-        return;
+        return true;
       }
       setSelectedTypeKey(folder.key);
+      return false;
     },
     [effectiveProjectId, router]
   );
@@ -887,6 +976,7 @@ function ApplicationsHubContent() {
                   departments={departmentFolders}
                   selectedDepartment={selectedDepartment}
                   selectedType={selectedTypeFolder}
+                  openSingleApplicationDirectly={Boolean(effectiveProjectId)}
                   onSelectAll={() => {
                     setSelectedTypeKey(null);
                     setSelectedDepartmentKey(ALL_DEPARTMENTS);
@@ -900,12 +990,11 @@ function ApplicationsHubContent() {
                       item.types.some((type) => type.key === folder.key)
                     );
                     if (department) setSelectedDepartmentKey(department.key);
-                    openTypeFolder(folder);
+                    return openTypeFolder(folder);
                   }}
-                  leaf={
-                    selectedTypeFolder ? (
+                  renderLeaf={(folder) => (
                 <div className="flex flex-col gap-2">
-                  {selectedTypeFolder.applications.map((app) => {
+                  {folder.applications.map((app) => {
                     const stage = getApplicationStage(app);
                     const canManage = canManageProjectApps(app.projectId);
                     const canReject = canManage && stage === "in_process";
@@ -917,6 +1006,17 @@ function ApplicationsHubContent() {
                     const deleting = rowBusy && pendingAction?.type === "delete";
                     const backingToDraft =
                       rowBusy && pendingAction?.type === "back_to_draft";
+                    const projectAlreadySelected = Boolean(effectiveProjectId);
+                    const cardTitle = projectAlreadySelected
+                      ? app.permissionType || folder.title || "Application"
+                      : app.projectTitle || app.permissionType;
+                    const showPermissionType =
+                      folder.direct &&
+                      Boolean(app.permissionType) &&
+                      app.permissionType !== cardTitle;
+                    const showDepartment =
+                      !projectAlreadySelected &&
+                      Boolean(app.department && app.department !== "—");
 
                     return (
                       <div
@@ -934,7 +1034,7 @@ function ApplicationsHubContent() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-2">
                               <p className="line-clamp-2 text-sm font-semibold text-slate-900">
-                                {app.projectTitle || app.permissionType}
+                                {cardTitle}
                               </p>
                               <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
                             </div>
@@ -943,16 +1043,16 @@ function ApplicationsHubContent() {
                             >
                               {STAGE_LABELS[stage]}
                             </span>
-                            {selectedTypeFolder.direct && app.permissionType ? (
+                            {showPermissionType ? (
                               <p className="mt-2 truncate text-xs text-gray-500">
                                 {app.permissionType}
                               </p>
                             ) : null}
-                            <p className="mt-1 truncate text-xs text-gray-500">
-                              {app.department && app.department !== "—"
-                                ? app.department
-                                : "No department"}
-                            </p>
+                            {showDepartment ? (
+                              <p className="mt-1 truncate text-xs text-gray-500">
+                                {app.department}
+                              </p>
+                            ) : null}
                             <p className="mt-0.5 text-xs text-gray-400">
                               {formatCreatedAt(app.createdAt)}
                             </p>
@@ -1020,8 +1120,7 @@ function ApplicationsHubContent() {
                     );
                   })}
                 </div>
-                    ) : null
-                  }
+                  )}
                 />
               )}
             </div>
