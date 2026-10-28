@@ -21,12 +21,6 @@ export const CREATE_PROJECT_SECTIONS: CreateProjectSection[] = [
     savedKey: "saved-project-library",
   },
   {
-    id: "project-details",
-    label: "Project Details",
-    path: "/dashboard/project-details",
-    savedKey: "saved-project-details",
-  },
-  {
     id: "applicant-details",
     label: "Applicant Details",
     path: "/dashboard/applicant",
@@ -43,6 +37,12 @@ export const CREATE_PROJECT_SECTIONS: CreateProjectSection[] = [
     label: "Building Details",
     path: "/dashboard/building",
     savedKey: "saved-building-details",
+  },
+  {
+    id: "project-details",
+    label: "Project Details",
+    path: "/dashboard/project-details",
+    savedKey: "saved-project-details",
   },
 ];
 

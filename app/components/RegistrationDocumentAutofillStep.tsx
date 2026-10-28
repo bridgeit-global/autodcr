@@ -70,6 +70,8 @@ type RegistrationDocumentAutofillStepProps = {
   skipSignatorySlots?: boolean;
   /** Dev/testing: show control to skip upload and AI extraction. */
   allowSkipExtraction?: boolean;
+  /** Production: allow continuing without uploading identity documents. */
+  allowContinueWithoutDocuments?: boolean;
   onSkipExtraction?: () => void;
 };
 
@@ -228,6 +230,7 @@ export default function RegistrationDocumentAutofillStep({
   onExtractedChange,
   skipSignatorySlots = false,
   allowSkipExtraction = false,
+  allowContinueWithoutDocuments = false,
   onSkipExtraction,
 }: RegistrationDocumentAutofillStepProps) {
   const docSlots = useMemo(
@@ -975,7 +978,28 @@ export default function RegistrationDocumentAutofillStep({
             ? "Detecting & saving…"
             : "Save"}
         </button>
+        {allowContinueWithoutDocuments && !hasExtracted && (
+          <button
+            type="button"
+            onClick={() => {
+              setHasExtracted(true);
+              onExtractedChange?.(true);
+              onSkipExtraction?.();
+              onContinue();
+            }}
+            disabled={loading || uploads.some((u) => u.loading)}
+            className="rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        )}
       </div>
+      {allowContinueWithoutDocuments && !hasExtracted && (
+        <p className="text-xs text-gray-500">
+          Don’t have these documents right now? Click Next to fill details
+          manually — you can upload documents later during registration.
+        </p>
+      )}
     </div>
   );
 }

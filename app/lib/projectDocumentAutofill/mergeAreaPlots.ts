@@ -2,8 +2,10 @@ import type { AreaExtractRow, AreaPlotRow, ProjectLibraryExtraction } from "./ty
 import {
   isLeafRow,
   leaseAreaOf,
+  normalizeExtractNo,
   parseExtractsJson,
   pickString,
+  roundArea2,
   uid,
 } from "./utils";
 
@@ -20,7 +22,7 @@ function toExtractRow(raw: ReturnType<typeof parseExtractsJson>[number]): AreaEx
   };
   return {
     id: uid(),
-    extractNo: pickString(raw.extractNo),
+    extractNo: normalizeExtractNo(pickString(raw.extractNo)),
     ...base,
     leaseArea: leaseAreaOf(base),
   };
@@ -45,7 +47,9 @@ function plotFromPrExtraction(
       : [
           {
             id: uid(),
-            extractNo: pickString(extracted.proposedCtsNumber?.split(/[,;/]+/)[0]),
+            extractNo: normalizeExtractNo(
+              pickString(extracted.proposedCtsNumber?.split(/[,;/]+/)[0])
+            ),
             prcArea: pickString(extracted.grossPlotArea) || ZERO,
             ulcArea: ZERO,
             bFormArea: ZERO,
@@ -109,8 +113,18 @@ export function computeAreaTotals(plots: AreaPlotRow[]) {
     }
   }
 
+  const rounded = {
+    prcArea: roundArea2(allPlotsTotal.prcArea),
+    ulcArea: roundArea2(allPlotsTotal.ulcArea),
+    bFormArea: roundArea2(allPlotsTotal.bFormArea),
+    conveyanceArea: roundArea2(allPlotsTotal.conveyanceArea),
+    attorneyArea: roundArea2(allPlotsTotal.attorneyArea),
+    dilrMapArea: roundArea2(allPlotsTotal.dilrMapArea),
+    leaseArea: roundArea2(allPlotsTotal.leaseArea),
+  };
+
   return {
-    allPlotsTotal,
-    totalLeaseArea: allPlotsTotal.leaseArea,
+    allPlotsTotal: rounded,
+    totalLeaseArea: rounded.leaseArea,
   };
 }

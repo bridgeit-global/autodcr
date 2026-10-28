@@ -386,8 +386,9 @@ export default function ConsultantPartialRegistrationModal({
       require(field, field);
     }
 
-    if (!letterheadFile) {
-      next.letterheadFile = "Letterhead image is required";
+    // Letterhead is optional when adding via + New User; if uploaded, require preview confirm.
+    if (letterheadFile && !hasViewedLetterhead) {
+      next.letterheadFile = "Please view the letterhead preview before submitting";
     }
 
     setErrors(next);
@@ -610,8 +611,8 @@ export default function ConsultantPartialRegistrationModal({
             </h2>
             <p className="text-sm text-gray-600 mt-1">
               Upload identity documents to auto-fill details, then confirm registration
-              numbers and letterhead. The consultant will only need to set up login and
-              accept the declaration.
+              numbers. Letterhead is optional here. The consultant will only need to set
+              up login and accept the declaration.
             </p>
           </div>
           <button
@@ -674,6 +675,7 @@ export default function ConsultantPartialRegistrationModal({
               registrationKind="consultant"
               consultantType={formData.consultantType}
               allowSkipExtraction={canSkipConsultantIdentityDocExtraction()}
+              allowContinueWithoutDocuments
               onSkipExtraction={() => setSkippedIdentityDocs(true)}
               onAutofill={applyPartialAutofill}
               onExtractedChange={(extracted) => {
@@ -681,8 +683,10 @@ export default function ConsultantPartialRegistrationModal({
                 if (extracted) setSkippedIdentityDocs(false);
               }}
               onContinue={() => {
-                const element = document.getElementById("section-basic-details");
-                element?.scrollIntoView({ behavior: "smooth", block: "start" });
+                window.setTimeout(() => {
+                  const element = document.getElementById("section-basic-details");
+                  element?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 50);
               }}
             />
             {errors.identityDocuments && (
@@ -1300,14 +1304,15 @@ export default function ConsultantPartialRegistrationModal({
           >
             <h3 className="text-lg font-semibold text-black mb-1">Letterhead</h3>
             <p className="text-sm text-gray-600 mb-4">
-              Upload your letterhead image (JPG/PNG). After successful upload, you
-              will see a preview showing where it will be placed.
+              Optional — upload A4 JPG/PNG letterhead and confirm placement. If
+              skipped, applications will generate without a letterhead background.
             </p>
 
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block font-medium text-black mb-1">
-                  Letterhead Image <span className="text-red-600 font-bold">*</span>
+                  Letterhead Image{" "}
+                  <span className="text-gray-500 font-normal">(optional)</span>
                 </label>
                 <div
                   className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${

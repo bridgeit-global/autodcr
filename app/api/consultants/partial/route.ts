@@ -11,7 +11,6 @@ import {
 import {
   buildPartialConsultantMetadata,
   buildConsultantCompletionUrl,
-  canSkipConsultantIdentityDocExtractionServer,
   EXTRA_REG_REQUIRED_BY_TYPE,
   getPrimaryRegNoFromPayload,
   normalizePhone,
@@ -190,9 +189,8 @@ export async function POST(request: NextRequest) {
       signatorySignatureFile,
     } = await parseRequestBody(request);
 
-    const skipIdentityDocuments =
-      body.skipIdentityDocuments === true &&
-      canSkipConsultantIdentityDocExtractionServer();
+    // + New User always allows skipping identity docs (env gate kept for full registration form).
+    const skipIdentityDocuments = body.skipIdentityDocuments === true;
 
     if (!skipIdentityDocuments) {
       if (!aadhaarFile || aadhaarFile.size === 0) {
@@ -227,31 +225,27 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!letterheadFile || letterheadFile.size === 0) {
-      return NextResponse.json(
-        { error: "Letterhead image is required" },
-        { status: 400 }
-      );
-    }
-
-    const validImageTypes = ["image/jpeg", "image/jpg", "image/png"];
-    const nameLower = letterheadFile.name.toLowerCase();
-    const isValidImage =
-      validImageTypes.includes(letterheadFile.type) ||
-      nameLower.endsWith(".jpg") ||
-      nameLower.endsWith(".jpeg") ||
-      nameLower.endsWith(".png");
-    if (!isValidImage) {
-      return NextResponse.json(
-        { error: "Letterhead must be a JPG or PNG image" },
-        { status: 400 }
-      );
-    }
-    if (letterheadFile.size > 10 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "Letterhead must be 10MB or smaller" },
-        { status: 400 }
-      );
+    // Letterhead is optional for + New User partial create.
+    if (letterheadFile && letterheadFile.size > 0) {
+      const validImageTypes = ["image/jpeg", "image/jpg", "image/png"];
+      const nameLower = letterheadFile.name.toLowerCase();
+      const isValidImage =
+        validImageTypes.includes(letterheadFile.type) ||
+        nameLower.endsWith(".jpg") ||
+        nameLower.endsWith(".jpeg") ||
+        nameLower.endsWith(".png");
+      if (!isValidImage) {
+        return NextResponse.json(
+          { error: "Letterhead must be a JPG or PNG image" },
+          { status: 400 }
+        );
+      }
+      if (letterheadFile.size > 10 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: "Letterhead must be 10MB or smaller" },
+          { status: 400 }
+        );
+      }
     }
 
     const consultantType = requiredString(body.consultantType, "Consultant type");
@@ -428,18 +422,21 @@ export async function POST(request: NextRequest) {
     const uploadedPaths: string[] = [];
 
     try {
-      const letterheadUpload = await uploadConsultantDocument(
-        admin,
-        userId,
-        letterheadFile,
-        "letterhead"
-      );
-      uploadedPaths.push(letterheadUpload.path);
-
       let metadataWithDocuments: Record<string, unknown> = {
         ...metadata,
-        letterhead_url: letterheadUpload.url,
+        identity_documents_skipped: skipIdentityDocuments,
       };
+
+      if (letterheadFile && letterheadFile.size > 0) {
+        const letterheadUpload = await uploadConsultantDocument(
+          admin,
+          userId,
+          letterheadFile,
+          "letterhead"
+        );
+        uploadedPaths.push(letterheadUpload.path);
+        metadataWithDocuments.letterhead_url = letterheadUpload.url;
+      }
 
       if (!skipIdentityDocuments) {
         const aadhaarUpload = await uploadConsultantDocument(

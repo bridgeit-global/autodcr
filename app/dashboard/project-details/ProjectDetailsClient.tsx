@@ -289,6 +289,18 @@ function lockCreateProjectApplicantToLoggedInUser(
   }
 }
 
+/** Area Details → All Plots Total → Least Area (`totalLeaseArea`). */
+function readGrossPlotAreaFromAreaTotals(): string {
+  const areaTotals = loadDraft<{ totalLeaseArea?: number | string } | null>(
+    "draft-area-details-totals",
+    null
+  );
+  const raw = Number(areaTotals?.totalLeaseArea ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) return "";
+  const rounded = Math.round(raw * 100) / 100;
+  return String(rounded);
+}
+
 function readSavePlotFormDraft(): SavePlotFormData {
   const stored = loadDraft<Partial<SavePlotFormData>>(
     "draft-project-details-save-plot",
@@ -326,10 +338,12 @@ function readSavePlotFormDraft(): SavePlotFormData {
   };
   const raw = withLocation.proposedCtsNumber;
   const normalizedProposedCtsNumber = sanitizeCtsNumbers(raw);
+  const grossFromArea = readGrossPlotAreaFromAreaTotals();
 
   return {
     ...withLocation,
     proposedCtsNumber: normalizedProposedCtsNumber,
+    ...(grossFromArea ? { grossPlotArea: grossFromArea } : {}),
   };
 }
 
@@ -584,7 +598,9 @@ export default function ProjectDetailsClient() {
             String(savePlotDetails.ward || "") || undefined,
             String(savePlotDetails.plotBelongsTo || "")
           ),
-          grossPlotArea: String(savePlotDetails.grossPlotArea || ""),
+          grossPlotArea:
+            readGrossPlotAreaFromAreaTotals() ||
+            String(savePlotDetails.grossPlotArea || ""),
           sacNo: Array.isArray(savePlotDetails.sacNo)
             ? savePlotDetails.sacNo.map(String)
             : typeof savePlotDetails.sacNo === "string" && savePlotDetails.sacNo
@@ -775,6 +791,26 @@ export default function ProjectDetailsClient() {
     setIsSavePlotSaved(false);
     window.setTimeout(() => setIsInitialLoad(false), 500);
   }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot, setProjectValue, userMetadata]);
+
+  // Gross Plot Area = Area Details All Plots Total Least Area (`totalLeaseArea`).
+  useEffect(() => {
+    if (isReadOnlyMode) return;
+
+    const syncGrossPlotArea = () => {
+      const fromArea = readGrossPlotAreaFromAreaTotals();
+      if (!fromArea) return;
+      setSavePlotValue("grossPlotArea", fromArea, { shouldValidate: true, shouldDirty: false });
+    };
+
+    syncGrossPlotArea();
+
+    // Re-sync when Property Details is shown (user may have just edited Area Details).
+    if (activeTab === "save-plot") {
+      syncGrossPlotArea();
+    }
+
+    return subscribeProjectAutofillApplied(syncGrossPlotArea);
+  }, [activeTab, isReadOnlyMode, setSavePlotValue]);
 
   // After hydration, backfill village/CTS from enriched draft if cascade effects cleared them.
   useEffect(() => {
@@ -1818,43 +1854,6 @@ export default function ProjectDetailsClient() {
                   )}
               </div>
 
-            {/* Applicant name & address */}
-              <div>
-                  <label className={labelClasses}>
-                  Full name of applicant {requiredMark}
-                </label>
-                <input
-                    {...registerProject("fullNameOfApplicant", {
-                    required: "Full name is required",
-                  })}
-                  type="text"
-                  readOnly={!isEditMode}
-                    className={isEditMode ? inputClasses : `${inputClasses} cursor-not-allowed bg-gray-100 text-gray-500`}
-                  placeholder={isEditMode ? "Enter full name" : "Auto-filled from profile"}
-                />
-                  {projectErrors.fullNameOfApplicant && (
-                    <p className={errorClasses}>{projectErrors.fullNameOfApplicant.message}</p>
-                )}
-              </div>
-
-              <div>
-                  <label className={labelClasses}>
-                  Address of the applicant {requiredMark}
-                </label>
-                <input
-                    {...registerProject("addressOfApplicant", {
-                    required: "Address is required",
-                  })}
-                  type="text"
-                  readOnly={!isEditMode}
-                    className={isEditMode ? inputClasses : `${inputClasses} cursor-not-allowed bg-gray-100 text-gray-500`}
-                  placeholder={isEditMode ? "Enter address" : "Auto-filled from profile"}
-                />
-                  {projectErrors.addressOfApplicant && (
-                    <p className={errorClasses}>{projectErrors.addressOfApplicant.message}</p>
-                )}
-              </div>
-
             {/* Landmark and Property Tax */}
             <div>
                   <label className={labelClasses}>
@@ -2146,11 +2145,20 @@ export default function ProjectDetailsClient() {
                   Gross Plot Area (Sq.m) {requiredMark}
                 </label>
                 <input
-                  {...registerSavePlot("grossPlotArea", { required: "Gross plot area is required" })}
+                  {...registerSavePlot("grossPlotArea", {
+                    validate: (v) => {
+                      const n = Number(v);
+                      if (!v || !Number.isFinite(n) || n <= 0) {
+                        return "Gross plot area is filled from Area Details (All Plots Total Least Area). Complete Area Details first.";
+                      }
+                      return true;
+                    },
+                  })}
                   type="number"
                   step="any"
-                  className={inputClasses}
-                  placeholder="Enter area"
+                  readOnly
+                  className={`${inputClasses} cursor-not-allowed bg-gray-100 text-gray-500`}
+                  placeholder="Auto-filled from Area Details"
                 />
                 {savePlotErrors.grossPlotArea && (
                   <p className={errorClasses}>{savePlotErrors.grossPlotArea.message}</p>

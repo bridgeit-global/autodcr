@@ -6,6 +6,40 @@ const ctsMapping = ctsMappingData as unknown as WardVillageMapping;
 
 const ZERO = "0";
 
+/** Round area values to 2 decimal places to avoid float noise (e.g. 1410.6000000000001). */
+export function roundArea2(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+export function formatArea2(n: number): string {
+  return roundArea2(n).toFixed(2);
+}
+
+const DEVANAGARI_DIGITS: Record<string, string> = {
+  "०": "0",
+  "१": "1",
+  "२": "2",
+  "३": "3",
+  "४": "4",
+  "५": "5",
+  "६": "6",
+  "७": "7",
+  "८": "8",
+  "९": "9",
+};
+
+/** Convert Devanagari digits to ASCII and normalize CTS slash → hyphen (१७७/३० → 177-30). */
+export function normalizeExtractNo(raw: string | null | undefined): string {
+  if (!raw?.trim()) return "";
+  let s = raw.trim();
+  s = s.replace(/[०१२३४५६७८९]/g, (ch) => DEVANAGARI_DIGITS[ch] ?? ch);
+  s = s.replace(/\s+/g, "");
+  // 177/30 or 177/30A → 177-30 / 177-30A
+  s = s.replace(/^(\d+)\/(\d+[A-Za-z]?)$/i, "$1-$2");
+  return s;
+}
+
 export function uid(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -40,7 +74,7 @@ export function leaseAreaOf(row: {
     .map((v) => Number(v) || 0)
     .filter((v) => v > 0);
   if (!values.length) return ZERO;
-  return Math.min(...values).toString();
+  return String(roundArea2(Math.min(...values)));
 }
 
 /** True when a token looks like a CTS / CS survey number (not a zone letter or village name). */
@@ -83,7 +117,7 @@ export function splitCtsNumbers(raw: string | null | undefined): string[] {
   if (!raw?.trim()) return [];
   const tokens = raw
     .split(/[,;]+/)
-    .map((part) => normalizeCtsToken(part.trim()))
+    .map((part) => normalizeCtsToken(normalizeExtractNo(part.trim())))
     .filter(isValidCtsToken);
   return [...new Set(tokens)];
 }
@@ -448,8 +482,9 @@ export function hasLocationData(extracted: Record<string, string | null>): boole
 export function isLeafRow(row: RawExtractRow): boolean {
   if (row.isLeaf === true || row.isLeaf === "true") return true;
   if (row.isLeaf === false || row.isLeaf === "false") return false;
-  const no = (row.extractNo ?? "").trim();
-  return /\/\d+/.test(no);
+  const no = normalizeExtractNo(row.extractNo);
+  // Subdivision rows: 338/1, 177-30, 340/2A
+  return /[/-]\d+[A-Za-z]?$/i.test(no);
 }
 
 export function defaultPlotBelongsForRegion(

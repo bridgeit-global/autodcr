@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ApplicationDocumentPreviewPane from "@/app/components/ApplicationDocumentPreviewPane";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
@@ -131,7 +138,7 @@ import { mapBridgeError } from "@/app/lib/bridge/errorMapper";
 import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/utils/buttonClasses";
 import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
-import { Loader2, RotateCcw, Trash2, XCircle } from "lucide-react";
+import { GripVertical, Loader2, RotateCcw, Trash2, XCircle } from "lucide-react";
 
 type PreviewProjectData = {
   title?: string;
@@ -1346,6 +1353,31 @@ const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>>
 const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
 
 const LICENSE_PREVIEW_VALUE = "license";
+
+const DETAILS_PANE_PERCENT_KEY = "application-details-pane-percent";
+const DETAILS_PANE_DEFAULT_PERCENT = 40;
+const DETAILS_PANE_MIN_PERCENT = 25;
+const DETAILS_PANE_MAX_PERCENT = 70;
+
+function clampDetailsPanePercent(value: number): number {
+  return Math.min(
+    DETAILS_PANE_MAX_PERCENT,
+    Math.max(DETAILS_PANE_MIN_PERCENT, value)
+  );
+}
+
+function readStoredDetailsPanePercent(): number {
+  if (typeof window === "undefined") return DETAILS_PANE_DEFAULT_PERCENT;
+  try {
+    const raw = sessionStorage.getItem(DETAILS_PANE_PERCENT_KEY);
+    if (raw == null) return DETAILS_PANE_DEFAULT_PERCENT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return DETAILS_PANE_DEFAULT_PERCENT;
+    return clampDetailsPanePercent(parsed);
+  } catch {
+    return DETAILS_PANE_DEFAULT_PERCENT;
+  }
+}
 
 /** Storage / QR key: catalog document id for multi-doc types, else templateType / acceptance. */
 function applicationUrlsKeyFor(
@@ -3109,6 +3141,82 @@ export default function ApplicationDetailsPage() {
         : letterVariant;
 
   const documentPaneScrollRef = useRef<HTMLDivElement | null>(null);
+  const [detailsPanePercent, setDetailsPanePercent] = useState(readStoredDetailsPanePercent);
+  const [isResizingPanes, setIsResizingPanes] = useState(false);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(DETAILS_PANE_PERCENT_KEY, String(detailsPanePercent));
+    } catch {
+      // ignore quota / private-mode failures
+    }
+  }, [detailsPanePercent]);
+
+  const handlePaneResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const container = documentPaneScrollRef.current;
+    const handle = event.currentTarget;
+    if (!container) return;
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    setIsResizingPanes(true);
+
+    // Delta-based resize so the grip stays under the pointer (no jump from grab offset).
+    const startX = event.clientX;
+    const startPercent = detailsPanePercent;
+    const splitterWidth = handle.getBoundingClientRect().width;
+    const availableWidth = Math.max(
+      1,
+      container.getBoundingClientRect().width - splitterWidth
+    );
+
+    handle.setPointerCapture(event.pointerId);
+
+    let rafId = 0;
+    let latestX = startX;
+    let pendingPercent = startPercent;
+
+    const applyResize = () => {
+      rafId = 0;
+      const deltaPercent = ((latestX - startX) / availableWidth) * 100;
+      pendingPercent = clampDetailsPanePercent(startPercent + deltaPercent);
+      // Update layout via CSS vars directly — avoids lag from re-rendering this page every move.
+      container.style.setProperty("--details-pane-grow", String(pendingPercent));
+      container.style.setProperty("--preview-pane-grow", String(100 - pendingPercent));
+    };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      latestX = moveEvent.clientX;
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(applyResize);
+    };
+
+    const onUp = (upEvent: PointerEvent) => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      latestX = upEvent.clientX;
+      applyResize();
+      setDetailsPanePercent(pendingPercent);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      setIsResizingPanes(false);
+      if (handle.hasPointerCapture(upEvent.pointerId)) {
+        handle.releasePointerCapture(upEvent.pointerId);
+      }
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  };
 
   const handlePreviewDocSelectionChange = (next: string) => {
     if (next === previewDocSelection) return;
@@ -5276,9 +5384,15 @@ export default function ApplicationDetailsPage() {
 
         <div
           ref={documentPaneScrollRef}
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 lg:flex-row lg:items-start"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pt-3 lg:flex-row lg:items-stretch lg:gap-0"
+          style={
+            {
+              ["--details-pane-grow" as string]: detailsPanePercent,
+              ["--preview-pane-grow" as string]: 100 - detailsPanePercent,
+            } as CSSProperties
+          }
         >
-          <div className="w-full lg:w-2/5 lg:flex-none">
+          <div className="w-full min-w-0 lg:[flex:var(--details-pane-grow)_1_0%]">
           {detailsFieldsLoading &&
           detailsFieldRows.length === 0 &&
           detailsFieldsFallbackRows.length === 0 &&
@@ -5381,7 +5495,35 @@ export default function ApplicationDetailsPage() {
             </div>
           )}
           </div>
-          <div className="w-full min-w-0 lg:flex-1">
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize details and document preview"
+            aria-valuemin={DETAILS_PANE_MIN_PERCENT}
+            aria-valuemax={DETAILS_PANE_MAX_PERCENT}
+            aria-valuenow={Math.round(detailsPanePercent)}
+            title="Drag to resize"
+            onPointerDown={handlePaneResizeStart}
+            className={`relative z-10 hidden w-3 shrink-0 cursor-col-resize touch-none self-stretch lg:flex lg:items-center lg:justify-center ${
+              isResizingPanes ? "bg-brand-blue/5" : "hover:bg-slate-100/80"
+            }`}
+          >
+            <div
+              className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 ${
+                isResizingPanes ? "bg-brand-blue" : "bg-slate-300"
+              }`}
+            />
+            <div
+              className={`relative flex h-8 w-4 items-center justify-center rounded-md border bg-white shadow-sm ${
+                isResizingPanes
+                  ? "border-brand-blue text-brand-blue"
+                  : "border-slate-300 text-slate-500"
+              }`}
+            >
+              <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+            </div>
+          </div>
+          <div className="w-full min-w-0 lg:[flex:var(--preview-pane-grow)_1_0%]">
             <ApplicationDocumentPreviewPane
               title={
                 selectedApplication ? `${selectedApplication} Preview` : "Application Preview"
