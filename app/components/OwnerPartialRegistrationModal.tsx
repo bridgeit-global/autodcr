@@ -114,6 +114,7 @@ export default function OwnerPartialRegistrationModal({
   const [entityDocuments, setEntityDocuments] = useState<
     Record<string, File | null>
   >({});
+  const [skippedIdentityDocs, setSkippedIdentityDocs] = useState(false);
 
   const documentsComplete = isOwnerDocumentsSectionComplete(formData.entityType, {
     aadhaarCardFile,
@@ -122,6 +123,7 @@ export default function OwnerPartialRegistrationModal({
     authorizedSignatorySignatureFile: signatorySignatureFile,
     entityDocuments,
   });
+  const sectionUnlocked = documentsComplete || skippedIdentityDocs;
 
   const docsForEntity = OWNER_DOC_CHECKLIST[formData.entityType] || [];
   const docsForEntityDisplay =
@@ -185,6 +187,7 @@ export default function OwnerPartialRegistrationModal({
     setSignatoryPhotoFile(null);
     setSignatorySignatureFile(null);
     setEntityDocuments({});
+    setSkippedIdentityDocs(false);
   }, [open, accountRole]);
 
   useEffect(() => {
@@ -220,6 +223,7 @@ export default function OwnerPartialRegistrationModal({
         setPanCardFile(null);
         setSignatoryPhotoFile(null);
         setSignatorySignatureFile(null);
+        setSkippedIdentityDocs(false);
       }
       return { ...prev, [field]: normalized };
     });
@@ -266,7 +270,7 @@ export default function OwnerPartialRegistrationModal({
       next.pan = "Enter a valid PAN (e.g. ABCDE1234F)";
     }
 
-    if (!documentsComplete) {
+    if (!documentsComplete && !skippedIdentityDocs) {
       next.identityDocuments = "Complete entity type and document uploads first";
     }
 
@@ -287,9 +291,8 @@ export default function OwnerPartialRegistrationModal({
       require(field, labels[field] || field);
     }
 
-    if (!letterheadFile) {
-      next.letterheadFile = "Letterhead is required";
-    } else if (!hasViewedLetterhead) {
+    // Letterhead is optional when adding via + New User; if uploaded, require preview confirm.
+    if (letterheadFile && !hasViewedLetterhead) {
       next.letterheadFile = "Please view the letterhead preview before submitting";
     }
 
@@ -477,20 +480,23 @@ export default function OwnerPartialRegistrationModal({
         JSON.stringify({
           ...formData,
           accountRole,
+          skipIdentityDocuments: skippedIdentityDocs,
         })
       );
       if (letterheadFile) formPayload.append("letterhead", letterheadFile);
-      if (aadhaarCardFile) formPayload.append("aadhaar_card", aadhaarCardFile);
-      if (panCardFile) formPayload.append("pan_card", panCardFile);
-      if (signatoryPhotoFile) {
-        formPayload.append("signatory_photo", signatoryPhotoFile);
+      if (!skippedIdentityDocs) {
+        if (aadhaarCardFile) formPayload.append("aadhaar_card", aadhaarCardFile);
+        if (panCardFile) formPayload.append("pan_card", panCardFile);
+        if (signatoryPhotoFile) {
+          formPayload.append("signatory_photo", signatoryPhotoFile);
+        }
+        if (signatorySignatureFile) {
+          formPayload.append("signatory_signature", signatorySignatureFile);
+        }
+        Object.entries(entityDocuments).forEach(([id, file]) => {
+          if (file) formPayload.append(`entity_doc_${id}`, file);
+        });
       }
-      if (signatorySignatureFile) {
-        formPayload.append("signatory_signature", signatorySignatureFile);
-      }
-      Object.entries(entityDocuments).forEach(([id, file]) => {
-        if (file) formPayload.append(`entity_doc_${id}`, file);
-      });
 
       const res = await fetch("/api/owners/partial", {
         method: "POST",
@@ -556,8 +562,9 @@ export default function OwnerPartialRegistrationModal({
             </h2>
             <p className="text-sm text-gray-600 mt-1">
               Select entity type, upload documents to auto-fill details, then confirm
-              registration numbers and letterhead. The {accountRole.toLowerCase()} will
-              only need to set up login and accept the declaration.
+              registration numbers. Letterhead is optional here. The{" "}
+              {accountRole.toLowerCase()} will only need to set up login and accept the
+              declaration.
             </p>
           </div>
           <button
@@ -643,11 +650,19 @@ export default function OwnerPartialRegistrationModal({
                   registrationKind={registrationKind}
                   entityType={formData.entityType}
                   onAutofill={applyPartialAutofill}
+                  allowContinueWithoutDocuments
+                  onSkipExtraction={() => setSkippedIdentityDocs(true)}
                   onContinue={() => {
-                    const element = document.getElementById(
-                      "owner-section-basic-details"
-                    );
-                    element?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    // Wait for Basic Details to mount after skip/extract unlock.
+                    window.setTimeout(() => {
+                      const element = document.getElementById(
+                        "owner-section-basic-details"
+                      );
+                      element?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      });
+                    }, 50);
                   }}
                 />
 
@@ -691,7 +706,7 @@ export default function OwnerPartialRegistrationModal({
             )}
           </div>
 
-          {documentsComplete && (
+          {sectionUnlocked && (
             <>
               {/* Card 2: Basic Details */}
               <div
@@ -1105,12 +1120,14 @@ export default function OwnerPartialRegistrationModal({
               >
                 <h3 className="text-lg font-semibold text-black mb-1">Letterhead</h3>
                 <p className="text-sm text-gray-600 mb-4">
-                  Upload A4 JPG/PNG letterhead and confirm placement
+                  Optional — upload A4 JPG/PNG letterhead and confirm placement. If
+                  skipped, applications will generate without a letterhead background.
                 </p>
 
                 <div>
                   <label className="block font-medium text-black mb-1">
-                    Letterhead Image <span className="text-red-600 font-bold">*</span>
+                    Letterhead Image{" "}
+                    <span className="text-gray-500 font-normal">(optional)</span>
                   </label>
                   <input
                     type="file"
@@ -1163,7 +1180,7 @@ export default function OwnerPartialRegistrationModal({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={isSubmitting || checkingPhone || !documentsComplete}
+              disabled={isSubmitting || checkingPhone || !sectionUnlocked}
               className="px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
             >
               {isSubmitting ? "Submitting…" : `Create ${accountRole}`}

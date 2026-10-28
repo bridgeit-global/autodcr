@@ -976,8 +976,6 @@ export default function ProjectLibraryPage() {
     if (isReadOnlyMode || isExtracting || isDetecting) return;
 
     let working = staging;
-    let fixedIndexesForExtraction: number[] = [];
-    let extraJobsForExtraction: Array<{ id: string; type: LibraryDocType }> = [];
     let savedFixed = uploads;
     let savedExtra = extraDocs;
 
@@ -993,17 +991,6 @@ export default function ProjectLibraryPage() {
 
       const assigned = await detectAndAssign(working);
       if (!assigned.ok) return;
-      const newExtraIds = new Set(assigned.extraSlotIds);
-      // Only newly attached files are verified — already-saved docs are left alone.
-      fixedIndexesForExtraction = assigned.fixedIndexes;
-      extraJobsForExtraction = assigned.nextExtra
-        .filter(
-          (s) =>
-            s.upload &&
-            newExtraIds.has(s.id) &&
-            EXTRACTABLE_EXTRA_TYPES.includes(s.type)
-        )
-        .map((s) => ({ id: s.id, type: s.type }));
       savedFixed = assigned.nextFixed;
       savedExtra = assigned.nextExtra;
       setStaging([]);
@@ -1021,6 +1008,17 @@ export default function ProjectLibraryPage() {
       });
       return;
     }
+
+    // Re-verify and re-extract every currently attached document (not only newly staged).
+    const fixedIndexesForExtraction = savedFixed
+      .map((upload, index) => (upload ? index : -1))
+      .filter((index) => index >= 0);
+    const extraJobsForExtraction = savedExtra
+      .filter(
+        (s) =>
+          s.upload && EXTRACTABLE_EXTRA_TYPES.includes(s.type)
+      )
+      .map((s) => ({ id: s.id, type: s.type }));
 
     const outcome = await runExtraction({
       fixedIndexes: fixedIndexesForExtraction,

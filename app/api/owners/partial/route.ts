@@ -115,6 +115,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid entity type" }, { status: 400 });
     }
 
+    const skipIdentityDocuments = body.skipIdentityDocuments === true;
+
     const letterheadFile = form ? asFile(form.get("letterhead")) : null;
     const aadhaarFile = form ? asFile(form.get("aadhaar_card")) : null;
     const panFile = form ? asFile(form.get("pan_card")) : null;
@@ -123,69 +125,68 @@ export async function POST(request: NextRequest) {
       ? asFile(form.get("signatory_signature"))
       : null;
 
-    if (!aadhaarFile || aadhaarFile.size === 0) {
-      return NextResponse.json(
-        { error: "Aadhaar card document is required" },
-        { status: 400 }
-      );
-    }
-    if (!ownerUsesEntityPan(entityType) && (!panFile || panFile.size === 0)) {
-      return NextResponse.json(
-        { error: "PAN card document is required" },
-        { status: 400 }
-      );
-    }
-    if (!signatoryPhotoFile || signatoryPhotoFile.size === 0) {
-      return NextResponse.json(
-        { error: "Authorized signatory photograph is required" },
-        { status: 400 }
-      );
-    }
-    if (!signatorySignatureFile || signatorySignatureFile.size === 0) {
-      return NextResponse.json(
-        { error: "Authorized signatory signature is required" },
-        { status: 400 }
-      );
-    }
-
     const entityDocs = OWNER_DOC_CHECKLIST[entityType] || [];
     const entityDocFiles: Array<{ id: string; file: File }> = [];
-    for (const doc of entityDocs) {
-      const file = form ? asFile(form.get(`entity_doc_${doc.id}`)) : null;
-      if (!file || file.size === 0) {
+
+    if (!skipIdentityDocuments) {
+      if (!aadhaarFile || aadhaarFile.size === 0) {
         return NextResponse.json(
-          { error: `${doc.label} is required` },
+          { error: "Aadhaar card document is required" },
           { status: 400 }
         );
       }
-      entityDocFiles.push({ id: doc.id, file });
+      if (!ownerUsesEntityPan(entityType) && (!panFile || panFile.size === 0)) {
+        return NextResponse.json(
+          { error: "PAN card document is required" },
+          { status: 400 }
+        );
+      }
+      if (!signatoryPhotoFile || signatoryPhotoFile.size === 0) {
+        return NextResponse.json(
+          { error: "Authorized signatory photograph is required" },
+          { status: 400 }
+        );
+      }
+      if (!signatorySignatureFile || signatorySignatureFile.size === 0) {
+        return NextResponse.json(
+          { error: "Authorized signatory signature is required" },
+          { status: 400 }
+        );
+      }
+
+      for (const doc of entityDocs) {
+        const file = form ? asFile(form.get(`entity_doc_${doc.id}`)) : null;
+        if (!file || file.size === 0) {
+          return NextResponse.json(
+            { error: `${doc.label} is required` },
+            { status: 400 }
+          );
+        }
+        entityDocFiles.push({ id: doc.id, file });
+      }
     }
 
-    if (!letterheadFile || letterheadFile.size === 0) {
-      return NextResponse.json(
-        { error: "Letterhead image is required" },
-        { status: 400 }
-      );
-    }
-
-    const validImageTypes = ["image/jpeg", "image/jpg", "image/png"];
-    const nameLower = letterheadFile.name.toLowerCase();
-    const isValidImage =
-      validImageTypes.includes(letterheadFile.type) ||
-      nameLower.endsWith(".jpg") ||
-      nameLower.endsWith(".jpeg") ||
-      nameLower.endsWith(".png");
-    if (!isValidImage) {
-      return NextResponse.json(
-        { error: "Letterhead must be a JPG or PNG image" },
-        { status: 400 }
-      );
-    }
-    if (letterheadFile.size > 10 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "Letterhead must be 10MB or smaller" },
-        { status: 400 }
-      );
+    // Letterhead is optional for + New User partial create.
+    if (letterheadFile && letterheadFile.size > 0) {
+      const validImageTypes = ["image/jpeg", "image/jpg", "image/png"];
+      const nameLower = letterheadFile.name.toLowerCase();
+      const isValidImage =
+        validImageTypes.includes(letterheadFile.type) ||
+        nameLower.endsWith(".jpg") ||
+        nameLower.endsWith(".jpeg") ||
+        nameLower.endsWith(".png");
+      if (!isValidImage) {
+        return NextResponse.json(
+          { error: "Letterhead must be a JPG or PNG image" },
+          { status: 400 }
+        );
+      }
+      if (letterheadFile.size > 10 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: "Letterhead must be 10MB or smaller" },
+          { status: 400 }
+        );
+      }
     }
 
     const entityName = isIndividualType(entityType)
@@ -356,70 +357,82 @@ export async function POST(request: NextRequest) {
     const uploadedPaths: string[] = [];
 
     try {
-      const letterheadUpload = await uploadOwnerDocument(
-        admin,
-        userId,
-        letterheadFile,
-        "letterhead"
-      );
-      uploadedPaths.push(letterheadUpload.path);
-
-      const aadhaarUpload = await uploadOwnerDocument(
-        admin,
-        userId,
-        aadhaarFile,
-        "aadhaar_card"
-      );
-      uploadedPaths.push(aadhaarUpload.path);
-
-      let panUrl = "";
-      if (panFile && panFile.size > 0) {
-        const panUpload = await uploadOwnerDocument(
-          admin,
-          userId,
-          panFile,
-          "pan_card"
-        );
-        uploadedPaths.push(panUpload.path);
-        panUrl = panUpload.url;
-      }
-
-      const signatoryPhotoUpload = await uploadOwnerDocument(
-        admin,
-        userId,
-        signatoryPhotoFile,
-        "signatory_photo"
-      );
-      uploadedPaths.push(signatoryPhotoUpload.path);
-
-      const signatorySignatureUpload = await uploadOwnerDocument(
-        admin,
-        userId,
-        signatorySignatureFile,
-        "signatory_signature"
-      );
-      uploadedPaths.push(signatorySignatureUpload.path);
-
-      const entityUrlMeta: Record<string, string> = {};
-      for (const { id, file } of entityDocFiles) {
-        const upload = await uploadOwnerDocument(admin, userId, file, id);
-        uploadedPaths.push(upload.path);
-        const metaKey = OWNER_ENTITY_DOC_URL_META_BY_ID[id];
-        if (metaKey) entityUrlMeta[metaKey] = upload.url;
-        if (id === "llpEntityPan" && !panUrl) {
-          panUrl = upload.url;
-        }
-      }
-
       const metadataWithDocuments: Record<string, unknown> = {
         ...metadata,
-        letterhead_url: letterheadUpload.url,
-        aadhaar_card_url: aadhaarUpload.url,
-        ...(panUrl ? { pan_card_url: panUrl } : {}),
-        authorized_signatory_photo_url: signatoryPhotoUpload.url,
-        authorized_signatory_signature_url: signatorySignatureUpload.url,
-        ...entityUrlMeta,
+        identity_documents_skipped: skipIdentityDocuments,
       };
+
+      if (letterheadFile && letterheadFile.size > 0) {
+        const letterheadUpload = await uploadOwnerDocument(
+          admin,
+          userId,
+          letterheadFile,
+          "letterhead"
+        );
+        uploadedPaths.push(letterheadUpload.path);
+        metadataWithDocuments.letterhead_url = letterheadUpload.url;
+      }
+
+      if (!skipIdentityDocuments) {
+        if (!aadhaarFile || !signatoryPhotoFile || !signatorySignatureFile) {
+          throw new Error("Identity documents are required");
+        }
+
+        const aadhaarUpload = await uploadOwnerDocument(
+          admin,
+          userId,
+          aadhaarFile,
+          "aadhaar_card"
+        );
+        uploadedPaths.push(aadhaarUpload.path);
+
+        let panUrl = "";
+        if (panFile && panFile.size > 0) {
+          const panUpload = await uploadOwnerDocument(
+            admin,
+            userId,
+            panFile,
+            "pan_card"
+          );
+          uploadedPaths.push(panUpload.path);
+          panUrl = panUpload.url;
+        }
+
+        const signatoryPhotoUpload = await uploadOwnerDocument(
+          admin,
+          userId,
+          signatoryPhotoFile,
+          "signatory_photo"
+        );
+        uploadedPaths.push(signatoryPhotoUpload.path);
+
+        const signatorySignatureUpload = await uploadOwnerDocument(
+          admin,
+          userId,
+          signatorySignatureFile,
+          "signatory_signature"
+        );
+        uploadedPaths.push(signatorySignatureUpload.path);
+
+        const entityUrlMeta: Record<string, string> = {};
+        for (const { id, file } of entityDocFiles) {
+          const upload = await uploadOwnerDocument(admin, userId, file, id);
+          uploadedPaths.push(upload.path);
+          const metaKey = OWNER_ENTITY_DOC_URL_META_BY_ID[id];
+          if (metaKey) entityUrlMeta[metaKey] = upload.url;
+          if (id === "llpEntityPan" && !panUrl) {
+            panUrl = upload.url;
+          }
+        }
+
+        metadataWithDocuments.aadhaar_card_url = aadhaarUpload.url;
+        if (panUrl) metadataWithDocuments.pan_card_url = panUrl;
+        metadataWithDocuments.authorized_signatory_photo_url =
+          signatoryPhotoUpload.url;
+        metadataWithDocuments.authorized_signatory_signature_url =
+          signatorySignatureUpload.url;
+        Object.assign(metadataWithDocuments, entityUrlMeta);
+      }
 
       const { error: updateError } = await admin.auth.admin.updateUserById(
         userId,

@@ -50,6 +50,10 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 const ZERO_VALUE = "0";
 
+/** Round area sums to 2dp to avoid float noise (e.g. 1410.6000000000001). */
+const roundArea2 = (n: number) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
+const formatArea2 = (n: number) => roundArea2(n).toFixed(2);
+
 const createExtract = (): ExtractRow => ({
   id: uid(),
   extractNo: ZERO_VALUE,
@@ -90,7 +94,7 @@ const calculateLeaseArea = (extract: ExtractRow) => {
     return ZERO_VALUE;
   }
 
-  return Math.min(...numericValues).toString();
+  return String(roundArea2(Math.min(...numericValues)));
 };
 
 const getPlotFieldTotals = (plot: PlotRow) => {
@@ -114,7 +118,15 @@ const getPlotFieldTotals = (plot: PlotRow) => {
     totals.leaseArea += Number(extract.leaseArea) || 0;
   });
 
-  return totals;
+  return {
+    prcArea: roundArea2(totals.prcArea),
+    ulcArea: roundArea2(totals.ulcArea),
+    bFormArea: roundArea2(totals.bFormArea),
+    conveyanceArea: roundArea2(totals.conveyanceArea),
+    attorneyArea: roundArea2(totals.attorneyArea),
+    dilrMapArea: roundArea2(totals.dilrMapArea),
+    leaseArea: roundArea2(totals.leaseArea),
+  };
 };
 
 const getPortalFieldTotals = (plots: PlotRow[]) => {
@@ -128,7 +140,7 @@ const getPortalFieldTotals = (plots: PlotRow[]) => {
     leaseArea: 0,
   };
 
-  return plots.reduce((acc, plot) => {
+  const summed = plots.reduce((acc, plot) => {
     const plotTotals = getPlotFieldTotals(plot);
     acc.prcArea += plotTotals.prcArea;
     acc.ulcArea += plotTotals.ulcArea;
@@ -139,6 +151,16 @@ const getPortalFieldTotals = (plots: PlotRow[]) => {
     acc.leaseArea += plotTotals.leaseArea;
     return acc;
   }, initialTotals);
+
+  return {
+    prcArea: roundArea2(summed.prcArea),
+    ulcArea: roundArea2(summed.ulcArea),
+    bFormArea: roundArea2(summed.bFormArea),
+    conveyanceArea: roundArea2(summed.conveyanceArea),
+    attorneyArea: roundArea2(summed.attorneyArea),
+    dilrMapArea: roundArea2(summed.dilrMapArea),
+    leaseArea: roundArea2(summed.leaseArea),
+  };
 };
 
 export default function AreaDetailsPage() {
@@ -290,15 +312,16 @@ const removePlot = (plotId: string) => {
 };
 
   const totalLeaseArea = useMemo(() => {
-    return plots.reduce((sum, plot) => {
+    const sum = plots.reduce((acc, plot) => {
       return (
-        sum +
+        acc +
         plot.extracts.reduce(
           (innerSum, extract) => innerSum + Number(extract.leaseArea || 0),
           0
         )
       );
     }, 0);
+    return roundArea2(sum);
   }, [plots]);
 
   const handleSave = async () => {
@@ -653,13 +676,13 @@ const removePlot = (plotId: string) => {
                     {/* Sub Plot Total row inside the same table */}
                     <tr className="bg-blue-50 font-semibold text-gray-900">
                       <td className="border-r border-gray-200 px-3 py-2 text-left">Sub Plot Total</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.prcArea}</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.ulcArea}</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.bFormArea}</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.conveyanceArea}</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.attorneyArea}</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.dilrMapArea}</td>
-                      <td className="border-r border-gray-200 px-3 py-2 text-left">{plotTotals.leaseArea}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.prcArea)}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.ulcArea)}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.bFormArea)}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.conveyanceArea)}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.attorneyArea)}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.dilrMapArea)}</td>
+                      <td className="border-r border-gray-200 px-3 py-2 text-left">{formatArea2(plotTotals.leaseArea)}</td>
                       <td className="px-3 py-2" />
                     </tr>
                   </tbody>
@@ -709,24 +732,24 @@ const removePlot = (plotId: string) => {
                   {plotTotalsSummary.map(({ label, totals }) => (
                     <tr key={label} className="border-b border-gray-100">
                       <td className="px-3 py-2 font-medium text-gray-900">{label}</td>
-                      <td className="px-3 py-2">{totals.prcArea}</td>
-                      <td className="px-3 py-2">{totals.ulcArea}</td>
-                      <td className="px-3 py-2">{totals.bFormArea}</td>
-                      <td className="px-3 py-2">{totals.conveyanceArea}</td>
-                      <td className="px-3 py-2">{totals.attorneyArea}</td>
-                      <td className="px-3 py-2">{totals.dilrMapArea}</td>
-                      <td className="px-3 py-2">{totals.leaseArea}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.prcArea)}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.ulcArea)}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.bFormArea)}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.conveyanceArea)}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.attorneyArea)}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.dilrMapArea)}</td>
+                      <td className="px-3 py-2">{formatArea2(totals.leaseArea)}</td>
                     </tr>
                   ))}
                   <tr className="bg-blue-50 font-semibold text-gray-900">
                     <td className="px-3 py-2">All Plots Total</td>
-                    <td className="px-3 py-2">{portalTotals.prcArea}</td>
-                    <td className="px-3 py-2">{portalTotals.ulcArea}</td>
-                    <td className="px-3 py-2">{portalTotals.bFormArea}</td>
-                    <td className="px-3 py-2">{portalTotals.conveyanceArea}</td>
-                    <td className="px-3 py-2">{portalTotals.attorneyArea}</td>
-                    <td className="px-3 py-2">{portalTotals.dilrMapArea}</td>
-                    <td className="px-3 py-2">{portalTotals.leaseArea}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.prcArea)}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.ulcArea)}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.bFormArea)}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.conveyanceArea)}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.attorneyArea)}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.dilrMapArea)}</td>
+                    <td className="px-3 py-2">{formatArea2(portalTotals.leaseArea)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -736,7 +759,7 @@ const removePlot = (plotId: string) => {
           <div className="border-t border-gray-200 pt-4">
             <div className="flex items-center justify-between text-gray-900 font-semibold">
               <span>Total</span>
-              <span>{totalLeaseArea}</span>
+              <span>{formatArea2(totalLeaseArea)}</span>
             </div>
           </div>
         </div>

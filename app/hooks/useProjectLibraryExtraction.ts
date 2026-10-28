@@ -159,9 +159,9 @@ export function useProjectLibraryExtraction() {
 
   const runExtraction = useCallback(
     async (input?: {
-      /** Primary library slots filled on this Save — only these are re-verified. */
+      /** Fixed library slot indexes to re-verify on this Save (typically all attached). */
       fixedIndexes?: number[];
-      /** Extra/additional docs added on this Save — only these are re-verified. */
+      /** Extra/additional docs to re-verify on this Save (typically all attached extractable). */
       extraDocs?: Array<{ id: string; type: string }>;
     }): Promise<ProjectLibraryExtractionOutcome> => {
       const fixedIndexes = input?.fixedIndexes ?? [];
