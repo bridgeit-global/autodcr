@@ -14,7 +14,6 @@ import {
   OWNER_DOC_CHECKLIST,
   OWNER_ENTITY_DOC_URL_META_BY_ID,
   OWNER_ENTITY_TYPE_OPTIONS,
-  OWNER_EXTRA_REG_REQUIRED_BY_TYPE,
   OWNER_REGISTRATION_META_BY_TYPE,
   ownerUsesEntityPan,
   type PartialOwnerPayload,
@@ -223,11 +222,7 @@ export async function POST(request: NextRequest) {
     if (!mapping) {
       return NextResponse.json({ error: "Invalid entity type" }, { status: 400 });
     }
-    const primaryReg = requiredString(body[mapping.formField], mapping.label);
-    requiredString(body[mapping.dateField], `${mapping.label} date`);
-    for (const field of OWNER_EXTRA_REG_REQUIRED_BY_TYPE[entityType] || []) {
-      requiredString(body[field], field);
-    }
+    const primaryReg = String(body[mapping.formField] || "").trim();
 
     const accountRoleRaw = String(body.accountRole || body.role || "Owner").trim();
     const accountRole: PrincipalAccountRole =
@@ -273,7 +268,9 @@ export async function POST(request: NextRequest) {
       govtRegistrationDate:
         String(body.govtRegistrationDate || "").trim() || undefined,
     };
-    (payload as Record<string, string>)[mapping.formField] = primaryReg;
+    if (primaryReg) {
+      (payload as Record<string, string>)[mapping.formField] = primaryReg;
+    }
 
     const admin = createServiceRoleClient();
 

@@ -18,7 +18,6 @@ import {
   normalizePhone,
   OWNER_DOC_CHECKLIST,
   OWNER_ENTITY_TYPE_OPTIONS,
-  OWNER_EXTRA_REG_REQUIRED_BY_TYPE,
   OWNER_LLP_AUTOFILL_ENTITY_DOC_IDS,
   OWNER_REGISTRATION_META_BY_TYPE,
   ownerMetadataToFormFields,
@@ -272,23 +271,6 @@ export default function OwnerPartialRegistrationModal({
 
     if (!documentsComplete && !skippedIdentityDocs) {
       next.identityDocuments = "Complete entity type and document uploads first";
-    }
-
-    const mapping = OWNER_REGISTRATION_META_BY_TYPE[formData.entityType];
-    if (mapping) {
-      require(mapping.formField, mapping.label);
-      require(mapping.dateField, `${mapping.label} date`);
-    }
-    for (const field of OWNER_EXTRA_REG_REQUIRED_BY_TYPE[formData.entityType] || []) {
-      const labels: Record<string, string> = {
-        fullNameProprietor: "Full name of proprietor",
-        numberOfPartners: "Number of partners",
-        numberOfDirectors: "Number of directors",
-        numberOfDesignatedPartners: "Number of designated partners",
-        numberOfTrustees: "Number of trustees",
-        departmentName: "Department name",
-      };
-      require(field, labels[field] || field);
     }
 
     // Letterhead is optional when adding via + New User; if uploaded, require preview confirm.
@@ -545,7 +527,6 @@ export default function OwnerPartialRegistrationModal({
   const inputClass =
     "border border-gray-200 rounded-lg px-3 py-2 h-10 w-full text-black focus:ring-2 focus:ring-emerald-500 outline-none";
   const entityType = formData.entityType;
-  const regMapping = OWNER_REGISTRATION_META_BY_TYPE[entityType];
 
   const modal = (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
@@ -562,7 +543,7 @@ export default function OwnerPartialRegistrationModal({
             </h2>
             <p className="text-sm text-gray-600 mt-1">
               Select entity type, upload documents to auto-fill details, then confirm
-              registration numbers. Letterhead is optional here. The{" "}
+              basic details. Letterhead is optional here. The{" "}
               {accountRole.toLowerCase()} will only need to set up login and accept the
               declaration.
             </p>
@@ -911,205 +892,6 @@ export default function OwnerPartialRegistrationModal({
                       placeholder="Landmark"
                     />
                   </div>
-                </div>
-              </div>
-
-              {/* Card 3: Registration Numbers */}
-              <div
-                id="owner-section-registration"
-                className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm"
-              >
-                <h3 className="text-lg font-semibold text-black mb-1">
-                  Registration Numbers
-                </h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  Entity registration details
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {regMapping && (
-                    <>
-                      <div>
-                        <label className="block font-medium text-black mb-1">
-                          {regMapping.label}{" "}
-                          <span className="text-red-600 font-bold">*</span>
-                        </label>
-                        <input
-                          value={formData[regMapping.formField] || ""}
-                          onChange={(e) =>
-                            setField(regMapping.formField, e.target.value)
-                          }
-                          onBlur={() => void lookupRegistration()}
-                          className={inputClass}
-                          placeholder={regMapping.label}
-                        />
-                        {errors[regMapping.formField] && (
-                          <p className="text-xs text-red-600 mt-1">
-                            {errors[regMapping.formField]}
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block font-medium text-black mb-1">
-                          Registration Date{" "}
-                          <span className="text-red-600 font-bold">*</span>
-                        </label>
-                        <input
-                          type="date"
-                          value={formData[regMapping.dateField] || ""}
-                          onChange={(e) =>
-                            setField(regMapping.dateField, e.target.value)
-                          }
-                          className={inputClass}
-                        />
-                        {errors[regMapping.dateField] && (
-                          <p className="text-xs text-red-600 mt-1">
-                            {errors[regMapping.dateField]}
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {entityType === "Proprietorship" && (
-                    <div>
-                      <label className="block font-medium text-black mb-1">
-                        Full Name of Proprietor{" "}
-                        <span className="text-red-600 font-bold">*</span>
-                      </label>
-                      <input
-                        value={formData.fullNameProprietor}
-                        onChange={(e) =>
-                          setField("fullNameProprietor", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="Name as per PAN / Aadhaar"
-                      />
-                      {errors.fullNameProprietor && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {errors.fullNameProprietor}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {entityType === "Partnership Firm" && (
-                    <div>
-                      <label className="block font-medium text-black mb-1">
-                        Number of Partners{" "}
-                        <span className="text-red-600 font-bold">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="2"
-                        value={formData.numberOfPartners}
-                        onChange={(e) =>
-                          setField("numberOfPartners", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="Total partners"
-                      />
-                      {errors.numberOfPartners && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {errors.numberOfPartners}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {entityType === "Pvt. Ltd. / Ltd. Company" && (
-                    <div>
-                      <label className="block font-medium text-black mb-1">
-                        Number of Directors{" "}
-                        <span className="text-red-600 font-bold">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={formData.numberOfDirectors}
-                        onChange={(e) =>
-                          setField("numberOfDirectors", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="Total directors"
-                      />
-                      {errors.numberOfDirectors && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {errors.numberOfDirectors}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {entityType === "LLP" && (
-                    <div>
-                      <label className="block font-medium text-black mb-1">
-                        Number of Designated Partners{" "}
-                        <span className="text-red-600 font-bold">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="2"
-                        value={formData.numberOfDesignatedPartners}
-                        onChange={(e) =>
-                          setField("numberOfDesignatedPartners", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="Designated partners"
-                      />
-                      {errors.numberOfDesignatedPartners && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {errors.numberOfDesignatedPartners}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {entityType === "Trust / Society" && (
-                    <div>
-                      <label className="block font-medium text-black mb-1">
-                        Number of Trustees{" "}
-                        <span className="text-red-600 font-bold">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={formData.numberOfTrustees}
-                        onChange={(e) =>
-                          setField("numberOfTrustees", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="Total trustees"
-                      />
-                      {errors.numberOfTrustees && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {errors.numberOfTrustees}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {entityType === "Govt. / PSU / Local Body" && (
-                    <div>
-                      <label className="block font-medium text-black mb-1">
-                        Department Name{" "}
-                        <span className="text-red-600 font-bold">*</span>
-                      </label>
-                      <input
-                        value={formData.departmentName}
-                        onChange={(e) =>
-                          setField("departmentName", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="Department / Office"
-                      />
-                      {errors.departmentName && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {errors.departmentName}
-                        </p>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
 
