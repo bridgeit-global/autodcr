@@ -3,7 +3,8 @@
 import { useApplicationPdfSaveSlot } from "@/app/dashboard/context/ApplicationPdfSaveSlotContext";
 import { useApplicationSignSlot } from "@/app/dashboard/context/ApplicationSignSlotContext";
 import { useApplicationLifecycleActionsSlot } from "@/app/dashboard/context/ApplicationLifecycleActionsSlotContext";
-import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
+import { useSectionSaveSlotOptional } from "@/app/dashboard/context/SectionSaveSlotContext";
+import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 type ProjectWizardToolbarProps = {
   onSubmitProjectClick: () => void;
@@ -142,6 +143,8 @@ export default function ProjectWizardToolbar({
   isProjectDataLoading = false,
   isSubmittingProject = false,
 }: ProjectWizardToolbarProps) {
+  const sectionSave = useSectionSaveSlotOptional()?.slot ?? null;
+
   if (isReadOnlyMode) return null;
 
   const isSubmittedProject = isEditMode && !isDraftProject;
@@ -153,6 +156,18 @@ export default function ProjectWizardToolbar({
         Complete each section, then submit when everything is saved.
       </p>
       <div className="flex flex-wrap items-center gap-2">
+        {sectionSave && (
+          <button
+            type="button"
+            onClick={() => void sectionSave.onSave()}
+            disabled={sectionSave.disabled}
+            className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
+              sectionSave.saved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
+            } ${sectionSave.disabled ? "cursor-not-allowed opacity-70" : ""}`}
+          >
+            {sectionSave.label}
+          </button>
+        )}
         {isSubmittedProject ? (
           <button
             type="button"
