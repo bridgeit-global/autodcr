@@ -11,6 +11,7 @@ import {
 import {
   buildPartialConsultantMetadata,
   buildConsultantCompletionUrl,
+  EXTRA_REG_REQUIRED_BY_TYPE,
   getPrimaryRegNoFromPayload,
   normalizePhone,
   REGISTRATION_NUMBER_META_BY_TYPE,
@@ -258,7 +259,10 @@ export async function POST(request: NextRequest) {
     );
     const pan = String(body.pan || "").trim().toUpperCase();
     const addressLine1 = requiredString(body.addressLine1, "Address line 1");
-    const registrationDate = String(body.registrationDate || "").trim();
+    const registrationDate = requiredString(
+      body.registrationDate,
+      "Registration date"
+    );
 
     if (alternatePhone.length !== 10) {
       return NextResponse.json(
@@ -284,7 +288,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const primaryReg = String(body[mapping.formField] || "").trim();
+    const primaryReg = requiredString(
+      body[mapping.formField],
+      mapping.label
+    );
+    for (const field of EXTRA_REG_REQUIRED_BY_TYPE[consultantType] || []) {
+      requiredString(body[field], field);
+    }
 
     const payload: PartialConsultantPayload = {
       consultantType,
@@ -306,6 +316,9 @@ export async function POST(request: NextRequest) {
       structuralLicenseNo: body.structuralLicenseNo as string | undefined,
       structuralValidity: body.structuralValidity as string | undefined,
       qualification: body.qualification as string | undefined,
+      siteSupervisorLicenseNo: body.siteSupervisorLicenseNo as string | undefined,
+      siteSupervisorGrade: body.siteSupervisorGrade as string | undefined,
+      siteSupervisorValidity: body.siteSupervisorValidity as string | undefined,
       lbsLicenseNo: body.lbsLicenseNo as string | undefined,
       competencyClass: body.competencyClass as string | undefined,
       lbsExpiryDate: body.lbsExpiryDate as string | undefined,
@@ -329,9 +342,7 @@ export async function POST(request: NextRequest) {
       townPlannerExpiryDate: body.townPlannerExpiryDate as string | undefined,
     };
 
-    if (primaryReg) {
-      (payload as Record<string, string>)[mapping.formField] = primaryReg;
-    }
+    (payload as Record<string, string>)[mapping.formField] = primaryReg;
 
     const admin = createServiceRoleClient();
 
