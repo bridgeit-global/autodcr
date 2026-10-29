@@ -1596,11 +1596,7 @@ export default function ApplicantDetailsPage() {
     const applicantToRemove = applicants.find((applicant) => applicant.id === id);
     if (!applicantToRemove) return;
 
-    if (
-      applicantToRemove.applicantType === "Licensed Site Supervisor" ||
-      applicantToRemove.applicantType === "Site Supervisor" ||
-      isLoggedInApplicantRow(applicantToRemove)
-    ) {
+    if (isLoggedInApplicantRow(applicantToRemove)) {
       return;
     }
 
@@ -1641,11 +1637,7 @@ export default function ApplicantDetailsPage() {
     const applicantToRemove = applicants.find((applicant) => applicant.id === id);
     if (!applicantToRemove) return;
 
-    if (
-      applicantToRemove.applicantType === "Licensed Site Supervisor" ||
-      applicantToRemove.applicantType === "Site Supervisor" ||
-      isLoggedInApplicantRow(applicantToRemove)
-    ) {
+    if (isLoggedInApplicantRow(applicantToRemove)) {
       return;
     }
 
@@ -1755,10 +1747,7 @@ export default function ApplicantDetailsPage() {
                           const isOwnerRow = isPrincipalApplicantType(applicant.applicantType);
                           const isLoggedInUserEntry = isLoggedInApplicantRow(applicant);
                           const deleteDisabled =
-                            isReadOnlyMode ||
-                            applicant.applicantType === "Licensed Site Supervisor" ||
-                            applicant.applicantType === "Site Supervisor" ||
-                            isLoggedInUserEntry;
+                            isReadOnlyMode || isLoggedInUserEntry;
                           const showChangeOwner =
                             canManageProjectOwner && isOwnerRow && !isReadOnlyMode && !changingOwner;
 

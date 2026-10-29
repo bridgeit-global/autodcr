@@ -485,10 +485,11 @@ function DashboardLayoutContent({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccessMessage, setSubmitSuccessMessage] = useState<string | null>(null);
   const [allPagesSaved, setAllPagesSaved] = useState(false);
+  const [principalMissing, setPrincipalMissing] = useState(false);
   const [showDraftConfirm, setShowDraftConfirm] = useState(false);
 
   useEffect(() => {
-    const checkAllPagesSaved = () => {
+    const checkToolbarGates = () => {
       const allSaved = REQUIRED_PAGES.every((page) => {
         if (page.key === "saved-project-details") {
           return isPageSaved("saved-project-info") && isPageSaved("saved-save-plot-details");
@@ -496,10 +497,24 @@ function DashboardLayoutContent({
         return isPageSaved(page.key);
       });
       setAllPagesSaved(allSaved);
+
+      const meta = readSessionUserMeta();
+      if (!canCreateProjectAsArchitect(meta)) {
+        setPrincipalMissing(false);
+        return;
+      }
+      const draftApplicants = loadDraft(
+        "draft-applicant-details-applicants",
+        []
+      ) as ApplicantLike[];
+      // Only block when the roster has been started (non-empty) without Owner/Developer.
+      setPrincipalMissing(
+        draftApplicants.length > 0 && !applicantRosterHasOwner(draftApplicants)
+      );
     };
 
-    checkAllPagesSaved();
-    const interval = setInterval(checkAllPagesSaved, 1000);
+    checkToolbarGates();
+    const interval = setInterval(checkToolbarGates, 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1308,6 +1323,7 @@ function DashboardLayoutContent({
                     isReadOnlyMode={isReadOnlyMode}
                     isProjectDataLoading={isProjectDataLoading}
                     isSubmittingProject={isSubmittingProject}
+                    principalMissing={principalMissing}
                   />
                 </div>
                 <div className="shrink-0">
