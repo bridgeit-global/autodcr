@@ -16,10 +16,11 @@ import { supabase } from "@/app/utils/supabase";
 import { fetchProjectForEdit } from "@/app/utils/fetchProjectForEdit";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+import { useSectionSaveSlot } from "@/app/dashboard/context/SectionSaveSlotContext";
 import CustomSelect from "@/app/components/CustomSelect";
 import Modal from "@/app/components/ui/Modal";
 import WizardSteps, { type WizardStep } from "@/app/components/ui/WizardSteps";
-import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
+import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
 import { subscribeProjectAutofillApplied } from "@/app/lib/projectDocumentAutofill";
 import {
   enrichSavePlotLocation,
@@ -362,6 +363,9 @@ export default function ProjectDetailsClient() {
   const isReadOnlyMode = mode === "readonly";
   const { userMetadata } = useUserMetadata();
   const { showAlert } = useDashboardAlertModal();
+  const { setSlot: setSectionSaveSlot } = useSectionSaveSlot();
+  const projectInfoFormRef = useRef<HTMLFormElement>(null);
+  const savePlotFormRef = useRef<HTMLFormElement>(null);
 
   // Only enable edit mode if we're on the project-details page and have a projectId
   const isProjectDetailsPage = pathname === "/dashboard/project-details";
@@ -383,6 +387,34 @@ export default function ProjectDetailsClient() {
 
   const [isProjectInfoSaved, setIsProjectInfoSaved] = useState(() => isPageSaved("saved-project-info"));
   const [isSavePlotSaved, setIsSavePlotSaved] = useState(() => isPageSaved("saved-save-plot-details"));
+
+  useEffect(() => {
+    if (isReadOnlyMode) {
+      setSectionSaveSlot(null);
+      return;
+    }
+    const saved =
+      activeTab === "save-plot" ? isSavePlotSaved : isProjectInfoSaved;
+    setSectionSaveSlot({
+      onSave: () => {
+        if (activeTab === "save-plot") {
+          savePlotFormRef.current?.requestSubmit();
+        } else {
+          projectInfoFormRef.current?.requestSubmit();
+        }
+      },
+      label: saved ? "Section saved" : "Save section",
+      saved,
+    });
+    return () => setSectionSaveSlot(null);
+  }, [
+    activeTab,
+    isProjectInfoSaved,
+    isReadOnlyMode,
+    isSavePlotSaved,
+    setSectionSaveSlot,
+  ]);
+
   // Track initial load to prevent clearing fields during form initialization
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const lastAutofillHydratedRef = useRef(0);
@@ -1734,9 +1766,9 @@ export default function ProjectDetailsClient() {
 
   return (
     <div className="pb-6">
-      {/* Basic Details → Property Details */}
+      {/* Basic Details → Property Details — sticky while form scrolls */}
       <div>
-        <div className="mb-5 overflow-x-auto pb-1">
+        <div className="sticky top-0 z-20 mb-5 -mx-0 overflow-x-auto border-b border-gray-100 bg-white pb-3 pt-1">
           <WizardSteps
             steps={WIZARD_STEPS}
             currentStep={currentStepIndex}
@@ -1745,7 +1777,7 @@ export default function ProjectDetailsClient() {
         </div>
 
         {activeTab === "project-info" && (
-          <form onSubmit={handleProjectSubmit(onProjectSubmit)}>
+          <form ref={projectInfoFormRef} onSubmit={handleProjectSubmit(onProjectSubmit)}>
             <fieldset
               disabled={isReadOnlyMode}
               className={
@@ -1907,17 +1939,6 @@ export default function ProjectDetailsClient() {
               >
                 Cancel
               </button>
-
-                {!isReadOnlyMode && (
-                  <button
-                    type="submit"
-                    className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
-                      isProjectInfoSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                    }`}
-                  >
-                    {isProjectInfoSaved ? "Saved" : "Save"}
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => goToStep(currentStepIndex + 1)}
@@ -1931,7 +1952,7 @@ export default function ProjectDetailsClient() {
         )}
 
         {activeTab === "save-plot" && (
-          <form onSubmit={handleSavePlotSubmit(onSavePlotSubmit)}>
+          <form ref={savePlotFormRef} onSubmit={handleSavePlotSubmit(onSavePlotSubmit)}>
             <fieldset
               disabled={isReadOnlyMode}
               className={
@@ -2421,16 +2442,6 @@ export default function ProjectDetailsClient() {
               >
                 Cancel
               </button>
-                {!isReadOnlyMode && (
-                  <button
-                    type="submit"
-                    className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
-                      isSavePlotSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                    }`}
-                  >
-                    {isSavePlotSaved ? "Saved" : "Save"}
-                  </button>
-                )}
             </div>
       </form>
         )}

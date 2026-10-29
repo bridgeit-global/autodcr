@@ -15,6 +15,7 @@ export const APPLICANT_TYPE_TO_APPOINTMENT_PERMISSION_ID: Record<string, string>
   Plumber: "appointment_letter_for_plumber",
   "Town Planner": "appointment_letter_for_town_planner",
   "Structural Engineer": "appointment_letter_for_structural_engineer",
+  "Site Supervisor": "appointment_letter_for_site_supervisor",
   "Environmental Consultant": "appointment_letter_for_environmental_consultant",
 };
 
@@ -43,6 +44,7 @@ export const APPOINTMENT_PERMISSION_ID_TO_TITLE: Record<string, string> = {
   appointment_letter_for_plumber: "Appointment Letter for Plumber",
   appointment_letter_for_town_planner: "Appointment Letter for Town Planner",
   appointment_letter_for_structural_engineer: "Appointment Letter for Structural Engineer",
+  appointment_letter_for_site_supervisor: "Appointment Letter for Site Supervisor",
   appointment_letter_for_environmental_consultant: "Appointment Letter for Environmental Consultant",
   // Legacy Pascal ids still resolve titles for older client caches.
   Appointment_Letter_for_Architect: "Appointment Letter for Architect",
@@ -55,6 +57,7 @@ export const APPOINTMENT_PERMISSION_ID_TO_TITLE: Record<string, string> = {
   Appointment_Letter_for_Plumber: "Appointment Letter for Plumber",
   Appointment_Letter_for_Town_Planner: "Appointment Letter for Town Planner",
   Appointment_Letter_for_Structural_Engineer: "Appointment Letter for Structural Engineer",
+  Appointment_Letter_for_Site_Supervisor: "Appointment Letter for Site Supervisor",
   Appointment_Letter_for_Environmental_Consultant: "Appointment Letter for Environmental Consultant",
 };
 
@@ -125,6 +128,7 @@ const APPLICANT_TYPE_TO_APPLICATION_URL_KEY: Record<string, string> = {
   Plumber: "Plumber",
   "Town Planner": "Town Planner",
   "Structural Engineer": "Structural Engineer",
+  "Site Supervisor": "Site Supervisor",
   "Environmental Consultant": "Environmental Consultant",
   "PMC / Project Manager": "PMC / Project Manager",
 };

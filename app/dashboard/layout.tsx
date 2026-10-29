@@ -8,6 +8,7 @@ import ProjectSectionStepper from "../components/appshell/ProjectSectionStepper"
 import { ApplicationPdfSaveSlotProvider } from "./context/ApplicationPdfSaveSlotContext";
 import { ApplicationSignSlotProvider } from "./context/ApplicationSignSlotContext";
 import { ApplicationLifecycleActionsSlotProvider } from "./context/ApplicationLifecycleActionsSlotContext";
+import { SectionSaveSlotProvider } from "./context/SectionSaveSlotContext";
 import { SaveBeforeSubmitModal } from "../components/SaveBeforeSubmitModal";
 import { useDashboardAlertModal } from "./context/DashboardAlertModalContext";
 import { isPageSaved, loadDraft, saveDraft, clearProjectDrafts, markPageSaved } from "../utils/draftStorage";
@@ -1294,6 +1295,7 @@ function DashboardLayoutContent({
         <ApplicationPdfSaveSlotProvider>
           <ApplicationSignSlotProvider>
             <ApplicationLifecycleActionsSlotProvider>
+            <SectionSaveSlotProvider>
             <div className="flex min-h-0 w-full flex-1 flex-col px-2 py-3 sm:px-3">
               <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
                 <div className="shrink-0">
@@ -1324,6 +1326,7 @@ function DashboardLayoutContent({
                 </div>
               </div>
             </div>
+            </SectionSaveSlotProvider>
             </ApplicationLifecycleActionsSlotProvider>
           </ApplicationSignSlotProvider>
         </ApplicationPdfSaveSlotProvider>

@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "next/navigation";
 import { loadDraft, saveDraft, markPageSaved, isPageSaved } from "@/app/utils/draftStorage";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+import { useSectionSaveSlot } from "@/app/dashboard/context/SectionSaveSlotContext";
 import CustomSelect from "@/app/components/CustomSelect";
-import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 
 type BuildingFormData = {
   buildingType: string;
@@ -37,7 +37,9 @@ export default function BuildingDetailsPage() {
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   const { showAlert } = useDashboardAlertModal();
+  const { setSlot: setSectionSaveSlot } = useSectionSaveSlot();
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-building-details"));
+  const formRef = useRef<HTMLFormElement>(null);
 
   const {
     register,
@@ -191,6 +193,21 @@ export default function BuildingDetailsPage() {
     saveDraft(UNSAVED_BUILDING_FLAG_KEY, !currentlySaved);
   }, []);
 
+  useEffect(() => {
+    if (isReadOnlyMode) {
+      setSectionSaveSlot(null);
+      return;
+    }
+    setSectionSaveSlot({
+      onSave: () => {
+        formRef.current?.requestSubmit();
+      },
+      label: isSaved ? "Section saved" : "Save section",
+      saved: isSaved,
+    });
+    return () => setSectionSaveSlot(null);
+  }, [isReadOnlyMode, isSaved, setSectionSaveSlot]);
+
   if (isLoading) {
     return (
       <div className="flex min-h-[320px] items-center justify-center py-10">
@@ -204,7 +221,7 @@ export default function BuildingDetailsPage() {
 
   return (
     <div className="pb-2">
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form ref={formRef} onSubmit={handleSubmit(onSubmit)}>
         <fieldset
           disabled={isReadOnlyMode}
           className={
@@ -213,19 +230,6 @@ export default function BuildingDetailsPage() {
               : ""
           }
         >
-          {!isReadOnlyMode && (
-            <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
-              <button
-                type="submit"
-                className={`rounded-lg px-5 py-2 text-sm font-semibold ${
-                  isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                }`}
-              >
-                {isSaved ? "Saved" : "Save"}
-              </button>
-            </div>
-          )}
-
           <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <div>
               <label className={labelClasses}>Type {requiredMark}</label>

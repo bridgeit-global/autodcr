@@ -9,8 +9,8 @@ import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+import { useSectionSaveSlot } from "@/app/dashboard/context/SectionSaveSlotContext";
 import CustomSelect from "@/app/components/CustomSelect";
-import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
   addressLinesFromResidential,
   formatCityPincode,
@@ -93,6 +93,7 @@ type ConsultantDirectoryEntry = {
 const APPLICANT_TYPE_OPTIONS = [
   "Architect",
   "Structural Engineer",
+  "Site Supervisor",
   "Licensed Surveyor",
   "MEP Consultant",
   "Plumber",
@@ -418,6 +419,8 @@ export default function ApplicantDetailsPage() {
   const [showNewUserModal, setShowNewUserModal] = useState(false);
   const [isSaved, setIsSaved] = useState(() => isPageSaved("saved-applicant-details"));
   const [isFormAutofilled, setIsFormAutofilled] = useState(false);
+  const { setSlot: setSectionSaveSlot } = useSectionSaveSlot();
+  const formRef = useRef<HTMLFormElement>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ open: boolean; applicantId: number | null; applicantName: string; applicantType: string }>({
     open: false,
     applicantId: null,
@@ -900,6 +903,10 @@ export default function ApplicantDetailsPage() {
             registrationNo = userMetadata.structural_license_no || "";
             licenseIssueDate = userMetadata.registration_date || "";
             break;
+          case "Site Supervisor":
+            registrationNo = userMetadata.site_supervisor_license_no || "";
+            licenseIssueDate = userMetadata.registration_date || "";
+            break;
           case "Licensed Surveyor":
             registrationNo = userMetadata.lbs_license_no || "";
             licenseIssueDate = userMetadata.registration_date || "";
@@ -1155,6 +1162,9 @@ export default function ApplicantDetailsPage() {
           break;
         case "Structural Engineer":
           registrationNumber = String(meta.structural_license_no || "");
+          break;
+        case "Site Supervisor":
+          registrationNumber = String(meta.site_supervisor_license_no || "");
           break;
         case "Licensed Surveyor":
           registrationNumber = String(meta.lbs_license_no || "");
@@ -1553,6 +1563,21 @@ export default function ApplicantDetailsPage() {
     });
   };
 
+  useEffect(() => {
+    if (isReadOnlyMode) {
+      setSectionSaveSlot(null);
+      return;
+    }
+    setSectionSaveSlot({
+      onSave: () => {
+        formRef.current?.requestSubmit();
+      },
+      label: isSaved ? "Section saved" : "Save section",
+      saved: isSaved,
+    });
+    return () => setSectionSaveSlot(null);
+  }, [isReadOnlyMode, isSaved, setSectionSaveSlot]);
+
   // Persist draft as user types
   useEffect(() => {
     const subscription = watch((value) => {
@@ -1573,6 +1598,7 @@ export default function ApplicantDetailsPage() {
 
     if (
       applicantToRemove.applicantType === "Licensed Site Supervisor" ||
+      applicantToRemove.applicantType === "Site Supervisor" ||
       isLoggedInApplicantRow(applicantToRemove)
     ) {
       return;
@@ -1617,6 +1643,7 @@ export default function ApplicantDetailsPage() {
 
     if (
       applicantToRemove.applicantType === "Licensed Site Supervisor" ||
+      applicantToRemove.applicantType === "Site Supervisor" ||
       isLoggedInApplicantRow(applicantToRemove)
     ) {
       return;
@@ -1730,6 +1757,7 @@ export default function ApplicantDetailsPage() {
                           const deleteDisabled =
                             isReadOnlyMode ||
                             applicant.applicantType === "Licensed Site Supervisor" ||
+                            applicant.applicantType === "Site Supervisor" ||
                             isLoggedInUserEntry;
                           const showChangeOwner =
                             canManageProjectOwner && isOwnerRow && !isReadOnlyMode && !changingOwner;
@@ -1781,19 +1809,9 @@ export default function ApplicantDetailsPage() {
         </div>
 
           {!isReadOnlyMode && (
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold text-brand-navy">Applicant / Authorized Person Details</h2>
-              </div>
-              <button
-                type="submit"
-                className={`rounded-lg px-5 py-2 text-sm font-semibold ${
-                  isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-                }`}
-              >
-                {isSaved ? "Saved" : "Save"}
-              </button>
+          <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            <div>
+              <h2 className="text-base font-bold text-brand-navy">Applicant / Authorized Person Details</h2>
             </div>
 
             <fieldset
@@ -1951,10 +1969,10 @@ export default function ApplicantDetailsPage() {
             <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
                 <label className={labelClasses}>
-                  Registration Number {requiredMark}
+                  Registration Number
                 </label>
                 <input
-                  {...register("registrationNumber", { required: "Registration number is required" })}
+                  {...register("registrationNumber")}
                   className={`${inputClasses} ${disabledClasses}`}
                   placeholder={selectedDirectoryId ? "" : "Select from directory to auto-fill"}
                   readOnly={true}
@@ -1989,15 +2007,14 @@ export default function ApplicantDetailsPage() {
             <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
               <div>
                 <label className={labelClasses}>
-                  License Issue Date {requiredMark}
+                  License Issue Date
                 </label>
                 <input
                   type="date"
-                  {...register("licenseIssueDate", { 
-                    required: "License issue date is required",
+                  {...register("licenseIssueDate", {
                     validate: (value) => {
                       if (!value || value.trim() === "") {
-                        return "License issue date is required";
+                        return true;
                       }
                       const selected = new Date(value);
                       selected.setHours(0, 0, 0, 0);
@@ -2007,7 +2024,7 @@ export default function ApplicantDetailsPage() {
                         return "License issue date cannot be in the future";
                       }
                       return true;
-                    }
+                    },
                   })}
                   className={`${inputClasses} ${disabledClasses}`}
                   readOnly={true}

@@ -7,7 +7,7 @@ import { subscribeProjectAutofillApplied } from "@/app/lib/projectDocumentAutofi
 import { useProjectData } from "@/app/hooks/useProjectData";
 import { supabase } from "@/app/utils/supabase";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
-import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
+import { useSectionSaveSlot } from "@/app/dashboard/context/SectionSaveSlotContext";
 
 type ExtractRow = {
   id: string;
@@ -178,10 +178,24 @@ export default function AreaDetailsPage() {
   const portalTotals = useMemo(() => getPortalFieldTotals(plots), [plots]);
   const plotTotalsSummary = useMemo(
     () =>
-      plots.map((plot, index) => ({
-        label: plot.plotName?.trim() ? plot.plotName : `Plot ${index + 1}`,
-        totals: getPlotFieldTotals(plot),
-      })),
+      plots.flatMap((plot, plotIndex) =>
+        plot.extracts.map((extract, extractIndex) => ({
+          id: extract.id,
+          label:
+            extract.extractNo?.trim() && extract.extractNo.trim() !== ZERO_VALUE
+              ? extract.extractNo.trim()
+              : `Plot ${plotIndex + 1} · Extract ${extractIndex + 1}`,
+          totals: {
+            prcArea: roundArea2(Number(extract.prcArea) || 0),
+            ulcArea: roundArea2(Number(extract.ulcArea) || 0),
+            bFormArea: roundArea2(Number(extract.bFormArea) || 0),
+            conveyanceArea: roundArea2(Number(extract.conveyanceArea) || 0),
+            attorneyArea: roundArea2(Number(extract.attorneyArea) || 0),
+            dilrMapArea: roundArea2(Number(extract.dilrMapArea) || 0),
+            leaseArea: roundArea2(Number(extract.leaseArea) || 0),
+          },
+        }))
+      ),
     [plots]
   );
 
@@ -324,6 +338,8 @@ const removePlot = (plotId: string) => {
     return roundArea2(sum);
   }, [plots]);
 
+  const { setSlot: setSectionSaveSlot } = useSectionSaveSlot();
+
   const handleSave = async () => {
     if (isReadOnlyMode) return;
     // Basic validation: ensure each plot has Name, Owner Name, and Type selected
@@ -413,6 +429,19 @@ const removePlot = (plotId: string) => {
     setIsSaved(true);
   };
 
+  useEffect(() => {
+    if (isReadOnlyMode) {
+      setSectionSaveSlot(null);
+      return;
+    }
+    setSectionSaveSlot({
+      onSave: handleSave,
+      label: isSaved ? "Section saved" : "Save section",
+      saved: isSaved,
+    });
+    return () => setSectionSaveSlot(null);
+  }, [isReadOnlyMode, isSaved, setSectionSaveSlot, plots, portalTotals, totalLeaseArea]);
+
   const inputClasses =
     "h-11 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition-colors hover:border-gray-300 focus:border-brand-blue focus:bg-white focus:ring-2 focus:ring-brand-blue/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500";
   const labelClasses = "mb-1.5 block text-sm font-medium text-brand-navy";
@@ -455,20 +484,6 @@ const removePlot = (plotId: string) => {
         }
       >
       <div>
-        {!isReadOnlyMode && (
-          <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={handleSave}
-              className={`rounded-lg px-5 py-2 text-sm font-semibold ${
-                isSaved ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-              }`}
-            >
-              {isSaved ? "Saved" : "Save"}
-            </button>
-          </div>
-        )}
-
         <div className="space-y-6">
           {plots.map((plot, plotIndex) => {
             const plotTotals = getPlotFieldTotals(plot);
@@ -729,8 +744,8 @@ const removePlot = (plotId: string) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {plotTotalsSummary.map(({ label, totals }) => (
-                    <tr key={label} className="border-b border-gray-100">
+                  {plotTotalsSummary.map(({ id, label, totals }) => (
+                    <tr key={id} className="border-b border-gray-100">
                       <td className="px-3 py-2 font-medium text-gray-900">{label}</td>
                       <td className="px-3 py-2">{formatArea2(totals.prcArea)}</td>
                       <td className="px-3 py-2">{formatArea2(totals.ulcArea)}</td>

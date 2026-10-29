@@ -11,7 +11,6 @@ import {
 import {
   buildPartialConsultantMetadata,
   buildConsultantCompletionUrl,
-  EXTRA_REG_REQUIRED_BY_TYPE,
   getPrimaryRegNoFromPayload,
   normalizePhone,
   REGISTRATION_NUMBER_META_BY_TYPE,
@@ -257,12 +256,9 @@ export async function POST(request: NextRequest) {
     const alternatePhone = normalizePhone(
       requiredString(body.alternatePhone, "Phone number")
     );
-    const pan = requiredString(body.pan, "PAN").toUpperCase();
+    const pan = String(body.pan || "").trim().toUpperCase();
     const addressLine1 = requiredString(body.addressLine1, "Address line 1");
-    const registrationDate = requiredString(
-      body.registrationDate,
-      "Registration date"
-    );
+    const registrationDate = String(body.registrationDate || "").trim();
 
     if (alternatePhone.length !== 10) {
       return NextResponse.json(
@@ -273,7 +269,7 @@ export async function POST(request: NextRequest) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Enter a valid email" }, { status: 400 });
     }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+    if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
       return NextResponse.json(
         { error: "Enter a valid PAN (e.g. ABCDE1234F)" },
         { status: 400 }
@@ -288,13 +284,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const primaryReg = requiredString(
-      body[mapping.formField],
-      mapping.label
-    );
-    for (const field of EXTRA_REG_REQUIRED_BY_TYPE[consultantType] || []) {
-      requiredString(body[field], field);
-    }
+    const primaryReg = String(body[mapping.formField] || "").trim();
 
     const payload: PartialConsultantPayload = {
       consultantType,
@@ -339,7 +329,9 @@ export async function POST(request: NextRequest) {
       townPlannerExpiryDate: body.townPlannerExpiryDate as string | undefined,
     };
 
-    (payload as Record<string, string>)[mapping.formField] = primaryReg;
+    if (primaryReg) {
+      (payload as Record<string, string>)[mapping.formField] = primaryReg;
+    }
 
     const admin = createServiceRoleClient();
 

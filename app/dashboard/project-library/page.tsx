@@ -22,6 +22,7 @@ import {
   clearAllExtraDpAttachments,
 } from "@/app/utils/projectLibraryFiles";
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
+import { useSectionSaveSlot } from "@/app/dashboard/context/SectionSaveSlotContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
 import { fetchApplicationCatalogTypes } from "@/app/utils/applicationCatalog";
 import {
@@ -30,7 +31,6 @@ import {
   savedApplicationPdfLabel,
 } from "@/app/utils/projectSavedApplicationPdfUrl";
 import { supabase } from "@/app/utils/supabase";
-import { BTN_PRIMARY, BTN_SAVE_UNSAVED } from "@/app/utils/buttonClasses";
 import {
   DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
   DRAFT_PROJECT_LIBRARY_EXTRA_DOCS_KEY,
@@ -435,6 +435,7 @@ export default function ProjectLibraryPage() {
   const isReadOnlyMode = searchParams.get("mode") === "readonly";
   const { isEditMode, isLoading, projectData } = useProjectData();
   const { showAlert } = useDashboardAlertModal();
+  const { setSlot: setSectionSaveSlot } = useSectionSaveSlot();
   const { isExtracting, runExtraction } = useProjectLibraryExtraction();
   const [uploads, setUploads] = useState<(UploadRecord | undefined)[]>(() =>
     normalizeFixedUploads(
@@ -966,6 +967,15 @@ export default function ProjectLibraryPage() {
     isPageSaved("saved-project-library") &&
     staging.length === 0;
 
+  const sectionSaveBusy = isExtracting || isDetecting;
+  const sectionSaveLabel = isDetecting
+    ? "Detecting…"
+    : isExtracting
+      ? "Saving & extracting…"
+      : showSavedButton
+        ? "Section saved"
+        : "Save section";
+
   useEffect(() => {
     if (totalAttached < 1 && isSaved) {
       markLibraryDirty();
@@ -1161,6 +1171,29 @@ export default function ProjectLibraryPage() {
     persistExtraDocs(extraDocs);
   }, [extraDocs]);
 
+  useEffect(() => {
+    if (isReadOnlyMode) {
+      setSectionSaveSlot(null);
+      return;
+    }
+    setSectionSaveSlot({
+      onSave: handleSave,
+      label: sectionSaveLabel,
+      saved: showSavedButton,
+      disabled: sectionSaveBusy,
+    });
+    return () => setSectionSaveSlot(null);
+  }, [
+    isReadOnlyMode,
+    sectionSaveLabel,
+    showSavedButton,
+    sectionSaveBusy,
+    setSectionSaveSlot,
+    staging,
+    uploads,
+    extraDocs,
+  ]);
+
   if (isLoading) {
     return (
       <div className="flex min-h-[320px] items-center justify-center py-10">
@@ -1188,32 +1221,13 @@ export default function ProjectLibraryPage() {
       />
 
       <div>
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="mb-5">
           <p className="max-w-xl text-sm text-gray-500">
             Upload any documents you have — all types are optional. We’ll detect
             each type (PR / PRC, D.P. Remarks letter / Map Plan / Road Line Plan,
             C.R.Z. Remarks, Power of Attorney). You can add multiple files of
             each type.
           </p>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isReadOnlyMode || isExtracting || isDetecting}
-            className={`rounded-lg px-5 py-2 text-sm font-semibold ${
-              showSavedButton ? BTN_PRIMARY : BTN_SAVE_UNSAVED
-            } ${isReadOnlyMode || isExtracting || isDetecting ? "cursor-not-allowed opacity-70" : ""}`}
-          >
-            {isExtracting || isDetecting ? (
-              <span className="inline-flex items-center gap-2">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                {isDetecting ? "Detecting…" : "Saving & extracting…"}
-              </span>
-            ) : showSavedButton ? (
-              "Saved"
-            ) : (
-              "Save"
-            )}
-          </button>
         </div>
 
         {savedApplications.length > 0 && (
