@@ -15,6 +15,8 @@ type ProjectWizardToolbarProps = {
   isReadOnlyMode: boolean;
   isProjectDataLoading?: boolean;
   isSubmittingProject?: boolean;
+  /** Architect roster has applicants but no Owner/Developer — block Submit/Update. */
+  principalMissing?: boolean;
 };
 
 export function ReadOnlyApplicationActions() {
@@ -142,18 +144,22 @@ export default function ProjectWizardToolbar({
   isReadOnlyMode,
   isProjectDataLoading = false,
   isSubmittingProject = false,
+  principalMissing = false,
 }: ProjectWizardToolbarProps) {
   const sectionSave = useSectionSaveSlotOptional()?.slot ?? null;
 
   if (isReadOnlyMode) return null;
 
   const isSubmittedProject = isEditMode && !isDraftProject;
-  const updateDisabled = isProjectDataLoading || isSubmittingProject;
+  const updateDisabled =
+    isProjectDataLoading || isSubmittingProject || principalMissing;
 
   return (
     <div className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white px-2 py-3">
       <p className="text-sm text-gray-500">
-        Complete each section, then submit when everything is saved.
+        {principalMissing
+          ? "Add an Owner or Developer on Applicant Details before submitting or updating."
+          : "Complete each section, then submit when everything is saved."}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         {sectionSave && (
@@ -173,6 +179,11 @@ export default function ProjectWizardToolbar({
             type="button"
             onClick={onSubmitProjectClick}
             disabled={updateDisabled}
+            title={
+              principalMissing
+                ? "Add an Owner or Developer on Applicant Details first"
+                : undefined
+            }
             className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
               updateDisabled ? "cursor-not-allowed bg-brand-blue/60 text-white" : BTN_PRIMARY
             }`}
@@ -187,7 +198,15 @@ export default function ProjectWizardToolbar({
           <button
             type="button"
             onClick={onSubmitProjectClick}
-            className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${BTN_PRIMARY}`}
+            disabled={principalMissing}
+            title={
+              principalMissing
+                ? "Add an Owner or Developer on Applicant Details first"
+                : undefined
+            }
+            className={`inline-flex min-h-10 items-center rounded-lg px-5 text-sm font-semibold ${
+              principalMissing ? "cursor-not-allowed bg-brand-blue/60 text-white" : BTN_PRIMARY
+            }`}
           >
             Submit Project
           </button>

@@ -524,6 +524,13 @@ export function resolveApplicantsForOwnerValidation(
     return draft;
   }
 
+  // Draft has other applicants but no Owner/Developer — treat as intentional
+  // removal. Do not fall back to saved applicant_details or invent a principal
+  // from stale projects.user_id (that previously let Update Project succeed).
+  if (draft.length > 0) {
+    return draft;
+  }
+
   const fromProject = Array.isArray(projectData?.applicant_details?.applicants)
     ? (projectData.applicant_details.applicants as ApplicantLike[])
     : [];
@@ -534,10 +541,10 @@ export function resolveApplicantsForOwnerValidation(
   const projectOwnerId =
     typeof projectData?.user_id === "string" ? projectData.user_id.trim() : "";
   if (!projectOwnerId) {
-    return draft.length ? draft : fromProject;
+    return fromProject;
   }
 
-  const source = draft.length ? draft : fromProject;
+  const source = fromProject;
   const ownerIndex = source.findIndex((row) =>
     isOwnerApplicantType(String(row.applicantType || row.applicant_type || ""))
   );
