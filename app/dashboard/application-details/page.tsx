@@ -173,6 +173,9 @@ type PreviewProjectData = {
       letterhead_url?: string;
       letterheadUrl?: string;
       name?: string;
+      first_name?: string;
+      middle_name?: string;
+      last_name?: string;
       entity_type?: string;
       entityType?: string;
       address_line1?: string;
@@ -689,36 +692,69 @@ function pickConsultantEmailFromMeta(meta: unknown): string | undefined {
   return undefined;
 }
 
-function pickEntityNameFromMeta(meta: unknown): string | undefined {
-  if (!meta || typeof meta !== "object") return undefined;
+function unwrapUserMetaRecord(meta: unknown): Record<string, unknown> | null {
+  if (!meta || typeof meta !== "object") return null;
   const m = meta as Record<string, unknown>;
-  for (const key of ["entity_name", "entityName", "company_name", "companyName", "firm_name"]) {
-    const v = m[key];
+  for (const key of ["raw_user_meta_data", "user_metadata", "metadata"]) {
+    const nested = m[key];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      return { ...m, ...(nested as Record<string, unknown>) };
+    }
+  }
+  return m;
+}
+
+function metaString(
+  meta: Record<string, unknown> | null,
+  ...keys: string[]
+): string {
+  if (!meta) return "";
+  for (const key of keys) {
+    const v = meta[key];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
-  return undefined;
+  return "";
+}
+
+function pickEntityNameFromMeta(meta: unknown): string | undefined {
+  const m = unwrapUserMetaRecord(meta);
+  const value = metaString(
+    m,
+    "entity_name",
+    "entityName",
+    "company_name",
+    "companyName",
+    "firm_name"
+  );
+  return value || undefined;
 }
 
 function pickEntityTypeFromMeta(meta: unknown): string | undefined {
-  if (!meta || typeof meta !== "object") return undefined;
-  const m = meta as Record<string, unknown>;
-  for (const key of ["entity_type", "entityType"]) {
-    const v = m[key];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return undefined;
+  const m = unwrapUserMetaRecord(meta);
+  const value = metaString(m, "entity_type", "entityType");
+  return value || undefined;
 }
 
 function pickPersonFullNameFromMeta(meta: unknown): string | undefined {
-  if (!meta || typeof meta !== "object") return undefined;
-  const m = meta as Record<string, unknown>;
-  const first = typeof m.first_name === "string" ? m.first_name.trim() : "";
-  const middle = typeof m.middle_name === "string" ? m.middle_name.trim() : "";
-  const last = typeof m.last_name === "string" ? m.last_name.trim() : "";
+  const m = unwrapUserMetaRecord(meta);
+  if (!m) return undefined;
+  const first = metaString(m, "first_name", "firstName");
+  const middle = metaString(m, "middle_name", "middleName");
+  const last = metaString(m, "last_name", "lastName");
   const full = [first, middle, last].filter(Boolean).join(" ").trim();
   if (full) return full;
-  const fallback = typeof m.name === "string" ? m.name.trim() : "";
+  const fallback = metaString(m, "name");
+  const company = pickEntityNameFromMeta(m) || "";
+  if (fallback && company && fallback.toLowerCase() === company.toLowerCase()) {
+    return undefined;
+  }
   return fallback || undefined;
+}
+
+function isAuthUserUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value
+  );
 }
 
 function pickLetterheadUrlFromMeta(meta: unknown): string | undefined {
@@ -768,13 +804,16 @@ async function fetchRawUserMetadataFromApi(
   const { data: authData } = await supabase.auth.getUser();
   const authUuid = authData.user?.id;
 
-  const candidates = [
-    ...new Set(
-      [...(preferredPortalIds ?? []).map((s) => String(s).trim()), portalFromMeta, portalFromStorage, authUuid].filter(
-        Boolean
-      )
-    ),
-  ] as string[];
+  const preferred = [
+    ...new Set((preferredPortalIds ?? []).map((s) => String(s).trim()).filter(Boolean)),
+  ];
+  // When looking up a specific owner/consultant, do not fall back to the
+  // logged-in architect — that previously returned the wrong profile.
+  const candidates = (
+    preferred.length > 0
+      ? preferred
+      : [portalFromMeta, portalFromStorage, authUuid]
+  ).filter((id): id is string => Boolean(id));
 
   for (const user_id of candidates) {
     try {
@@ -1059,15 +1098,14 @@ async function buildApplicationPreviewContext(
   const ownerLookupUserIds = [
     ...new Set(
       [
-        normalizeLookupId(effectiveProjectData?.user_id),
         ...ownerApplicants.flatMap((owner) => [
           normalizeLookupId(owner.user_id),
           normalizeLookupId(owner.userId),
-          normalizeLookupId(owner.id),
           normalizeLookupId((owner as { owner_id?: unknown }).owner_id),
           normalizeLookupId((owner as { ownerId?: unknown }).ownerId),
         ]),
-      ].filter(Boolean)
+        normalizeLookupId(effectiveProjectData?.user_id),
+      ].filter((id) => Boolean(id) && isAuthUserUuid(id))
     ),
   ];
   let ownerMetaSnapshot: unknown = null;

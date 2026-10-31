@@ -111,7 +111,9 @@ function sacFromAssessmentExtractions(
 ): string[] {
   const numbers = new Set<string>();
   for (const extraction of extractions.filter(
-    (e) => e.documentType === "assessment-department"
+    (e) =>
+      e.documentType === "assessment-department" ||
+      e.documentType === "property-tax-bill"
   )) {
     for (const sac of splitSacNumbers(extraction.extracted.sacNo)) {
       numbers.add(sac);

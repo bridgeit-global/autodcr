@@ -25,6 +25,24 @@ function pickText(...values: Array<unknown>): string {
   return "";
 }
 
+/** Person name from an applicant row / owner profile. Ignores firm `name`. */
+export function personNameFromApplicantRecord(
+  rec: Record<string, unknown> | null | undefined
+): string {
+  if (!rec) return "";
+  const first = pickText(rec.first_name, rec.firstName);
+  const middle = pickText(rec.middle_name, rec.middleName);
+  const last = pickText(rec.last_name, rec.lastName);
+  return [first, middle, last].filter(Boolean).join(" ").trim();
+}
+
+/** Person name when stored; otherwise the row `name` (consultants, individuals). */
+export function displayNameFromApplicantRecord(
+  rec: Record<string, unknown> | null | undefined
+): string {
+  return personNameFromApplicantRecord(rec) || pickText(rec?.name) || "";
+}
+
 /** Company / firm name from auth.users `raw_user_meta_data` (owner registration). */
 export function pickEntityNameFromUserMeta(
   meta: Record<string, unknown> | null | undefined
@@ -172,6 +190,12 @@ export function serializeApplicantRowForStorage(
     row.companyName
   );
   if (entityName) out.entity_name = entityName;
+  const firstName = pickText(row.first_name, row.firstName);
+  const middleName = pickText(row.middle_name, row.middleName);
+  const lastName = pickText(row.last_name, row.lastName);
+  if (firstName) out.first_name = firstName;
+  if (middleName) out.middle_name = middleName;
+  if (lastName) out.last_name = lastName;
 
   return out;
 }

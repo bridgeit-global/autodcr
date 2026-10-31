@@ -47,6 +47,11 @@ export {
   type AssessmentDepartment,
 } from "./assessmentDepartment";
 export {
+  propertyTaxBill,
+  propertyTaxBillSchema,
+  type PropertyTaxBill,
+} from "./propertyTaxBill";
+export {
   airportAuthorityOfIndia,
   airportAuthorityOfIndiaSchema,
   type AirportAuthorityOfIndia,

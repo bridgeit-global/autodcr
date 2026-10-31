@@ -51,6 +51,7 @@ type FolderSection =
   | "power-of-attorney"
   | "assessment-department"
   | "airport-authority-of-india"
+  | "property-tax-bill"
   | "saved-applications"
   | "other";
 
@@ -94,6 +95,7 @@ const FOLDER_LABELS: Record<FolderSection, string> = {
   "power-of-attorney": PROJECT_LIBRARY_DOCUMENT_NAMES[3],
   "assessment-department": PROJECT_LIBRARY_DOCUMENT_NAMES[4],
   "airport-authority-of-india": PROJECT_LIBRARY_DOCUMENT_NAMES[5],
+  "property-tax-bill": PROJECT_LIBRARY_DOCUMENT_NAMES[6],
   "saved-applications": "Saved Applications",
   other: "Other",
 };
@@ -105,6 +107,7 @@ const FOLDER_ORDER: FolderSection[] = [
   "power-of-attorney",
   "assessment-department",
   "airport-authority-of-india",
+  "property-tax-bill",
   "saved-applications",
   "other",
 ];
@@ -167,6 +170,7 @@ function folderSectionFromPath(path: string): FolderSection {
     if (kind.slot === 3) return "power-of-attorney";
     if (kind.slot === 4) return "assessment-department";
     if (kind.slot === 5) return "airport-authority-of-india";
+    if (kind.slot === 6) return "property-tax-bill";
     return "other";
   }
   if (kind.type === "pr-card") return "pr-card";
@@ -181,6 +185,7 @@ function folderSectionFromPath(path: string): FolderSection {
   if (kind.type === "power-of-attorney") return "power-of-attorney";
   if (kind.type === "assessment-department") return "assessment-department";
   if (kind.type === "airport-authority-of-india") return "airport-authority-of-india";
+  if (kind.type === "property-tax-bill") return "property-tax-bill";
   return "other";
 }
 
@@ -297,6 +302,7 @@ function extraTypeFromLibraryPath(path: string): ProjectLibraryExtraDocType | nu
   if (p.includes("airport-authority-of-india/extra-")) {
     return "airport-authority-of-india";
   }
+  if (p.includes("property-tax-bill/extra-")) return "property-tax-bill";
   return null;
 }
 
@@ -377,7 +383,7 @@ async function resolvePreviewBlobUrl(
   // Last resort: list the document folder and try sequential extras / primary.
   const raw = row.path.trim().replace(/^\/+/, "");
   const folderMatch = raw.match(
-    /^(pr-card|dp-remarks|crz-remarks|power-of-attorney|assessment-department|airport-authority-of-india)\//i
+    /^(pr-card|dp-remarks|crz-remarks|power-of-attorney|assessment-department|airport-authority-of-india|property-tax-bill)\//i
   );
   if (folderMatch) {
     const folderPrefix = `${row.projectId}/project-library/${folderMatch[1]}`;

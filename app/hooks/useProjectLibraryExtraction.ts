@@ -62,6 +62,12 @@ const FIXED_JOBS: Array<Omit<ExtractionJob, "loadBlob"> & { index: number }> = [
     documentType: "airport-authority-of-india",
     label: "Airport Authority of India",
   },
+  {
+    index: 6,
+    slot: "property-tax-bill",
+    documentType: "property-tax-bill",
+    label: "Property Tax Bill",
+  },
 ];
 
 const EXTRACT_CONCURRENCY = 5;
@@ -73,6 +79,7 @@ const EXTRACTABLE_EXTRA_TYPES = [
   "power-of-attorney",
   "assessment-department",
   "airport-authority-of-india",
+  "property-tax-bill",
 ] as const;
 
 type ExtractableExtraType = (typeof EXTRACTABLE_EXTRA_TYPES)[number];
@@ -110,6 +117,11 @@ const EXTRA_JOB_META: Record<
     slot: "airport-authority-of-india",
     documentType: "airport-authority-of-india",
     label: "Additional Airport Authority of India",
+  },
+  "property-tax-bill": {
+    slot: "property-tax-bill",
+    documentType: "property-tax-bill",
+    label: "Additional Property Tax Bill",
   },
 };
 

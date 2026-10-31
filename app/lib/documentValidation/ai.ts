@@ -39,7 +39,9 @@ const CLASSIFY_TYPE_HINTS: Partial<Record<DocumentType, string>> = {
   "power-of-attorney":
     "Power of Attorney (POA) — legal deed granting authority over property (principal / attorney names, property details)",
   "assessment-department":
-    "BMC Assessment & Collection Department document — No Dues Certificate, Annexure A capital-value calculation, property tax assessment with SAC NO / Prop A/C No (2 letters + 13 digits). Not a PR card, DP remarks, or CRZ remarks.",
+    "BMC Assessment & Collection Department document — No Dues Certificate, Annexure A capital-value calculation, property tax assessment with SAC NO / Prop A/C No (2 letters + 13 digits). Not a Property Tax Bill, PR card, DP remarks, or CRZ remarks.",
+  "property-tax-bill":
+    "BMC Property Tax Bill / property tax demand bill / देयक — current or past year tax bill with SAC NO / Prop A/C No (2 letters + 13 digits). Not a No Dues Certificate, Annexure A, PR card, DP, or CRZ.",
   "airport-authority-of-india":
     "Airport Authority of India (AAI) / SNCR NOC or height clearance certificate — often titled SNCR, with Valid up to / Valid Upto / validity end date. Not Assessment, PR card, DP, or CRZ.",
 };

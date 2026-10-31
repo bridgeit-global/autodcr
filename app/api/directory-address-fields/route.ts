@@ -17,6 +17,9 @@ type AddressFields = {
   entity_type: string;
   registration_number: string;
   license_issue_date: string;
+  first_name: string;
+  middle_name: string;
+  last_name: string;
 };
 
 function pickText(...values: Array<unknown>): string {
@@ -69,6 +72,9 @@ function addressFieldsFromMeta(meta: Record<string, unknown>): AddressFields {
     entity_type,
     registration_number: getOwnerRegistrationNumberFromMetadata(meta, entity_type),
     license_issue_date: licenseIssueDateFromMeta(meta),
+    first_name: pickText(meta.first_name, meta.firstName),
+    middle_name: pickText(meta.middle_name, meta.middleName),
+    last_name: pickText(meta.last_name, meta.lastName),
   };
 }
 

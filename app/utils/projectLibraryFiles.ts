@@ -46,7 +46,8 @@ export type ExtraLibraryDocType =
   | "crz-remarks"
   | "power-of-attorney"
   | "assessment-department"
-  | "airport-authority-of-india";
+  | "airport-authority-of-india"
+  | "property-tax-bill";
 
 const keyForIndex = (index: number) => `slot:${index}`;
 const keyForExtraPr = (slotId: string) => `extra-pr:${slotId}`;

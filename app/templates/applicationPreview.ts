@@ -6,6 +6,7 @@ import {
   addressLinesFromApplicantRecord,
   entityTypeToSignatoryDesignation,
   formatAddressLinesForLetterDisplay,
+  personNameFromApplicantRecord,
   pickCityPincodeFromRecord,
   stripTrailingAddressPunctuation,
 } from "@/app/utils/applicantRecordFields";
@@ -576,18 +577,19 @@ export function mapToPdfFieldValues(
     ? (formatCoaExpiryDisplay(source?.lbsExpiryDate) ?? "")
     : (formatCoaExpiryDisplay(source?.coaExpiryDate) ?? "");
   const clientCompanyNameEarly = source?.clientCompanyName?.trim() || "";
-  const rawClientNameCandidates = [
-    source?.clientName?.trim(),
-    fields.ApplicantName?.trim(),
-    source?.projectData?.title?.trim(),
-  ].filter((v): v is string => Boolean(v && v.trim()));
-  // Prefer a person name; skip values that are just the owner company / project title firm.
+  const personFromOwnerRow = personNameFromApplicantRecord(
+    ownerApplicant as Record<string, unknown> | undefined
+  );
+  const sourceClientName = source?.clientName?.trim() || "";
+  const sourceClientIsCompany =
+    Boolean(sourceClientName) &&
+    Boolean(clientCompanyNameEarly) &&
+    sourceClientName.toLowerCase() === clientCompanyNameEarly.toLowerCase();
+  // Signatory line is the designated partner / director person, never the firm `name`.
   const clientName =
-    rawClientNameCandidates.find(
-      (name) =>
-        !clientCompanyNameEarly ||
-        name.toLowerCase() !== clientCompanyNameEarly.toLowerCase()
-    ) || "-";
+    personFromOwnerRow ||
+    (!sourceClientIsCompany ? sourceClientName : "") ||
+    "-";
   const clientAddressFormatted = formatAddressLinesForLetterDisplay(
     sanitizeAddressLine(
       pickText(
@@ -1532,8 +1534,11 @@ const SAVED_PDF_QR_LOCK_FN = `function __lockAppSavedPdfQr(){
 }`;
 
 /** Paged.js auto-runs on `interactive`, before styles/fonts settle in blob iframes — content stays in a hidden <template>. */
-const PAGED_PREVIEW_START_SCRIPT = `<script>
+function buildPagedPreviewStartScript(letterheadCssUrl: string): string {
+  const lh = letterheadCssUrl.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `<script>
 (function(){
+  var LETTERHEAD_URL = '${lh}';
   async function startPagedPreview(){
     if (document.querySelector(".pagedjs_page")) return;
     if (!window.Paged || !window.Paged.Previewer) return;
@@ -1543,6 +1548,54 @@ const PAGED_PREVIEW_START_SCRIPT = `<script>
       }
       var previewer = new window.Paged.Previewer();
       await previewer.preview();
+      // Paged.js overwrites stylesheet page chrome; force paper-sheet preview chrome inline.
+      var pagesWrap = document.querySelector(".pagedjs_pages");
+      if (pagesWrap) {
+        pagesWrap.style.setProperty("display", "flex", "important");
+        pagesWrap.style.setProperty("flex-direction", "column", "important");
+        pagesWrap.style.setProperty("align-items", "center", "important");
+        pagesWrap.style.setProperty("gap", "32px", "important");
+        pagesWrap.style.setProperty("padding", "28px 16px 36px", "important");
+        pagesWrap.style.setProperty("background-color", "transparent", "important");
+        pagesWrap.style.setProperty("box-sizing", "border-box", "important");
+      }
+      document.documentElement.style.setProperty("background-color", "#ffffff", "important");
+      if (document.body) {
+        document.body.style.setProperty("background-color", "#ffffff", "important");
+      }
+      document.querySelectorAll(".pagedjs_page").forEach(function (page, index) {
+        var isFirst = index === 0 || page.classList.contains("pagedjs_first_page");
+        page.style.setProperty("display", "block", "important");
+        page.style.setProperty("margin", "0 auto", "important");
+        page.style.setProperty("border", "1px solid #e5e7eb", "important");
+        page.style.setProperty("border-radius", "12px", "important");
+        page.style.setProperty("outline", "none", "important");
+        page.style.setProperty("box-shadow", "none", "important");
+        page.style.setProperty("filter", "none", "important");
+        page.style.setProperty("overflow", "hidden", "important");
+        page.style.setProperty("background-color", "#ffffff", "important");
+        // Outer page never carries letterhead — a second paint here doubles the left brand bar.
+        page.style.setProperty("background-image", "none", "important");
+        page.querySelectorAll(".pagedjs_sheet, .pagedjs_pagebox, .pagedjs_area").forEach(function (el) {
+          el.style.setProperty("box-shadow", "none", "important");
+          el.style.setProperty("filter", "none", "important");
+          el.style.setProperty("background-image", "none", "important");
+          el.style.setProperty("background-color", "transparent", "important");
+        });
+        if (isFirst && LETTERHEAD_URL) {
+          // Single paint on pagebox. Overscale slightly so scanned letterhead
+          // edge dirt (beige left strip) is clipped by overflow:hidden on the page.
+          var target =
+            page.querySelector(".pagedjs_pagebox") ||
+            page.querySelector(".pagedjs_sheet") ||
+            page;
+          target.style.setProperty("background-image", "url('" + LETTERHEAD_URL + "')", "important");
+          target.style.setProperty("background-repeat", "no-repeat", "important");
+          target.style.setProperty("background-size", "calc(100% + 24px) 100%", "important");
+          target.style.setProperty("background-position", "-12px 0", "important");
+          target.style.setProperty("background-color", "#ffffff", "important");
+        }
+      });
       if (typeof __lockAppSavedPdfQr === "function") __lockAppSavedPdfQr();
     } catch (e) {
       console.warn("[application-preview] Paged.js layout failed", e);
@@ -1555,6 +1608,7 @@ const PAGED_PREVIEW_START_SCRIPT = `<script>
   }
 })();
 </script>`;
+}
 
 const SAVED_PDF_QR_LOCK_SCRIPT_PAGED = `<script>
 ${SAVED_PDF_QR_LOCK_FN}
@@ -1812,13 +1866,18 @@ function injectPaginatedStyles(
   const isArchitectTemplate = letterLayout && templateType === "Architect";
   const useArchitectLayout =
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
-  const pageMarginTop = useArchitectLayout
+  const pageMarginTopFirst = useArchitectLayout
     ? "72pt"
     : letterLayout
       ? "95pt"
       : letterheadCssUrl
         ? "72pt"
         : "18pt";
+  const pageMarginTop = useArchitectLayout
+    ? "36pt"
+    : letterLayout
+      ? "48pt"
+      : "18pt";
   const pageMarginBottom = isAcceptanceLetter
     ? "64pt"
     : useArchitectLayout
@@ -1982,6 +2041,9 @@ function injectPaginatedStyles(
       padding-bottom: 20pt;
     }
   }
+  @page :first {
+    margin: ${pageMarginTopFirst} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
+  }
   @page WordSection1 {
     size: A4;
     margin: ${pageMarginTop} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
@@ -1994,11 +2056,14 @@ function injectPaginatedStyles(
       padding-bottom: 20pt;
     }
   }
+  @page WordSection1:first {
+    margin: ${pageMarginTopFirst} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
+  }
 
   html, body {
     margin: 0;
     padding: 0;
-    background-color: #f3f4f6 !important;
+    background-color: #ffffff !important;
     background-image: none !important;
     overflow-x: hidden !important;
   }
@@ -2112,32 +2177,48 @@ function injectPaginatedStyles(
     flex-wrap: nowrap !important;
     align-items: center !important;
     width: 100% !important;
-    padding: 12px 0;
+    box-sizing: border-box !important;
+    padding: 28px 16px 36px !important;
+    gap: 32px !important;
+    background-color: transparent !important;
   }
   .pagedjs_page,
-  .pagedjs_pagebox {
+  .pagedjs_pagebox,
+  .pagedjs_sheet,
+  .pagedjs_area {
     background-color: #ffffff;
-    ${letterheadCssUrl ? `background-image: url('${letterheadCssUrl}') !important;` : ""}
-    ${letterheadCssUrl ? "background-repeat: no-repeat !important;" : ""}
-    ${letterheadCssUrl ? "background-size: 210mm 297mm !important;" : ""}
-    ${letterheadCssUrl ? "background-position: top center !important;" : ""}
-  }
-  .pagedjs_page {
-    display: block !important;
-    float: none !important;
-    clear: both !important;
-    flex: 0 0 auto !important;
-    width: var(--pagedjs-width) !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    margin: 0 auto 16px auto !important;
-    overflow: hidden !important;
-  }
-  .pagedjs_sheet {
-    overflow: hidden !important;
+    background-image: none;
   }
   ${
     letterheadCssUrl
       ? `
+  /* Letterhead once on first pagebox only — outer .pagedjs_page stays clear (no doubled left bar). */
+  .pagedjs_page.pagedjs_first_page,
+  .pagedjs_pages > .pagedjs_page:first-of-type {
+    background-image: none !important;
+  }
+  .pagedjs_page.pagedjs_first_page .pagedjs_pagebox,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_pagebox {
+    background-image: url('${letterheadCssUrl}') !important;
+    background-repeat: no-repeat !important;
+    /* Overscale + shift crops scanned letterhead edge dirt (left beige strip). */
+    background-size: calc(100% + 24px) 100% !important;
+    background-position: -12px 0 !important;
+    background-color: #ffffff !important;
+  }
+  .pagedjs_page.pagedjs_first_page .pagedjs_sheet,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_sheet,
+  .pagedjs_page.pagedjs_first_page .pagedjs_area,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_area {
+    background-image: none !important;
+    background-color: transparent !important;
+  }
+  .pagedjs_page ~ .pagedjs_page,
+  .pagedjs_page ~ .pagedjs_page .pagedjs_sheet,
+  .pagedjs_page ~ .pagedjs_page .pagedjs_pagebox,
+  .pagedjs_page ~ .pagedjs_page .pagedjs_area {
+    background-image: none !important;
+  }
   .pagedjs_page_content,
   .pagedjs_page_content > div,
   .pagedjs_page_content .page,
@@ -2147,6 +2228,23 @@ function injectPaginatedStyles(
     background-image: none !important;
   }`
       : ""
+  }
+  .pagedjs_page {
+    display: block !important;
+    float: none !important;
+    clear: both !important;
+    flex: 0 0 auto !important;
+    width: var(--pagedjs-width) !important;
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    outline: none !important;
+    margin: 0 auto !important;
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+  }
+  .pagedjs_sheet {
+    overflow: hidden !important;
   }
 
   /* Forms (IOD, Concession, etc.) must be allowed to split or Paged.js hides the document. */
@@ -2161,11 +2259,6 @@ function injectPaginatedStyles(
     break-inside: auto !important;
     page-break-inside: auto !important;
   }`
-  }
-
-  /* Letterhead only on page 1; continuation pages stay plain white. */
-  .pagedjs_pages > .pagedjs_page ~ .pagedjs_page {
-    background-image: none !important;
   }
 
   .pagedjs_margin-bottom-center {
@@ -2187,9 +2280,13 @@ function injectPaginatedStyles(
       display: block !important;
       padding: 0 !important;
       width: auto !important;
+      gap: 0 !important;
+      background-color: #ffffff !important;
     }
     .pagedjs_page {
       box-shadow: none !important;
+      border: none !important;
+      outline: none !important;
       margin: 0 !important;
       overflow: hidden !important;
     }
@@ -2199,7 +2296,7 @@ function injectPaginatedStyles(
 </style>
 ${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
 <script src="${previewOrigin}/pagedjs/paged.polyfill.js"></script>
-${PAGED_PREVIEW_START_SCRIPT}`;
+${buildPagedPreviewStartScript(letterheadCssUrl)}`;
 
   let out = html;
   if (/<\/head>/i.test(out)) {
@@ -2263,7 +2360,7 @@ function injectPlumberPreviewPages(
   html, body {
     margin: 0;
     padding: 0;
-    background-color: #f3f4f6 !important;
+    background-color: #ffffff !important;
     background-image: none !important;
     overflow-x: hidden !important;
   }
@@ -2273,7 +2370,10 @@ function injectPlumberPreviewPages(
     flex-wrap: nowrap !important;
     align-items: center !important;
     width: 100% !important;
-    padding: 4px 0;
+    box-sizing: border-box !important;
+    padding: 28px 16px 36px !important;
+    gap: 32px !important;
+    background-color: transparent !important;
   }
   .preview-sheet {
     display: block !important;
@@ -2283,8 +2383,11 @@ function injectPlumberPreviewPages(
     width: 210mm !important;
     min-height: 297mm;
     background: #ffffff;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    margin: 0 auto 8px auto !important;
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    outline: none !important;
+    margin: 0 auto !important;
     box-sizing: border-box;
     overflow: hidden !important;
   }
@@ -2460,6 +2563,23 @@ export async function generateApplicationPreviewHtml(
   });
 }
 
+/** Catalog maps `$project_Client_Name` from owner `name` (firm). Keep the person name. */
+function keepOwnerPersonNameOnPreviewFields(
+  formValues: Record<string, string | undefined>,
+  source?: ApplicationPreviewSource
+) {
+  const applicants = source?.projectData?.applicant_details?.applicants || [];
+  const ownerApplicant = applicants.find((applicant) =>
+    isOwnerApplicantType(applicant.applicantType || applicant.applicant_type || "")
+  );
+  const person = personNameFromApplicantRecord(
+    ownerApplicant as Record<string, unknown> | undefined
+  );
+  if (!person) return;
+  formValues.project_Client_Name = person;
+  formValues["{{CLIENT_NAME}}"] = person;
+}
+
 export async function fetchApplicationPreviewHtmlRaw(
   fields: TemplateFields,
   templateType: TemplateType,
@@ -2487,6 +2607,7 @@ export async function fetchApplicationPreviewHtmlRaw(
     );
     Object.assign(formValues, catalogFields);
     applyCatalogFieldOverrides(formValues, source?.fieldOverrides, preloadedPlaceholders);
+    keepOwnerPersonNameOnPreviewFields(formValues, source);
     if (!catalogDocumentShowsLetterhead(preloadedDoc)) {
       delete formValues.project_Letterhead_Image_Url;
       delete formValues["{{LETTERHEAD_URL}}"];
@@ -2531,6 +2652,7 @@ export async function fetchApplicationPreviewHtmlRaw(
         );
         Object.assign(formValues, catalogFields);
         applyCatalogFieldOverrides(formValues, source?.fieldOverrides, placeholders);
+        keepOwnerPersonNameOnPreviewFields(formValues, source);
         if (!catalogDocumentShowsLetterhead(variantDoc)) {
           delete formValues.project_Letterhead_Image_Url;
           delete formValues["{{LETTERHEAD_URL}}"];
@@ -2549,6 +2671,7 @@ export async function fetchApplicationPreviewHtmlRaw(
   }
 
   applyCatalogFieldOverrides(formValues, source?.fieldOverrides);
+  keepOwnerPersonNameOnPreviewFields(formValues, source);
 
   let access_token = opts?.accessToken?.trim();
   if (!access_token) {
