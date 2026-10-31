@@ -69,6 +69,9 @@ type ApplicantRow = {
   pincode?: string;
   entity_type?: string;
   entity_name?: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
 };
 
 type ConsultantDirectoryEntry = {
@@ -88,6 +91,9 @@ type ConsultantDirectoryEntry = {
   entity_name?: string;
   entity_type?: string;
   letterhead_url?: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
 };
 
 const APPLICANT_TYPE_OPTIONS = [
@@ -331,6 +337,9 @@ const mapStoredApplicantsToRows = (applicantsList: unknown[]): ApplicantRow[] =>
       app.company_name,
       app.companyName
     ) || undefined,
+    first_name: pickText(app.first_name, app.firstName) || undefined,
+    middle_name: pickText(app.middle_name, app.middleName) || undefined,
+    last_name: pickText(app.last_name, app.lastName) || undefined,
   }));
 
 const mapRosterJsonToApplicantRows = (rows: unknown[]): ApplicantRow[] =>
@@ -372,6 +381,9 @@ const mapRosterJsonToApplicantRows = (rows: unknown[]): ApplicantRow[] =>
             row.company_name,
             row.companyName
           ) || undefined,
+        first_name: pickText(row.first_name, row.firstName) || undefined,
+        middle_name: pickText(row.middle_name, row.middleName) || undefined,
+        last_name: pickText(row.last_name, row.lastName) || undefined,
       };
     })
   );
@@ -681,6 +693,12 @@ export default function ApplicantDetailsPage() {
               row.letterhead_url,
               row.user_metadata?.letterhead_url
             ) || undefined,
+          first_name:
+            pickText(row.first_name, row.user_metadata?.first_name) || undefined,
+          middle_name:
+            pickText(row.middle_name, row.user_metadata?.middle_name) || undefined,
+          last_name:
+            pickText(row.last_name, row.user_metadata?.last_name) || undefined,
         };
         }) ?? [];
 
@@ -1237,6 +1255,9 @@ export default function ApplicantDetailsPage() {
         entity_type: entityType || undefined,
         letterhead_url:
           pickText(meta.letterhead_url, meta.letterheadUrl) || undefined,
+        first_name: pickText(meta.first_name) || undefined,
+        middle_name: pickText(meta.middle_name) || undefined,
+        last_name: pickText(meta.last_name) || undefined,
       };
       setDirectoryOptions((prev) => {
         if (prev.some((e) => e.id === entry.id)) {
@@ -1348,35 +1369,55 @@ export default function ApplicantDetailsPage() {
       );
     }
 
-    // Backfill entity_name from auth profile for any applicant row that is missing it
-    // (owners already get this via ensureOwner; consultants rely on directory/profile meta).
-    const rowsNeedingEntityName = (rosterForSave.applicants as ApplicantRow[]).filter(
-      (row) => row.user_id?.trim() && !pickText(row.entity_name)
+    // Backfill firm + person names from auth profile for rows that were saved before
+    // those fields existed on applicant_details.
+    const rowsNeedingProfile = (rosterForSave.applicants as ApplicantRow[]).filter(
+      (row) =>
+        Boolean(row.user_id?.trim()) &&
+        (!pickText(row.entity_name) ||
+          !pickText(row.first_name) ||
+          !pickText(row.last_name))
     );
-    if (rowsNeedingEntityName.length > 0) {
+    if (rowsNeedingProfile.length > 0) {
       try {
         const res = await fetch("/api/directory-address-fields", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_ids: rowsNeedingEntityName.map((row) => row.user_id),
+            user_ids: rowsNeedingProfile.map((row) => row.user_id),
           }),
         });
         if (res.ok) {
           const payload = (await res.json()) as {
-            profiles?: Record<string, { entity_name?: string }>;
+            profiles?: Record<
+              string,
+              {
+                entity_name?: string;
+                first_name?: string;
+                middle_name?: string;
+                last_name?: string;
+              }
+            >;
           };
           const profiles = payload.profiles || {};
           rosterForSave = {
             applicants: (rosterForSave.applicants as ApplicantRow[]).map((row) => {
-              if (pickText(row.entity_name) || !row.user_id) return row;
-              const entityName = pickText(profiles[row.user_id]?.entity_name);
-              return entityName ? { ...row, entity_name: entityName } : row;
+              if (!row.user_id) return row;
+              const profile = profiles[row.user_id];
+              if (!profile) return row;
+              return {
+                ...row,
+                entity_name: pickText(row.entity_name) || pickText(profile.entity_name) || row.entity_name,
+                first_name: pickText(row.first_name) || pickText(profile.first_name) || row.first_name,
+                middle_name:
+                  pickText(row.middle_name) || pickText(profile.middle_name) || row.middle_name,
+                last_name: pickText(row.last_name) || pickText(profile.last_name) || row.last_name,
+              };
             }),
           };
         }
       } catch (enrichErr) {
-        console.error("Error enriching applicant entity_name before save:", enrichErr);
+        console.error("Error enriching applicant profile names before save:", enrichErr);
       }
     }
 
@@ -1502,6 +1543,15 @@ export default function ApplicantDetailsPage() {
       pincode: pincode || undefined,
       ...(entityNameFromDirectory ? { entity_name: entityNameFromDirectory } : {}),
       ...(entityTypeFromDirectory ? { entity_type: entityTypeFromDirectory } : {}),
+      ...(pickText(selectedDirectoryEntry?.first_name)
+        ? { first_name: pickText(selectedDirectoryEntry?.first_name) }
+        : {}),
+      ...(pickText(selectedDirectoryEntry?.middle_name)
+        ? { middle_name: pickText(selectedDirectoryEntry?.middle_name) }
+        : {}),
+      ...(pickText(selectedDirectoryEntry?.last_name)
+        ? { last_name: pickText(selectedDirectoryEntry?.last_name) }
+        : {}),
     };
 
     const isAddingOwner = isPrincipalApplicantType(data.applicantType);
@@ -1734,9 +1784,31 @@ export default function ApplicantDetailsPage() {
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3 text-center`}>{applicant.id}</td>
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.applicantType}</td>
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>
-                        <p className="font-semibold text-gray-900">{applicant.name}</p>
-                        <p className="text-xs text-gray-600">Ph: {applicant.contactNumber}</p>
-                        <p className="text-xs text-gray-600">Email: {applicant.email}</p>
+                        {(() => {
+                          const personName = [
+                            applicant.first_name,
+                            applicant.middle_name,
+                            applicant.last_name,
+                          ]
+                            .filter((part) => Boolean(part && String(part).trim()))
+                            .join(" ")
+                            .trim();
+                          const firmName = (applicant.entity_name || "").trim();
+                          const headline = personName || applicant.name;
+                          const showFirm =
+                            Boolean(firmName) &&
+                            firmName.toLowerCase() !== headline.toLowerCase();
+                          return (
+                            <>
+                              <p className="font-semibold text-gray-900">{headline}</p>
+                              {showFirm ? (
+                                <p className="text-xs text-gray-700">{firmName}</p>
+                              ) : null}
+                              <p className="text-xs text-gray-600">Ph: {applicant.contactNumber}</p>
+                              <p className="text-xs text-gray-600">Email: {applicant.email}</p>
+                            </>
+                          );
+                        })()}
                       </td>
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.registrationNo}</td>
                       <td className={`border-r ${index !== applicants.length - 1 ? "border-b" : ""} border-gray-200 px-4 py-3`}>{applicant.licenseIssueDate || "-"}</td>

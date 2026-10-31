@@ -4,6 +4,7 @@ import {
   architectAppointmentLetter,
   airportAuthorityOfIndia,
   assessmentDepartment,
+  propertyTaxBill,
   crzRemarks,
   dpRemarks,
   dpRemarksMap,
@@ -36,6 +37,7 @@ export const documents = {
   "crz-remarks": crzRemarks,
   "power-of-attorney": powerOfAttorney,
   "assessment-department": assessmentDepartment,
+  "property-tax-bill": propertyTaxBill,
   "airport-authority-of-india": airportAuthorityOfIndia,
 } as const;
 

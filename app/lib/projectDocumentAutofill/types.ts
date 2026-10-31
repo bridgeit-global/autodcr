@@ -7,7 +7,8 @@ export type ProjectLibraryDocSlot =
   | "crz-remarks"
   | "power-of-attorney"
   | "assessment-department"
-  | "airport-authority-of-india";
+  | "airport-authority-of-india"
+  | "property-tax-bill";
 
 export type ProjectLibraryExtraction = {
   slot: ProjectLibraryDocSlot;

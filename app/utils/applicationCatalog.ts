@@ -900,12 +900,17 @@ export function resolveCatalogPlaceholderValue(
     const row = pickApplicant(applicants, null, true);
     if (!row) return "";
     const key = placeholder.source_column || "";
+    if (key === "name") {
+      const first = stringifyCatalogValue(row.first_name ?? row.firstName);
+      const middle = stringifyCatalogValue(row.middle_name ?? row.middleName);
+      const last = stringifyCatalogValue(row.last_name ?? row.lastName);
+      const person = [first, middle, last].filter(Boolean).join(" ").trim();
+      return person || stringifyCatalogValue(row.name);
+    }
     const alt =
       key === "entity_name"
         ? row.entity_name ?? row.entityName
-        : key === "name"
-          ? row.name
-          : row[key] ?? row[key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())];
+        : row[key] ?? row[key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())];
     return stringifyCatalogValue(alt);
   }
   if (placeholder.source_table === "applicants") {

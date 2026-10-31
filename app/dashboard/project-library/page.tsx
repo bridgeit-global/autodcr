@@ -68,7 +68,8 @@ type LibraryDocType =
   | "crz-remarks"
   | "power-of-attorney"
   | "assessment-department"
-  | "airport-authority-of-india";
+  | "airport-authority-of-india"
+  | "property-tax-bill";
 
 type ExtraDocSlot = {
   id: string;
@@ -141,6 +142,7 @@ const FIXED_TYPE_TO_SLOT: Partial<Record<LibraryDocType, number>> = {
   "power-of-attorney": 3,
   "assessment-department": 4,
   "airport-authority-of-india": 5,
+  "property-tax-bill": 6,
 };
 const EXTRACTABLE_EXTRA_TYPES: LibraryDocType[] = [
   "pr-card",
@@ -149,6 +151,7 @@ const EXTRACTABLE_EXTRA_TYPES: LibraryDocType[] = [
   "power-of-attorney",
   "assessment-department",
   "airport-authority-of-india",
+  "property-tax-bill",
 ];
 
 const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
@@ -160,6 +163,7 @@ const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
   "power-of-attorney",
   "assessment-department",
   "airport-authority-of-india",
+  "property-tax-bill",
 ];
 
 const DP_TYPE_OPTIONS: LibraryDocType[] = [
@@ -177,6 +181,7 @@ const LABEL_BY_TYPE: Record<LibraryDocType, string> = {
   "power-of-attorney": DOCUMENT_NAMES[3],
   "assessment-department": DOCUMENT_NAMES[4],
   "airport-authority-of-india": DOCUMENT_NAMES[5],
+  "property-tax-bill": DOCUMENT_NAMES[6],
 };
 
 const EXTRA_LABEL_BY_TYPE: Record<LibraryDocType, string> = {
@@ -188,6 +193,7 @@ const EXTRA_LABEL_BY_TYPE: Record<LibraryDocType, string> = {
   "power-of-attorney": `Additional ${DOCUMENT_NAMES[3]}`,
   "assessment-department": `Additional ${DOCUMENT_NAMES[4]}`,
   "airport-authority-of-india": `Additional ${DOCUMENT_NAMES[5]}`,
+  "property-tax-bill": `Additional ${DOCUMENT_NAMES[6]}`,
 };
 
 const createId = () =>
@@ -245,7 +251,9 @@ function splitServerUploads(uploadsData: UploadRecord[]) {
                 ? "power-of-attorney"
                 : kind.slot === 4
                   ? "assessment-department"
-                  : "airport-authority-of-india";
+                  : kind.slot === 5
+                    ? "airport-authority-of-india"
+                    : "property-tax-bill";
       extraDocs.push(createExtraSlot(overflowType, upload));
     }
   }
@@ -1566,6 +1574,45 @@ export default function ProjectLibraryPage() {
                 )}
               </>
             ) : null}
+            {uploads[6] ||
+            extrasOfType(extraDocs, "property-tax-bill").length > 0 ? (
+              <>
+                <AttachedSummaryRow
+                  key="fixed-6"
+                  serial="7"
+                  label={DOCUMENT_NAMES[6]}
+                  upload={uploads[6]}
+                  isReadOnlyMode={isReadOnlyMode}
+                  onPreview={() =>
+                    void openPreview(
+                      DOCUMENT_NAMES[6] || uploads[6]?.name || "Document 7",
+                      () => getProjectLibraryFile(6),
+                      uploads[6]?.url
+                    )
+                  }
+                  onDelete={() => void removeFixedUpload(6)}
+                />
+                {extrasOfType(extraDocs, "property-tax-bill").map(
+                  (slot, slotIndex) => (
+                    <AttachedSummaryRow
+                      key={slot.id}
+                      serial={`7.${slotIndex + 1}`}
+                      label={EXTRA_LABEL_BY_TYPE[slot.type]}
+                      upload={slot.upload}
+                      isReadOnlyMode={isReadOnlyMode}
+                      onPreview={() =>
+                        void openPreview(
+                          `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
+                          () => getExtraLibraryDoc(slot.id),
+                          slot.upload?.url
+                        )
+                      }
+                      onDelete={() => void removeExtraDoc(slot.id)}
+                    />
+                  )
+                )}
+              </>
+            ) : null}
           </ul>
         )}
 
@@ -1642,6 +1689,9 @@ export default function ProjectLibraryPage() {
                         </option>
                         <option value="airport-authority-of-india">
                           {LABEL_BY_TYPE["airport-authority-of-india"]}
+                        </option>
+                        <option value="property-tax-bill">
+                          {LABEL_BY_TYPE["property-tax-bill"]}
                         </option>
                       </select>
                       <button

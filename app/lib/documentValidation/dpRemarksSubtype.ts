@@ -6,6 +6,7 @@ const DP_MAP = "dp-remarks-map";
 const DP_RL = "dp-remarks-rl";
 const PR = "pr-card";
 const ASSESSMENT = "assessment-department";
+const PROPERTY_TAX_BILL = "property-tax-bill";
 const AAI = "airport-authority-of-india";
 
 function allowedHas(allowedTypes: readonly string[], id: string): boolean {
@@ -31,9 +32,43 @@ export function isAirportAuthorityOfIndiaText(documentText: string): boolean {
   return aai || (/\bSNCR\b/i.test(t) && validUpTo);
 }
 
+/** BMC Property Tax Bill / demand bill / देयक — not No Dues or Annexure A. */
+export function isPropertyTaxBillText(documentText: string): boolean {
+  if (isAirportAuthorityOfIndiaText(documentText)) return false;
+  const t = documentText;
+  const h = head(t);
+  const isNoDues =
+    /\bNo\s+dues?\s+certificate\b/i.test(t) ||
+    /\bNo\s+Property\s+tax\s+dues\b/i.test(t);
+  const isAnnexureA =
+    /\bAnnexure\s*[\"']?A[\"']?\b/i.test(h) &&
+    (/\bCapital\s+Value\b/i.test(t) || /\bSAC\s*NO\s*:/i.test(t));
+  if (isNoDues || isAnnexureA) return false;
+
+  const billTitle =
+    /\bProperty\s+Tax\s+Bill\b/i.test(h) ||
+    /\bProperty\s+Tax\s+Demand\b/i.test(h) ||
+    /\bTax\s+Bill\b/i.test(h) ||
+    /देयक/.test(h);
+  const billCue =
+    /\bBill\s*(?:No\.?|Number|#)\b/i.test(t) ||
+    /\bDemand\s*(?:No\.?|Number|#)\b/i.test(t) ||
+    /\bAmount\s+Payable\b/i.test(t) ||
+    /\bProperty\s+Tax\b/i.test(t);
+  const sacOrAccount =
+    /\bSAC\s*No\.?\b/i.test(t) ||
+    /\bSACNo\b/i.test(t) ||
+    /\bSAC\s*NO\s*:/i.test(t) ||
+    /\bProp\s*A\/C\s*No\.?\b/i.test(t) ||
+    /लेखा\s*क्रमांक/.test(t);
+
+  return billTitle || (billCue && sacOrAccount);
+}
+
 /** BMC Assessment & Collection — No Dues, Annexure A, SAC/Prop A/C docs. */
 export function isAssessmentDepartmentText(documentText: string): boolean {
   if (isAirportAuthorityOfIndiaText(documentText)) return false;
+  if (isPropertyTaxBillText(documentText)) return false;
   const t = documentText;
   const h = head(t);
   const dept =
@@ -79,6 +114,7 @@ export function isDpRemarksLetterText(documentText: string): boolean {
 export function isDpMapPlanText(documentText: string): boolean {
   if (
     isAirportAuthorityOfIndiaText(documentText) ||
+    isPropertyTaxBillText(documentText) ||
     isAssessmentDepartmentText(documentText) ||
     isCrzRemarksText(documentText) ||
     isDpRemarksLetterText(documentText)
@@ -94,6 +130,7 @@ export function isDpMapPlanText(documentText: string): boolean {
 export function isDpRoadLineText(documentText: string): boolean {
   if (
     isAirportAuthorityOfIndiaText(documentText) ||
+    isPropertyTaxBillText(documentText) ||
     isAssessmentDepartmentText(documentText) ||
     isCrzRemarksText(documentText) ||
     isDpRemarksLetterText(documentText)
@@ -109,6 +146,7 @@ export function isDpRoadLineText(documentText: string): boolean {
 export function isPrCardText(documentText: string): boolean {
   if (
     isAirportAuthorityOfIndiaText(documentText) ||
+    isPropertyTaxBillText(documentText) ||
     isAssessmentDepartmentText(documentText) ||
     isCrzRemarksText(documentText) ||
     isDpRemarksLetterText(documentText) ||
@@ -127,6 +165,7 @@ function typeFromText(documentText: string): DocumentType | null {
   const text = documentText.replace(/\u0000/g, " ");
   if (!text.trim()) return null;
   if (isAirportAuthorityOfIndiaText(text)) return AAI;
+  if (isPropertyTaxBillText(text)) return PROPERTY_TAX_BILL;
   if (isAssessmentDepartmentText(text)) return ASSESSMENT;
   if (isCrzRemarksText(text)) return CRZ;
   if (isDpRoadLineText(text)) return DP_RL;

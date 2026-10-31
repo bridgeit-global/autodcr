@@ -311,6 +311,9 @@ export function buildOwnerApplicantRow(
     pincode: pincode || undefined,
     entity_type: meta?.entity_type?.trim() || undefined,
     ...(entityName ? { entity_name: entityName } : {}),
+    ...(meta?.first_name?.trim() ? { first_name: meta.first_name.trim() } : {}),
+    ...(meta?.middle_name?.trim() ? { middle_name: meta.middle_name.trim() } : {}),
+    ...(meta?.last_name?.trim() ? { last_name: meta.last_name.trim() } : {}),
     letterhead_url: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
     letterheadUrl: meta?.letterhead_url?.trim() || meta?.letterheadUrl?.trim() || undefined,
   };

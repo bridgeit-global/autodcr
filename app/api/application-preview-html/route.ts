@@ -406,14 +406,17 @@ function pickLetterheadUrlFromPreviewFields(
 }
 
 function injectLetterheadBackgroundStyle(html: string, letterheadUrl: string): string {
-  const cssUrl = letterheadUrl.replace(/\\/g, "%5C").replace(/'/g, "%27");
+  void letterheadUrl;
+  // Letterhead is painted on `.pagedjs_page` / `.pagedjs_pagebox` in injectPaginatedStyles.
+  // Do not put it on html/body or @page — Paged.js copies those onto every sheet.
   const block = `<style id="application-letterhead-bg">
 html, body {
-  background: #fff url('${cssUrl}') top center / 210mm 297mm no-repeat !important;
   background-color: #ffffff !important;
+  background-image: none !important;
 }
 .page, .WordSection1, main.page {
   background-color: transparent !important;
+  background-image: none !important;
 }
 </style>`;
   if (/<head[^>]*>/i.test(html)) {
