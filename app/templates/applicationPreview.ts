@@ -1534,20 +1534,118 @@ const SAVED_PDF_QR_LOCK_FN = `function __lockAppSavedPdfQr(){
 }`;
 
 /** Paged.js auto-runs on `interactive`, before styles/fonts settle in blob iframes — content stays in a hidden <template>. */
-function buildPagedPreviewStartScript(letterheadCssUrl: string): string {
+function buildPagedPreviewStartScript(
+  letterheadCssUrl: string,
+  bottomCenterPadding = "6pt",
+  letterheadBgSize = "calc(100% + 24px) calc(100% - 18pt)"
+): string {
   const lh = letterheadCssUrl.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const pageNumPad = bottomCenterPadding.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const bgSize = letterheadBgSize.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   return `<script>
 (function(){
   var LETTERHEAD_URL = '${lh}';
+  var PAGE_NUM_PAD = '${pageNumPad}';
+  var LETTERHEAD_BG_SIZE = '${bgSize}';
+  function injectLetterheadFooterFixCss() {
+    // Paged.js replaces/strips our head styles after layout — re-apply footer rules here.
+    var style = document.getElementById("app-letterhead-footer-fix");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "app-letterhead-footer-fix";
+      document.head.appendChild(style);
+    }
+    var lhRules = LETTERHEAD_URL
+      ? (
+          ".pagedjs_page.pagedjs_first_page," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type{" +
+          "background-image:none!important;}" +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_pagebox," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_pagebox{" +
+          "background-image:url('" + LETTERHEAD_URL + "')!important;" +
+          "background-repeat:no-repeat!important;" +
+          "background-size:" + LETTERHEAD_BG_SIZE + "!important;" +
+          "background-position:-12px 0!important;" +
+          "background-color:#ffffff!important;" +
+          "-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}" +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_sheet," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_area," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_sheet," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_area{" +
+          "background:transparent!important;background-image:none!important;}" +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-left," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-center," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-right," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-left-corner," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-right-corner," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-left-corner-holder," +
+          ".pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-right-corner-holder," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-left," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-center," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-right," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-left-corner," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-right-corner," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-left-corner-holder," +
+          ".pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-right-corner-holder{" +
+          "background:transparent!important;background-color:transparent!important;}" +
+          ".pagedjs_margin-bottom-center{padding-bottom:" + PAGE_NUM_PAD + "!important;}"
+        )
+      : "";
+    style.textContent =
+      lhRules +
+      /* Print must clip to A4 — overflow:visible + preview padding created blank pages. */
+      "@media print{" +
+      "html,body{margin:0!important;padding:0!important;height:auto!important;max-height:none!important;" +
+      "overflow:hidden!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}" +
+      ".pagedjs_pages{display:block!important;padding:0!important;gap:0!important;margin:0!important;" +
+      "width:auto!important;background:transparent!important;}" +
+      ".pagedjs_page{margin:0!important;border:none!important;border-radius:0!important;" +
+      "box-shadow:none!important;overflow:hidden!important;}" +
+      ".pagedjs_sheet,.pagedjs_pagebox,.pagedjs_area{overflow:hidden!important;}" +
+      ".pagedjs_pagebox{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}" +
+      "}";
+  }
+  /** Inline !important preview chrome beats @media print — clear it before PDF/print. */
+  function stripPreviewChromeForPrint() {
+    var pagesWrap = document.querySelector(".pagedjs_pages");
+    if (pagesWrap) {
+      pagesWrap.style.setProperty("display", "block", "important");
+      pagesWrap.style.setProperty("flex-direction", "column", "important");
+      pagesWrap.style.setProperty("align-items", "stretch", "important");
+      pagesWrap.style.setProperty("gap", "0", "important");
+      pagesWrap.style.setProperty("padding", "0", "important");
+      pagesWrap.style.setProperty("margin", "0", "important");
+      pagesWrap.style.setProperty("background-color", "transparent", "important");
+    }
+    document.querySelectorAll(".pagedjs_page").forEach(function (page) {
+      page.style.setProperty("margin", "0", "important");
+      page.style.setProperty("border", "none", "important");
+      page.style.setProperty("border-radius", "0", "important");
+      page.style.setProperty("box-shadow", "none", "important");
+      page.style.setProperty("overflow", "hidden", "important");
+      page.style.setProperty("outline", "none", "important");
+    });
+    document.querySelectorAll(".pagedjs_sheet, .pagedjs_pagebox, .pagedjs_area").forEach(function (el) {
+      el.style.setProperty("overflow", "hidden", "important");
+    });
+  }
+  window.__stripAppPreviewChromeForPrint = stripPreviewChromeForPrint;
   async function startPagedPreview(){
-    if (document.querySelector(".pagedjs_page")) return;
-    if (!window.Paged || !window.Paged.Previewer) return;
+    if (document.documentElement.getAttribute("data-letterhead-ready") === "1") return;
+    if (!window.Paged || !window.Paged.Previewer) {
+      document.documentElement.setAttribute("data-letterhead-ready", "1");
+      return;
+    }
     try {
       if (document.fonts && document.fonts.ready) {
         await document.fonts.ready;
       }
-      var previewer = new window.Paged.Previewer();
-      await previewer.preview();
+      if (!document.querySelector(".pagedjs_page")) {
+        var previewer = new window.Paged.Previewer();
+        await previewer.preview();
+      }
       // Paged.js overwrites stylesheet page chrome; force paper-sheet preview chrome inline.
       var pagesWrap = document.querySelector(".pagedjs_pages");
       if (pagesWrap) {
@@ -1568,10 +1666,12 @@ function buildPagedPreviewStartScript(letterheadCssUrl: string): string {
         page.style.setProperty("display", "block", "important");
         page.style.setProperty("margin", "0 auto", "important");
         page.style.setProperty("border", "1px solid #e5e7eb", "important");
+        // Screen preview keeps rounded paper sheets; print strip zeros radius.
         page.style.setProperty("border-radius", "12px", "important");
         page.style.setProperty("outline", "none", "important");
         page.style.setProperty("box-shadow", "none", "important");
         page.style.setProperty("filter", "none", "important");
+        // Keep overflow hidden so print/PDF never spills footer/page# onto a blank page.
         page.style.setProperty("overflow", "hidden", "important");
         page.style.setProperty("background-color", "#ffffff", "important");
         // Outer page never carries letterhead — a second paint here doubles the left brand bar.
@@ -1581,24 +1681,42 @@ function buildPagedPreviewStartScript(letterheadCssUrl: string): string {
           el.style.setProperty("filter", "none", "important");
           el.style.setProperty("background-image", "none", "important");
           el.style.setProperty("background-color", "transparent", "important");
+          el.style.setProperty("overflow", "hidden", "important");
         });
         if (isFirst && LETTERHEAD_URL) {
-          // Single paint on pagebox. Overscale slightly so scanned letterhead
-          // edge dirt (beige left strip) is clipped by overflow:hidden on the page.
+          // Single paint on pagebox. Horizontal overscale crops left-edge dirt;
+          // height stops short so “Page X of Y” sits under the letterhead footer.
           var target =
             page.querySelector(".pagedjs_pagebox") ||
             page.querySelector(".pagedjs_sheet") ||
             page;
           target.style.setProperty("background-image", "url('" + LETTERHEAD_URL + "')", "important");
           target.style.setProperty("background-repeat", "no-repeat", "important");
-          target.style.setProperty("background-size", "calc(100% + 24px) 100%", "important");
+          target.style.setProperty("background-size", LETTERHEAD_BG_SIZE, "important");
           target.style.setProperty("background-position", "-12px 0", "important");
           target.style.setProperty("background-color", "#ffffff", "important");
+          target.style.setProperty("-webkit-print-color-adjust", "exact", "important");
+          target.style.setProperty("print-color-adjust", "exact", "important");
+          page.querySelectorAll(
+            ".pagedjs_margin-bottom, .pagedjs_margin-bottom-left, .pagedjs_margin-bottom-center, .pagedjs_margin-bottom-right, .pagedjs_margin-bottom-left-corner, .pagedjs_margin-bottom-right-corner, .pagedjs_margin-bottom-left-corner-holder, .pagedjs_margin-bottom-right-corner-holder"
+          ).forEach(function (el) {
+            el.style.setProperty("background", "transparent", "important");
+            el.style.setProperty("background-color", "transparent", "important");
+          });
         }
       });
+      injectLetterheadFooterFixCss();
+      window.addEventListener("beforeprint", stripPreviewChromeForPrint);
       if (typeof __lockAppSavedPdfQr === "function") __lockAppSavedPdfQr();
+      document.documentElement.setAttribute("data-letterhead-ready", "1");
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "paged-preview-ready" }, "*");
+        }
+      } catch (e) { /* ignore */ }
     } catch (e) {
       console.warn("[application-preview] Paged.js layout failed", e);
+      document.documentElement.setAttribute("data-letterhead-ready", "1");
     }
   }
   if (document.readyState === "complete") {
@@ -1680,6 +1798,10 @@ html body .application-saved-pdf-qr-fallback {
   flex-grow: 0 !important;
   align-self: flex-end !important;
 }
+/* Fallback only — template .qr-cell slots need no extra top offset. */
+html body .application-saved-pdf-qr-firstpage-wrap {
+  margin: 12px 0 10px 0 !important;
+}
 </style>`;
 
 /**
@@ -1720,6 +1842,16 @@ function prependFloatingSavedPdfQrIntoLetterRoot(html: string): string {
   const root = letterRootFromParsed(parsed) ?? parsed.body;
   const qrFallback = parsed.body?.querySelector(".application-saved-pdf-qr-fallback");
   const qrStandalone = parsed.body?.querySelector("#app-saved-pdf-qr");
+
+  /** Leave QR in template slots (letter-header .qr-cell / .saved-pdf-qr-stack). */
+  const inTemplateSlot = (el: Element | null | undefined) =>
+    Boolean(
+      el?.closest(".qr-cell, .saved-pdf-qr-stack, .letter-header, .app-saved-pdf-qr-row")
+    );
+  if (inTemplateSlot(qrFallback) || inTemplateSlot(qrStandalone)) {
+    return html;
+  }
+
   let node: Element | null = null;
   if (root && qrFallback && !root.contains(qrFallback)) node = qrFallback;
   else if (root && qrStandalone && !root.contains(qrStandalone)) node = qrStandalone;
@@ -1741,7 +1873,7 @@ function prependFloatingSavedPdfQrIntoLetterRoot(html: string): string {
   wrap.className = "application-saved-pdf-qr-firstpage-wrap";
   wrap.setAttribute(
     "style",
-    "display:flex!important;justify-content:flex-end!important;width:100%!important;margin:0 0 10px 0!important;clear:both!important;"
+    "display:flex!important;justify-content:flex-end!important;width:100%!important;margin:12px 0 10px 0!important;clear:both!important;"
   );
   node.parentNode?.removeChild(node);
   wrap.appendChild(node);
@@ -1866,41 +1998,52 @@ function injectPaginatedStyles(
   const isArchitectTemplate = letterLayout && templateType === "Architect";
   const useArchitectLayout =
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
+  /* First-page top must clear scanned letterhead logos (brand mark + firm name).
+     Too little → QR/To/Date sit on the logo; too much → empty band. Tuned once for
+     all appointment/acceptance/letterheaded apps — not per-application. */
   const pageMarginTopFirst = useArchitectLayout
-    ? "72pt"
+    ? "96pt"
     : letterLayout
-      ? "95pt"
+      ? "100pt"
       : letterheadCssUrl
-        ? "72pt"
+        ? "96pt"
         : "18pt";
   const pageMarginTop = useArchitectLayout
     ? "36pt"
     : letterLayout
       ? "48pt"
       : "18pt";
+  /* Bottom margin must clear letterhead footer (+ page-# strip under it).
+     Acceptance has a tall gold+address+contact band; appointment is usually one line. */
   const pageMarginBottom = isAcceptanceLetter
-    ? "64pt"
+    ? "120pt"
     : useArchitectLayout
-      ? "72pt"
+      ? "56pt"
       : letterLayout
-        ? "135pt"
+        ? "64pt"
         : letterheadCssUrl
           ? "56pt"
           : "18pt";
-  // Clear letterhead branding without stacking a full second band under @page margin.
-  // (22pt sat on logos; 90px left a large empty gap.)
+  /* Page # sits in the clear strip under the letterhead footer (see background-size). */
+  const letterheadPageNumStrip = "18pt";
+  const bottomCenterPadding = letterheadCssUrl ? "6pt" : "20pt";
+  const letterheadBgSize = letterheadCssUrl
+    ? `calc(100% + 24px) calc(100% - ${letterheadPageNumStrip})`
+    : "";
   const contentPaddingTop = useArchitectLayout
-    ? "28pt"
+    ? "48pt"
     : letterLayout
-      ? "40pt"
-      : "12pt";
-  /* Clear white band under last CC line — keep bottom air without starving the top. */
+      ? "48pt"
+      : letterheadCssUrl
+        ? "36pt"
+        : "12pt";
+  /* Modest bottom content pad — page margin owns letterhead-footer clearance. */
   const contentPaddingBottom = isAcceptanceLetter
-    ? "20pt"
+    ? "12pt"
     : useArchitectLayout
-      ? "24pt"
+      ? "12pt"
       : letterLayout
-        ? "40pt"
+        ? "24pt"
         : "12pt";
   const pageMarginLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
   const pageMarginRight = useArchitectLayout ? "30pt" : letterLayout ? "42pt" : "18pt";
@@ -2037,8 +2180,8 @@ function injectPaginatedStyles(
       font-size: 9pt;
       color: rgb(100, 100, 100);
       vertical-align: bottom;
-      /* Larger inset lifts “Page X of Y” into the white band above the thick gold bar. */
-      padding-bottom: 20pt;
+      /* Small inset: page # sits under the letterhead footer in the reserved strip. */
+      padding-bottom: ${bottomCenterPadding};
     }
   }
   @page :first {
@@ -2053,7 +2196,7 @@ function injectPaginatedStyles(
       font-size: 9pt;
       color: rgb(100, 100, 100);
       vertical-align: bottom;
-      padding-bottom: 20pt;
+      padding-bottom: ${bottomCenterPadding};
     }
   }
   @page WordSection1:first {
@@ -2140,9 +2283,15 @@ function injectPaginatedStyles(
     display: flex !important;
     justify-content: flex-end !important;
     width: 100% !important;
-    margin: 0 0 10px 0 !important;
+    margin: 12px 0 10px 0 !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+  }
+  /* Template slots keep QR with To/Date — do not add letterhead offset hacks. */
+  .letter-header .qr-cell,
+  .letter-header .saved-pdf-qr-stack,
+  .app-saved-pdf-qr-row > div:last-child {
+    margin-top: 0 !important;
   }
 
   /* The Word template has a 80pt top gap before the signature block which,
@@ -2189,10 +2338,27 @@ function injectPaginatedStyles(
     background-color: #ffffff;
     background-image: none;
   }
+  .pagedjs_page {
+    display: block !important;
+    float: none !important;
+    clear: both !important;
+    flex: 0 0 auto !important;
+    width: var(--pagedjs-width) !important;
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    outline: none !important;
+    margin: 0 auto !important;
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+  }
+  .pagedjs_sheet {
+    overflow: hidden !important;
+  }
   ${
     letterheadCssUrl
       ? `
-  /* Letterhead once on first pagebox only — outer .pagedjs_page stays clear (no doubled left bar). */
+  /* Letterhead once on first pagebox only — place AFTER base page rules so it wins. */
   .pagedjs_page.pagedjs_first_page,
   .pagedjs_pages > .pagedjs_page:first-of-type {
     background-image: none !important;
@@ -2201,16 +2367,38 @@ function injectPaginatedStyles(
   .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_pagebox {
     background-image: url('${letterheadCssUrl}') !important;
     background-repeat: no-repeat !important;
-    /* Overscale + shift crops scanned letterhead edge dirt (left beige strip). */
-    background-size: calc(100% + 24px) 100% !important;
+    /* Horizontal overscale crops left-edge dirt; short height leaves page-# strip. */
+    background-size: ${letterheadBgSize} !important;
     background-position: -12px 0 !important;
     background-color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   .pagedjs_page.pagedjs_first_page .pagedjs_sheet,
   .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_sheet,
   .pagedjs_page.pagedjs_first_page .pagedjs_area,
   .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_area {
     background-image: none !important;
+    background-color: transparent !important;
+  }
+  /* Bottom margin boxes must not paint white over the letterhead footer. */
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-left,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-center,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-right,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-left,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-center,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-right,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-left-corner,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-right-corner,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-left-corner-holder,
+  .pagedjs_page.pagedjs_first_page .pagedjs_margin-bottom-right-corner-holder,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-left-corner,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-right-corner,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-left-corner-holder,
+  .pagedjs_pages > .pagedjs_page:first-of-type .pagedjs_margin-bottom-right-corner-holder {
+    background: transparent !important;
     background-color: transparent !important;
   }
   .pagedjs_page ~ .pagedjs_page,
@@ -2228,23 +2416,6 @@ function injectPaginatedStyles(
     background-image: none !important;
   }`
       : ""
-  }
-  .pagedjs_page {
-    display: block !important;
-    float: none !important;
-    clear: both !important;
-    flex: 0 0 auto !important;
-    width: var(--pagedjs-width) !important;
-    box-shadow: none !important;
-    border: 1px solid #e5e7eb !important;
-    border-radius: 12px !important;
-    outline: none !important;
-    margin: 0 auto !important;
-    overflow: hidden !important;
-    background-clip: padding-box !important;
-  }
-  .pagedjs_sheet {
-    overflow: hidden !important;
   }
 
   /* Forms (IOD, Concession, etc.) must be allowed to split or Paged.js hides the document. */
@@ -2266,29 +2437,47 @@ function injectPaginatedStyles(
     box-sizing: border-box !important;
     text-align: center !important;
     overflow: visible !important;
-    padding-bottom: 65pt !important;
+    /* Pin into the clear strip under the letterhead footer. */
+    padding-bottom: ${bottomCenterPadding} !important;
   }
 
-  /* During print, drop the shadow / background — only the actual content. */
+  /* Print/PDF: clip to A4; preview gap/padding must not create blank spill pages. */
   @media print {
     html, body {
       background: #ffffff !important;
       background-image: none !important;
-      overflow: visible !important;
+      overflow: hidden !important;
+      max-height: none !important;
+      height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .pagedjs_pages {
       display: block !important;
       padding: 0 !important;
       width: auto !important;
       gap: 0 !important;
+      margin: 0 !important;
       background-color: #ffffff !important;
     }
     .pagedjs_page {
       box-shadow: none !important;
       border: none !important;
+      border-radius: 0 !important;
       outline: none !important;
       margin: 0 !important;
       overflow: hidden !important;
+    }
+    .pagedjs_sheet,
+    .pagedjs_pagebox,
+    .pagedjs_area {
+      overflow: hidden !important;
+    }
+    .pagedjs_pagebox {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
   }
   ${acceptanceLetterBodyPagedCss}
@@ -2296,7 +2485,11 @@ function injectPaginatedStyles(
 </style>
 ${SAVED_PDF_QR_LOCK_SCRIPT_PAGED}
 <script src="${previewOrigin}/pagedjs/paged.polyfill.js"></script>
-${buildPagedPreviewStartScript(letterheadCssUrl)}`;
+${buildPagedPreviewStartScript(
+  letterheadCssUrl,
+  bottomCenterPadding,
+  letterheadBgSize || "calc(100% + 24px) calc(100% - 18pt)"
+)}`;
 
   let out = html;
   if (/<\/head>/i.test(out)) {
@@ -2464,7 +2657,7 @@ function injectPlumberPreviewPages(
 
   const qrBlock =
     qrOutsideSection !== ""
-      ? `<div class="application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;justify-content:flex-end!important;width:100%!important;margin-top:12px!important;clear:both!important;">${qrOutsideSection}</div>`
+      ? `<div class="application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;justify-content:flex-end!important;width:100%!important;margin:12px 0 10px 0!important;clear:both!important;">${qrOutsideSection}</div>`
       : "";
 
   return `<html><head>${parsed.head.innerHTML}${plumberHead}</head>${bodyOpen}
@@ -2481,13 +2674,12 @@ ${SAVED_PDF_QR_LOCK_SCRIPT_INLINE}
  * Global HTML preview path for all consultant template types.
  * Native browser text = razor-sharp preview at any zoom, instant load.
  *
- * Saved-PDF QR (optional): in Storage bucket `Application_Templates` HTML, place
- * `$project_Saved_Pdf_QR` (see `PROJECT_SAVED_PDF_QR_SENTINEL` in
- * `app/api/application-preview-html/constants.ts`) beside the client/owner block, e.g.:
- * `<div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">`
- * inner column for client tokens, then a column with only `$project_Saved_Pdf_QR`.
- * The API replaces the sentinel with a QR image of the matching `application_urls` entry
- * (`templateType`, or `Architect_acceptance` for the Architect acceptance letter).
+ * Saved-PDF QR (optional): place `$project_Saved_Pdf_QR` or `{{SAVED_PDF_QR}}` in the
+ * HTML where the QR should appear (recommended: `.letter-header .qr-cell` /
+ * `.saved-pdf-qr-stack`). The API replaces the sentinel in place — no per-app code.
+ * Catalog `show_qrcode` toggles injection. Apps without a sentinel get one shared
+ * page-1 fallback. See `PROJECT_SAVED_PDF_QR_SENTINEL` in
+ * `app/api/application-preview-html/constants.ts`.
  */
 /** Parallel HTML fetches (dual appointment + acceptance). Refresh only if no session exists. */
 export async function generateApplicationPreviewHtmlBatch(

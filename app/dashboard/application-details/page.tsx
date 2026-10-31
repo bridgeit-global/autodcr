@@ -1540,6 +1540,22 @@ function resolveStoredPreviewPdfUrl(
   return storedPdfUrlWithCacheBuster(storedUrl, opts);
 }
 
+type PreviewHtmlCacheEntry = {
+  html: string;
+  fields: TemplateFields;
+  templateType: TemplateType;
+  previewSource: ApplicationPreviewSource;
+  fieldMapping: Record<string, string | undefined>;
+};
+
+function previewHtmlCacheKey(
+  catalogDocumentId: string | null | undefined,
+  variant: "appointment" | "acceptance"
+): string {
+  const id = catalogDocumentId?.trim();
+  return id || variant;
+}
+
 type BuiltApplicationPreview = {
   fields: TemplateFields;
   templateType: TemplateType;
@@ -2188,6 +2204,7 @@ export default function ApplicationDetailsPage() {
     setPreviewDocKind("letter");
     setLetterVariant("appointment");
     setCatalogTypeIsAppointment(false);
+    previewHtmlCacheRef.current.clear();
 
     const title = selectedApplication?.trim();
     if (!title) {
@@ -2260,6 +2277,8 @@ export default function ApplicationDetailsPage() {
   const letterFieldsPreviewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Drops stale letter/license preview results when a newer load starts. */
   const previewLoadRequestRef = useRef(0);
+  /** Live HTML preview cache keyed by catalog document id (or appointment/acceptance). */
+  const previewHtmlCacheRef = useRef<Map<string, PreviewHtmlCacheEntry>>(new Map());
   const sidePreviewLoadRef = useRef<() => Promise<void> | null>(() => null);
   const [applicationWorkflowStage, setApplicationWorkflowStage] =
     useState<ApplicationWorkflowStage>("draft");
@@ -2753,6 +2772,30 @@ export default function ApplicationDetailsPage() {
     }
   };
 
+  const clearLetterPreviewHtmlCache = () => {
+    previewHtmlCacheRef.current.clear();
+  };
+
+  const applyCachedPreviewHtml = (entry: PreviewHtmlCacheEntry, openModal: boolean) => {
+    previewPdfContextRef.current = {
+      fields: entry.fields,
+      templateType: entry.templateType,
+      previewSource: entry.previewSource,
+    };
+    setPreviewError(null);
+    setPreviewNotice(null);
+    setPreviewDocKind("letter");
+    setPreviewReadyForSave(true);
+    setPreviewFieldMapping(entry.fieldMapping);
+    setPreviewUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setPreviewHtml(entry.html);
+    setIsPreviewLoading(false);
+    if (openModal) setPreviewOpen(true);
+  };
+
   const loadPreviewContent = async (
     variant: "appointment" | "acceptance",
     opts?: {
@@ -2770,6 +2813,8 @@ export default function ApplicationDetailsPage() {
       opts?.catalogDocumentId !== undefined
         ? opts.catalogDocumentId
         : selectedCatalogDocumentId;
+    const cacheKey = previewHtmlCacheKey(resolvedCatalogDocumentId, variant);
+    const cachedEntry = previewHtmlCacheRef.current.get(cacheKey);
     const requestId = ++previewLoadRequestRef.current;
     const stale = () => requestId !== previewLoadRequestRef.current;
 
@@ -2794,6 +2839,12 @@ export default function ApplicationDetailsPage() {
           if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
           return null;
         });
+      }
+
+      // Tab switch / side preview: show cached letter immediately (no loading flash).
+      if (cachedEntry && keepModalOpen && !resetSaveState) {
+        applyCachedPreviewHtml(cachedEntry, openModal);
+        return;
       }
 
       setIsPreviewLoading(true);
@@ -2853,7 +2904,6 @@ export default function ApplicationDetailsPage() {
         ]);
       if (stale()) return;
 
-      const preferLiveHtmlPreview = prefersLiveHtmlApplicationPreview(templateType);
       const useStoredPdfPreview = shouldUseStoredPdfPreview(
         templateType,
         workflowStageForPreview
@@ -2863,32 +2913,6 @@ export default function ApplicationDetailsPage() {
         workflowStageForPreview,
         { ownerSignedAt, architectSignedAt }
       );
-
-      // #region agent log
-      if (templateType === "Architect") {
-        fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-          body: JSON.stringify({
-            sessionId: "9d94e9",
-            runId: "post-fix",
-            hypothesisId: "D",
-            location: "application-details/page.tsx:loadPreviewContent",
-            message: "Architect preview load decision",
-            data: {
-              workflowStageForPreview,
-              preferLiveHtmlPreview,
-              useStoredPdfPreview,
-              fieldNameArchitect: Boolean(fieldMapping["project_Name_Architect."]?.trim()),
-              fieldCompanyArchitect: Boolean(fieldMapping.project_Company_Name_Architect?.trim()),
-              fieldAddr1Architect: Boolean(fieldMapping["project_Address_line1_Architect"]?.trim()),
-              projectArchitectUserId: projectForPreview?.architect_user_id ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
 
       if (useStoredPdfPreview && projectId) {
         // Prefer project seed / cached urls; signature timestamps already bust PDF cache.
@@ -2909,31 +2933,6 @@ export default function ApplicationDetailsPage() {
             ownerSignedAt,
             architectSignedAt,
           });
-          // #region agent log
-          if (templateType === "Architect") {
-            fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-              body: JSON.stringify({
-                sessionId: "9d94e9",
-                runId: "post-fix",
-                hypothesisId: "E",
-                location: "application-details/page.tsx:loadPreviewContent:storedPdf",
-                message: "Using stored PDF for architect preview",
-                data: {
-                  workflowStageForPreview,
-                  resolvedVariant,
-                  hasSavedPdfUrl: Boolean(savedPdfUrl),
-                  liveFieldNameArchitect: Boolean(fieldMapping["project_Name_Architect."]?.trim()),
-                  liveFieldAddr1Architect: Boolean(
-                    fieldMapping["project_Address_line1_Architect"]?.trim()
-                  ),
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-          }
-          // #endregion
           previewPdfContextRef.current = { fields, templateType, previewSource };
           setPdfSavedForCurrentPreview(true);
           setPreviewReadyForSave(true);
@@ -3016,26 +3015,113 @@ export default function ApplicationDetailsPage() {
       const previewAuthToken = previewSessionData.session?.access_token;
 
       const knownCatalogDocument = knownCatalogDocumentEarly;
+      const activeHtmlSource: ApplicationPreviewSource = {
+        ...previewSource,
+        // Always pass the document key so Concession never inherits Architect's QR.
+        // Omit savedPdfUrlForQr until this document's PDF exists (draft → no QR).
+        applicationUrlsKey: qrKey,
+        ...(savedPdfUrlForQr ? { savedPdfUrlForQr } : {}),
+        ...(knownCatalogDocument ? { resolvedCatalogDocument: knownCatalogDocument } : {}),
+        ...(resolvedPlaceholders
+          ? {
+              resolvedPlaceholders,
+              resolvedApplicantType: catalogApplicationType?.applicant_type ?? null,
+            }
+          : {}),
+      };
+
       let html = await generateApplicationPreviewHtml(
         fields,
         templateType,
-        {
-          ...previewSource,
-          // Always pass the document key so Concession never inherits Architect's QR.
-          // Omit savedPdfUrlForQr until this document's PDF exists (draft → no QR).
-          applicationUrlsKey: qrKey,
-          ...(savedPdfUrlForQr ? { savedPdfUrlForQr } : {}),
-          ...(knownCatalogDocument ? { resolvedCatalogDocument: knownCatalogDocument } : {}),
-          ...(resolvedPlaceholders
-            ? {
-                resolvedPlaceholders,
-                resolvedApplicantType: catalogApplicationType?.applicant_type ?? null,
-              }
-            : {}),
-        },
+        activeHtmlSource,
         previewAuthToken
       );
       if (stale()) return;
+
+      const siblingVariant: "appointment" | "acceptance" =
+        variant === "appointment" ? "acceptance" : "appointment";
+      const siblingCatalogDoc = catalogDocuments.find(
+        (d) => d.letter_variant === siblingVariant
+      );
+      const siblingCacheKey = previewHtmlCacheKey(
+        siblingCatalogDoc?.id ?? null,
+        siblingVariant
+      );
+      const shouldPrefetchSibling =
+        workflowStageForPreview === "draft" &&
+        Boolean(siblingCatalogDoc?.id) &&
+        !previewHtmlCacheRef.current.has(siblingCacheKey) &&
+        (catalogTypeIsAppointment || isDualLetterType(templateType));
+
+      if (shouldPrefetchSibling && siblingCatalogDoc) {
+        const siblingDocId = siblingCatalogDoc.id;
+        const siblingCatalogTypeId = catalogApplicationType?.id;
+        const siblingApplicantType = catalogApplicationType?.applicant_type ?? null;
+        const includeConsultantProfiles =
+          catalogApplicationType?.category === "appointment_letter";
+        void (async () => {
+          try {
+            const siblingBuilt = await buildApplicationPreviewContext({
+              userMetadata,
+              projectData: projectForPreview,
+              selectedApplication,
+              applicationNo,
+              applicationCreatedAt,
+              projectId,
+              letterVariant: siblingVariant,
+              catalogDocumentId: siblingDocId,
+              fieldOverrides: letterFieldOverridesRef.current,
+              includeConsultantProfiles,
+            });
+            if (stale()) return;
+            const siblingQrKey = applicationUrlsKeyFor(siblingBuilt.templateType, {
+              letterVariant: siblingVariant,
+              catalogDocumentId: siblingDocId,
+            });
+            const siblingSavedPdfUrlForQr = readApplicationUrlFromUrls(
+              urlsRawForQr,
+              siblingQrKey
+            );
+            const siblingPlaceholders = siblingCatalogTypeId
+              ? await fetchResolvedPlaceholdersForApplication(
+                  siblingCatalogTypeId,
+                  siblingDocId
+                )
+              : null;
+            if (stale()) return;
+            const siblingHtml = await generateApplicationPreviewHtml(
+              siblingBuilt.fields,
+              siblingBuilt.templateType,
+              {
+                ...siblingBuilt.previewSource,
+                applicationUrlsKey: siblingQrKey,
+                ...(siblingSavedPdfUrlForQr
+                  ? { savedPdfUrlForQr: siblingSavedPdfUrlForQr }
+                  : {}),
+                resolvedCatalogDocument: siblingCatalogDoc,
+                ...(siblingPlaceholders
+                  ? {
+                      resolvedPlaceholders: siblingPlaceholders,
+                      resolvedApplicantType: siblingApplicantType,
+                    }
+                  : {}),
+              },
+              previewAuthToken
+            );
+            if (stale() || !siblingHtml?.trim()) return;
+            if (previewHtmlCacheRef.current.has(siblingCacheKey)) return;
+            previewHtmlCacheRef.current.set(siblingCacheKey, {
+              html: siblingHtml,
+              fields: siblingBuilt.fields,
+              templateType: siblingBuilt.templateType,
+              previewSource: siblingBuilt.previewSource,
+              fieldMapping: siblingBuilt.fieldMapping,
+            });
+          } catch (err) {
+            console.warn("Sibling letter preview prefetch failed:", err);
+          }
+        })();
+      }
 
       if (ownerSignedAt?.trim()) {
         html = injectMockOwnerSignatureIntoPreviewHtml(
@@ -3060,12 +3146,28 @@ export default function ApplicationDetailsPage() {
       }
 
       previewPdfContextRef.current = { fields, templateType, previewSource };
-      const pdfAlreadySaved =
-        workflowStageForPreview !== "draft" && Boolean(storedPdfUrl);
-      if (resetSaveState && !pdfAlreadySaved) {
-        setPdfSavedForCurrentPreview(false);
-      } else if (pdfAlreadySaved) {
+      previewHtmlCacheRef.current.set(cacheKey, {
+        html,
+        fields,
+        templateType,
+        previewSource,
+        fieldMapping,
+      });
+      // Draft stage still stores a PDF on Save — treat that as saved so Preview
+      // shows Download PDF instead of Print / Save as PDF.
+      const pdfAlreadySaved = Boolean(storedPdfUrl);
+      if (pdfAlreadySaved) {
         setPdfSavedForCurrentPreview(true);
+        if (storedPdfUrl) {
+          setStoredSigningPdfUrl(
+            storedPdfUrlWithCacheBuster(storedPdfUrl, {
+              ownerSignedAt,
+              architectSignedAt,
+            })
+          );
+        }
+      } else if (resetSaveState) {
+        setPdfSavedForCurrentPreview(false);
       }
       setPreviewReadyForSave(true);
       setPreviewUrl((prev) => {
@@ -3073,27 +3175,6 @@ export default function ApplicationDetailsPage() {
         return null;
       });
       setPreviewHtml(html);
-      // #region agent log
-      if (templateType === "Architect") {
-        fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-          body: JSON.stringify({
-            sessionId: "9d94e9",
-            runId: "post-fix",
-            hypothesisId: "E",
-            location: "application-details/page.tsx:loadPreviewContent:liveHtml",
-            message: "Using live HTML for architect preview",
-            data: {
-              workflowStageForPreview,
-              hasSavedPdfUrlForQr: Boolean(savedPdfUrlForQr),
-              pdfAlreadySaved,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
       setPreviewFieldMapping(fieldMapping);
       if (openModal) setPreviewOpen(true);
     } catch (error: unknown) {
@@ -3538,6 +3619,8 @@ export default function ApplicationDetailsPage() {
       letterFieldOverridesRef.current = next;
       return next;
     });
+    // Field edits make cached Appointment/Acceptance HTML stale.
+    clearLetterPreviewHtmlCache();
     setDetailsFieldRows((rows) =>
       rows.map((r) => (r.id === row.id ? { ...r, value: nextValue } : r))
     );
@@ -4781,33 +4864,16 @@ export default function ApplicationDetailsPage() {
     setSavePdfMessage(null);
     setSavePdfError(null);
     setSidebarPdfStatus(null);
-    const stageBeforeSave = applicationWorkflowStage;
     try {
       let ctx = previewPdfContextRef.current;
-      // #region agent log
-      fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-        body: JSON.stringify({
-          sessionId: "9d94e9",
-          runId: "post-fix",
-          hypothesisId: "A",
-          location: "application-details/page.tsx:handleSaveApplicationPdf:entry",
-          message: "Save application clicked",
-          data: {
-            stageBeforeSave,
-            ctxCached: Boolean(ctx),
-            projectArchitectUserId: projectData?.architect_user_id ?? null,
-            stateHasApplicantDetails: Boolean(projectData?.applicant_details?.applicants?.length),
-            selectedApplication,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       const saveTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
-      const mustRefreshContextForSave = true;
-      if (mustRefreshContextForSave || !ctx) {
+      const ctxMatchesSelection =
+        Boolean(ctx) &&
+        ctx!.templateType === saveTemplateType &&
+        (ctx!.previewSource.catalogDocumentId ?? null) ===
+          (selectedCatalogDocumentId ?? null);
+      // Reuse preview context when present — avoids a full project reload on every Re-save.
+      if (!ctxMatchesSelection) {
         let projectForSave = projectData;
         if (projectId) {
           const coreSelect =
@@ -4854,56 +4920,12 @@ export default function ApplicationDetailsPage() {
         throw new Error("Could not prepare application data for saving.");
       }
 
-      const {
-        data: { user: authUser },
-        error: authUserErr,
-      } = await supabase.auth.getUser();
-      if (authUserErr || !authUser?.id) {
-        throw new Error("Not signed in. Please log in again.");
-      }
-
       const { data: sessionData } = await supabase.auth.getSession();
       const authToken = sessionData.session?.access_token;
-      if (!authToken) {
-        throw new Error("Missing session token. Please log in again.");
+      const authUserId = sessionData.session?.user?.id;
+      if (!authToken || !authUserId) {
+        throw new Error("Not signed in. Please log in again.");
       }
-
-      // #region agent log
-      if (ctx.templateType === "Architect") {
-        const saveFieldMapping = mapToPdfFieldValues(ctx.fields, ctx.previewSource, ctx.templateType);
-        fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-          body: JSON.stringify({
-            sessionId: "9d94e9",
-            runId: "post-fix",
-            hypothesisId: "B",
-            location: "application-details/page.tsx:handleSaveApplicationPdf:preUpload",
-            message: "Architect fields at save time",
-            data: {
-              ctxCachedAtSave: Boolean(previewPdfContextRef.current === ctx),
-              previewSourceArchitectUserId: ctx.previewSource.projectData?.architect_user_id ?? null,
-              consultantLookupUserIds: ctx.previewSource.consultantLookupUserIds ?? [],
-              fieldNameArchitect: Boolean(saveFieldMapping["project_Name_Architect."]?.trim()),
-              fieldCompanyArchitect: Boolean(saveFieldMapping.project_Company_Name_Architect?.trim()),
-              fieldAddr1Architect: Boolean(saveFieldMapping["project_Address_line1_Architect"]?.trim()),
-              fieldRegNoArchitect: Boolean(saveFieldMapping.project_RegNo_Architect?.trim()),
-              isDualLetterDraft: stageBeforeSave === "draft" && isDualLetterType(ctx.templateType),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
-
-      const fetchApplicationUrls = async (): Promise<unknown> => {
-        const { data: urlsRow } = await supabase
-          .from("projects")
-          .select("application_urls")
-          .eq("id", projectId)
-          .maybeSingle();
-        return urlsRow?.application_urls;
-      };
 
       const catalogDoc = catalogDocuments.find((d) => d.id === selectedCatalogDocumentId);
       const typeSlug = catalogApplicationType?.slug?.trim() ?? "";
@@ -4913,14 +4935,14 @@ export default function ApplicationDetailsPage() {
       }
 
       setSidebarPdfStatus("Saving document…");
-      const urlsRaw = await fetchApplicationUrls();
+      // Storage slug path predicts the public QR URL — no application_urls round-trip needed.
       const storage = { applicationTypeSlug: typeSlug, documentSlug };
-      const { blob, urlsKey } = await buildApplicationPreviewPdfBlob(urlsRaw, authToken, storage);
+      const { blob, urlsKey } = await buildApplicationPreviewPdfBlob(undefined, authToken, storage);
       const uploaded = await submitSavedApplicationPdfs({
         projectId,
         templateType: ctx.templateType,
         authToken,
-        authUserId: authUser.id,
+        authUserId,
         appointmentBlob: blob,
         applicationUrlsKey: urlsKey,
         applicationTypeSlug: typeSlug,

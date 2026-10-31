@@ -106,7 +106,8 @@ export default function DocumentPreviewModal({
 }: DocumentPreviewModalProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const injectMockOwnerSignatureRef = useRef<() => Promise<void>>(async () => Promise.resolve());
-  useHtmlPreviewFrame(iframeRef, htmlContent, Boolean(open && htmlContent && !fileUrl));
+  const showHtmlPreview = Boolean(open && htmlContent && !fileUrl);
+  useHtmlPreviewFrame(iframeRef, htmlContent, showHtmlPreview);
   /** Sidebar auto-sign: afterInject / onMockSignComplete ran successfully once for this open+html. */
   const sidebarAutoCommitDoneRef = useRef(false);
   /** Prevents parallel afterInject when load + timer both fire. */
@@ -122,6 +123,84 @@ export default function DocumentPreviewModal({
       document.body.style.overflow = "auto";
     };
   }, [open]);
+
+  // Grow the HTML iframe to full paged content so the modal body (overflow-auto) can scroll.
+  useEffect(() => {
+    if (!showHtmlPreview) return;
+    const frame = iframeRef.current;
+    if (!frame) return;
+
+    let observer: ResizeObserver | null = null;
+    frame.style.height = "";
+    const syncHeight = () => {
+      const doc = frame.contentDocument;
+      if (!doc?.documentElement) return;
+      const pages = doc.querySelector(".pagedjs_pages") as HTMLElement | null;
+      const page = doc.querySelector(".pagedjs_page") as HTMLElement | null;
+      if (pages && page) {
+        const available = frame.clientWidth;
+        const natural = page.offsetWidth;
+        const next =
+          available > 40 && natural > available + 1 ? available / natural : 1;
+        const applied = pages.style.zoom || "1";
+        const nextZoom = next === 1 ? "" : String(next);
+        if (applied !== nextZoom && Math.abs(Number(applied || "1") - next) > 0.01) {
+          pages.style.zoom = nextZoom;
+        }
+      }
+      frame.style.height = "0px";
+      const pagesLayoutH = pages
+        ? Math.ceil(pages.offsetTop + pages.offsetHeight + 8)
+        : 0;
+      const pagesRectH = pages ? Math.ceil(pages.getBoundingClientRect().height + 8) : 0;
+      const height = Math.max(
+        pagesLayoutH,
+        pagesRectH,
+        doc.documentElement.scrollHeight,
+        doc.body?.scrollHeight ?? 0,
+        600
+      );
+      frame.style.height = `${height}px`;
+      if (pages && observer) {
+        try {
+          observer.observe(pages);
+        } catch {
+          /* already observing */
+        }
+      }
+    };
+    const onPagedReady = (event: MessageEvent) => {
+      if (event.source !== frame.contentWindow) return;
+      if (event.data?.type !== "paged-preview-ready") return;
+      syncHeight();
+    };
+    const onLoad = () => {
+      syncHeight();
+      observer?.disconnect();
+      const doc = frame.contentDocument;
+      if (!doc?.documentElement) return;
+      observer = new ResizeObserver(() => syncHeight());
+      observer.observe(doc.documentElement);
+      if (doc.body) observer.observe(doc.body);
+      const pages = doc.querySelector(".pagedjs_pages");
+      if (pages) observer.observe(pages);
+    };
+
+    window.addEventListener("message", onPagedReady);
+    frame.addEventListener("load", onLoad);
+    if (
+      frame.contentDocument?.readyState === "complete" &&
+      frame.src &&
+      frame.src !== "about:blank"
+    ) {
+      onLoad();
+    }
+    return () => {
+      window.removeEventListener("message", onPagedReady);
+      frame.removeEventListener("load", onLoad);
+      observer?.disconnect();
+    };
+  }, [showHtmlPreview, htmlContent]);
 
   useEffect(() => {
     if (!open) {
@@ -377,8 +456,9 @@ export default function DocumentPreviewModal({
   const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
   /** Licenses may be uploaded as images; pdf.js cannot render those. */
   const isImagePreview = Boolean(fileUrl) && IMAGE_URL_PATTERN.test(fileUrl ?? "");
-  const downloadPdfUrl =
-    fileUrl ?? (saveCompleted && storedPdfDownloadUrl ? storedPdfDownloadUrl : null);
+  // Prefer the live preview URL; otherwise any stored PDF for this document.
+  // Draft saves keep HTML in the iframe for letterhead, but still expose Download.
+  const downloadPdfUrl = fileUrl ?? storedPdfDownloadUrl ?? null;
   const showDownloadPdf = Boolean(downloadPdfUrl);
   // Compact (w-fit) only when real preview content is present. Loading/error
   // without content must use the full modal width or the dialog collapses to a thin strip.
@@ -667,7 +747,7 @@ export default function DocumentPreviewModal({
                       title={title || "Document Preview"}
                       src="about:blank"
                       className="block w-full bg-white border-0"
-                      style={{ height: "78vh" }}
+                      style={{ height: "600px", minHeight: "600px" }}
                     />
                   </div>
                 </div>

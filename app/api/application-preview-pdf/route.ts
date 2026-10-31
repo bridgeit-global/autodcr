@@ -156,17 +156,18 @@ const PDF_CONTENT_WAIT = { waitUntil: "load" as const, timeout: 120_000 };
 const PDF_SLIM_WAIT = { waitUntil: "domcontentloaded" as const, timeout: 120_000 };
 
 async function waitFontsAndRasterSettle(page: import("puppeteer-core").Page): Promise<void> {
-  await page.evaluate(async () => {
+  const fontBudgetMs = isLambdaLikeRuntime ? 900 : 450;
+  await page.evaluate(async (budgetMs) => {
     try {
       await Promise.race([
         document.fonts.ready,
-        new Promise<void>((r) => setTimeout(() => r(), 900)),
+        new Promise<void>((r) => setTimeout(() => r(), budgetMs)),
       ]);
     } catch {
       /* ignore */
     }
-  });
-  await new Promise<void>((r) => setTimeout(() => r(), 100));
+  }, fontBudgetMs);
+  await new Promise<void>((r) => setTimeout(() => r(), isLambdaLikeRuntime ? 80 : 40));
 }
 
 /** Letterhead uses CSS background-image on `.pagedjs_page` — not in `document.images`; preload before print. */
@@ -194,7 +195,7 @@ async function waitCssBackgroundImagesLoaded(
       )
     );
   }, ASSET_LOAD_TIMEOUT_MS);
-  await new Promise<void>((r) => setTimeout(() => r(), isLambdaLikeRuntime ? 80 : 200));
+  await new Promise<void>((r) => setTimeout(() => r(), isLambdaLikeRuntime ? 60 : 40));
 }
 
 async function waitImgElementsLoaded(page: import("puppeteer-core").Page): Promise<void> {
@@ -257,6 +258,18 @@ async function waitForLetterLayoutReady(
   } catch {
     return "none";
   }
+  // Letterhead paint + footer CSS re-inject run after Paged.js preview(); wait so
+  // slim-HTML extraction keeps the gold-bar background on the first pagebox.
+  try {
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".preview-sheet") !== null ||
+        document.documentElement.getAttribute("data-letterhead-ready") === "1",
+      { timeout: Math.min(12_000, PAGEDJS_LAYOUT_TIMEOUT_MS) }
+    );
+  } catch {
+    // Proceed with whatever layout exists — better a PDF than a hard failure.
+  }
   const mode = await page.evaluate(() => {
     if (document.querySelector(".pagedjs_page")) return "pagedjs";
     if (document.querySelector(".preview-sheet")) return "preview-sheet";
@@ -315,21 +328,6 @@ async function htmlToPdfBuffer(
       await page.setContent(slimHtml, PDF_SLIM_WAIT);
       // Slim HTML is already paginated — skip a second full Paged.js wait (saves ~20s on Vercel).
       await waitFontsAndRasterSettle(page);
-      // #region agent log
-      fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-        body: JSON.stringify({
-          sessionId: "9d94e9",
-          runId: "post-fix",
-          hypothesisId: "F",
-          location: "application-preview-pdf/route.ts:htmlToPdfBuffer",
-          message: "Chromium PDF layout",
-          data: { layout, usedSlimHtml: true, hasQr: html.includes("app-saved-pdf-qr") },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } else {
       await page.evaluate(() => {
         const pagesRoot = document.querySelector(".pagedjs_pages");
@@ -345,26 +343,42 @@ async function htmlToPdfBuffer(
           if (!el.closest(".pagedjs_page")) el.remove();
         });
       });
-      // #region agent log
-      fetch("http://127.0.0.1:7676/ingest/9114059f-cf91-488c-b3e8-ff96cf74a24d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "9d94e9" },
-        body: JSON.stringify({
-          sessionId: "9d94e9",
-          runId: "post-fix",
-          hypothesisId: "F",
-          location: "application-preview-pdf/route.ts:htmlToPdfBuffer",
-          message: "Chromium PDF layout",
-          data: { layout, usedSlimHtml: false, hasQr: html.includes("app-saved-pdf-qr") },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     }
     }
   }
 
   await page.emulateMediaType("print");
+  // Preview chrome is applied with inline !important (gap/padding/borders) and
+  // otherwise spills into blank PDF pages. Clear it after print media is on.
+  // Slim-HTML reload drops window helpers, so always strip via DOM here.
+  await page.evaluate(() => {
+    const pagesWrap = document.querySelector(".pagedjs_pages");
+    if (pagesWrap instanceof HTMLElement) {
+      pagesWrap.style.setProperty("display", "block", "important");
+      pagesWrap.style.setProperty("flex-direction", "column", "important");
+      pagesWrap.style.setProperty("align-items", "stretch", "important");
+      pagesWrap.style.setProperty("gap", "0", "important");
+      pagesWrap.style.setProperty("padding", "0", "important");
+      pagesWrap.style.setProperty("margin", "0", "important");
+      pagesWrap.style.setProperty("background-color", "#ffffff", "important");
+    }
+    document.querySelectorAll(".pagedjs_page").forEach((page) => {
+      if (!(page instanceof HTMLElement)) return;
+      page.style.setProperty("margin", "0", "important");
+      page.style.setProperty("border", "none", "important");
+      page.style.setProperty("border-radius", "0", "important");
+      page.style.setProperty("box-shadow", "none", "important");
+      page.style.setProperty("overflow", "hidden", "important");
+      page.style.setProperty("outline", "none", "important");
+    });
+    document
+      .querySelectorAll(".pagedjs_sheet, .pagedjs_pagebox, .pagedjs_area")
+      .forEach((node) => {
+        if (node instanceof HTMLElement) {
+          node.style.setProperty("overflow", "hidden", "important");
+        }
+      });
+  });
   await waitFontsAndRasterSettle(page);
   await waitCssBackgroundImagesLoaded(page);
   await waitImgElementsLoaded(page);
@@ -379,35 +393,125 @@ async function htmlToPdfBuffer(
   return new Uint8Array(pdf);
 }
 
-async function withBrowser<T>(
-  fn: (browser: Awaited<ReturnType<typeof puppeteer.launch>>) => Promise<T>
-): Promise<T> {
-  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+type LaunchedBrowser = Awaited<ReturnType<typeof puppeteer.launch>>;
+
+/** Local/dev only — reuse Chromium across saves (cold launch is the dominant cost). */
+let localWarmBrowser: LaunchedBrowser | null = null;
+let localWarmUserDataDir: string | undefined;
+let localWarmLaunchPromise: Promise<LaunchedBrowser> | null = null;
+let localWarmIdleTimer: ReturnType<typeof setTimeout> | null = null;
+const LOCAL_WARM_IDLE_MS = 5 * 60_000;
+
+function clearLocalWarmIdleTimer() {
+  if (localWarmIdleTimer) {
+    clearTimeout(localWarmIdleTimer);
+    localWarmIdleTimer = null;
+  }
+}
+
+async function disposeLocalWarmBrowser() {
+  clearLocalWarmIdleTimer();
+  const browser = localWarmBrowser;
+  const userDataDir = localWarmUserDataDir;
+  localWarmBrowser = null;
+  localWarmUserDataDir = undefined;
+  localWarmLaunchPromise = null;
+  if (browser) {
+    await browser.close().catch(() => undefined);
+  }
+  if (userDataDir) {
+    await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function scheduleLocalWarmIdleDispose() {
+  clearLocalWarmIdleTimer();
+  localWarmIdleTimer = setTimeout(() => {
+    void disposeLocalWarmBrowser();
+  }, LOCAL_WARM_IDLE_MS);
+  if (typeof localWarmIdleTimer === "object" && localWarmIdleTimer && "unref" in localWarmIdleTimer) {
+    localWarmIdleTimer.unref();
+  }
+}
+
+async function launchBrowserInstance(): Promise<{
+  browser: LaunchedBrowser;
+  userDataDir?: string;
+}> {
+  const executablePath = await pickExecutablePath();
+  let userDataDir: string | undefined;
+  if (!isLambdaLikeRuntime) {
+    userDataDir = await createBrowserUserDataDir();
+  }
+  const launchArgs = [...pickLaunchArgs()];
+  if (userDataDir) {
+    launchArgs.push(`--user-data-dir=${userDataDir}`);
+  }
+  const browser = await puppeteer.launch({
+    args: launchArgs,
+    executablePath,
+    timeout: BROWSER_LAUNCH_TIMEOUT_MS,
+    headless: isLambdaLikeRuntime ? ("shell" as const) : true,
+    ...(isLambdaLikeRuntime
+      ? {
+          defaultViewport: {
+            width: 1240,
+            height: 1754,
+            deviceScaleFactor: 1,
+          },
+        }
+      : {}),
+  });
+  return { browser, userDataDir };
+}
+
+async function getLocalWarmBrowser(): Promise<LaunchedBrowser> {
+  clearLocalWarmIdleTimer();
+  if (localWarmBrowser?.connected) {
+    return localWarmBrowser;
+  }
+  if (localWarmLaunchPromise) {
+    return localWarmLaunchPromise;
+  }
+  localWarmLaunchPromise = (async () => {
+    if (localWarmBrowser) {
+      await disposeLocalWarmBrowser();
+    }
+    const { browser, userDataDir } = await launchBrowserInstance();
+    localWarmBrowser = browser;
+    localWarmUserDataDir = userDataDir;
+    browser.on("disconnected", () => {
+      if (localWarmBrowser === browser) {
+        localWarmBrowser = null;
+        localWarmUserDataDir = undefined;
+        clearLocalWarmIdleTimer();
+      }
+    });
+    return browser;
+  })();
+  try {
+    return await localWarmLaunchPromise;
+  } finally {
+    localWarmLaunchPromise = null;
+  }
+}
+
+async function withBrowser<T>(fn: (browser: LaunchedBrowser) => Promise<T>): Promise<T> {
+  if (!isLambdaLikeRuntime) {
+    const browser = await getLocalWarmBrowser();
+    try {
+      return await fn(browser);
+    } finally {
+      scheduleLocalWarmIdleDispose();
+    }
+  }
+
+  let browser: LaunchedBrowser | null = null;
   let userDataDir: string | undefined;
   try {
-    const executablePath = await pickExecutablePath();
-    if (!isLambdaLikeRuntime) {
-      userDataDir = await createBrowserUserDataDir();
-    }
-    const launchArgs = [...pickLaunchArgs()];
-    if (userDataDir) {
-      launchArgs.push(`--user-data-dir=${userDataDir}`);
-    }
-    browser = await puppeteer.launch({
-      args: launchArgs,
-      executablePath,
-      timeout: BROWSER_LAUNCH_TIMEOUT_MS,
-      headless: isLambdaLikeRuntime ? ("shell" as const) : true,
-      ...(isLambdaLikeRuntime
-        ? {
-            defaultViewport: {
-              width: 1240,
-              height: 1754,
-              deviceScaleFactor: 1,
-            },
-          }
-        : {}),
-    });
+    const launched = await launchBrowserInstance();
+    browser = launched.browser;
+    userDataDir = launched.userDataDir;
     return await fn(browser);
   } finally {
     if (browser) {

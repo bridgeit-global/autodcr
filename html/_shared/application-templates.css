@@ -89,11 +89,14 @@
     padding: 0;
   }
   
-  /* “To” / address (left), saved-PDF QR (middle), Date (right) — one top-aligned row. */
+  /* “To” / address (left), saved-PDF QR (middle), Date (right) — one top-aligned row.
+     Vertical clearance under letterhead comes from the global first-page frame
+     (page margin + content padding in applicationPreview) — keep this row tight. */
   .letter-header {
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
+    margin-top: 0;
     margin-bottom: 6px;
     page-break-inside: avoid;
   }
@@ -121,6 +124,9 @@
     padding-left: 8px;
     padding-right: 8px;
     padding-bottom: 4px;
+    /* Keep QR aligned with To/Date — letterhead clearance comes from page margins. */
+    margin-top: 0;
+    vertical-align: top;
   }
   
   .letter-header .date-cell {

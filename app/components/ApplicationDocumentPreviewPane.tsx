@@ -57,10 +57,31 @@ export default function ApplicationDocumentPreviewPane({
       }
       // Collapse first so the previous letter's tall frame cannot inflate scrollHeight.
       frame.style.height = "0px";
-      const height = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0);
+      // CSS zoom shrinks scrollHeight, which clipped the letterhead footer under the
+      // iframe. Prefer the pages layout box so gold-bar/address always fit.
+      const pagesLayoutH = pages
+        ? Math.ceil(pages.offsetTop + pages.offsetHeight + 8)
+        : 0;
+      const pagesRectH = pages ? Math.ceil(pages.getBoundingClientRect().height + 8) : 0;
+      const height = Math.max(
+        pagesLayoutH,
+        pagesRectH,
+        doc.documentElement.scrollHeight,
+        doc.body?.scrollHeight ?? 0
+      );
       if (height > 0) frame.style.height = `${height}px`;
-      doc.documentElement.style.overflow = "hidden";
-      if (doc.body) doc.body.style.overflow = "hidden";
+      if (pages && observer) {
+        try {
+          observer.observe(pages);
+        } catch {
+          /* already observing */
+        }
+      }
+    };
+    const onPagedReady = (event: MessageEvent) => {
+      if (event.source !== frame.contentWindow) return;
+      if (event.data?.type !== "paged-preview-ready") return;
+      syncHeight();
     };
     const onLoad = () => {
       syncHeight();
@@ -70,13 +91,17 @@ export default function ApplicationDocumentPreviewPane({
       observer = new ResizeObserver(() => syncHeight());
       observer.observe(doc.documentElement);
       if (doc.body) observer.observe(doc.body);
+      const pages = doc.querySelector(".pagedjs_pages");
+      if (pages) observer.observe(pages);
     };
 
+    window.addEventListener("message", onPagedReady);
     frame.addEventListener("load", onLoad);
     if (frame.contentDocument?.readyState === "complete" && frame.src && frame.src !== "about:blank") {
       onLoad();
     }
     return () => {
+      window.removeEventListener("message", onPagedReady);
       frame.removeEventListener("load", onLoad);
       observer?.disconnect();
     };
