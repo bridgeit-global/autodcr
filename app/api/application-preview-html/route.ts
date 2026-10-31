@@ -511,27 +511,26 @@ async function injectSavedPdfQrHtml(
   const qrRightColumn = `<div class="application-saved-pdf-qr-fallback" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:0!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
 
   const hadSentinel = qrSentinels.some((token) => html.includes(token));
+  const cleaned = stripExistingQrBlocks(html);
 
-  const baseForLayout = stripExistingQrBlocks(
-    hadSentinel ? stripSentinel(html) : html
-  );
-
-  const beside =
-    opts.letterLayout === false
-      ? null
-      : insertSavedPdfQrBesideClientBlock(baseForLayout, qrRightColumn);
-  if (beside) {
-    return beside;
-  }
-
-  /* Sentinel stays in the template slot (letter-header qr-cell). Otherwise pin to
-     the start of <body> so Paged.js puts the QR on page 1, not after the last page. */
+  /* 1) Prefer the template slot (e.g. letter-header .qr-cell). New apps only need the
+     sentinel in HTML — no per-application TypeScript. */
   if (hadSentinel) {
-    return qrSentinels.reduce((acc, token) => acc.split(token).join(qrBox), html);
+    return qrSentinels.reduce(
+      (acc, token) => acc.split(token).join(qrBox),
+      cleaned
+    );
   }
 
-  const fallback = `<div class="application-saved-pdf-qr-fallback application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:0 0 10px auto!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
-  return insertMarkupAfterBodyOpen(html, fallback);
+  /* 2) Legacy Word letters with To,/Sub: but no sentinel. */
+  if (opts.letterLayout !== false) {
+    const beside = insertSavedPdfQrBesideClientBlock(cleaned, qrRightColumn);
+    if (beside) return beside;
+  }
+
+  /* 3) Universal page-1 fallback for catalog forms without a sentinel. */
+  const fallback = `<div class="application-saved-pdf-qr-fallback application-saved-pdf-qr-firstpage-wrap" style="display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:4px!important;margin:12px 0 10px auto!important;padding:0!important;border:none!important;width:132px!important;max-width:132px!important;min-width:0!important;box-sizing:border-box!important;"><span style="font-size:9px;color:#374151;">Saved application PDF</span>${qrBox}</div>`;
+  return insertMarkupAfterBodyOpen(cleaned, fallback);
 }
 
 /** Maps each template type to its acceptance HTML object path. */
