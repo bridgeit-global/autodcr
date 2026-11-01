@@ -1551,7 +1551,7 @@ type PreviewHtmlCacheEntry = {
 };
 
 /** Bump when appointment/acceptance page layout CSS changes (invalidates in-session HTML cache). */
-const PREVIEW_HTML_LAYOUT_REV = "cc-page1-v14";
+const PREVIEW_HTML_LAYOUT_REV = "cc-page1-v15";
 
 function previewHtmlCacheKey(
   catalogDocumentId: string | null | undefined,

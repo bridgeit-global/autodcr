@@ -2006,8 +2006,9 @@ function injectPaginatedStyles(
   const previewOrigin = resolvePreviewAppOrigin();
   const isAcceptanceLetter =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body");
+  const hasLetterHeader = metaHtml.includes("letter-header");
   const isAuthorityAppointmentLetter =
-    metaHtml.includes("letter-header") &&
+    hasLetterHeader &&
     metaHtml.includes("subject-reference-table") &&
     !isAcceptanceLetter;
   // Concession and other building-permission HTML maps to templateType Architect
@@ -2020,6 +2021,13 @@ function injectPaginatedStyles(
   const isArchitectTemplate = letterLayout && templateType === "Architect";
   const useArchitectLayout =
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
+  /*
+   * Same first-page top for every letter-header template (authority appointment,
+   * acceptance, Architect appointment). Structural Engineer appointment already
+   * used 115pt+0; acceptance/Architect were stuck on 96pt+48pt content pad and
+   * showed a large empty band under the logo.
+   */
+  const useTightLetterheadFirstPageTop = hasLetterHeader;
   /* First-page top must clear scanned letterhead logos (brand mark + firm name).
      Too little → QR/To/Date sit on the logo; too much → empty band. Tuned once for
      all appointment/acceptance/letterheaded apps — not per-application. */
@@ -2050,24 +2058,25 @@ function injectPaginatedStyles(
             ? "56pt"
             : "18pt";
   /* Page # sits in the clear strip under the letterhead footer (see background-size). */
-  const letterheadPageNumStrip = isAuthorityAppointmentLetter ? "16pt" : "18pt";
+  const letterheadPageNumStrip =
+    isAuthorityAppointmentLetter || useTightLetterheadFirstPageTop ? "16pt" : "18pt";
   const bottomCenterPadding = letterheadCssUrl
-    ? isAuthorityAppointmentLetter
+    ? isAuthorityAppointmentLetter || useTightLetterheadFirstPageTop
       ? "5pt"
       : "6pt"
     : "20pt";
   const letterheadBgSize = letterheadCssUrl
     ? `calc(100% + 24px) calc(100% - ${letterheadPageNumStrip})`
     : "";
-  const contentPaddingTop = useArchitectLayout
-    ? isAuthorityAppointmentLetter
-      ? "0pt"
-      : "48pt"
-    : letterLayout
+  const contentPaddingTop = useTightLetterheadFirstPageTop
+    ? "0pt"
+    : useArchitectLayout
       ? "48pt"
-      : letterheadCssUrl
-        ? "36pt"
-        : "12pt";
+      : letterLayout
+        ? "48pt"
+        : letterheadCssUrl
+          ? "36pt"
+          : "12pt";
   /* Modest bottom content pad — page margin owns letterhead-footer clearance. */
   const contentPaddingBottom = isAcceptanceLetter
     ? "12pt"
@@ -2081,11 +2090,10 @@ function injectPaginatedStyles(
   /*
    * Clear scanned letterhead logo + firm name above To/QR/Date.
    * Letterhead JPEG is stretched to the page, so the brand mark often occupies the
-   * top ~110–120pt. 48–90pt overlapped KH logos; 96pt+48pt content pad left a large
-   * empty band. Authority letters use 115pt margin and 0 content pad: clears the
-   * logo with a small gap, without the old double-pad empty band.
+   * top ~110–120pt. 96pt margin + 48pt content pad left a large empty band —
+   * letter-header letters use 115pt margin and 0 content pad instead.
    */
-  const effectivePageMarginTopFirst = isAuthorityAppointmentLetter
+  const effectivePageMarginTopFirst = useTightLetterheadFirstPageTop
     ? "115pt"
     : pageMarginTopFirst;
   const pageMarginLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
