@@ -174,27 +174,79 @@ async function waitFontsAndRasterSettle(page: import("puppeteer-core").Page): Pr
 async function waitCssBackgroundImagesLoaded(
   page: import("puppeteer-core").Page
 ): Promise<void> {
-  await page.evaluate(async (assetTimeoutMs) => {
-    const urls = new Set<string>();
+  const failures = await page.evaluate(async (assetTimeoutMs) => {
+    type BgEntry = { src: string; isLetterhead: boolean };
+    const entries: BgEntry[] = [];
+    const seen = new Set<string>();
+
     document.querySelectorAll("*").forEach((el) => {
       const bg = getComputedStyle(el).backgroundImage;
       if (!bg || bg === "none") return;
       const m = bg.match(/url\(\s*["']?([^"')]+)["']?\s*\)/);
-      if (m?.[1]) urls.add(m[1].trim());
+      const src = m?.[1]?.trim();
+      if (!src || seen.has(src)) return;
+      seen.add(src);
+      const onPagebox =
+        el.classList.contains("pagedjs_pagebox") ||
+        Boolean(el.closest?.(".pagedjs_pagebox"));
+      // Remote/data backgrounds on the first pagebox are the letterhead paint target.
+      const isLetterhead = onPagebox && /^(https?:|data:image)/i.test(src);
+      entries.push({ src, isLetterhead });
     });
+
+    const failed: string[] = [];
     await Promise.all(
-      [...urls].map(
-        (src) =>
+      entries.map(
+        ({ src, isLetterhead }) =>
           new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = (ok: boolean) => {
+              if (settled) return;
+              settled = true;
+              if (!ok && isLetterhead) failed.push(src.slice(0, 120));
+              resolve();
+            };
             const img = new Image();
-            img.onload = () => resolve();
-            img.onerror = () => resolve();
+            const timer = window.setTimeout(() => finish(false), assetTimeoutMs);
+            const succeed = () => {
+              window.clearTimeout(timer);
+              if (img.complete && img.naturalWidth > 0) {
+                finish(true);
+                return;
+              }
+              finish(false);
+            };
+            img.onload = () => {
+              if (typeof img.decode === "function") {
+                img.decode().then(succeed).catch(() => finish(false));
+              } else {
+                succeed();
+              }
+            };
+            img.onerror = () => {
+              window.clearTimeout(timer);
+              finish(false);
+            };
             img.src = src;
-            window.setTimeout(() => resolve(), assetTimeoutMs);
+            if (img.complete && img.naturalWidth > 0) {
+              if (typeof img.decode === "function") {
+                img.decode().then(succeed).catch(() => finish(false));
+              } else {
+                succeed();
+              }
+            }
           })
       )
     );
+    return failed;
   }, ASSET_LOAD_TIMEOUT_MS);
+
+  if (failures.length > 0) {
+    console.warn(
+      "[application-preview-pdf] letterhead/background image not ready before PDF:",
+      failures
+    );
+  }
   await new Promise<void>((r) => setTimeout(() => r(), isLambdaLikeRuntime ? 60 : 40));
 }
 
