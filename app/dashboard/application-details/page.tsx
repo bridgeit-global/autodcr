@@ -1344,6 +1344,7 @@ const TYPES_WITH_ACCEPTANCE = new Set<TemplateType>([
   "Structural Engineer",
   "Environmental Consultant",
   "PMC / Project Manager",
+  "Site Supervisor",
 ]);
 
 const catalogSigningByTitle = new Map<string, CatalogSigningInfo>();
@@ -1386,6 +1387,7 @@ const ACCEPTANCE_URL_KEY_BY_TEMPLATE_TYPE: Partial<Record<TemplateType, string>>
   "Structural Engineer": "Structural_Engineer_acceptance",
   "Environmental Consultant": "Environmental_Consultant_acceptance",
   "PMC / Project Manager": "PMC_Project_Manager_acceptance",
+  "Site Supervisor": "Site_Supervisor_acceptance",
 };
 
 const ARCHITECT_ACCEPTANCE_URL_KEY = "Architect_acceptance";
@@ -1548,12 +1550,15 @@ type PreviewHtmlCacheEntry = {
   fieldMapping: Record<string, string | undefined>;
 };
 
+/** Bump when appointment/acceptance page layout CSS changes (invalidates in-session HTML cache). */
+const PREVIEW_HTML_LAYOUT_REV = "cc-page1-v14";
+
 function previewHtmlCacheKey(
   catalogDocumentId: string | null | undefined,
   variant: "appointment" | "acceptance"
 ): string {
   const id = catalogDocumentId?.trim();
-  return id || variant;
+  return `${PREVIEW_HTML_LAYOUT_REV}:${id || variant}`;
 }
 
 type BuiltApplicationPreview = {
@@ -2205,6 +2210,7 @@ export default function ApplicationDetailsPage() {
     setLetterVariant("appointment");
     setCatalogTypeIsAppointment(false);
     previewHtmlCacheRef.current.clear();
+    savePdfArtifactRef.current = null;
 
     const title = selectedApplication?.trim();
     if (!title) {
@@ -2331,6 +2337,22 @@ export default function ApplicationDetailsPage() {
     templateType: TemplateType;
     previewSource: ApplicationPreviewSource;
   } | null>(null);
+  /**
+   * Last successful draft Save PDF for this document fingerprint.
+   * Re-save with unchanged fields reuses the blob (skips Chromium on Vercel).
+   */
+  const savePdfArtifactRef = useRef<{
+    fingerprint: string;
+    blob: Blob;
+    urlsKey: string;
+  } | null>(null);
+  /** Drop reuse of Chromium PDFs built before the current letter layout CSS. */
+  const savePdfLayoutRevRef = useRef(PREVIEW_HTML_LAYOUT_REV);
+  if (savePdfLayoutRevRef.current !== PREVIEW_HTML_LAYOUT_REV) {
+    savePdfLayoutRevRef.current = PREVIEW_HTML_LAYOUT_REV;
+    savePdfArtifactRef.current = null;
+    previewHtmlCacheRef.current.clear();
+  }
   const saveApplicationPdfRef = useRef<() => Promise<void>>(async () => Promise.resolve());
   const saveInFlightRef = useRef(false);
   const signInFlightRef = useRef(false);
@@ -2400,6 +2422,23 @@ export default function ApplicationDetailsPage() {
           projectId,
         })
       : await plannedSavedApplicationPdfPublicUrl(projectId, urlsKey, savedAt);
+    const fingerprint = JSON.stringify({
+      layoutRev: PREVIEW_HTML_LAYOUT_REV,
+      urlsKey,
+      qr: savedPdfUrlForQr,
+      catalogDocumentId:
+        ctx.previewSource.catalogDocumentId ?? selectedCatalogDocumentId ?? null,
+      letterVariant: ctx.previewSource.letterVariant ?? "appointment",
+      templateType: ctx.templateType,
+      fields: ctx.fields,
+      overrides: letterFieldOverridesRef.current,
+    });
+    const cached = savePdfArtifactRef.current;
+    if (cached && cached.fingerprint === fingerprint && cached.blob.size > 0) {
+      return { blob: cached.blob, savedAt, urlsKey: cached.urlsKey };
+    }
+    // Overlap Chromium launch with HTML generation on cold Vercel instances.
+    prewarmPreviewPdfRuntime();
     const html = await generateApplicationPreviewHtml(
       ctx.fields,
       ctx.templateType,
@@ -2411,6 +2450,7 @@ export default function ApplicationDetailsPage() {
       accessToken
     );
     const blob = await generateApplicationPreviewPdfFromHtml(html, ctx.templateType);
+    savePdfArtifactRef.current = { fingerprint, blob, urlsKey };
     return { blob, savedAt, urlsKey };
   };
 
@@ -2774,6 +2814,7 @@ export default function ApplicationDetailsPage() {
 
   const clearLetterPreviewHtmlCache = () => {
     previewHtmlCacheRef.current.clear();
+    savePdfArtifactRef.current = null;
   };
 
   const applyCachedPreviewHtml = (entry: PreviewHtmlCacheEntry, openModal: boolean) => {
@@ -2794,6 +2835,38 @@ export default function ApplicationDetailsPage() {
     setPreviewHtml(entry.html);
     setIsPreviewLoading(false);
     if (openModal) setPreviewOpen(true);
+  };
+
+  /** Point Download PDF at this letter only — never leave a sibling appointment/acceptance URL. */
+  const syncStoredPdfDownloadForLetter = (
+    templateType: TemplateType,
+    variant: "appointment" | "acceptance",
+    catalogDocumentId: string | null | undefined,
+    urlsRaw?: unknown
+  ) => {
+    const raw =
+      urlsRaw ??
+      (projectData?.application_urls &&
+      typeof projectData.application_urls === "object" &&
+      !Array.isArray(projectData.application_urls)
+        ? projectData.application_urls
+        : undefined);
+    const resolvedVariant = isDualLetterType(templateType) ? variant : "appointment";
+    const storedUrl = raw
+      ? getStoredApplicationPdfUrl(raw, templateType, resolvedVariant, catalogDocumentId)
+      : null;
+    if (storedUrl) {
+      setStoredSigningPdfUrl(
+        storedPdfUrlWithCacheBuster(storedUrl, {
+          ownerSignedAt,
+          architectSignedAt,
+        })
+      );
+      setPdfSavedForCurrentPreview(true);
+    } else {
+      setStoredSigningPdfUrl(null);
+      setPdfSavedForCurrentPreview(false);
+    }
   };
 
   const loadPreviewContent = async (
@@ -2841,10 +2914,29 @@ export default function ApplicationDetailsPage() {
         });
       }
 
+      // Draft Appointment/Acceptance: never keep a post-save blob/PDF in the side
+      // pane when (re)loading a tab — prefer live HTML so layout CSS is visible.
+      const preferLiveDraftHtml =
+        applicationWorkflowStage === "draft" && keepModalOpen;
+
       // Tab switch / side preview: show cached letter immediately (no loading flash).
       if (cachedEntry && keepModalOpen && !resetSaveState) {
         applyCachedPreviewHtml(cachedEntry, openModal);
+        // Re-bind Download PDF to this document (cached HTML path used to keep the sibling URL).
+        syncStoredPdfDownloadForLetter(
+          cachedEntry.templateType,
+          variant,
+          resolvedCatalogDocumentId,
+          projectData?.application_urls
+        );
         return;
+      }
+
+      if (preferLiveDraftHtml) {
+        setPreviewUrl((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return null;
+        });
       }
 
       setIsPreviewLoading(true);
@@ -3155,18 +3247,18 @@ export default function ApplicationDetailsPage() {
       });
       // Draft stage still stores a PDF on Save — treat that as saved so Preview
       // shows Download PDF instead of Print / Save as PDF.
-      const pdfAlreadySaved = Boolean(storedPdfUrl);
-      if (pdfAlreadySaved) {
+      // Always re-bind (or clear) to THIS letter — switching Appointment ↔ Acceptance
+      // must not leave the sibling PDF as the Download target.
+      if (storedPdfUrl) {
         setPdfSavedForCurrentPreview(true);
-        if (storedPdfUrl) {
-          setStoredSigningPdfUrl(
-            storedPdfUrlWithCacheBuster(storedPdfUrl, {
-              ownerSignedAt,
-              architectSignedAt,
-            })
-          );
-        }
-      } else if (resetSaveState) {
+        setStoredSigningPdfUrl(
+          storedPdfUrlWithCacheBuster(storedPdfUrl, {
+            ownerSignedAt,
+            architectSignedAt,
+          })
+        );
+      } else {
+        setStoredSigningPdfUrl(null);
         setPdfSavedForCurrentPreview(false);
       }
       setPreviewReadyForSave(true);
@@ -3664,9 +3756,7 @@ export default function ApplicationDetailsPage() {
     };
   }, []);
 
-  // Pre-load the html2canvas + jsPDF chunks while the user reads the page so
-  // the first Preview click feels instant rather than spending ~300-500ms on
-  // dynamic imports.
+  // Pre-load html2canvas/jsPDF and keep Chromium warm so Save/Re-save is faster on Vercel.
   useEffect(() => {
     if (!projectId) return;
     type IdleHandle = number;
@@ -3683,6 +3773,13 @@ export default function ApplicationDetailsPage() {
       else window.clearTimeout(handle as unknown as number);
     };
   }, [projectId]);
+
+  // Re-warm Chromium when the letter is ready to Save (Fluid instances go idle quickly).
+  useEffect(() => {
+    if (!previewReadyForSave || !projectId) return;
+    const t = window.setTimeout(() => prewarmPreviewPdfRuntime(), 300);
+    return () => window.clearTimeout(t);
+  }, [previewReadyForSave, projectId, selectedCatalogDocumentId]);
 
   const handleMockSignComplete = async () => {
     if (!projectId) {
@@ -4865,6 +4962,10 @@ export default function ApplicationDetailsPage() {
     setSavePdfError(null);
     setSidebarPdfStatus(null);
     try {
+      // Session + Chromium warmup overlap context prep / HTML build.
+      const sessionPromise = supabase.auth.getSession();
+      prewarmPreviewPdfRuntime();
+
       let ctx = previewPdfContextRef.current;
       const saveTemplateType = mapSelectedApplicationToTemplate(selectedApplication);
       const ctxMatchesSelection =
@@ -4920,7 +5021,7 @@ export default function ApplicationDetailsPage() {
         throw new Error("Could not prepare application data for saving.");
       }
 
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await sessionPromise;
       const authToken = sessionData.session?.access_token;
       const authUserId = sessionData.session?.user?.id;
       if (!authToken || !authUserId) {
@@ -4937,7 +5038,11 @@ export default function ApplicationDetailsPage() {
       setSidebarPdfStatus("Saving document…");
       // Storage slug path predicts the public QR URL — no application_urls round-trip needed.
       const storage = { applicationTypeSlug: typeSlug, documentSlug };
-      const { blob, urlsKey } = await buildApplicationPreviewPdfBlob(undefined, authToken, storage);
+      const { blob, savedAt, urlsKey } = await buildApplicationPreviewPdfBlob(
+        undefined,
+        authToken,
+        storage
+      );
       const uploaded = await submitSavedApplicationPdfs({
         projectId,
         templateType: ctx.templateType,
@@ -4949,21 +5054,64 @@ export default function ApplicationDetailsPage() {
         documentSlug,
       });
       const pdfPath = uploaded.storagePath ?? `${typeSlug}/${documentSlug}/${projectId}.pdf`;
-      await persistDocumentDraft(catalogDoc.id, "saved", pdfPath, {
+      // Show saved PDF immediately; draft row write can finish in parallel.
+      const persistPromise = persistDocumentDraft(catalogDoc.id, "saved", pdfPath, {
         ...letterFieldOverridesRef.current,
       });
       setPdfSavedForCurrentPreview(true);
       setSavePdfMessage("Document saved.");
 
-      const pdfUrl = uploaded.publicUrl;
+      // Instant side preview = exact bytes just uploaded (letterhead + QR), no CDN lag.
+      const localPreviewUrl = URL.createObjectURL(blob);
+      setPreviewHtml(null);
+      setPreviewUrl((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return localPreviewUrl;
+      });
+
+      const pdfUrl = uploaded.publicUrl?.trim() || null;
       if (pdfUrl) {
-        setStoredSigningPdfUrl(pdfUrl);
-        setPreviewHtml(null);
-        setPreviewUrl((prev) => {
-          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
-          return pdfUrl;
+        const bustedPdfUrl = storedPdfUrlWithCacheBuster(pdfUrl, {
+          ownerSignedAt: savedAt,
         });
+        setStoredSigningPdfUrl(bustedPdfUrl);
+        setProjectData((prev) => {
+          if (!prev) return prev;
+          const prevUrls =
+            prev.application_urls && typeof prev.application_urls === "object"
+              ? { ...(prev.application_urls as Record<string, unknown>) }
+              : {};
+          const fromUpload =
+            uploaded.publicUrls && typeof uploaded.publicUrls === "object"
+              ? { ...uploaded.publicUrls }
+              : {};
+          return {
+            ...prev,
+            application_urls: {
+              ...prevUrls,
+              ...fromUpload,
+              [urlsKey]: pdfUrl,
+            },
+          };
+        });
+      } else {
+        setStoredSigningPdfUrl(localPreviewUrl);
       }
+
+      // Drop pre-save HTML (often missing QR) so tab switches rebuild with saved URL.
+      const savedVariant =
+        (ctx.previewSource.letterVariant as "appointment" | "acceptance" | undefined) ??
+        letterVariant;
+      previewHtmlCacheRef.current.delete(
+        previewHtmlCacheKey(catalogDoc.id, savedVariant)
+      );
+      const siblingVariant: "appointment" | "acceptance" =
+        savedVariant === "appointment" ? "acceptance" : "appointment";
+      const siblingDoc = catalogDocuments.find((d) => d.letter_variant === siblingVariant);
+      previewHtmlCacheRef.current.delete(
+        previewHtmlCacheKey(siblingDoc?.id ?? null, siblingVariant)
+      );
+      await persistPromise;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save PDF.";
       setSavePdfError(message);

@@ -11,6 +11,7 @@ export const VALID_ACCEPTANCE_APPLICATION_URL_KEYS = new Set([
   "Structural_Engineer_acceptance",
   "Environmental_Consultant_acceptance",
   "PMC_Project_Manager_acceptance",
+  "Site_Supervisor_acceptance",
 ]);
 
 /**

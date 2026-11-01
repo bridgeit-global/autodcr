@@ -395,27 +395,33 @@ async function htmlToPdfBuffer(
 
 type LaunchedBrowser = Awaited<ReturnType<typeof puppeteer.launch>>;
 
-/** Local/dev only — reuse Chromium across saves (cold launch is the dominant cost). */
-let localWarmBrowser: LaunchedBrowser | null = null;
-let localWarmUserDataDir: string | undefined;
-let localWarmLaunchPromise: Promise<LaunchedBrowser> | null = null;
-let localWarmIdleTimer: ReturnType<typeof setTimeout> | null = null;
-const LOCAL_WARM_IDLE_MS = 5 * 60_000;
+/**
+ * Reuse Chromium across warm invocations (local + Vercel Fluid).
+ * Cold launch dominates Save/Re-save latency; closing every request forces a
+ * multi-second relaunch on every document save.
+ * `pdfRenderChain` serializes renders so one browser is safe under concurrency.
+ */
+let warmBrowser: LaunchedBrowser | null = null;
+let warmUserDataDir: string | undefined;
+let warmLaunchPromise: Promise<LaunchedBrowser> | null = null;
+let warmIdleTimer: ReturnType<typeof setTimeout> | null = null;
+/** Keep warm longer locally; free memory sooner on serverless. */
+const WARM_IDLE_MS = isLambdaLikeRuntime ? 3 * 60_000 : 5 * 60_000;
 
-function clearLocalWarmIdleTimer() {
-  if (localWarmIdleTimer) {
-    clearTimeout(localWarmIdleTimer);
-    localWarmIdleTimer = null;
+function clearWarmIdleTimer() {
+  if (warmIdleTimer) {
+    clearTimeout(warmIdleTimer);
+    warmIdleTimer = null;
   }
 }
 
-async function disposeLocalWarmBrowser() {
-  clearLocalWarmIdleTimer();
-  const browser = localWarmBrowser;
-  const userDataDir = localWarmUserDataDir;
-  localWarmBrowser = null;
-  localWarmUserDataDir = undefined;
-  localWarmLaunchPromise = null;
+async function disposeWarmBrowser() {
+  clearWarmIdleTimer();
+  const browser = warmBrowser;
+  const userDataDir = warmUserDataDir;
+  warmBrowser = null;
+  warmUserDataDir = undefined;
+  warmLaunchPromise = null;
   if (browser) {
     await browser.close().catch(() => undefined);
   }
@@ -424,13 +430,13 @@ async function disposeLocalWarmBrowser() {
   }
 }
 
-function scheduleLocalWarmIdleDispose() {
-  clearLocalWarmIdleTimer();
-  localWarmIdleTimer = setTimeout(() => {
-    void disposeLocalWarmBrowser();
-  }, LOCAL_WARM_IDLE_MS);
-  if (typeof localWarmIdleTimer === "object" && localWarmIdleTimer && "unref" in localWarmIdleTimer) {
-    localWarmIdleTimer.unref();
+function scheduleWarmIdleDispose() {
+  clearWarmIdleTimer();
+  warmIdleTimer = setTimeout(() => {
+    void disposeWarmBrowser();
+  }, WARM_IDLE_MS);
+  if (typeof warmIdleTimer === "object" && warmIdleTimer && "unref" in warmIdleTimer) {
+    warmIdleTimer.unref();
   }
 }
 
@@ -465,61 +471,43 @@ async function launchBrowserInstance(): Promise<{
   return { browser, userDataDir };
 }
 
-async function getLocalWarmBrowser(): Promise<LaunchedBrowser> {
-  clearLocalWarmIdleTimer();
-  if (localWarmBrowser?.connected) {
-    return localWarmBrowser;
+async function getWarmBrowser(): Promise<LaunchedBrowser> {
+  clearWarmIdleTimer();
+  if (warmBrowser?.connected) {
+    return warmBrowser;
   }
-  if (localWarmLaunchPromise) {
-    return localWarmLaunchPromise;
+  if (warmLaunchPromise) {
+    return warmLaunchPromise;
   }
-  localWarmLaunchPromise = (async () => {
-    if (localWarmBrowser) {
-      await disposeLocalWarmBrowser();
+  warmLaunchPromise = (async () => {
+    if (warmBrowser) {
+      await disposeWarmBrowser();
     }
     const { browser, userDataDir } = await launchBrowserInstance();
-    localWarmBrowser = browser;
-    localWarmUserDataDir = userDataDir;
+    warmBrowser = browser;
+    warmUserDataDir = userDataDir;
     browser.on("disconnected", () => {
-      if (localWarmBrowser === browser) {
-        localWarmBrowser = null;
-        localWarmUserDataDir = undefined;
-        clearLocalWarmIdleTimer();
+      if (warmBrowser === browser) {
+        warmBrowser = null;
+        warmUserDataDir = undefined;
+        clearWarmIdleTimer();
       }
     });
     return browser;
   })();
   try {
-    return await localWarmLaunchPromise;
+    return await warmLaunchPromise;
   } finally {
-    localWarmLaunchPromise = null;
+    warmLaunchPromise = null;
   }
 }
 
 async function withBrowser<T>(fn: (browser: LaunchedBrowser) => Promise<T>): Promise<T> {
-  if (!isLambdaLikeRuntime) {
-    const browser = await getLocalWarmBrowser();
-    try {
-      return await fn(browser);
-    } finally {
-      scheduleLocalWarmIdleDispose();
-    }
-  }
-
-  let browser: LaunchedBrowser | null = null;
-  let userDataDir: string | undefined;
+  const browser = await getWarmBrowser();
   try {
-    const launched = await launchBrowserInstance();
-    browser = launched.browser;
-    userDataDir = launched.userDataDir;
     return await fn(browser);
   } finally {
-    if (browser) {
-      await browser.close().catch(() => undefined);
-    }
-    if (userDataDir) {
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
-    }
+    scheduleWarmIdleDispose();
   }
 }
 

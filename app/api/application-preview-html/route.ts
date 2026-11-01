@@ -546,6 +546,7 @@ const ACCEPTANCE_TEMPLATE_PATH_MAP: Partial<Record<TemplateType, string>> = {
   "Structural Engineer": "Acceptance/structural-engineer_acceptance.html",
   "Environmental Consultant": "Acceptance/environmental-consultant_acceptance.html",
   "PMC / Project Manager": "Acceptance/pmc-project-manager_acceptance.html",
+  "Site Supervisor": "Acceptance/site-supervisor_acceptance.html",
 };
 
 /** Maps template type to its `application_urls` acceptance key for QR injection. */
@@ -561,6 +562,7 @@ const ACCEPTANCE_APPLICATION_URL_KEY_MAP: Partial<Record<TemplateType, string>> 
   "Structural Engineer": "Structural_Engineer_acceptance",
   "Environmental Consultant": "Environmental_Consultant_acceptance",
   "PMC / Project Manager": "PMC_Project_Manager_acceptance",
+  "Site Supervisor": "Site_Supervisor_acceptance",
 };
 
 async function loadApplicationTemplateHtml(

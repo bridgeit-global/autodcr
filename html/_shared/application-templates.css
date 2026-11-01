@@ -4,12 +4,12 @@
  * Edit here once; keep per-template <style> blocks for overrides only.
  */
 
+ /* Page margins are owned by injectPaginatedStyles (Paged.js). Keep @page size
+    only — non-zero margins here fight the letterhead chrome and leave a large
+    empty band under the logo before To/QR/Date. */
  @page {
     size: A4;
-    margin-top: 2.5cm;
-    margin-right: 2cm;
-    margin-bottom: 2cm;
-    margin-left: 2cm;
+    margin: 0;
   }
   
   * {
@@ -33,7 +33,8 @@
     width: 100%;
     margin: 0 auto;
     background: transparent;
-    padding-top: 90px;
+    /* Top inset is page margin / letterhead chrome, not content padding. */
+    padding-top: 0;
   }
 
   /* Acceptance letters use WordSection1; bottom air comes from .acceptance-closing. */
@@ -508,6 +509,22 @@
   
   .cc-box.cc-architect {
     page-break-before: auto;
+  }
+
+  /* Nested C.C. under owner sign-off: full width, flush left (signature stays right). */
+  .owner-signature .cc-box {
+    align-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    text-align: left;
+  }
+
+  .owner-signature .cc-box .cc-label,
+  .owner-signature .cc-box .cc-content,
+  .owner-signature .cc-box .cc-note {
+    text-align: left;
   }
   
   p + .project-details,

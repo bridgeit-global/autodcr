@@ -1968,6 +1968,27 @@ function htmlLooksLikeAppointmentLetter(html: string): boolean {
   );
 }
 
+/**
+ * Shared `application-templates.css` ships `@page { margin-top: 2.5cm; … }`.
+ * Paged.js often keeps the first `@page` it sees, so our later `@page :first`
+ * never wins and To/QR stay far under the letterhead. Strip those rules before
+ * we inject the real page chrome.
+ */
+function neutralizeSharedAtPageRules(html: string): string {
+  return html.replace(/@page\b[^{]*\{[\s\S]*?\}/gi, "/* shared @page neutralized */");
+}
+
+/**
+ * Layout detection must ignore `<style>` text. Shared CSS documents selectors like
+ * `.eeb-tab-line` / `.acceptance-letter-body`, which falsely marked every
+ * appointment letter as acceptance (96pt top + 48pt pad + 120pt bottom).
+ */
+function htmlMarkupForLayoutDetection(html: string): string {
+  return htmlWithoutSavedPdfQrInjection(html)
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+}
+
 function injectPaginatedStyles(
   html: string,
   templateType?: TemplateType,
@@ -1976,7 +1997,8 @@ function injectPaginatedStyles(
 ): string {
   const showLetterhead = opts?.showLetterhead !== false;
   html = prependFloatingSavedPdfQrIntoLetterRoot(html);
-  const metaHtml = htmlWithoutSavedPdfQrInjection(html);
+  html = neutralizeSharedAtPageRules(html);
+  const metaHtml = htmlMarkupForLayoutDetection(html);
   const letterheadUrl = showLetterhead
     ? resolveLetterheadUrlFromHtml(html, ownerLetterheadUrl)
     : "";
@@ -2014,24 +2036,33 @@ function injectPaginatedStyles(
       ? "48pt"
       : "18pt";
   /* Bottom margin must clear letterhead footer (+ page-# strip under it).
-     Acceptance has a tall gold+address+contact band; appointment is usually one line. */
+     Acceptance has a tall gold+address+contact band; appointment is usually one line.
+     Authority appointments use a short bottom so signature + C.C. fit on page 1. */
   const pageMarginBottom = isAcceptanceLetter
     ? "120pt"
-    : useArchitectLayout
-      ? "56pt"
-      : letterLayout
-        ? "64pt"
-        : letterheadCssUrl
-          ? "56pt"
-          : "18pt";
+    : isAuthorityAppointmentLetter
+      ? "40pt"
+      : useArchitectLayout
+        ? "56pt"
+        : letterLayout
+          ? "64pt"
+          : letterheadCssUrl
+            ? "56pt"
+            : "18pt";
   /* Page # sits in the clear strip under the letterhead footer (see background-size). */
-  const letterheadPageNumStrip = "18pt";
-  const bottomCenterPadding = letterheadCssUrl ? "6pt" : "20pt";
+  const letterheadPageNumStrip = isAuthorityAppointmentLetter ? "16pt" : "18pt";
+  const bottomCenterPadding = letterheadCssUrl
+    ? isAuthorityAppointmentLetter
+      ? "5pt"
+      : "6pt"
+    : "20pt";
   const letterheadBgSize = letterheadCssUrl
     ? `calc(100% + 24px) calc(100% - ${letterheadPageNumStrip})`
     : "";
   const contentPaddingTop = useArchitectLayout
-    ? "48pt"
+    ? isAuthorityAppointmentLetter
+      ? "0pt"
+      : "48pt"
     : letterLayout
       ? "48pt"
       : letterheadCssUrl
@@ -2040,11 +2071,23 @@ function injectPaginatedStyles(
   /* Modest bottom content pad — page margin owns letterhead-footer clearance. */
   const contentPaddingBottom = isAcceptanceLetter
     ? "12pt"
-    : useArchitectLayout
-      ? "12pt"
-      : letterLayout
-        ? "24pt"
-        : "12pt";
+    : isAuthorityAppointmentLetter
+      ? "10pt"
+      : useArchitectLayout
+        ? "8pt"
+        : letterLayout
+          ? "24pt"
+          : "12pt";
+  /*
+   * Clear scanned letterhead logo + firm name above To/QR/Date.
+   * Letterhead JPEG is stretched to the page, so the brand mark often occupies the
+   * top ~110–120pt. 48–90pt overlapped KH logos; 96pt+48pt content pad left a large
+   * empty band. Authority letters use 115pt margin and 0 content pad: clears the
+   * logo with a small gap, without the old double-pad empty band.
+   */
+  const effectivePageMarginTopFirst = isAuthorityAppointmentLetter
+    ? "115pt"
+    : pageMarginTopFirst;
   const pageMarginLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
   const pageMarginRight = useArchitectLayout ? "30pt" : letterLayout ? "42pt" : "18pt";
   const contentPaddingLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
@@ -2157,8 +2200,124 @@ function injectPaginatedStyles(
     font-weight: 700 !important;
   }
   .pagedjs_page_content .to-content p,
-  .pagedjs_page_content .cc-content p {
+  .pagedjs_page_content .cc-content {
     font-weight: 700 !important;
+  }
+  /* Keep original To | QR | Date header; only tighten body so C.C. can stay on page 1. */
+  .pagedjs_page_content .letter-header {
+    margin: 0 0 2pt 0 !important;
+  }
+  .pagedjs_page_content .letter-header .address-qr-date-row > td {
+    vertical-align: top !important;
+  }
+  .pagedjs_page_content .letter-header .to-content p,
+  .pagedjs_page_content .letter-header .bp-recipient-line {
+    margin: 0 !important;
+    line-height: 1.2 !important;
+  }
+  .pagedjs_page_content .subject-reference-table {
+    margin-top: 4pt !important;
+    margin-bottom: 4pt !important;
+  }
+  .pagedjs_page_content .subject-reference-table td {
+    padding-top: 1pt !important;
+    padding-bottom: 1pt !important;
+    line-height: 1.25 !important;
+  }
+  .pagedjs_page_content .WordSection1 > p,
+  .pagedjs_page_content .WordSection1 > p.opening {
+    margin-top: 4pt !important;
+    margin-bottom: 4pt !important;
+  }
+  .pagedjs_page_content .label-value-table.consultant-details {
+    margin-top: 4pt !important;
+    margin-bottom: 4pt !important;
+  }
+  .pagedjs_page_content .label-value-table.consultant-details td {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    line-height: 1.2 !important;
+  }
+  /* Full-width wrapper so nested C.C. can flush left; signature bits stay right. */
+  .pagedjs_page_content .owner-signature {
+    margin-top: 12pt !important;
+    margin-bottom: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-end !important;
+    text-align: right !important;
+  }
+  /*
+   * Keep the DSC pocket even when empty (draft / unsigned). Collapsing :empty
+   * removed the stamp band so designation sat flush under "For …" and C.C.
+   * looked cramped — match acceptance-style reserved air for the stamp.
+   */
+  .pagedjs_page_content .owner-signature .dsc-stamp-slot,
+  .pagedjs_page_content .owner-signature .dsc-stamp-slot--owner,
+  .pagedjs_page_content .owner-signature .dsc-stamp-slot:empty,
+  .pagedjs_page_content .owner-signature .dsc-stamp-slot--owner:empty {
+    display: block !important;
+    width: 180px !important;
+    height: 60px !important;
+    min-height: 60px !important;
+    margin-top: 10px !important;
+    margin-bottom: 10px !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    align-self: flex-end !important;
+  }
+  .pagedjs_page_content .owner-signature .signature-company,
+  .pagedjs_page_content .owner-signature .owner-signature-details,
+  .pagedjs_page_content .owner-signature .signature-designation,
+  .pagedjs_page_content .owner-signature .signature-name,
+  .pagedjs_page_content .owner-signature .signature-designation-below {
+    margin: 0 !important;
+    line-height: 1.25 !important;
+    text-align: right !important;
+    align-self: flex-end !important;
+  }
+  /* C.C. flush left under the letter (not under the right-aligned sign-off). */
+  .pagedjs_page_content .owner-signature .cc-box {
+    align-self: stretch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-top: 14pt !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    margin-bottom: 0 !important;
+    padding: 0 !important;
+    text-align: left !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+  .pagedjs_page_content .owner-signature .cc-box .cc-row {
+    display: table !important;
+    width: 100% !important;
+    text-align: left !important;
+  }
+  .pagedjs_page_content .owner-signature .cc-box .cc-label {
+    display: table-cell !important;
+    vertical-align: top !important;
+    white-space: nowrap !important;
+    padding-right: 8px !important;
+    width: 1% !important;
+    text-align: left !important;
+  }
+  .pagedjs_page_content .owner-signature .cc-box .cc-content {
+    display: table-cell !important;
+    vertical-align: top !important;
+    line-height: 1.2 !important;
+    text-align: left !important;
+  }
+  .pagedjs_page_content .owner-signature .cc-box .cc-note {
+    margin-top: 3pt !important;
+    margin-bottom: 0 !important;
+    font-weight: 400 !important;
+    text-align: left !important;
   }`
     : "";
 
@@ -2168,6 +2327,22 @@ function injectPaginatedStyles(
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
 <style>
+  /*
+   * Shared application-templates.css sets .page { padding-top: 90px }. That must
+   * be zero BEFORE Paged.js measures the document. Scoping only under
+   * .pagedjs_page_content is too late (wrapper does not exist yet), so pagination
+   * still reserves 90px and pushes C.C. onto page 2 with empty space left on page 1.
+   */
+  div.page,
+  div.WordSection1,
+  div.page.WordSection1,
+  main.page {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+    min-height: 0 !important;
+  }
+
   /* Letterhead-safe A4 content frame.
      Reserve top/footer zones so flowing content does not overlap the printed
      letterhead branding/footer and naturally continues on page 2. */
@@ -2185,7 +2360,7 @@ function injectPaginatedStyles(
     }
   }
   @page :first {
-    margin: ${pageMarginTopFirst} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
+    margin: ${effectivePageMarginTopFirst} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
   }
   @page WordSection1 {
     size: A4;
@@ -2200,7 +2375,7 @@ function injectPaginatedStyles(
     }
   }
   @page WordSection1:first {
-    margin: ${pageMarginTopFirst} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
+    margin: ${effectivePageMarginTopFirst} ${pageMarginRight} ${pageMarginBottom} ${pageMarginLeft};
   }
 
   html, body {
