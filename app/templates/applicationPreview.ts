@@ -1632,6 +1632,51 @@ function buildPagedPreviewStartScript(
     });
   }
   window.__stripAppPreviewChromeForPrint = stripPreviewChromeForPrint;
+  /** CSS background-image is not in document.images — preload/decode before ready flag. */
+  function waitLetterheadImageDecoded(url, timeoutMs) {
+    if (!url) return Promise.resolve(true);
+    return new Promise(function (resolve) {
+      var settled = false;
+      function done(ok) {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      }
+      var img = new Image();
+      var timer = window.setTimeout(function () {
+        console.warn("[application-preview] letterhead decode timed out");
+        done(false);
+      }, timeoutMs || 10000);
+      function finishOk() {
+        window.clearTimeout(timer);
+        if (img.naturalWidth > 0) {
+          done(true);
+          return;
+        }
+        done(false);
+      }
+      img.onload = function () {
+        if (typeof img.decode === "function") {
+          img.decode().then(finishOk).catch(finishOk);
+        } else {
+          finishOk();
+        }
+      };
+      img.onerror = function () {
+        window.clearTimeout(timer);
+        console.warn("[application-preview] letterhead image failed to load");
+        done(false);
+      };
+      img.src = url;
+      if (img.complete && img.naturalWidth > 0) {
+        if (typeof img.decode === "function") {
+          img.decode().then(finishOk).catch(finishOk);
+        } else {
+          finishOk();
+        }
+      }
+    });
+  }
   async function startPagedPreview(){
     if (document.documentElement.getAttribute("data-letterhead-ready") === "1") return;
     if (!window.Paged || !window.Paged.Previewer) {
@@ -1708,6 +1753,8 @@ function buildPagedPreviewStartScript(
       injectLetterheadFooterFixCss();
       window.addEventListener("beforeprint", stripPreviewChromeForPrint);
       if (typeof __lockAppSavedPdfQr === "function") __lockAppSavedPdfQr();
+      // Do not flip ready until letterhead pixels are decoded (or wait gives up).
+      await waitLetterheadImageDecoded(LETTERHEAD_URL, 10000);
       document.documentElement.setAttribute("data-letterhead-ready", "1");
       try {
         if (window.parent && window.parent !== window) {
