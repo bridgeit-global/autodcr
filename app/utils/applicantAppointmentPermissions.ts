@@ -109,6 +109,7 @@ export const ACCEPTANCE_URL_KEY_MAP: Partial<Record<string, string>> = {
   "Structural Engineer": "Structural_Engineer_acceptance",
   "Environmental Consultant": "Environmental_Consultant_acceptance",
   "PMC / Project Manager": "PMC_Project_Manager_acceptance",
+  "Site Supervisor": "Site_Supervisor_acceptance",
 };
 
 /** All valid acceptance URL keys (for server-side validation). */

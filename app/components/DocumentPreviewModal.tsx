@@ -456,9 +456,12 @@ export default function DocumentPreviewModal({
   const isStoredPdfPreview = Boolean(fileUrl) && !htmlContent;
   /** Licenses may be uploaded as images; pdf.js cannot render those. */
   const isImagePreview = Boolean(fileUrl) && IMAGE_URL_PATTERN.test(fileUrl ?? "");
-  // Prefer the live preview URL; otherwise any stored PDF for this document.
-  // Draft saves keep HTML in the iframe for letterhead, but still expose Download.
-  const downloadPdfUrl = fileUrl ?? storedPdfDownloadUrl ?? null;
+  // Live HTML preview: Download must use the stored URL for the selected letter only.
+  // Preferring `fileUrl` here re-downloads a leftover appointment blob after switching
+  // the Document dropdown to Acceptance (or the reverse).
+  const downloadPdfUrl = htmlContent
+    ? storedPdfDownloadUrl ?? null
+    : fileUrl ?? storedPdfDownloadUrl ?? null;
   const showDownloadPdf = Boolean(downloadPdfUrl);
   // Compact (w-fit) only when real preview content is present. Loading/error
   // without content must use the full modal width or the dialog collapses to a thin strip.
