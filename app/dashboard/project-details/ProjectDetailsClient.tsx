@@ -67,6 +67,8 @@ type SavePlotFormData = {
   plotNo: string;
   isInternalRoadPresent: "Yes" | "No" | "";
   plotType: string;
+  /** DigiSatbara primary PR download date → Plot Area Certificate {{DATE_OF_PRC}}. */
+  prcDownloadDate: string;
   plotEntries: {
     ctsNumber: string;
     sacNumber: string;
@@ -109,6 +111,7 @@ const SAVE_PLOT_FORM_DEFAULTS: SavePlotFormData = {
   plotNo: "",
   isInternalRoadPresent: "",
   plotType: "",
+  prcDownloadDate: "",
   plotEntries: [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
 };
 
@@ -645,19 +648,48 @@ export default function ProjectDetailsClient() {
           plotNo: String(savePlotDetails.plotNo || ""),
           isInternalRoadPresent: (savePlotDetails.isInternalRoadPresent === "Yes" || savePlotDetails.isInternalRoadPresent === "No") ? savePlotDetails.isInternalRoadPresent : "",
           plotType: String(savePlotDetails.plotType || ""),
+          prcDownloadDate: String(
+            savePlotDetails.prcDownloadDate ||
+              savePlotDetails.prc_download_date ||
+              ""
+          ),
           plotEntries:
             Array.isArray(savePlotDetails.plotEntries) && savePlotDetails.plotEntries.length > 0
               ? (savePlotDetails.plotEntries as SavePlotFormData["plotEntries"])
               : [{ ctsNumber: "", sacNumber: "", verifyPropertyTax: "", prCard: "" }],
         };
 
+        /*
+         * Pending Project Library autofill must not be wiped by a DB refetch.
+         * Library Save sets dirty-project-details + project-library-autofill-at and
+         * writes draft-project-details-save-plot from all remaining PR cards.
+         */
+        const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
+        const dirtyProject = Boolean(loadDraft<boolean>("dirty-project-details", false));
+        const preferLibraryAutofill =
+          dirtyProject &&
+          autofillAt > 0 &&
+          autofillAt >= lastAutofillHydratedRef.current;
+
         setIsInitialLoad(true);
         resetProject(projectFormData);
-        resetSavePlot(savePlotFormData);
         saveDraft("draft-project-details-project", projectFormData);
-        saveDraft("draft-project-details-save-plot", savePlotFormData);
         saveDraft("saved-project-info-snapshot", projectFormData);
-        saveDraft("saved-save-plot-details-snapshot", savePlotFormData);
+
+        const cascadeSource = preferLibraryAutofill
+          ? readSavePlotFormDraft()
+          : savePlotFormData;
+
+        if (preferLibraryAutofill) {
+          resetSavePlot(cascadeSource);
+          syncCascadeRefs(cascadeSource);
+          lastAutofillHydratedRef.current = autofillAt;
+          setIsSavePlotSaved(false);
+        } else {
+          resetSavePlot(savePlotFormData);
+          saveDraft("draft-project-details-save-plot", savePlotFormData);
+          saveDraft("saved-save-plot-details-snapshot", savePlotFormData);
+        }
 
         const hasMeaningful = (val: unknown): boolean => {
           if (val === null || val === undefined) return false;
@@ -672,58 +704,58 @@ export default function ProjectDetailsClient() {
           markPageSaved("saved-project-info");
           setIsProjectInfoSaved(true);
         }
-        if (hasMeaningful(data.save_plot_details)) {
+        if (!preferLibraryAutofill && hasMeaningful(data.save_plot_details)) {
           markPageSaved("saved-save-plot-details");
           setIsSavePlotSaved(true);
         }
 
         requestAnimationFrame(() => {
           setTimeout(() => {
-            if (savePlotFormData.zone) {
-              setSavePlotValue("zone", savePlotFormData.zone, {
+            if (cascadeSource.zone) {
+              setSavePlotValue("zone", cascadeSource.zone, {
                 shouldValidate: false,
                 shouldDirty: false,
                 shouldTouch: false,
               });
             }
             setTimeout(() => {
-              if (savePlotFormData.ward) {
-                setSavePlotValue("ward", savePlotFormData.ward, {
+              if (cascadeSource.ward) {
+                setSavePlotValue("ward", cascadeSource.ward, {
                   shouldValidate: false,
                   shouldDirty: false,
                   shouldTouch: false,
                 });
               }
               setTimeout(() => {
-                if (savePlotFormData.villageName) {
-                  setSavePlotValue("villageName", savePlotFormData.villageName, {
+                if (cascadeSource.villageName) {
+                  setSavePlotValue("villageName", cascadeSource.villageName, {
                     shouldValidate: false,
                     shouldDirty: false,
                     shouldTouch: false,
                   });
                 }
-                if (savePlotFormData.proposedCtsNumber?.length > 0) {
-                  setSavePlotValue("proposedCtsNumber", savePlotFormData.proposedCtsNumber, {
+                if (cascadeSource.proposedCtsNumber?.length > 0) {
+                  setSavePlotValue("proposedCtsNumber", cascadeSource.proposedCtsNumber, {
                     shouldValidate: false,
                     shouldDirty: false,
                     shouldTouch: false,
                   });
                 }
-                if (savePlotFormData.plotBelongsTo) {
-                  setSavePlotValue("plotBelongsTo", savePlotFormData.plotBelongsTo, {
+                if (cascadeSource.plotBelongsTo) {
+                  setSavePlotValue("plotBelongsTo", cascadeSource.plotBelongsTo, {
                     shouldValidate: false,
                     shouldDirty: false,
                     shouldTouch: false,
                   });
                 }
-                if (savePlotFormData.villageName && savePlotFormData.ward) {
+                if (cascadeSource.villageName && cascadeSource.ward) {
                   const loadNumbers = async () => {
-                    if (savePlotFormData.plotBelongsTo === "F.P.No") {
+                    if (cascadeSource.plotBelongsTo === "F.P.No") {
                       try {
                         const qs = new URLSearchParams({
                           type: "fp",
-                          ward: savePlotFormData.ward,
-                          tps: savePlotFormData.villageName,
+                          ward: cascadeSource.ward,
+                          tps: cascadeSource.villageName,
                         });
                         const r = await fetch(`/api/dp2034/map-query?${qs}`);
                         const mapData = await r.json();
@@ -737,9 +769,9 @@ export default function ProjectDetailsClient() {
                     }
                     setCtsNumbers(
                       getSurveyNumbersForPlotFlowSync(
-                        savePlotFormData.ward,
-                        savePlotFormData.villageName,
-                        savePlotFormData.plotBelongsTo || ""
+                        cascadeSource.ward,
+                        cascadeSource.villageName,
+                        cascadeSource.plotBelongsTo || ""
                       )
                     );
                   };
@@ -790,17 +822,20 @@ export default function ProjectDetailsClient() {
 
   // Reload project + save-plot forms when Project Library extraction writes new drafts.
   useEffect(() => {
-    if (isEditMode || isReadOnlyMode) return;
+    if (isReadOnlyMode) return;
 
     const hydrateFromAutofillDrafts = () => {
       setIsInitialLoad(true);
-      resetProject(readProjectFormDraft());
-      lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
+      if (!isEditMode) {
+        resetProject(readProjectFormDraft());
+        lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
+        setIsProjectInfoSaved(false);
+      }
       const savePlotDraft = readSavePlotFormDraft();
       resetSavePlot(savePlotDraft);
       syncCascadeRefs(savePlotDraft);
-      setIsProjectInfoSaved(false);
       setIsSavePlotSaved(false);
+      lastAutofillHydratedRef.current = loadDraft<number>("project-library-autofill-at", 0);
       window.setTimeout(() => setIsInitialLoad(false), 500);
     };
 
@@ -809,17 +844,19 @@ export default function ProjectDetailsClient() {
 
   // If user navigates here after Library Save, hydrate from the latest autofill timestamp.
   useEffect(() => {
-    if (isEditMode || isReadOnlyMode) return;
+    if (isReadOnlyMode) return;
     const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
     if (!autofillAt || autofillAt <= lastAutofillHydratedRef.current) return;
     lastAutofillHydratedRef.current = autofillAt;
     setIsInitialLoad(true);
-    resetProject(readProjectFormDraft());
-    lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
+    if (!isEditMode) {
+      resetProject(readProjectFormDraft());
+      lockCreateProjectApplicantToLoggedInUser(userMetadata, setProjectValue);
+      setIsProjectInfoSaved(false);
+    }
     const savePlotDraft = readSavePlotFormDraft();
     resetSavePlot(savePlotDraft);
     syncCascadeRefs(savePlotDraft);
-    setIsProjectInfoSaved(false);
     setIsSavePlotSaved(false);
     window.setTimeout(() => setIsInitialLoad(false), 500);
   }, [isEditMode, isReadOnlyMode, resetProject, resetSavePlot, setProjectValue, userMetadata]);
@@ -1313,8 +1350,22 @@ export default function ProjectDetailsClient() {
   const onSavePlotSubmit = async (data: SavePlotFormData) => {
     if (isReadOnlyMode) return;
     try {
-      const isDraft = projectData?.status === "draft";
-      if (isEditMode && projectId && !isDraft) {
+      // Hidden library field — keep DigiSatbara date from autofill draft if form omitted it.
+      const draftSavePlot = loadDraft<Partial<SavePlotFormData>>(
+        "draft-project-details-save-plot",
+        SAVE_PLOT_FORM_DEFAULTS
+      );
+      const savePlotPayload: SavePlotFormData = {
+        ...data,
+        prcDownloadDate: (
+          data.prcDownloadDate ||
+          draftSavePlot.prcDownloadDate ||
+          ""
+        ).trim(),
+      };
+
+      // Persist in Edit Project (incl. draft) so checklist {{DATE_OF_PRC}} / CTS hit the DB.
+      if (isEditMode && projectId) {
         const userId = typeof window !== "undefined" ? window.localStorage.getItem("consultantId") : null;
         if (!userId) {
           showAlert({
@@ -1337,7 +1388,7 @@ export default function ProjectDetailsClient() {
           headers,
           body: JSON.stringify({
             user_id: userId,
-            save_plot_details: data,
+            save_plot_details: savePlotPayload,
           }),
         });
 
@@ -1359,7 +1410,8 @@ export default function ProjectDetailsClient() {
       }
       markPageSaved("saved-save-plot-details");
       saveDraft("dirty-project-details", false);
-      saveDraft("saved-save-plot-details-snapshot", data);
+      saveDraft("draft-project-details-save-plot", savePlotPayload);
+      saveDraft("saved-save-plot-details-snapshot", savePlotPayload);
       setIsSavePlotSaved(true);
     } catch (error: any) {
       console.error("Error saving plot details:", error);

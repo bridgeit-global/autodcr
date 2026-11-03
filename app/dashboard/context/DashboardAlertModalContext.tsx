@@ -39,7 +39,7 @@ export function DashboardAlertModalProvider({ children }: { children: ReactNode 
       {children}
       {open && options && (
         <div
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="dashboard-alert-title"

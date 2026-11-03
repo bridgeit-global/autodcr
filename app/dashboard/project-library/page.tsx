@@ -15,7 +15,6 @@ import {
   deleteExtraLibraryDoc,
   getProjectLibraryFile,
   getExtraLibraryDoc,
-  countAttachedProjectLibraryFiles,
   reconcileFixedLibraryUploads,
   saveProjectLibraryFile,
   saveExtraLibraryDoc,
@@ -24,12 +23,12 @@ import {
 import { useDashboardAlertModal } from "@/app/dashboard/context/DashboardAlertModalContext";
 import { useSectionSaveSlot } from "@/app/dashboard/context/SectionSaveSlotContext";
 import DocumentPreviewModal from "@/app/components/DocumentPreviewModal";
-import { fetchApplicationCatalogTypes } from "@/app/utils/applicationCatalog";
 import {
-  parseSavedApplicationPdf,
-  PROJECT_LIBRARY_BUCKET,
-  savedApplicationPdfLabel,
-} from "@/app/utils/projectSavedApplicationPdfUrl";
+  downloadProjectLibraryBlob,
+  downloadProjectLibraryPreviewUrl,
+  isDurableLibraryUrl,
+  withDurableLibraryUrl,
+} from "@/app/utils/projectLibraryStorageUrl";
 import { supabase } from "@/app/utils/supabase";
 import {
   DRAFT_PROJECT_LIBRARY_DP_ATTACHMENTS_KEY,
@@ -89,40 +88,6 @@ type LibrarySnapshot = {
   dpAttachments: DpAttachments;
 };
 
-type SavedApplicationPdfRow = {
-  key: string;
-  title: string;
-  detail: string;
-  url: string;
-  storagePath: string | null;
-};
-
-function readSavedApplicationEntries(
-  raw: unknown
-): Array<{ key: string; url: string }> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-  const entries: Array<{ key: string; url: string }> = [];
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string" && value.trim()) {
-      entries.push({ key, url: value.trim() });
-    }
-  }
-  return entries;
-}
-
-function formatSavedOn(iso: string | null): string | null {
-  if (!iso) return null;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 type StagingItem = {
   id: string;
   file: File;
@@ -153,6 +118,55 @@ const EXTRACTABLE_EXTRA_TYPES: LibraryDocType[] = [
   "airport-authority-of-india",
   "property-tax-bill",
 ];
+
+/**
+ * Edit Project loads upload metadata from the DB but not IndexedDB blobs.
+ * Re-download missing files from Storage so Save re-extracts *all* attached
+ * docs (not only newly staged uploads that already have local blobs).
+ */
+async function ensureLocalLibraryBlobsForExtraction(
+  projectId: string | undefined,
+  fixed: (UploadRecord | undefined)[],
+  extras: ExtraDocSlot[]
+): Promise<void> {
+  if (!projectId?.trim()) return;
+
+  for (let i = 0; i < fixed.length; i++) {
+    const upload = fixed[i];
+    const path = upload?.path?.trim();
+    if (!upload || !path) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const local = await getProjectLibraryFile(i);
+    if (local?.blob && local.blob.size > 0) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const blob = await downloadProjectLibraryBlob(projectId, path);
+    if (!blob || blob.size <= 0) continue;
+    const file = new File([blob], upload.name || `library-slot-${i}.pdf`, {
+      type: blob.type || "application/pdf",
+      lastModified: Date.now(),
+    });
+    // eslint-disable-next-line no-await-in-loop
+    await saveProjectLibraryFile(i, file);
+  }
+
+  for (const slot of extras) {
+    const path = slot.upload?.path?.trim();
+    if (!slot.upload || !path) continue;
+    if (!EXTRACTABLE_EXTRA_TYPES.includes(slot.type)) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const local = await getExtraLibraryDoc(slot.id);
+    if (local?.blob && local.blob.size > 0) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const blob = await downloadProjectLibraryBlob(projectId, path);
+    if (!blob || blob.size <= 0) continue;
+    const file = new File([blob], slot.upload.name || `${slot.id}.pdf`, {
+      type: blob.type || "application/pdf",
+      lastModified: Date.now(),
+    });
+    // eslint-disable-next-line no-await-in-loop
+    await saveExtraLibraryDoc(slot.id, file, slot.type);
+  }
+}
 
 const LIBRARY_ALLOWED_TYPES: LibraryDocType[] = [
   "pr-card",
@@ -468,9 +482,6 @@ export default function ProjectLibraryPage() {
     undefined
   );
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
-  const [savedApplications, setSavedApplications] = useState<SavedApplicationPdfRow[]>(
-    []
-  );
 
   const markLibraryDirty = () => {
     clearPageSaved("saved-project-library");
@@ -485,11 +496,14 @@ export default function ProjectLibraryPage() {
 
     void (async () => {
       if (isEditMode && projectData) {
+        const projectId = projectData.id as string | undefined;
         const uploadsData = ((projectData.project_library || {}).uploads ||
           []) as UploadRecord[];
         if (uploadsData.length > 0) {
-          const { fixed, extraDocs: nextExtras } =
-            splitServerUploads(uploadsData);
+          const healed = uploadsData.map((u) =>
+            withDurableLibraryUrl(projectId, u)
+          );
+          const { fixed, extraDocs: nextExtras } = splitServerUploads(healed);
           if (cancelled) return;
           setUploads(fixed);
           setExtraDocs(nextExtras);
@@ -503,6 +517,24 @@ export default function ProjectLibraryPage() {
             setIsSaved(true);
           } else {
             markLibraryDirty();
+          }
+          // Persist URL heals in the background — don't block first paint.
+          const needsHeal = healed.some(
+            (u, i) => u.url !== (uploadsData[i]?.url || "")
+          );
+          if (needsHeal && projectId) {
+            void supabase
+              .from("projects")
+              .update({ project_library: { uploads: healed } })
+              .eq("id", projectId)
+              .then(({ error: healError }) => {
+                if (healError) {
+                  console.error(
+                    "Failed to heal project_library blob URLs:",
+                    healError
+                  );
+                }
+              });
           }
           return;
         }
@@ -561,47 +593,6 @@ export default function ProjectLibraryPage() {
     };
   }, [isEditMode, isLoading, projectData]);
 
-  useEffect(() => {
-    const entries = readSavedApplicationEntries(projectData?.application_urls);
-    if (entries.length === 0) {
-      setSavedApplications([]);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const types = await fetchApplicationCatalogTypes();
-      if (cancelled) return;
-      const titleBySlug = new Map(
-        types.map((type) => [type.slug, type.application_title])
-      );
-      const rows = entries.map(({ key, url }) => {
-        const parts = parseSavedApplicationPdf(key, url);
-        const savedOn = formatSavedOn(parts.savedAtIso);
-        const detailParts = [parts.department, savedOn].filter(
-          (part): part is string => Boolean(part)
-        );
-        return {
-          key,
-          title: savedApplicationPdfLabel(
-            parts,
-            key,
-            parts.slug ? titleBySlug.get(parts.slug) : null
-          ),
-          detail: detailParts.join(" · ") || "Saved application PDF",
-          url,
-          storagePath: parts.storagePath,
-        };
-      });
-      rows.sort((a, b) => a.title.localeCompare(b.title));
-      setSavedApplications(rows);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectData]);
-
   const closePreview = () => {
     setPreviewOpen(false);
     if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
@@ -613,7 +604,8 @@ export default function ProjectLibraryPage() {
   const openPreview = async (
     title: string,
     loadBlob: () => Promise<{ blob: Blob } | null | undefined>,
-    fallbackUrl?: string
+    fallbackUrl?: string,
+    libraryPath?: string
   ) => {
     setPreviewTitle(title);
     try {
@@ -629,13 +621,37 @@ export default function ProjectLibraryPage() {
     } catch (e) {
       console.error("Failed to load local file for preview:", e);
     }
-    // Never reuse stale draft blob: URLs from a previous page load.
-    if (fallbackUrl && !fallbackUrl.startsWith("blob:")) {
+
+    // Bucket is private — prefer signed/download via storage path over public URL.
+    const projectId = projectData?.id as string | undefined;
+    const path = libraryPath?.trim();
+    if (projectId && path) {
+      try {
+        const resolved = await downloadProjectLibraryPreviewUrl(projectId, path);
+        if (resolved) {
+          if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+          if (resolved.startsWith("blob:")) {
+            setPreviewBlobUrl(resolved);
+          } else {
+            setPreviewBlobUrl(null);
+          }
+          setPreviewUrl(resolved);
+          setPreviewOpen(true);
+          return;
+        }
+      } catch (e) {
+        console.error("Failed to resolve library storage preview:", e);
+      }
+    }
+
+    // Durable http(s) only; never reuse stale draft blob: URLs.
+    if (isDurableLibraryUrl(fallbackUrl)) {
       setPreviewBlobUrl(null);
-      setPreviewUrl(fallbackUrl);
+      setPreviewUrl(fallbackUrl!);
       setPreviewOpen(true);
       return;
     }
+
     showAlert({
       title: "Preview unavailable",
       message: "No document file is available to preview. Upload the PDFs again.",
@@ -1014,11 +1030,15 @@ export default function ProjectLibraryPage() {
       setStaging([]);
     }
 
-    const attachedCount = await countAttachedProjectLibraryFiles(
-      MAX_FILES,
-      savedExtra.filter((s) => s.upload).map((s) => s.id)
-    );
-    if (attachedCount < 1) {
+    /*
+     * Count from UI metadata (not IndexedDB alone). Edit Project hydrates uploads
+     * from the DB without local blobs — after delete+Save the remaining cards still
+     * have upload records but empty IndexedDB, which falsely tripped "upload at least one".
+     */
+    const attachedMetaCount =
+      savedFixed.filter(Boolean).length +
+      savedExtra.filter((s) => s.upload).length;
+    if (attachedMetaCount < 1) {
       showAlert({
         title: "Project library",
         message:
@@ -1027,7 +1047,10 @@ export default function ProjectLibraryPage() {
       return;
     }
 
-    // Re-verify and re-extract every currently attached document (not only newly staged).
+    // Edit mode: pull missing IndexedDB blobs from Storage, then re-extract ALL remaining.
+    const projectId = projectData?.id as string | undefined;
+    await ensureLocalLibraryBlobsForExtraction(projectId, savedFixed, savedExtra);
+
     const fixedIndexesForExtraction = savedFixed
       .map((upload, index) => (upload ? index : -1))
       .filter((index) => index >= 0);
@@ -1084,6 +1107,61 @@ export default function ProjectLibraryPage() {
 
     if (outcome.autofill) {
       applyProjectAutofillDrafts(outcome.autofill);
+
+      /*
+       * Edit Project: persist library-owned Save Plot keys (CTS + DigiSatbara date)
+       * immediately so Document Checklist {{DATE_OF_PRC}} / CTS resolve without a
+       * separate Property Details save. Includes draft projects — checklist reads DB.
+       */
+      if (isEditMode && projectId) {
+        const userId =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem("consultantId")
+            : null;
+        const existingSavePlot =
+          (projectData?.save_plot_details as Record<string, unknown> | undefined) ||
+          {};
+        const draftSavePlot =
+          (loadDraft("draft-project-details-save-plot", {}) as Record<
+            string,
+            unknown
+          >) || {};
+        const mergedSavePlot = {
+          ...existingSavePlot,
+          ...draftSavePlot,
+          ...(outcome.autofill.savePlot || {}),
+        };
+        if (userId) {
+          try {
+            const {
+              data: { session },
+            } = await supabase.auth.getSession();
+            const headers: HeadersInit = { "Content-Type": "application/json" };
+            if (session?.access_token) {
+              headers.Authorization = `Bearer ${session.access_token}`;
+            }
+            const res = await fetch(`/api/projects/${projectId}`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({
+                user_id: userId,
+                save_plot_details: mergedSavePlot,
+              }),
+            });
+            if (!res.ok) {
+              console.error(
+                "Failed to persist save_plot_details after library autofill:",
+                await res.text()
+              );
+            }
+          } catch (err) {
+            console.error(
+              "Failed to persist save_plot_details after library autofill:",
+              err
+            );
+          }
+        }
+      }
     }
 
     // Attach Valid-up-to as expiryDate on Airport Authority of India upload objects.
@@ -1238,63 +1316,6 @@ export default function ProjectLibraryPage() {
           </p>
         </div>
 
-        {savedApplications.length > 0 && (
-          <section className="mb-5">
-            <h2 className="mb-3 text-sm font-semibold text-brand-navy">
-              Saved applications
-            </h2>
-            <ul className="space-y-3">
-              {savedApplications.map((pdf) => (
-                <li
-                  key={pdf.key}
-                  className="rounded-xl border border-gray-200 bg-white px-4 py-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-gray-900">
-                        {pdf.title}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">{pdf.detail}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void openPreview(
-                          pdf.title,
-                          async () => {
-                            if (!pdf.storagePath) return null;
-                            const { data, error } = await supabase.storage
-                              .from(PROJECT_LIBRARY_BUCKET)
-                              .download(pdf.storagePath);
-                            if (error || !data || data.size === 0) return null;
-                            return { blob: data };
-                          },
-                          pdf.url
-                        )
-                      }
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-brand-blue shadow-sm hover:bg-gray-50"
-                      aria-label={`Preview ${pdf.title}`}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        className="h-5 w-5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M5 4h9l5 5v11H5z" />
-                        <path d="M9 12h6" />
-                        <path d="M9 16h3" />
-                      </svg>
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
         {!isReadOnlyMode && (
           <div
             onDragOver={(e) => {
@@ -1364,7 +1385,8 @@ export default function ProjectLibraryPage() {
                 void openPreview(
                   DOCUMENT_NAMES[0] || uploads[0]?.name || "Document 1",
                   () => getProjectLibraryFile(0),
-                  uploads[0]?.url
+                  uploads[0]?.url,
+                  uploads[0]?.path
                 )
               }
               onDelete={() => void removeFixedUpload(0)}
@@ -1380,7 +1402,8 @@ export default function ProjectLibraryPage() {
                   void openPreview(
                     `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                     () => getExtraLibraryDoc(slot.id),
-                    slot.upload?.url
+                    slot.upload?.url,
+                    slot.upload?.path
                   )
                 }
                 onDelete={() => void removeExtraDoc(slot.id)}
@@ -1395,7 +1418,8 @@ export default function ProjectLibraryPage() {
                 void openPreview(
                   DOCUMENT_NAMES[1] || uploads[1]?.name || "Document 2",
                   () => getProjectLibraryFile(1),
-                  uploads[1]?.url
+                  uploads[1]?.url,
+                  uploads[1]?.path
                 )
               }
               onDelete={() => void removeFixedUpload(1)}
@@ -1417,7 +1441,8 @@ export default function ProjectLibraryPage() {
                     void openPreview(
                       `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                       () => getExtraLibraryDoc(slot.id),
-                      slot.upload?.url
+                      slot.upload?.url,
+                      slot.upload?.path
                     )
                   }
                   onDelete={() => void removeExtraDoc(slot.id)}
@@ -1435,9 +1460,10 @@ export default function ProjectLibraryPage() {
                   onPreview={() =>
                     void openPreview(
                       DOCUMENT_NAMES[2] || uploads[2]?.name || "Document 3",
-                      () => getProjectLibraryFile(2),
-                      uploads[2]?.url
-                    )
+                  () => getProjectLibraryFile(2),
+                  uploads[2]?.url,
+                  uploads[2]?.path
+                )
                   }
                   onDelete={() => void removeFixedUpload(2)}
                 />
@@ -1452,7 +1478,8 @@ export default function ProjectLibraryPage() {
                       void openPreview(
                         `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                         () => getExtraLibraryDoc(slot.id),
-                        slot.upload?.url
+                        slot.upload?.url,
+                        slot.upload?.path
                       )
                     }
                     onDelete={() => void removeExtraDoc(slot.id)}
@@ -1471,9 +1498,10 @@ export default function ProjectLibraryPage() {
                   onPreview={() =>
                     void openPreview(
                       DOCUMENT_NAMES[3] || uploads[3]?.name || "Document 4",
-                      () => getProjectLibraryFile(3),
-                      uploads[3]?.url
-                    )
+                  () => getProjectLibraryFile(3),
+                  uploads[3]?.url,
+                  uploads[3]?.path
+                )
                   }
                   onDelete={() => void removeFixedUpload(3)}
                 />
@@ -1488,7 +1516,8 @@ export default function ProjectLibraryPage() {
                       void openPreview(
                         `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                         () => getExtraLibraryDoc(slot.id),
-                        slot.upload?.url
+                        slot.upload?.url,
+                        slot.upload?.path
                       )
                     }
                     onDelete={() => void removeExtraDoc(slot.id)}
@@ -1508,9 +1537,10 @@ export default function ProjectLibraryPage() {
                   onPreview={() =>
                     void openPreview(
                       DOCUMENT_NAMES[4] || uploads[4]?.name || "Document 5",
-                      () => getProjectLibraryFile(4),
-                      uploads[4]?.url
-                    )
+                  () => getProjectLibraryFile(4),
+                  uploads[4]?.url,
+                  uploads[4]?.path
+                )
                   }
                   onDelete={() => void removeFixedUpload(4)}
                 />
@@ -1526,7 +1556,8 @@ export default function ProjectLibraryPage() {
                         void openPreview(
                           `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                           () => getExtraLibraryDoc(slot.id),
-                          slot.upload?.url
+                          slot.upload?.url,
+                          slot.upload?.path
                         )
                       }
                       onDelete={() => void removeExtraDoc(slot.id)}
@@ -1547,9 +1578,10 @@ export default function ProjectLibraryPage() {
                   onPreview={() =>
                     void openPreview(
                       DOCUMENT_NAMES[5] || uploads[5]?.name || "Document 6",
-                      () => getProjectLibraryFile(5),
-                      uploads[5]?.url
-                    )
+                  () => getProjectLibraryFile(5),
+                  uploads[5]?.url,
+                  uploads[5]?.path
+                )
                   }
                   onDelete={() => void removeFixedUpload(5)}
                 />
@@ -1565,7 +1597,8 @@ export default function ProjectLibraryPage() {
                         void openPreview(
                           `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                           () => getExtraLibraryDoc(slot.id),
-                          slot.upload?.url
+                          slot.upload?.url,
+                          slot.upload?.path
                         )
                       }
                       onDelete={() => void removeExtraDoc(slot.id)}
@@ -1586,9 +1619,10 @@ export default function ProjectLibraryPage() {
                   onPreview={() =>
                     void openPreview(
                       DOCUMENT_NAMES[6] || uploads[6]?.name || "Document 7",
-                      () => getProjectLibraryFile(6),
-                      uploads[6]?.url
-                    )
+                  () => getProjectLibraryFile(6),
+                  uploads[6]?.url,
+                  uploads[6]?.path
+                )
                   }
                   onDelete={() => void removeFixedUpload(6)}
                 />
@@ -1604,7 +1638,8 @@ export default function ProjectLibraryPage() {
                         void openPreview(
                           `${EXTRA_LABEL_BY_TYPE[slot.type]} ${slotIndex + 1}`,
                           () => getExtraLibraryDoc(slot.id),
-                          slot.upload?.url
+                          slot.upload?.url,
+                          slot.upload?.path
                         )
                       }
                       onDelete={() => void removeExtraDoc(slot.id)}

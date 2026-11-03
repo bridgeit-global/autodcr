@@ -28,7 +28,7 @@ import { resolveFireBrigadeOffice } from "@/app/utils/resolveFireBrigadeOffice";
 import { supabase } from "@/app/utils/supabase";
 import {
   applyCatalogFieldOverrides,
-  catalogDocumentPrefersConsultantLetterhead,
+  catalogDocumentLetterheadSource,
   catalogDocumentShowsLetterhead,
   catalogPlaceholderFieldMap,
   fetchApplicationCatalogTypeByTitle,
@@ -37,6 +37,7 @@ import {
   pickCatalogDocument,
   resolveCatalogDocumentForPreview,
   type ApplicationCatalogDocument,
+  type CatalogLetterheadSource,
 } from "@/app/utils/applicationCatalog";
 import {
   isOwnerApplicantType,
@@ -144,6 +145,9 @@ export type ApplicationPreviewSource = {
       villageName?: string;
       roadName?: string;
       majorUseOfPlot?: string;
+      /** DigiSatbara primary PR download date → Plot Area Certificate {{DATE_OF_PRC}}. */
+      prcDownloadDate?: string;
+      prc_download_date?: string;
     } | null;
     applicant_details?: {
       applicants?: Array<{
@@ -172,18 +176,33 @@ export type ApplicationPreviewSource = {
 };
 
 /**
- * Appointment letters go out on the owner's letterhead; acceptance letters are written
- * by the consultant, so they use the appointed consultant's letterhead instead.
+ * Letterhead follows `application_documents.letterhead_source` only.
+ * owner → ownerLetterheadUrl; architect_or_ls / consultant → consultantLetterheadUrl.
+ * Never fall back across parties or to the viewer. Missing URL → "".
  */
 function resolveLetterheadUrlForVariant(
   source?: ApplicationPreviewSource,
-  opts?: { preferConsultant?: boolean }
+  opts?: {
+    preferConsultant?: boolean;
+    letterheadSource?: CatalogLetterheadSource | null;
+    catalogDocument?: ApplicationCatalogDocument | null;
+  }
 ): string {
   const ownerLetterheadUrl = source?.ownerLetterheadUrl?.trim() || "";
+  const consultantLetterheadUrl = source?.consultantLetterheadUrl?.trim() || "";
   const isAcceptanceLetter =
     (source?.letterVariant ?? source?.architectHtmlVariant) === "acceptance";
-  if (!isAcceptanceLetter && !opts?.preferConsultant) return ownerLetterheadUrl;
-  return source?.consultantLetterheadUrl?.trim() || ownerLetterheadUrl;
+  const letterheadSource: CatalogLetterheadSource =
+    opts?.letterheadSource ??
+    (opts?.catalogDocument
+      ? catalogDocumentLetterheadSource(opts.catalogDocument)
+      : source?.resolvedCatalogDocument
+        ? catalogDocumentLetterheadSource(source.resolvedCatalogDocument)
+        : opts?.preferConsultant || isAcceptanceLetter
+          ? "consultant"
+          : "owner");
+  if (letterheadSource === "owner") return ownerLetterheadUrl;
+  return consultantLetterheadUrl;
 }
 
 /** Pincode for EEBP acceptance “Mumbai - …” line (project info or BP address line 3). */
@@ -213,7 +232,9 @@ export function mapSelectedApplicationToTemplate(
   if (value.includes("structural")) return "Structural Engineer";
   if (value.includes("parking")) return "Parking Consultant";
   if (value.includes("rain")) return "Rainwater Consultant";
-  if (value.includes("site supervisor")) return "Site Supervisor";
+  if (value.includes("site supervisor") || value.includes("site_supervisor")) {
+    return "Site Supervisor";
+  }
   if (value.includes("horticulturist")) return "Horticulturist";
   if (value.includes("landscape")) return "Landscape Consultant";
   if (value.includes("geotechnical")) return "Geotechnical Consultant";
@@ -221,10 +242,26 @@ export function mapSelectedApplicationToTemplate(
   if (value.includes("town planner") || value.includes("townplanner")) return "Town Planner";
   if (value.includes("pmc") || value.includes("project manager")) return "PMC / Project Manager";
   if (value.includes("plumber")) return "Plumber";
-  if (value.includes("site supervisor")) return "Site Supervisor";
-  if (value.includes("horticulturist")) return "Horticulturist";
   if (value.includes("licensed surveyor")) return "Licensed Surveyor";
+  if (value.includes("architect")) return "Architect";
   return "Architect";
+}
+
+/**
+ * Which roster role to load letterhead for, from `application_documents.letterhead_source`.
+ * Multi-doc types (Document Checklist) must use the selected document — not the app title.
+ */
+export function templateTypeForLetterheadSource(
+  letterheadSource: CatalogLetterheadSource,
+  doc?: Pick<ApplicationCatalogDocument, "slug" | "category" | "html"> | null,
+  fallbackTemplateType?: TemplateType
+): TemplateType {
+  if (letterheadSource === "architect_or_ls") return "Architect";
+  if (letterheadSource === "owner") return fallbackTemplateType ?? "Architect";
+  const haystack = [doc?.category, doc?.slug, doc?.html, fallbackTemplateType]
+    .filter(Boolean)
+    .join(" ");
+  return mapSelectedApplicationToTemplate(haystack);
 }
 
 export function pickConsultantLookupUserIdsFromProject(
@@ -677,7 +714,9 @@ export function mapToPdfFieldValues(
   );
 
   const clientCompanyDesignation = source?.clientCompanyDesignation?.trim() || "";
-  const letterheadImageUrl = resolveLetterheadUrlForVariant(source);
+  const letterheadImageUrl = resolveLetterheadUrlForVariant(source, {
+    catalogDocument: source?.resolvedCatalogDocument,
+  });
   const displayClientCompanyDesignation = clientCompanyDesignation
     ? entityTypeToSignatoryDesignation(clientCompanyDesignation)
     : "";
@@ -869,6 +908,18 @@ export function mapToPdfFieldValues(
     "project_ addressline1_BuildingProposal": buildingProposalAddress?.line1 || "",
     "project_ addressline2_BuildingProposal": buildingProposalAddress?.line2 || "",
     "project_ addressline3_BuildingProposal": buildingProposalAddress?.line3 || "",
+    // Catalog mustache aliases — same Building Proposal office lines as appointment letters.
+    "{{BP_ORGANISATION}}":
+      buildingProposalAddress?.organisation || "Brihanmumbai Municipal Corporation",
+    "{{BP_ADDRESS_LINE_1}}": buildingProposalAddress?.line1 || "",
+    "{{BP_ADDRESS_LINE_2}}": buildingProposalAddress?.line2 || "",
+    "{{BP_ADDRESS_LINE_3}}": buildingProposalAddress?.line3 || "",
+    "{{BP_OFFICER_NAME}}": buildingProposalAddress?.officerName
+      ? applyWardToOfficerName(
+          buildingProposalAddress.officerName,
+          wardForProjectToken
+        )
+      : "",
     project_Acceptance_EEBP_Pincode:
       resolveAcceptanceEebpPincode(
         source?.projectData?.project_info?.pincode,
@@ -1679,8 +1730,16 @@ function buildPagedPreviewStartScript(
   }
   async function startPagedPreview(){
     if (document.documentElement.getAttribute("data-letterhead-ready") === "1") return;
-    if (!window.Paged || !window.Paged.Previewer) {
+    function signalPagedPreviewReady() {
       document.documentElement.setAttribute("data-letterhead-ready", "1");
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "paged-preview-ready" }, "*");
+        }
+      } catch (e) { /* ignore */ }
+    }
+    if (!window.Paged || !window.Paged.Previewer) {
+      signalPagedPreviewReady();
       return;
     }
     try {
@@ -1755,15 +1814,10 @@ function buildPagedPreviewStartScript(
       if (typeof __lockAppSavedPdfQr === "function") __lockAppSavedPdfQr();
       // Do not flip ready until letterhead pixels are decoded (or wait gives up).
       await waitLetterheadImageDecoded(LETTERHEAD_URL, 10000);
-      document.documentElement.setAttribute("data-letterhead-ready", "1");
-      try {
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage({ type: "paged-preview-ready" }, "*");
-        }
-      } catch (e) { /* ignore */ }
+      signalPagedPreviewReady();
     } catch (e) {
       console.warn("[application-preview] Paged.js layout failed", e);
-      document.documentElement.setAttribute("data-letterhead-ready", "1");
+      signalPagedPreviewReady();
     }
   }
   if (document.readyState === "complete") {
@@ -1968,30 +2022,12 @@ function isUsableLetterheadUrl(url: string): boolean {
 }
 
 function resolveLetterheadUrlFromHtml(
-  html: string,
-  ownerLetterheadUrl?: string | null
+  _html: string,
+  assignedLetterheadUrl?: string | null
 ): string {
-  const passed = ownerLetterheadUrl?.trim() || "";
-  if (isUsableLetterheadUrl(passed)) return passed;
-
-  const metaHtml = htmlWithoutSavedPdfQrInjection(html);
-  const dataUriMatch = metaHtml.match(
-    /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
-  );
-  const cssBackgroundImageMatch = metaHtml.match(
-    /background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i
-  );
-  const cssBackgroundShorthandMatch = metaHtml.match(
-    /background\s*:\s*[^;]*url\((['"]?)(.*?)\1\)[^;]*;/i
-  );
-  const fromHtml = (
-    dataUriMatch?.[0] ||
-    cssBackgroundImageMatch?.[2]?.trim() ||
-    cssBackgroundShorthandMatch?.[2]?.trim() ||
-    ""
-  ).trim();
-  if (isUsableLetterheadUrl(fromHtml)) return fromHtml;
-  return "";
+  // Assigned URL only — do not scrape body/CSS for a default letterhead image.
+  const passed = assignedLetterheadUrl?.trim() || "";
+  return isUsableLetterheadUrl(passed) ? passed : "";
 }
 
 /**
@@ -2050,6 +2086,8 @@ function injectPaginatedStyles(
     ? resolveLetterheadUrlFromHtml(html, ownerLetterheadUrl)
     : "";
   const letterheadCssUrl = letterheadUrl ? escapeCssUrlValue(letterheadUrl) : "";
+  /** No assigned letterhead → no image and no reserved logo/footer band. */
+  const hasLetterheadPaint = Boolean(letterheadCssUrl);
   const previewOrigin = resolvePreviewAppOrigin();
   const isAcceptanceLetter =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body");
@@ -2070,59 +2108,72 @@ function injectPaginatedStyles(
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
   /*
    * Same first-page top for every letter-header template (authority appointment,
-   * acceptance, Architect appointment). Structural Engineer appointment already
-   * used 115pt+0; acceptance/Architect were stuck on 96pt+48pt content pad and
-   * showed a large empty band under the logo.
+   * acceptance, Architect appointment) — only when a letterhead image is present.
+   * Missing assigned letterhead must not leave a blank logo band.
    */
-  const useTightLetterheadFirstPageTop = hasLetterHeader;
+  const useTightLetterheadFirstPageTop = hasLetterHeader && hasLetterheadPaint;
+  /* Annexure/checklist forms with letterhead (not appointment/acceptance). */
+  const isLetterheadedForm = hasLetterheadPaint && !letterLayout && !useArchitectLayout;
+  /* First content line (ANNEXURE / title / To,) clears the scanned logo the same way
+     as appointment + acceptance: 115pt @page :first and 0 content top pad.
+     Do not invent per-HTML padding-top on .annexure / .form-title. */
+  const useLetterheadFirstPageClearance =
+    useTightLetterheadFirstPageTop || isLetterheadedForm;
   /* First-page top must clear scanned letterhead logos (brand mark + firm name).
-     Too little → QR/To/Date sit on the logo; too much → empty band. Tuned once for
-     all appointment/acceptance/letterheaded apps — not per-application. */
-  const pageMarginTopFirst = useArchitectLayout
-    ? "96pt"
-    : letterLayout
-      ? "100pt"
-      : letterheadCssUrl
-        ? "96pt"
-        : "18pt";
+     Too little → content sits on the logo; too much → empty band. Tuned once for
+     appointment/acceptance/letterheaded forms — not per-application.
+     Without a letterhead image, use a normal letter top inset. */
+  const pageMarginTopFirst = !hasLetterheadPaint
+    ? "18pt"
+    : useArchitectLayout
+      ? "96pt"
+      : letterLayout
+        ? "100pt"
+        : "96pt";
   const pageMarginTop = useArchitectLayout
     ? "36pt"
     : letterLayout
       ? "48pt"
       : "18pt";
   /* Bottom margin must clear letterhead footer (+ page-# strip under it).
-     Acceptance has a tall gold+address+contact band; appointment is usually one line.
-     Authority appointments use a short bottom so signature + C.C. fit on page 1. */
-  const pageMarginBottom = isAcceptanceLetter
-    ? "120pt"
-    : isAuthorityAppointmentLetter
-      ? "40pt"
-      : useArchitectLayout
-        ? "56pt"
-        : letterLayout
-          ? "64pt"
-          : letterheadCssUrl
-            ? "56pt"
-            : "18pt";
+     Acceptance / owner letterheads often have a tall gold+address+contact band —
+     never shrink below that clearance (overlapping the footer is worse than page 2).
+     Authority appointments stay short (one-line footer).
+     No letterhead → no footer band to clear. */
+  const pageMarginBottom = !hasLetterheadPaint
+    ? "24pt"
+    : isAcceptanceLetter
+      ? "120pt"
+      : isAuthorityAppointmentLetter
+        ? "40pt"
+        : useArchitectLayout
+          ? "56pt"
+          : letterLayout
+            ? "64pt"
+            : isLetterheadedForm
+              ? // Clear gold/address footer; long multi-CTS meta needs the extra ~12pt for DSC.
+                "84pt"
+              : "56pt";
   /* Page # sits in the clear strip under the letterhead footer (see background-size). */
   const letterheadPageNumStrip =
-    isAuthorityAppointmentLetter || useTightLetterheadFirstPageTop ? "16pt" : "18pt";
-  const bottomCenterPadding = letterheadCssUrl
-    ? isAuthorityAppointmentLetter || useTightLetterheadFirstPageTop
+    isAuthorityAppointmentLetter || useLetterheadFirstPageClearance ? "16pt" : "18pt";
+  const bottomCenterPadding = hasLetterheadPaint
+    ? isAuthorityAppointmentLetter || useLetterheadFirstPageClearance
       ? "5pt"
       : "6pt"
     : "20pt";
-  const letterheadBgSize = letterheadCssUrl
+  const letterheadBgSize = hasLetterheadPaint
     ? `calc(100% + 24px) calc(100% - ${letterheadPageNumStrip})`
     : "";
-  const contentPaddingTop = useTightLetterheadFirstPageTop
+  /* Letterhead clearance owns top inset — no second content pad (would double the gap). */
+  const contentPaddingTop = useLetterheadFirstPageClearance
     ? "0pt"
-    : useArchitectLayout
-      ? "48pt"
-      : letterLayout
+    : !hasLetterheadPaint
+      ? "12pt"
+      : useArchitectLayout
         ? "48pt"
-        : letterheadCssUrl
-          ? "36pt"
+        : letterLayout
+          ? "48pt"
           : "12pt";
   /* Modest bottom content pad — page margin owns letterhead-footer clearance. */
   const contentPaddingBottom = isAcceptanceLetter
@@ -2133,14 +2184,16 @@ function injectPaginatedStyles(
         ? "8pt"
         : letterLayout
           ? "24pt"
-          : "12pt";
+          : isLetterheadedForm
+            ? "2pt"
+            : "12pt";
   /*
-   * Clear scanned letterhead logo + firm name above To/QR/Date.
+   * Clear scanned letterhead logo + firm name above first content.
    * Letterhead JPEG is stretched to the page, so the brand mark often occupies the
-   * top ~110–120pt. 96pt margin + 48pt content pad left a large empty band —
-   * letter-header letters use 115pt margin and 0 content pad instead.
+   * top ~110–120pt. Appointment/acceptance letter-header and letterheaded annexures
+   * all use 115pt first-page margin and 0 content pad — only when painted.
    */
-  const effectivePageMarginTopFirst = useTightLetterheadFirstPageTop
+  const effectivePageMarginTopFirst = useLetterheadFirstPageClearance
     ? "115pt"
     : pageMarginTopFirst;
   const pageMarginLeft = useArchitectLayout ? "36pt" : letterLayout ? "56pt" : "18pt";
@@ -2659,7 +2712,125 @@ function injectPaginatedStyles(
   .pagedjs_page_content p {
     break-inside: auto !important;
     page-break-inside: auto !important;
+  }
+
+  /*
+   * Letterheaded annexures: NEVER use break-inside/before:avoid on .closing /
+   * .sig / .architect-block. Nested avoids + letterhead margins make Paged.js
+   * drop most of the body (empty page, only a signer remnant — “content gone”).
+   * Dense rhythm keeps page 1; content must always be allowed to split.
+   */
+  .pagedjs_page_content .closing,
+  .pagedjs_page_content .sig,
+  .pagedjs_page_content .cc,
+  .pagedjs_page_content .cc-box,
+  .pagedjs_page_content .architect-block,
+  .pagedjs_page_content .consultant-block,
+  .pagedjs_page_content .dsc-stamp-slot {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    break-before: auto !important;
+    page-break-before: auto !important;
+  }
+  /* Keep appointment DSC pocket (180×60); tight air for page-1 fit. */
+  .pagedjs_page_content .dsc-stamp-slot {
+    width: 180px !important;
+    height: 60px !important;
+    margin-top: 4px !important;
+    margin-bottom: 4px !important;
+  }
+  /* Checklist/annexure density — fit body + DSC above letterhead footer on page 1. */
+  .pagedjs_page_content,
+  .pagedjs_page_content .page,
+  .pagedjs_page_content main.page {
+    font-size: 10.5pt !important;
+    line-height: 1.14 !important;
+  }
+  .pagedjs_page_content .annexure {
+    margin: 0 0 1px !important;
+    line-height: 1.12 !important;
+  }
+  .pagedjs_page_content .form-title {
+    margin: 0 0 2px !important;
+    font-size: 11.5pt !important;
+    line-height: 1.12 !important;
+  }
+  .pagedjs_page_content .to-block {
+    margin: 1px 0 3px !important;
+  }
+  .pagedjs_page_content .to-block .to-label,
+  .pagedjs_page_content .to-block .to-content p {
+    margin: 0 !important;
+    line-height: 1.12 !important;
+  }
+  .pagedjs_page_content .meta-table {
+    margin: 1px 0 3px !important;
+  }
+  .pagedjs_page_content .meta-table td {
+    padding: 0 !important;
+    line-height: 1.08 !important;
+    vertical-align: top !important;
+  }
+  /* Long multi-CTS values must wrap tightly so closing/DSC stay on the letter. */
+  .pagedjs_page_content .meta-table td:last-child,
+  .pagedjs_page_content .meta-table .value-bold {
+    font-size: 9pt !important;
+    line-height: 1.08 !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+  }
+  .pagedjs_page_content .meta-table .lbl {
+    font-size: 10pt !important;
+    line-height: 1.08 !important;
+  }
+  .pagedjs_page_content > p,
+  .pagedjs_page_content .page > p,
+  .pagedjs_page_content main.page > p {
+    margin: 1px 0 !important;
+    line-height: 1.14 !important;
+  }
+  .pagedjs_page_content .closing {
+    margin-top: 1px !important;
+  }
+  .pagedjs_page_content .closing > p {
+    margin: 0 !important;
+    line-height: 1.12 !important;
+  }
+  .pagedjs_page_content .sig {
+    margin-top: 1px !important;
+  }
+  .pagedjs_page_content .sig > p {
+    margin: 0 !important;
+    line-height: 1.12 !important;
+  }
+  .pagedjs_page_content .closing .cc {
+    margin-top: 2px !important;
+  }
+  .pagedjs_page_content .closing .cc p {
+    margin: 0 !important;
+    line-height: 1.12 !important;
+  }
+  .pagedjs_page_content .signer-role,
+  .pagedjs_page_content .architect-block .meta-line,
+  .pagedjs_page_content .consultant-block .meta-line {
+    margin: 0 !important;
+    line-height: 1.08 !important;
+  }
+  .pagedjs_page_content p {
+    orphans: 1;
+    widows: 1;
   }`
+  }
+
+  ${
+    letterLayout
+      ? `
+  .pagedjs_page_content .cc,
+  .pagedjs_page_content .cc-box {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }`
+      : ""
   }
 
   .pagedjs_margin-bottom-center {
@@ -2764,19 +2935,8 @@ function injectPlumberPreviewPages(
   const before = serializeNodes(children.slice(0, markerIndex));
   const after = serializeNodes(children.slice(markerIndex));
 
-  const metaHtml = htmlWithoutSavedPdfQrInjection(html);
-  const dataUriMatch = metaHtml.match(
-    /data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+/i
-  );
-  const cssUrlMatch = metaHtml.match(
-    /background-image\s*:\s*url\((['"]?)(.*?)\1\)\s*;/i
-  );
-  const letterheadUrl = showLetterhead
-    ? ownerLetterheadUrl?.trim() ||
-      dataUriMatch?.[0] ||
-      cssUrlMatch?.[2] ||
-      ""
-    : "";
+  // Assigned URL only — ignore embedded CSS/data-URI defaults in the HTML.
+  const letterheadUrl = showLetterhead ? ownerLetterheadUrl?.trim() || "" : "";
 
   const plumberHead = `
 <style>
@@ -2823,7 +2983,7 @@ function injectPlumberPreviewPages(
   .preview-sheet--first,
   .preview-sheet--second {
     position: relative;
-    padding: 135pt 42pt 120pt 56pt;
+    padding: ${letterheadUrl ? "135pt 42pt 120pt 56pt" : "18pt 42pt 24pt 56pt"};
   }
   .preview-sheet-page-num {
     position: absolute;
@@ -2958,14 +3118,17 @@ export async function generateApplicationPreviewHtml(
           documentId: source?.catalogDocumentId,
         });
   const showLetterhead = catalogDocumentShowsLetterhead(catalogDoc);
-  const preferConsultantLetterhead = catalogDocumentPrefersConsultantLetterhead(catalogDoc);
+  const letterheadSource = catalogDocumentLetterheadSource(catalogDoc);
 
   const rawHtml = await fetchApplicationPreviewHtmlRaw(fields, templateType, source, {
     accessToken,
     skipSessionRefresh: Boolean(accessToken),
   });
   const letterheadUrl = showLetterhead
-    ? resolveLetterheadUrlForVariant(source, { preferConsultant: preferConsultantLetterhead })
+    ? resolveLetterheadUrlForVariant(source, {
+        letterheadSource,
+        catalogDocument: catalogDoc,
+      })
     : "";
   // Legacy Word-export plumber layout (cc-start); clean templates use letter-header + injectPaginatedStyles.
   if (
@@ -3024,6 +3187,8 @@ export async function fetchApplicationPreviewHtmlRaw(
         applicant_details: source?.projectData?.applicant_details as
           | { applicants?: Record<string, unknown>[] }
           | null,
+        consultant_coa_expiry: source?.coaExpiryDate ?? null,
+        consultant_lbs_expiry: source?.lbsExpiryDate ?? null,
       },
       source?.resolvedApplicantType
     );
@@ -3033,12 +3198,16 @@ export async function fetchApplicationPreviewHtmlRaw(
     if (!catalogDocumentShowsLetterhead(preloadedDoc)) {
       delete formValues.project_Letterhead_Image_Url;
       delete formValues["{{LETTERHEAD_URL}}"];
-    } else if (catalogDocumentPrefersConsultantLetterhead(preloadedDoc)) {
-      const consultantLetterhead =
-        source?.consultantLetterheadUrl?.trim() || source?.ownerLetterheadUrl?.trim() || "";
-      if (consultantLetterhead) {
-        formValues.project_Letterhead_Image_Url = consultantLetterhead;
-        formValues["{{LETTERHEAD_URL}}"] = consultantLetterhead;
+    } else {
+      const assigned = resolveLetterheadUrlForVariant(source, {
+        catalogDocument: preloadedDoc,
+      });
+      if (assigned) {
+        formValues.project_Letterhead_Image_Url = assigned;
+        formValues["{{LETTERHEAD_URL}}"] = assigned;
+      } else {
+        delete formValues.project_Letterhead_Image_Url;
+        delete formValues["{{LETTERHEAD_URL}}"];
       }
     }
   } else if (applicationTitle) {
@@ -3069,6 +3238,8 @@ export async function fetchApplicationPreviewHtmlRaw(
             applicant_details: source?.projectData?.applicant_details as
               | { applicants?: Record<string, unknown>[] }
               | null,
+            consultant_coa_expiry: source?.coaExpiryDate ?? null,
+            consultant_lbs_expiry: source?.lbsExpiryDate ?? null,
           },
           catalogType.applicant_type
         );
@@ -3078,12 +3249,16 @@ export async function fetchApplicationPreviewHtmlRaw(
         if (!catalogDocumentShowsLetterhead(variantDoc)) {
           delete formValues.project_Letterhead_Image_Url;
           delete formValues["{{LETTERHEAD_URL}}"];
-        } else if (catalogDocumentPrefersConsultantLetterhead(variantDoc)) {
-          const consultantLetterhead =
-            source?.consultantLetterheadUrl?.trim() || source?.ownerLetterheadUrl?.trim() || "";
-          if (consultantLetterhead) {
-            formValues.project_Letterhead_Image_Url = consultantLetterhead;
-            formValues["{{LETTERHEAD_URL}}"] = consultantLetterhead;
+        } else {
+          const assigned = resolveLetterheadUrlForVariant(source, {
+            catalogDocument: variantDoc,
+          });
+          if (assigned) {
+            formValues.project_Letterhead_Image_Url = assigned;
+            formValues["{{LETTERHEAD_URL}}"] = assigned;
+          } else {
+            delete formValues.project_Letterhead_Image_Url;
+            delete formValues["{{LETTERHEAD_URL}}"];
           }
         }
       }
@@ -3094,6 +3269,35 @@ export async function fetchApplicationPreviewHtmlRaw(
 
   applyCatalogFieldOverrides(formValues, source?.fieldOverrides);
   keepOwnerPersonNameOnPreviewFields(formValues, source);
+  // Catalog `{{VALIDITY}}` often missing on applicant rows — use session COA/LBS expiry.
+  if (!(formValues["{{VALIDITY}}"] || "").trim()) {
+    const rawExpiry =
+      source?.coaExpiryDate?.trim() || source?.lbsExpiryDate?.trim() || "";
+    if (rawExpiry) {
+      formValues["{{VALIDITY}}"] = formatCoaExpiryDisplay(rawExpiry) || rawExpiry;
+    }
+  }
+  // Plot Area Certificate — DigiSatbara date even if catalog placeholder row is stale/missing.
+  if (!(formValues["{{DATE_OF_PRC}}"] || "").trim()) {
+    const savePlot = source?.projectData?.save_plot_details as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const prcDate = String(
+      savePlot?.prcDownloadDate || savePlot?.prc_download_date || ""
+    ).trim();
+    if (prcDate) {
+      formValues["{{DATE_OF_PRC}}"] = prcDate;
+      formValues.date_of_prc = prcDate;
+    }
+  }
+
+  const plotBelongsFallback = String(
+    source?.projectData?.save_plot_details?.plotBelongsTo ?? ""
+  ).trim();
+  if (plotBelongsFallback && !formValues.__plotBelongsTo) {
+    formValues.__plotBelongsTo = plotBelongsFallback;
+  }
 
   let access_token = opts?.accessToken?.trim();
   if (!access_token) {

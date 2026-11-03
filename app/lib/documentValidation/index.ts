@@ -4,6 +4,7 @@ import {
   extractDocumentFromMedia,
   type ClassifyDocumentResult,
 } from "./ai";
+import { enrichPrCardDownloadDate } from "./documents/prCard";
 import { extractTextFromPdfBuffer } from "./extractText";
 import { documents, isDocumentType, type DocumentType } from "./registry";
 import { refineLibraryDocumentType, refineDpRemarksSubtype } from "./dpRemarksSubtype";
@@ -11,6 +12,15 @@ import type { DocumentDefinition } from "./types";
 import { validateExtractedFields } from "./validate";
 import type { ValidationResult } from "./validate";
 import type { z } from "zod";
+
+function maybeEnrichPrCardFields(
+  documentType: DocumentType,
+  extracted: Record<string, string | null>,
+  documentText: string
+): Record<string, string | null> {
+  if (documentType !== "pr-card" || !documentText.trim()) return extracted;
+  return enrichPrCardDownloadDate(extracted, documentText);
+}
 
 export type DocumentValidationResponse = ValidationResult<
   Record<string, string | null>
@@ -144,7 +154,10 @@ export async function validateDocumentPdf(
     documentText
   );
 
-  return runValidation(documentType, flattenExtracted(extracted));
+  return runValidation(
+    documentType,
+    maybeEnrichPrCardFields(documentType, flattenExtracted(extracted), documentText)
+  );
 }
 
 /**
@@ -188,7 +201,11 @@ export async function validateDocumentFile(
           definition as DocumentDefinition<z.ZodTypeAny>,
           documentText
         );
-        const flat = flattenExtracted(extracted);
+        const flat = maybeEnrichPrCardFields(
+          documentType,
+          flattenExtracted(extracted),
+          documentText
+        );
         if (hasMeaningfulExtraction(flat)) {
           return runValidation(documentType, flat);
         }
@@ -211,7 +228,10 @@ export async function validateDocumentFile(
       },
       documentText
     );
-    return runValidation(documentType, flattenExtracted(extracted));
+    return runValidation(
+      documentType,
+      maybeEnrichPrCardFields(documentType, flattenExtracted(extracted), documentText)
+    );
   }
 
   const extracted = await extractDocumentFromMedia(

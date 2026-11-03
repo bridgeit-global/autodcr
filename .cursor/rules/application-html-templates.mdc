@@ -1,0 +1,54 @@
+---
+description: Contract for application letter/form HTML under html/ and template generators
+globs: html/**/*.html,scripts/*template*,scripts/generate-general-document-checklist-html.mjs
+alwaysApply: false
+---
+
+# Application HTML templates
+
+Shared preview/PDF rules live in the **pipeline** (`applicationCatalog` + `injectPaginatedStyles`). Do not invent per-folder page or plot grammar.
+
+## Content tokens
+
+- Survey **inline prose**: prefer `{{PLOT_CS_CTS_NO}}` (kind + number, e.g. `C.T.S. No. 177A`).
+- Survey **meta-table row**: key = `Plot No./ C.S. No./ C.T.S. No. / F.P No.` and value = `{{PLOT_NO}} / {{CS_NO}} / {{CTS_NO}} / {{FP_NO}}` — pipeline collapses to key `C.T.S. No.` + value `177A` (plotBelongsTo-aware). Do **not** put `{{PLOT_CS_CTS_NO}}` in the value cell (that repeats the kind label).
+- Place **inline prose**: prefer `{{VILLAGE_DIVISION}}` (e.g. `Village KURLA - 4`).
+- Place **meta-table row**: key = `Division/ Village/ T.P. Scheme No.` and value = `{{DIVISION}} / {{VILLAGE}} / {{TPS_NO}}` — pipeline collapses to key `Village` + bare place name.
+- Application Details **Letter fields** panel: same collapse — one survey field labeled `C.T.S. No.` / `C.S. No.` / `F.P. No.` with the bare number, and one place field labeled `Village` / `Division` / `T.P. Scheme No.` with the bare name. Do not list all four plot tokens and all three place tokens.
+- Letter fields: omit empty address line 1/2/3 rows (`owner_address_line_*`, `architect_address_line_*`, `bp_address_line_*`) — only show lines that have a value (same as HTML empty-line cleanup).
+- Ward: token value is the **ward code only** (e.g. `L`). Prose may add the word “Ward” once beside the token (`{{WARD}} Ward`). Do not rely on the token appending “Ward”.
+- Suburb (`{{SUBURB}}`): derived from project region/ward — **never** hardcode City / Western / Eastern in HTML. Printed value is the region **only** (`City` / `Western` / `Eastern`) — do **not** append “Suburb”. Prefer `save_plot_details.region`; if empty, infer via `inferLocationFromWard(ward)` (same map as Project Details). Used in BMC To-block: `O/o The Dy.Ch.Eng.(B.P.) {{SUBURB}},`
+- BMC annexure To-block layout: `To,` alone on its own line, then address lines on the following lines (do not put `To,` beside the first address line). Do **not** print “(On the letter head of …)” notes — letterhead comes from catalog flags / preview chrome only.
+- Organisation on BMC annexure To-blocks: hardcode `Brihanmumbai Municipal Corporation` (or resolve `{{BP_ORGANISATION}}` to that literal) — not a free-text project field.
+- Building Proposal address lines (Word blanks Address Line 1/2/3): use `{{BP_ADDRESS_LINE_1}}`, `{{BP_ADDRESS_LINE_2}}`, `{{BP_ADDRESS_LINE_3}}` only. Values come from the same Building Proposal office resolution as appointment letters (`resolveBuildingProposalOffice` by region/ward from `building_proposal_offices`). Do **not** hardcode office street addresses in HTML.
+- Label/value meta rows (`.meta-table`): keep keys and values **close** — label column shrink-wraps (`width:1%; white-space:nowrap; padding-right:~10px`), not a wide fixed % that leaves a large gap. Values stay left-aligned in the second column and wrap under themselves.
+- `Subject:` / `Reference:` side headings are **normal weight**; bold only the value (e.g. Acceptance of Supervision, file no.) — same as Word annexures.
+- Closing blocks: wrap `Thanking you` / `Yours Faithfully` + signature in `.closing`; signature details in `.sig`; CC in `.cc` (letters may use `.cc-box`). Letterheaded checklist forms must **not** set `break-inside`/`break-before: avoid` on those wrappers (Paged.js drops the body).
+- C.C. / owner role label: use `{{OWNER_OR_DEVELOPER}}` (resolves to **Owner** or **Developer** from the project roster). Never hardcode `Owner/Developer` — print only the role that is present.
+- Architect signer block (appointment/acceptance style) — after `For {{CONSULTANT_FIRM}},` + DSC slot, use labeled lines (no salutation glued to the name):
+  ```
+  Architect
+  Name: {{ARCHITECT_LS_NAME}}
+  COA Reg. No.: {{REG_NO}}
+  Valid upto: {{VALIDITY}}
+  ```
+  Other consultants use the same pattern with their role title and `Reg. No.:` (not COA). Do not print bare `{{SALUTATION}}{{NAME}},` / bare reg / bare validity stacks.
+- DSC space: add `<div class="dsc-stamp-slot" aria-hidden="true"></div>` **only** where catalog `sign` requires a digital signature — not on every block.
+  - Size/air must match appointment letters: **180×60** with **8px** margin above and below (same as `html/_shared/application-templates.css` → `.signature-table .dsc-stamp-slot`). Do not shrink this pocket on forms — DSC placement depends on it.
+  - `sign` includes `owner` → `dsc-stamp-slot dsc-stamp-slot--owner` above the owner name lines.
+  - `sign` includes `architect_or_ls` or `consultant` → `dsc-stamp-slot` after `For {{CONSULTANT_FIRM}},` and before the signer name.
+  - Skip DSC slots when `sign` is empty / document is not DSC-signed.
+- Letterhead: catalog `show_letterhead` / `letterhead_source` only — do not paint letterhead images in HTML. Pipeline uses the **assigned person’s** letterhead only (no owner↔consultant fallback). If that person has no letterhead, preview/PDF show **no** letterhead and **no** reserved logo space.
+- First line under letterhead (`ANNEXURE …` / form title): do **not** add HTML top padding or blank spacer blocks. When a letterhead image exists, pipeline matches appointment/acceptance clearance (115pt first-page top). Same rule for every letterheaded checklist HTML.
+- Pagination: rely on `injectPaginatedStyles`; do not add one-off `@page` / min-height page hacks per folder.
+
+## After HTML changes
+
+Upload with:
+
+```bash
+node scripts/sync-application-templates.mjs --dir "./html/<folder>"
+# or specific paths matching application_documents.html
+```
+
+Object keys must match the catalog `html` column (paths relative to `html/`).

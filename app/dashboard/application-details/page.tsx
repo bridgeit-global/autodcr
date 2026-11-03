@@ -23,6 +23,7 @@ import {
 } from "@/app/components/DraftApplicationsModal";
 import { useUserMetadata } from "@/app/contexts/UserContext";
 import { supabase } from "@/app/utils/supabase";
+import { mergeSavePlotDetailsForCatalog } from "@/app/lib/projectDocumentAutofill/mergeSavePlotForCatalog";
 import {
   extractPanHashFromCertDer,
   isValidPanFormat,
@@ -96,6 +97,7 @@ import {
   mapToPdfFieldValues,
   mapSelectedApplicationToTemplate,
   pickConsultantLookupUserIdsFromProject,
+  templateTypeForLetterheadSource,
   prewarmPreviewPdfRuntime,
   buildDetailsFieldRowsForUi,
   type PdfDetailsFieldRow,
@@ -108,6 +110,7 @@ import {
 } from "@/app/lib/bridge/dscStampPlacement";
 import {
   catalogConsultantSignsAppointment,
+  catalogDocumentLetterheadSource,
   catalogDocumentOptionLabel,
   catalogPlaceholderFieldMap,
   buildCatalogLetterFieldRows,
@@ -853,6 +856,8 @@ type BuildApplicationPreviewContextInput = {
   fieldOverrides?: Record<string, string> | null;
   /** When false, skip consultant/owner profile HTTP calls. Department forms already have project fields. */
   includeConsultantProfiles?: boolean;
+  /** Selected catalog document — drives `letterhead_source` for profile letterhead lookup. */
+  catalogDocument?: import("@/app/utils/applicationCatalog").ApplicationCatalogDocument | null;
   /** @deprecated Use `letterVariant`. */
   architectHtmlVariant?: "appointment" | "acceptance";
 };
@@ -877,15 +882,24 @@ async function buildApplicationPreviewContext(
     fieldOverrides,
     architectHtmlVariant,
     includeConsultantProfiles = true,
+    catalogDocument: inputCatalogDocument,
   } = input;
 
   const localMeta = readLocalStoredUserMetadata();
   const templateType = mapSelectedApplicationToTemplate(selectedApplication);
+  const letterheadSource = catalogDocumentLetterheadSource(inputCatalogDocument ?? null);
+  const letterheadLookupTemplateType = templateTypeForLetterheadSource(
+    letterheadSource,
+    inputCatalogDocument ?? null,
+    templateType
+  );
 
   const [applicantDetailsFromTable, buildingProposalOfficesByKey, fireConsultantOfficesByKey] =
     await Promise.all([
       projectId ? fetchApplicantDetailsFromTable(supabase, projectId) : null,
-      includeConsultantProfiles ? fetchBuildingProposalOffices(supabase) : Promise.resolve(null),
+      // Always load BP offices — Document Checklist / department forms need
+      // {{BP_ADDRESS_LINE_*}} even when consultant profile enrichment is skipped.
+      fetchBuildingProposalOffices(supabase),
       includeConsultantProfiles ? fetchFireConsultantOffices(supabase) : Promise.resolve(null),
     ]);
   const effectiveProjectData =
@@ -1004,8 +1018,10 @@ async function buildApplicationPreviewContext(
     const nextConsultantEmail = pickConsultantEmailFromMeta(meta);
     const nextLetterheadUrl = pickLetterheadUrlFromMeta(meta);
 
-    if (isAppointedConsultantProfile && nextLetterheadUrl) {
-      consultantLetterheadUrl = nextLetterheadUrl;
+    // Appointed profile is authoritative: empty letterhead must clear any prior URL
+    // (e.g. viewer Architect letterhead must not stick on SE acceptance).
+    if (isAppointedConsultantProfile) {
+      consultantLetterheadUrl = nextLetterheadUrl || "";
     }
     if ((prefer || !coaRegNo) && nextCoaRegNo) coaRegNo = nextCoaRegNo;
     if ((prefer || !coaExpiryDate) && nextCoaExpiryDate) coaExpiryDate = nextCoaExpiryDate;
@@ -1022,20 +1038,16 @@ async function buildApplicationPreviewContext(
     if ((prefer || !consultantEmail) && nextConsultantEmail) consultantEmail = nextConsultantEmail;
   };
 
-  let consultantLookupUserIds = pickConsultantLookupUserIdsFromProject(
-    templateType,
-    effectiveProjectData
-  );
-  if (includeConsultantProfiles && consultantLookupUserIds.length === 0) {
-    const { data: authRow } = await supabase.auth.getUser();
-    const role =
-      typeof authRow.user?.user_metadata?.role === "string"
-        ? authRow.user.user_metadata.role
-        : "";
-    if (role === "Consultant" && authRow.user?.id) {
-      consultantLookupUserIds = [authRow.user.id];
-    }
-  }
+  // Load the letterhead_source party (Document Checklist tabs each have their own).
+  let consultantLookupUserIds =
+    letterheadSource === "owner"
+      ? []
+      : pickConsultantLookupUserIdsFromProject(
+          letterheadLookupTemplateType,
+          effectiveProjectData
+        );
+  // No viewer-id fallback when the roster has no appointed person for
+  // letterhead_source — missing assigned letterhead must stay blank.
 
   if (includeConsultantProfiles) {
   try {
@@ -1071,6 +1083,7 @@ async function buildApplicationPreviewContext(
     /* fall through to client-only sources */
   }
 
+  // Prefer appointed-profile letterhead only — viewer merge skips letterhead unless appointed.
   mergeConsultantMeta((await supabase.auth.getUser()).data.user?.user_metadata);
 
   // Always load the appointed consultant profile from server when we know their user id.
@@ -1078,7 +1091,12 @@ async function buildApplicationPreviewContext(
   const consultantProfileLookupIds =
     consultantLookupUserIds.length > 0
       ? consultantLookupUserIds
-      : pickConsultantLookupUserIdsFromProject(templateType, effectiveProjectData);
+      : letterheadSource === "owner"
+        ? []
+        : pickConsultantLookupUserIdsFromProject(
+            letterheadLookupTemplateType,
+            effectiveProjectData
+          );
   if (consultantProfileLookupIds.length > 0) {
     const serverMeta = await fetchRawUserMetadataFromApi(
       userMetadata,
@@ -1086,13 +1104,17 @@ async function buildApplicationPreviewContext(
     );
     if (serverMeta) mergeConsultantMeta(serverMeta, true);
   } else if (
-    templateType === "Licensed Surveyor"
+    letterheadLookupTemplateType === "Licensed Surveyor"
       ? !lbsLicenseNo || !lbsExpiryDate
       : !coaRegNo || !coaExpiryDate
   ) {
     const serverMeta = await fetchRawUserMetadataFromApi(userMetadata, consultantLookupUserIds);
     if (serverMeta) mergeConsultantMeta(serverMeta);
   }
+
+  // Do NOT fall back to the viewer's own letterhead_url. letterhead_source must
+  // resolve only from the appointed owner / architect_or_ls / consultant profile.
+  // Missing assigned letterhead → blank (no default image, no reserved space).
   }
 
   const ownerLookupUserIds = [
@@ -1267,6 +1289,9 @@ async function buildApplicationPreviewContext(
     clientPincode,
     ownerLetterheadUrl,
     consultantLetterheadUrl,
+    ...(inputCatalogDocument
+      ? { resolvedCatalogDocument: inputCatalogDocument }
+      : {}),
     ownerDebug: {
       ownerApplicants,
       ownerLookupUserIds,
@@ -2673,9 +2698,22 @@ export default function ApplicationDetailsPage() {
     [previewTemplateType]
   );
 
+  /** Overlay library draft Save Plot (incl. DigiSatbara date) onto a project row for preview. */
+  const withCatalogSavePlot = (
+    row: PreviewProjectData | null
+  ): PreviewProjectData | null => {
+    if (!row) return null;
+    return {
+      ...row,
+      save_plot_details: mergeSavePlotDetailsForCatalog(
+        row.save_plot_details as Record<string, unknown> | null
+      ) as PreviewProjectData["save_plot_details"],
+    };
+  };
+
   /** Returns the cached project row, loading it (direct select, then RPC) when missing. */
   const ensureProjectDataForPreview = async (): Promise<PreviewProjectData | null> => {
-    if (projectData) return projectData;
+    if (projectData) return withCatalogSavePlot(projectData);
     if (!projectId) return null;
 
     const coreSelect =
@@ -2688,7 +2726,7 @@ export default function ApplicationDetailsPage() {
     if (directData) {
       const loaded = directData as PreviewProjectData;
       setProjectData(loaded);
-      return loaded;
+      return withCatalogSavePlot(loaded);
     }
 
     const { data: rpcData } = await supabase.rpc("get_project_for_preview", {
@@ -2697,7 +2735,7 @@ export default function ApplicationDetailsPage() {
     if (rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
       const loaded = rpcData as PreviewProjectData;
       setProjectData(loaded);
-      return loaded;
+      return withCatalogSavePlot(loaded);
     }
     return null;
   };
@@ -2984,8 +3022,13 @@ export default function ApplicationDetailsPage() {
             projectId,
             letterVariant: variant,
             catalogDocumentId: resolvedCatalogDocumentId,
+            catalogDocument: knownCatalogDocumentEarly,
             fieldOverrides: letterFieldOverridesRef.current,
-            includeConsultantProfiles: catalogApplicationType?.category === "appointment_letter",
+            // Letterheaded department forms (Document Checklist, etc.) need consultant
+            // profile letterhead_url when letterhead_source is architect_or_ls / consultant.
+            includeConsultantProfiles:
+              catalogApplicationType?.category === "appointment_letter" ||
+              Boolean(knownCatalogDocumentEarly?.show_letterhead),
           }),
           catalogApplicationType
             ? fetchResolvedPlaceholdersForApplication(
@@ -3162,6 +3205,7 @@ export default function ApplicationDetailsPage() {
               projectId,
               letterVariant: siblingVariant,
               catalogDocumentId: siblingDocId,
+              catalogDocument: siblingCatalogDoc,
               fieldOverrides: letterFieldOverridesRef.current,
               includeConsultantProfiles,
             });
@@ -3541,17 +3585,28 @@ export default function ApplicationDetailsPage() {
             placeholders,
             templateHtml
           );
+          const savePlotForCatalog = mergeSavePlotDetailsForCatalog(
+            projectData.save_plot_details as Record<string, unknown> | null
+          );
           const mapped = catalogPlaceholderFieldMap(
             docPlaceholders,
             {
               title: projectData.title,
               project_info: projectData.project_info as Record<string, unknown> | null,
-              save_plot_details: projectData.save_plot_details as Record<string, unknown> | null,
+              save_plot_details: savePlotForCatalog,
               building_details: (projectData as { building_details?: Record<string, unknown> })
                 .building_details,
               applicant_details: projectData.applicant_details as
                 | { applicants?: Record<string, unknown>[] }
                 | null,
+              consultant_coa_expiry:
+                pickCoaExpiryFromMeta(userMetadata) ||
+                pickCoaExpiryFromMeta(readLocalStoredUserMetadata()) ||
+                null,
+              consultant_lbs_expiry:
+                pickLbsExpiryFromMeta(userMetadata) ||
+                pickLbsExpiryFromMeta(readLocalStoredUserMetadata()) ||
+                null,
             },
             catalogType.applicant_type
           );
@@ -3560,7 +3615,12 @@ export default function ApplicationDetailsPage() {
             variantDoc ? catalogDocumentOptionLabel(variantDoc) : null
           );
           setDetailsFieldRows(
-            buildCatalogLetterFieldRows(docPlaceholders, mapped, letterFieldOverridesRef.current)
+            buildCatalogLetterFieldRows(
+              docPlaceholders,
+              mapped,
+              letterFieldOverridesRef.current,
+              projectData.save_plot_details?.plotBelongsTo
+            )
           );
           setDetailsFieldsFallbackRows([]);
           return;
@@ -3575,6 +3635,10 @@ export default function ApplicationDetailsPage() {
           projectId,
           letterVariant,
           catalogDocumentId: selectedCatalogDocumentId,
+          catalogDocument: pickCatalogDocument(catalogDocuments, {
+            documentId: selectedCatalogDocumentId,
+            letterVariant,
+          }),
           fieldOverrides: letterFieldOverridesRef.current,
         });
         if (cancelled) return;
@@ -5006,6 +5070,10 @@ export default function ApplicationDetailsPage() {
           projectId,
           letterVariant,
           catalogDocumentId: selectedCatalogDocumentId,
+          catalogDocument: pickCatalogDocument(catalogDocuments, {
+            documentId: selectedCatalogDocumentId,
+            letterVariant,
+          }),
           fieldOverrides: letterFieldOverridesRef.current,
         });
         previewPdfContextRef.current = {

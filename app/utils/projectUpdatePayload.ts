@@ -1,6 +1,7 @@
 import { isPageSaved, loadDraft } from "@/app/utils/draftStorage";
 import { serializeApplicantRosterForStorage } from "@/app/utils/applicantRecordFields";
 import type { ProjectRecord } from "@/app/utils/fetchProjectForEdit";
+import { sanitizeLibraryUploadsForPersist } from "@/app/utils/projectLibraryStorageUrl";
 
 function hasMeaningfulValue(val: unknown): boolean {
   if (val === null || val === undefined) return false;
@@ -156,10 +157,15 @@ export function buildProjectUpdatePayload(input: BuildPayloadInput): ProjectUpda
   const filteredUploads = (projectLibraryUploads as unknown[]).filter(
     (u) => u !== null && u !== undefined && u !== ""
   );
+  const projectIdForUrls =
+    (existing as { id?: string } | null)?.id ?? null;
+  const durableUploads = sanitizeLibraryUploadsForPersist(
+    projectIdForUrls,
+    filteredUploads as { path?: string; url?: string; name?: string }[]
+  );
   const existingLibrary = (existing?.project_library as { uploads?: unknown[] }) ?? {};
-  const normalizedNew = filteredUploads.map((u: unknown) => {
-    const row = u as Record<string, unknown>;
-    return { name: row?.name, path: row?.path, url: row?.url };
+  const normalizedNew = durableUploads.map((u) => {
+    return { name: u?.name, path: u?.path, url: u?.url };
   });
   const normalizedExisting = (existingLibrary.uploads ?? []).map((u: unknown) => {
     const row = u as Record<string, unknown>;
@@ -172,9 +178,9 @@ export function buildProjectUpdatePayload(input: BuildPayloadInput): ProjectUpda
       { savedKey: "saved-project-library", dirtyKey: "dirty-project-library" },
       partialUpdate
     ) &&
-    filteredUploads.length > 0
+    durableUploads.length > 0
   ) {
-    payload.project_library = { uploads: filteredUploads };
+    payload.project_library = { uploads: durableUploads };
   }
 
   return payload;

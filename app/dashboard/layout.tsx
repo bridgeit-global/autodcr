@@ -60,6 +60,10 @@ import {
   shouldGateCreateProjectSections,
   type ProjectLibraryExtraDocType,
 } from "../utils/projectSections";
+import {
+  isDurableLibraryUrl,
+  sanitizeLibraryUploadsForPersist,
+} from "../utils/projectLibraryStorageUrl";
 
 type RequiredPage = {
   key: string;
@@ -718,12 +722,17 @@ function DashboardLayoutContent({
     if (allProjectLibraryUploads && Array.isArray(allProjectLibraryUploads)) {
       const filteredUploads = (allProjectLibraryUploads as any[]).filter((u: any) => u !== null && u !== undefined && u !== "") as ProjectLibraryUpload[];
       if (filteredUploads.length > 0) {
+        // Never persist ephemeral blob: URLs — rewrite to storage public URLs when possible.
+        const durableUploads = sanitizeLibraryUploadsForPersist(
+          currentProjectId,
+          filteredUploads
+        );
         const existingLibrary = existingData?.project_library || {};
         const existingUploads = existingLibrary.uploads || [];
-        const normalizedNew = filteredUploads.map((u) => ({ name: u?.name, path: u?.path, url: u?.url }));
+        const normalizedNew = durableUploads.map((u) => ({ name: u?.name, path: u?.path, url: u?.url }));
         const normalizedExisting = existingUploads.map((u: any) => ({ name: u?.name, path: u?.path, url: u?.url }));
         if (!deepEqual(normalizedNew, normalizedExisting)) {
-          payload.project_library = { uploads: filteredUploads };
+          payload.project_library = { uploads: durableUploads };
         }
       }
     }
@@ -947,7 +956,16 @@ function DashboardLayoutContent({
       }
 
       if (finalProjectId) {
-        const uploads = await uploadProjectLibraryFilesToStorage(finalProjectId);
+        let uploads = await uploadProjectLibraryFilesToStorage(finalProjectId);
+        if (uploads.length === 0) {
+          // Local blobs may already be cleared; heal draft metadata to public URLs.
+          const draftUploads = (
+            loadAllProjectLibraryUploadsFromDraft() as ProjectLibraryUpload[]
+          ).filter(Boolean);
+          uploads = sanitizeLibraryUploadsForPersist(finalProjectId, draftUploads).filter(
+            (u) => isDurableLibraryUrl(u.url) && Boolean(u.path)
+          );
+        }
         if (uploads.length > 0) {
           const { error: updateError } = await supabase
             .from("projects")
@@ -1230,8 +1248,15 @@ function DashboardLayoutContent({
 
       // Upload Project Library documents now (after project is created/updated)
       if (finalProjectId) {
-        const uploads = await uploadProjectLibraryFilesToStorage(finalProjectId);
-
+        let uploads = await uploadProjectLibraryFilesToStorage(finalProjectId);
+        if (uploads.length === 0) {
+          const draftUploads = (
+            loadAllProjectLibraryUploadsFromDraft() as ProjectLibraryUpload[]
+          ).filter(Boolean);
+          uploads = sanitizeLibraryUploadsForPersist(finalProjectId, draftUploads).filter(
+            (u) => isDurableLibraryUrl(u.url) && Boolean(u.path)
+          );
+        }
         if (uploads.length > 0) {
           const { error: updateError } = await supabase
             .from("projects")
@@ -1355,7 +1380,7 @@ function DashboardLayoutContent({
       />
 
       {showDraftConfirm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
           <div
             className={`bg-white rounded-xl shadow-2xl p-6 w-full mx-4 ${
               draftRemainingPages.length > 0 ? "max-w-md" : "max-w-sm"
@@ -1410,7 +1435,7 @@ function DashboardLayoutContent({
       )}
 
       {isSubmittingProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col items-center space-y-4">
             <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-200 border-t-brand-blue"></div>
             <p className="text-lg font-semibold text-gray-900">
