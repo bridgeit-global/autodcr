@@ -40,27 +40,50 @@ export async function resolveConsultantMetadata(
 
   if (userErr || !user) return null;
 
-  let meta: Record<string, unknown> = {
-    ...(typeof user.user_metadata === "object" && user.user_metadata !== null
-      ? (user.user_metadata as Record<string, unknown>)
-      : {}),
-  };
+  const preferredLookupIdsEarly = [
+    ...new Set(
+      (options?.lookupUserIds ?? [])
+        .map((s) => String(s).trim())
+        .filter(Boolean)
+    ),
+  ];
+  /**
+   * When resolving an appointed consultant, do NOT seed from the viewer’s
+   * metadata. Spreading the appointment profile onto the Architect/owner
+   * session left their `letterhead_url` in place whenever the consultant had
+   * none — acceptance letters then showed the wrong letterhead.
+   */
+  const seedFromSessionUser =
+    preferredLookupIdsEarly.length === 0 ||
+    preferredLookupIdsEarly.every((id) => id === user.id);
+
+  let meta: Record<string, unknown> = seedFromSessionUser
+    ? {
+        ...(typeof user.user_metadata === "object" && user.user_metadata !== null
+          ? (user.user_metadata as Record<string, unknown>)
+          : {}),
+      }
+    : {};
 
   let adminClient: ReturnType<typeof createClient> | null = null;
   if (serviceRole) {
     adminClient = createClient(url, serviceRole, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { data: adminData, error: adminErr } = await adminClient.auth.admin.getUserById(user.id);
-    if (
-      !adminErr &&
-      adminData?.user?.user_metadata &&
-      typeof adminData.user.user_metadata === "object"
-    ) {
-      meta = {
-        ...meta,
-        ...(adminData.user.user_metadata as Record<string, unknown>),
-      };
+    if (seedFromSessionUser) {
+      const { data: adminData, error: adminErr } = await adminClient.auth.admin.getUserById(
+        user.id
+      );
+      if (
+        !adminErr &&
+        adminData?.user?.user_metadata &&
+        typeof adminData.user.user_metadata === "object"
+      ) {
+        meta = {
+          ...meta,
+          ...(adminData.user.user_metadata as Record<string, unknown>),
+        };
+      }
     }
   }
 
@@ -142,13 +165,7 @@ export async function resolveConsultantMetadata(
     }
   }
 
-  const preferredLookupIds = [
-    ...new Set(
-      (options?.lookupUserIds ?? [])
-        .map((s) => String(s).trim())
-        .filter(Boolean)
-    ),
-  ];
+  const preferredLookupIds = preferredLookupIdsEarly;
 
   /**
    * Directory often stores `auth.users.id` (UUID). RPC may return an incomplete row; Admin API returns full `user_metadata` (COA keys, address, company name).
@@ -175,10 +192,16 @@ export async function resolveConsultantMetadata(
         consultantAdmin?.user?.user_metadata &&
         typeof consultantAdmin.user.user_metadata === "object"
       ) {
+        const appointed = consultantAdmin.user.user_metadata as Record<string, unknown>;
         meta = {
           ...meta,
-          ...(consultantAdmin.user.user_metadata as Record<string, unknown>),
+          ...appointed,
         };
+        // Appointed profile wins for letterhead: explicit null/empty clears any prior URL.
+        if (!String(appointed.letterhead_url ?? appointed.letterheadUrl ?? "").trim()) {
+          delete meta.letterhead_url;
+          delete meta.letterheadUrl;
+        }
       }
     }
   }

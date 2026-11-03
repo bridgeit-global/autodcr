@@ -194,14 +194,6 @@ function supplementSavePlot(
   );
   assignIfEmpty("grossPlotArea", pickFromExtractions(docs, (e) => e.grossPlotArea));
 
-  if (!next.proposedCtsNumber || !(next.proposedCtsNumber as string[]).length) {
-    const cts = [
-      ...splitCtsNumbers(pickFromExtractions(docs, (e) => e.proposedCtsNumber)),
-      ...ctsFromPrExtractions(docs),
-    ];
-    if (cts.length) next.proposedCtsNumber = [...new Set(cts)];
-  }
-
   const hints = parseAddressHints(
     pickFromExtractions(docs, (e) => e.propertyAddress),
     pickFromExtractions(docs, (e) => e.landmark),
@@ -216,34 +208,25 @@ function supplementSavePlot(
       hints.village
     )
   );
-  if (
-    hints.cts.length &&
-    (!next.proposedCtsNumber || !(next.proposedCtsNumber as string[]).length)
-  ) {
-    next.proposedCtsNumber = hints.cts;
-  }
+
+  /*
+   * CTS / SAC from the *current* extraction set only (full replace).
+   * Sticky union with a prior draft left deleted PR / assessment numbers behind.
+   */
+  const cts = [
+    ...splitCtsNumbers(pickFromExtractions(docs, (e) => e.proposedCtsNumber)),
+    ...ctsFromPrExtractions(docs),
+    ...hints.cts,
+  ];
+  next.proposedCtsNumber = sanitizeCtsNumbers([...new Set(cts)]);
+  next.sacNo = sacFromAssessmentExtractions(docs);
 
   const ward = pickString(next.ward as string | undefined);
   const village = pickString(next.villageName as string | undefined);
-  const ctsRaw = next.proposedCtsNumber;
-  const ctsList = Array.isArray(ctsRaw)
-    ? ctsRaw.map(String)
-    : typeof ctsRaw === "string" && ctsRaw
-      ? splitCtsNumbers(ctsRaw)
-      : [];
+  const ctsList = sanitizeCtsNumbers(next.proposedCtsNumber);
   if (ward && !village && ctsList.length) {
     const fromCts = inferVillageFromCts(ward, ctsList);
     if (fromCts) next.villageName = fromCts;
-  }
-
-  if (next.proposedCtsNumber) {
-    next.proposedCtsNumber = sanitizeCtsNumbers(next.proposedCtsNumber);
-  }
-
-  const assessmentSacs = sacFromAssessmentExtractions(docs);
-  if (assessmentSacs.length) {
-    const existing = sanitizeSacNumbers(next.sacNo);
-    next.sacNo = [...new Set([...existing, ...assessmentSacs])];
   }
 
   return next;
@@ -289,6 +272,23 @@ export function mergeSavePlot(extractions: ProjectLibraryExtraction[]): SavePlot
   }
 
   merged = supplementSavePlot(merged, extractions);
+
+  // DigiSatbara date → {{DATE_OF_PRC}}: prefer primary PR, else any remaining PR card.
+  const primaryPr =
+    extractions.find(
+      (e) =>
+        e.documentType === "pr-card" &&
+        (e.slot === "pr-primary" || e.fixedIndex === 0)
+    ) || null;
+  const anyPrWithDate = extractions.find(
+    (e) =>
+      e.documentType === "pr-card" &&
+      Boolean(pickString(e.extracted.downloadDate))
+  );
+  merged.prcDownloadDate =
+    pickString(primaryPr?.extracted.downloadDate) ||
+    pickString(anyPrWithDate?.extracted.downloadDate) ||
+    "";
 
   // Pure PR cards (no planning location) fill Area Details only — not Save Plot location fields.
   return enrichSavePlotLocation(merged);

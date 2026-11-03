@@ -16,6 +16,8 @@ import {
   catalogDocumentShowsLetterhead,
   catalogDocumentShowsQrcode,
   normalizePlotTypeLabelsInTemplateHtml,
+  plotBelongsToFromPreviewFields,
+  PLOT_BELONGS_TO_FIELD_KEY,
   resolveCatalogDocumentForPreview,
 } from "@/app/utils/applicationCatalog";
 
@@ -257,9 +259,12 @@ function replaceTemplateTokens(
   html: string,
   fields: Record<string, string | undefined>
 ): string {
-  let out = normalizePlotTypeLabelsInTemplateHtml(html);
+  const plotBelongs = plotBelongsToFromPreviewFields(fields);
+  let out = normalizePlotTypeLabelsInTemplateHtml(html, plotBelongs);
   // Replace longer tokens first so `$foo` doesn't partially replace `$foo_bar`.
-  const entries = Object.entries(fields).sort(([a], [b]) => b.length - a.length);
+  const entries = Object.entries(fields)
+    .filter(([key]) => key !== PLOT_BELONGS_TO_FIELD_KEY)
+    .sort(([a], [b]) => b.length - a.length);
   for (const [key, raw] of entries) {
     const safeRaw = raw ?? "";
     const escaped = escapeHtml(safeRaw);
@@ -278,8 +283,18 @@ function replaceTemplateTokens(
   out = out.replace(/\$project_[A-Za-z0-9_./-]+/g, (match) =>
     match === PROJECT_SAVED_PDF_QR_SENTINEL ? match : ""
   );
+  // Empty letterhead token → `url('')` breaks Chromium/Paged background fetch (blank page).
+  out = out.replace(/url\(\s*(['"]?)\s*\1\s*\)/gi, "none");
   // Keep unreplaced {{TOKEN}} visible (e.g. {{SITE_ADDRESS}}, {{REF_1}}) so missing
   // catalog values are obvious in preview. {{SAVED_PDF_QR}} is handled later.
+  // C.C. / prose: collapse "Owner/Developer" to the roster label when resolved.
+  const ownerOrDeveloper =
+    fields["{{OWNER_OR_DEVELOPER}}"]?.trim() ||
+    fields.OWNER_OR_DEVELOPER?.trim() ||
+    "";
+  if (ownerOrDeveloper) {
+    out = out.replace(/Owner\s*\/\s*Developer/gi, ownerOrDeveloper);
+  }
   return out;
 }
 
@@ -293,6 +308,17 @@ function paragraphVisibleText(innerHtml: string): string {
     .trim();
 }
 
+/** True when visible text is only unreplaced mustache tokens (and punctuation/whitespace). */
+function isOnlyUnreplacedMustache(visible: string): boolean {
+  if (!visible) return false;
+  const withoutTokens = visible
+    .replace(/\{\{[A-Z0-9_]+\}\}/g, "")
+    .replace(/[,:;./\-–—]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+  return withoutTokens.length === 0 && /\{\{[A-Z0-9_]+\}\}/.test(visible);
+}
+
 /** Removes empty address-line paragraphs after token substitution (e.g. unused line 3). */
 function removeEmptyAddressParagraphs(html: string): string {
   return html.replace(/<p(\s[^>]*)?>([\s\S]*?)<\/p>/gi, (full, attrs, inner) => {
@@ -300,11 +326,13 @@ function removeEmptyAddressParagraphs(html: string): string {
     if (visible) {
       // Drop leftover "For ," when firm name token was empty.
       if (/^for\s*,?$/i.test(visible)) return "";
+      // Drop lines that only still show {{OWNER_ADDRESS_LINE_3}} etc.
+      if (isOnlyUnreplacedMustache(visible)) return "";
       return full;
     }
     const attrStr = attrs ?? "";
     const isAddressLike =
-      /\bbold\b|MsoNormal|value-bold|to-content|signature-company|signature-designation(?:-below)?/i.test(
+      /\bbold\b|MsoNormal|value-bold|to-content|signature-company|signature-designation(?:-below)?|sig\b|\bcc\b/i.test(
         attrStr
       ) ||
       /value-bold|class=['"]?bold|signature-company|signature-designation(?:-below)?/i.test(inner);
@@ -788,9 +816,10 @@ export async function POST(request: NextRequest) {
     const letterheadUrl = showLetterhead
       ? pickLetterheadUrlFromPreviewFields(fieldsForTemplate)
       : "";
-    if (letterheadUrl) {
-      finalHtml = injectLetterheadBackgroundStyle(finalHtml, letterheadUrl);
-    }
+    // Always clear body/shared-CSS letterhead paint. When the assigned person has
+    // no letterhead, token strip leaves `url('')` which hangs Paged.js (blank preview).
+    // Real letterhead is applied later on `.pagedjs_pagebox` in injectPaginatedStyles.
+    finalHtml = injectLetterheadBackgroundStyle(finalHtml, letterheadUrl);
 
     const acceptanceUrlsKey =
       letterVariant === "acceptance"

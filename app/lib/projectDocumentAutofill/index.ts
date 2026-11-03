@@ -5,6 +5,7 @@ import { mergeSavePlot } from "./mergeSavePlot";
 import type { ProjectAutofillResult, ProjectLibraryExtraction } from "./types";
 
 export { applyProjectAutofillDrafts } from "./applyDrafts";
+export { mergeSavePlotDetailsForCatalog } from "./mergeSavePlotForCatalog";
 export {
   PROJECT_LIBRARY_AUTOFILL_EVENT,
   notifyProjectAutofillApplied,

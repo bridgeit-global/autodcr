@@ -1,6 +1,12 @@
 import { rememberCatalogDocumentSlug } from "@/app/utils/applicationPdfUrlKeys";
 import type { TemplateType } from "@/app/templates/templateGenerators";
+import { formatCoaExpiryDisplay } from "@/app/utils/coaMetadataDisplay";
 import { findConsultantApplicantInList } from "@/app/utils/consultantTemplateTokens";
+import {
+  inferLocationFromWard,
+  normalizeWard,
+} from "@/app/lib/projectDocumentAutofill/utils";
+import { primaryApplicantLabelFromRoster } from "@/app/utils/projectAccess";
 
 /**
  * Fact-sheet / concession "Name of Consultants" tokens — pick by role, not the
@@ -145,20 +151,135 @@ export function shouldSkipCatalogPlaceholderForLetterFields(
   if (legacy && LETTER_FIELD_SKIP_TOKENS.has(legacy)) return true;
   if (ph.legacy_token && LETTER_FIELD_SKIP_TOKENS.has(ph.legacy_token)) return true;
   if (/letterhead/i.test(ph.id) || /letterhead/i.test(ph.token)) return true;
+  // Derived C.C. label (Owner vs Developer) — not a typed Letter field.
+  if (ph.id === "owner_or_developer" || ph.token === "{{OWNER_OR_DEVELOPER}}") return true;
+  return false;
+}
+
+const SURVEY_NUMBER_PLACEHOLDER_IDS = new Set([
+  "plot_no",
+  "cs_no",
+  "cts_no",
+  "fp_no",
+]);
+const PLACE_VALUE_PLACEHOLDER_IDS = new Set([
+  "division",
+  "village",
+  "tps_no",
+]);
+
+function surveyNumberPlaceholderIdForPlot(plotBelongs: unknown): string {
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return "cs_no";
+    case "F.P.No":
+      return "fp_no";
+    case "CTS No.":
+    default:
+      return "cts_no";
+  }
+}
+
+function placeValuePlaceholderIdForPlot(plotBelongs: unknown): string {
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return "division";
+    case "F.P.No":
+      return "tps_no";
+    case "CTS No.":
+    default:
+      return "village";
+  }
+}
+
+/**
+ * Letter fields: show one survey row + one place row (plotBelongsTo-aware),
+ * same as meta-table keys (C.T.S. No. / Village) — not all four slash tokens.
+ */
+export function collapsePlotBelongsPlaceholdersForLetterFields(
+  placeholders: CatalogLinkedPlaceholder[],
+  plotBelongs?: unknown
+): CatalogLinkedPlaceholder[] {
+  const ids = new Set(placeholders.map((ph) => ph.id));
+  const hasSurveySlash = [...SURVEY_NUMBER_PLACEHOLDER_IDS].some((id) => ids.has(id));
+  const hasPlaceSlash = [...PLACE_VALUE_PLACEHOLDER_IDS].some((id) => ids.has(id));
+  const activeSurveyId = surveyNumberPlaceholderIdForPlot(plotBelongs);
+  const activePlaceId = placeValuePlaceholderIdForPlot(plotBelongs);
+  const surveyLabel = surveyKindLabelForPlot(plotBelongs);
+  const placeLabel = placeKindLabelForPlot(plotBelongs);
+
+  return placeholders
+    .filter((ph) => {
+      if (hasSurveySlash && SURVEY_NUMBER_PLACEHOLDER_IDS.has(ph.id) && ph.id !== activeSurveyId) {
+        return false;
+      }
+      // Combined prose token duplicates the active number once slash tokens exist.
+      if (hasSurveySlash && ph.id === "plot_cs_cts_no") return false;
+      if (hasPlaceSlash && PLACE_VALUE_PLACEHOLDER_IDS.has(ph.id) && ph.id !== activePlaceId) {
+        return false;
+      }
+      if (hasPlaceSlash && ph.id === "village_division") return false;
+      return true;
+    })
+    .map((ph) => {
+      if (ph.id === activeSurveyId || (!hasSurveySlash && ph.id === "plot_cs_cts_no")) {
+        return { ...ph, label: surveyLabel };
+      }
+      if (ph.id === activePlaceId || (!hasPlaceSlash && ph.id === "village_division")) {
+        return { ...ph, label: placeLabel };
+      }
+      return ph;
+    });
+}
+
+/** Strip kind prefix from combined tokens so the field value is number/name only. */
+function letterFieldDisplayValue(
+  ph: CatalogLinkedPlaceholder,
+  raw: string,
+  plotBelongs?: unknown
+): string {
+  const cleaned = raw.trim();
+  if (!cleaned) return "";
+  if (ph.id === "plot_cs_cts_no") {
+    const kind = surveyKindLabelForPlot(plotBelongs);
+    const stripped = cleaned.replace(
+      new RegExp(`^${kind.replace(/\./g, "\\.")}\\s*`, "i"),
+      ""
+    );
+    return stripped || cleaned;
+  }
+  if (ph.id === "village_division") {
+    return cleaned.replace(/^(?:Village|Division|TPS schema)\s+/i, "").trim() || cleaned;
+  }
+  return cleaned;
+}
+
+/** Address line 1/2/3 tokens — omit from Letter fields when the value is empty. */
+function isOptionalAddressLinePlaceholder(
+  ph: Pick<ApplicationCatalogPlaceholder, "id" | "token">
+): boolean {
+  if (/_address_line_[123]$/i.test(ph.id)) return true;
+  if (/ADDRESS_LINE_[123]\}\}?$/i.test(ph.token)) return true;
   return false;
 }
 
 /**
  * Build Letter fields panel rows from type ∪ document placeholders.
- * Includes empty values (unlike Create Application Key Variables).
+ * Includes empty values (unlike Create Application Key Variables), except
+ * optional address lines 1/2/3 which are hidden when blank.
  */
 export function buildCatalogLetterFieldRows(
   placeholders: CatalogLinkedPlaceholder[],
   mappedValues: Record<string, string>,
-  overrides?: Record<string, string> | null
+  overrides?: Record<string, string> | null,
+  plotBelongs?: unknown
 ): CatalogLetterFieldRow[] {
   const rows: CatalogLetterFieldRow[] = [];
-  for (const ph of placeholders) {
+  const collapsed = collapsePlotBelongsPlaceholdersForLetterFields(
+    placeholders,
+    plotBelongs
+  );
+  for (const ph of collapsed) {
     if (shouldSkipCatalogPlaceholderForLetterFields(ph)) continue;
     const legacyToken = catalogPlaceholderLegacyKey(ph);
     const mapped =
@@ -171,7 +292,10 @@ export function buildCatalogLetterFieldRows(
       overrides?.[ph.token] ??
       (legacyToken ? overrides?.[legacyToken] : undefined) ??
       (ph.legacy_token ? overrides?.[ph.legacy_token] : undefined);
-    const value = !readOnly && overrideRaw !== undefined ? String(overrideRaw) : mapped;
+    const rawValue = !readOnly && overrideRaw !== undefined ? String(overrideRaw) : mapped;
+    const value = letterFieldDisplayValue(ph, rawValue, plotBelongs);
+    // Don't show Owner/Architect/BP address line 1–3 inputs when that line is empty.
+    if (isOptionalAddressLinePlaceholder(ph) && !value.trim()) continue;
     rows.push({
       id: ph.id,
       token: ph.token,
@@ -822,6 +946,10 @@ export type CatalogProjectSource = {
   save_plot_details?: JsonRecord | null;
   building_details?: JsonRecord | null;
   applicant_details?: { applicants?: JsonRecord[] } | null;
+  /** Session / auth COA expiry (ISO) when applicant rows omit it — fills `{{VALIDITY}}`. */
+  consultant_coa_expiry?: string | null;
+  /** Session / auth LBS expiry when applicant rows omit it. */
+  consultant_lbs_expiry?: string | null;
 };
 
 function pickApplicant(
@@ -864,6 +992,23 @@ function resolveConsultantNameByPlaceholderId(
   return row ? stringifyCatalogValue(row.name) : "";
 }
 
+/** BMC To-block suburb/region label (City | Western | Eastern) from plot region or ward. */
+export function resolveSuburbFromPlotDetails(
+  savePlotDetails: Record<string, unknown> | null | undefined
+): string {
+  const regionRaw = String(savePlotDetails?.region ?? "").trim();
+  const wardRaw = String(savePlotDetails?.ward ?? "").trim();
+  const region =
+    regionRaw ||
+    inferLocationFromWard(normalizeWard(wardRaw) || wardRaw).region ||
+    "";
+  // Print region only (City / Western / Eastern) — no "Suburb" suffix.
+  if (region === "City" || region === "Western" || region === "Eastern") {
+    return region;
+  }
+  return "";
+}
+
 export function resolveCatalogPlaceholderValue(
   placeholder: ApplicationCatalogPlaceholder,
   project: CatalogProjectSource | null | undefined,
@@ -894,6 +1039,62 @@ export function resolveCatalogPlaceholderValue(
     if (placeholder.source_column === "applicant_role") {
       return opts?.applicantType?.trim() || "";
     }
+    // BMC annexure To-block organisation — Word source always prints this literal.
+    if (placeholder.id === "bp_organisation" || placeholder.token === "{{BP_ORGANISATION}}") {
+      return "Brihanmumbai Municipal Corporation";
+    }
+    // Suburb/region from plot (City | Western | Eastern) — no "Suburb" suffix.
+    if (placeholder.id === "suburb" || placeholder.token === "{{SUBURB}}") {
+      return resolveSuburbFromPlotDetails(project?.save_plot_details);
+    }
+    // C.C. / prose: print Owner or Developer only — never "Owner/Developer".
+    if (
+      placeholder.id === "owner_or_developer" ||
+      placeholder.token === "{{OWNER_OR_DEVELOPER}}"
+    ) {
+      return primaryApplicantLabelFromRoster(applicants);
+    }
+    // Prefer architect/LS salutation when application type has no applicant_type.
+    if (placeholder.id === "salutation" || placeholder.token === "{{SALUTATION}}") {
+      const arch =
+        findConsultantApplicantInList(applicants, "Architect") ||
+        findConsultantApplicantInList(applicants, "Licensed Surveyor");
+      if (arch) {
+        return stringifyCatalogValue(
+          (arch as JsonRecord).salutation ?? (arch as JsonRecord).Salutation
+        );
+      }
+      return "";
+    }
+    if (placeholder.source_column === "consultant_validity") {
+      const arch =
+        findConsultantApplicantInList(applicants, "Architect") ||
+        findConsultantApplicantInList(applicants, "Licensed Surveyor");
+      const fromApplicant = arch
+        ? stringifyCatalogValue(
+            (arch as JsonRecord).validity ??
+              (arch as JsonRecord).registrationValidity ??
+              (arch as JsonRecord).registration_validity ??
+              (arch as JsonRecord).coa_expiry_date ??
+              (arch as JsonRecord).coaExpiryDate ??
+              (arch as JsonRecord).lbs_expiry_date ??
+              (arch as JsonRecord).lbsExpiryDate
+          )
+        : "";
+      // Applicant roster rarely stores COA expiry — fall back to session metadata.
+      const raw =
+        fromApplicant ||
+        stringifyCatalogValue(project?.consultant_coa_expiry) ||
+        stringifyCatalogValue(project?.consultant_lbs_expiry);
+      return formatCoaExpiryDisplay(raw) || raw;
+    }
+    // DigiSatbara primary PR card footer → Plot Area Certificate {{DATE_OF_PRC}}.
+    if (placeholder.id === "date_of_prc" || placeholder.token === "{{DATE_OF_PRC}}") {
+      return stringifyCatalogValue(
+        project?.save_plot_details?.prcDownloadDate ??
+          project?.save_plot_details?.prc_download_date
+      );
+    }
     return "";
   }
   if (placeholder.source_table === "owner_applicant") {
@@ -914,7 +1115,23 @@ export function resolveCatalogPlaceholderValue(
     return stringifyCatalogValue(alt);
   }
   if (placeholder.source_table === "applicants") {
-    const row = pickApplicant(applicants, opts?.applicantType ?? null, false);
+    let row = pickApplicant(applicants, opts?.applicantType ?? null, false);
+    // Document Checklist (and similar) has no applicant_type — resolve Architect / L.S.
+    // for architect letterhead annexures (name, firm, reg no.).
+    if (
+      !row &&
+      (placeholder.id === "architect_ls_name" ||
+        placeholder.id === "architects_name" ||
+        placeholder.id === "consultant_firm" ||
+        placeholder.id === "consultant_name" ||
+        placeholder.id === "reg_no")
+    ) {
+      row =
+        (findConsultantApplicantInList(applicants, "Architect") as JsonRecord | undefined) ||
+        (findConsultantApplicantInList(applicants, "Licensed Surveyor") as
+          | JsonRecord
+          | undefined);
+    }
     if (!row) return "";
     const key = placeholder.source_column || "name";
     const alt =
@@ -965,12 +1182,70 @@ function formatRoadNameToken(roadName: string): string {
   return `${cleaned} Road`;
 }
 
-/** Ward. Keep a single "Ward" when the saved value already includes it, including values with spaces. */
+/**
+ * Ward token = code only (e.g. `L`). Templates add the word “Ward” in prose when needed
+ * (`{{WARD}} Ward`). Strips a trailing “Ward” if the stored value already includes it.
+ */
 function formatWardToken(ward: string): string {
   const cleaned = ward.trim().replace(/\s+/g, " ");
   if (!cleaned) return "";
-  if (/\bward\b/i.test(cleaned)) return cleaned;
-  return `${cleaned} Ward`;
+  return cleaned.replace(/\s*\bward\b\.?\s*$/i, "").trim();
+}
+
+/** Short place-type label for meta tables (not the value prefix). */
+function placeKindLabelForPlot(plotBelongs: unknown): string {
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return "Division";
+    case "F.P.No":
+      return "T.P. Scheme No.";
+    case "CTS No.":
+    default:
+      return "Village";
+  }
+}
+
+/** Single survey-number mustache for the active plotBelongsTo. */
+function surveyNumberTokenForPlot(plotBelongs: unknown): string {
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return "{{CS_NO}}";
+    case "F.P.No":
+      return "{{FP_NO}}";
+    case "CTS No.":
+    default:
+      return "{{CTS_NO}}";
+  }
+}
+
+/** Single place mustache for the active plotBelongsTo (bare name; label supplies type). */
+function placeValueTokenForPlot(plotBelongs: unknown): string {
+  switch (String(plotBelongs ?? "").trim()) {
+    case "CS No.":
+      return "{{DIVISION}}";
+    case "F.P.No":
+      // Prefer {{VILLAGE}} (villageName / TPS schema) so formatTpsNoToken’s long phrase
+      // is not doubled next to a “T.P. Scheme No.” meta label.
+      return "{{VILLAGE}}";
+    case "CTS No.":
+    default:
+      return "{{VILLAGE}}";
+  }
+}
+
+/** Optional plotBelongsTo passed via preview field map (not substituted into HTML). */
+export const PLOT_BELONGS_TO_FIELD_KEY = "__plotBelongsTo";
+
+export function plotBelongsToFromPreviewFields(
+  fields: Record<string, string | undefined> | null | undefined
+): string {
+  if (!fields) return "";
+  const raw =
+    fields[PLOT_BELONGS_TO_FIELD_KEY] ??
+    fields.plotBelongsTo ??
+    fields["{{PLOT_BELONGS_TO}}"] ??
+    "";
+  return String(raw).trim();
 }
 
 function formatPlotCsCtsToken(
@@ -1005,10 +1280,13 @@ export function formatVillageDivisionForPlot(
 /**
  * When templates hardcode "Village /Division" (or "of Village") before the token,
  * strip that label so the plotBelongsTo-aware value can supply the correct one.
- * Works for any HTML that contains {{VILLAGE_DIVISION}}, {{VILLAGE}}, or
- * $project_Division/Village — no per-file edits required.
+ * Also collapses Plot/CS/CTS/FP and Division/Village/TPS slash-lists using plotBelongsTo
+ * so old Storage HTML does not need per-file edits.
  */
-export function normalizePlotTypeLabelsInTemplateHtml(html: string): string {
+export function normalizePlotTypeLabelsInTemplateHtml(
+  html: string,
+  plotBelongs?: unknown
+): string {
   if (!html) return html;
   let out = html;
   out = out.replace(
@@ -1027,6 +1305,56 @@ export function normalizePlotTypeLabelsInTemplateHtml(html: string): string {
     /\bof\s+Village-?\s*(?=(?:<[^>]+>\s*)*\$project_Division\/Village)/gi,
     "of "
   );
+
+  const belongs = String(plotBelongs ?? "").trim();
+  if (belongs) {
+    const surveyLabel = surveyKindLabelForPlot(belongs);
+    const placeLabel = placeKindLabelForPlot(belongs);
+    const surveyToken = surveyNumberTokenForPlot(belongs);
+    const placeToken = placeValueTokenForPlot(belongs);
+
+    // Label: "Plot No./ C.S. No./ C.T.S. No. / F.P No." (flexible punctuation)
+    out = out.replace(
+      /Plot\s*No\.?\s*\/\s*C\.?\s*S\.?\s*No\.?\s*\/\s*C\.?\s*T\.?\s*S\.?\s*No\.?\s*\/\s*F\.?\s*P\.?\s*No\.?/gi,
+      surveyLabel
+    );
+    // Inline prose variant without spaces around slashes
+    out = out.replace(
+      /Plot\s*No\.\s*\/C\.S\.\s*No\.\/C\.T\.S\.\s*No\.\/\s*F\.P\s*No\.?/gi,
+      surveyLabel
+    );
+
+    // Value slash of four plot tokens (optional <span class="value-bold"> wrappers)
+    const tok = (name: string) =>
+      `(?:<span[^>]*>\\s*)?\\{\\{${name}\\}\\}(?:\\s*<\\/span>)?`;
+    out = out.replace(
+      new RegExp(
+        `${tok("PLOT_NO")}\\s*\\/\\s*${tok("CS_NO")}\\s*\\/\\s*${tok("CTS_NO")}\\s*\\/\\s*${tok("FP_NO")}`,
+        "gi"
+      ),
+      `<span class="value-bold">${surveyToken}</span>`
+    );
+
+    // Label: "Division/ Village/ T.P. Scheme No." (+ "of " / "Town Planning Scheme")
+    out = out.replace(
+      /(?:of\s+)?Division\s*\/\s*Village\s*\/\s*(?:T\.?\s*P\.?\s*Scheme|Town\s+Planning\s+Scheme)\s*No\.?/gi,
+      placeLabel
+    );
+    out = out.replace(
+      /Division\s*\/\s*Village\s*\/\s*Town\s+Planning\s+Scheme\s*No\.?/gi,
+      placeLabel
+    );
+
+    // Value slash Division/Village/TPS
+    out = out.replace(
+      new RegExp(
+        `${tok("DIVISION")}\\s*\\/\\s*${tok("VILLAGE")}\\s*\\/\\s*${tok("TPS_NO")}`,
+        "gi"
+      ),
+      `<span class="value-bold">${placeToken}</span>`
+    );
+  }
+
   return out;
 }
 
@@ -1073,6 +1401,9 @@ export function catalogPlaceholderFieldMap(
 ): Record<string, string> {
   const out: Record<string, string> = {};
   const plotBelongs = project?.save_plot_details?.plotBelongsTo;
+  if (plotBelongs != null && String(plotBelongs).trim()) {
+    out[PLOT_BELONGS_TO_FIELD_KEY] = String(plotBelongs).trim();
+  }
   for (const ph of placeholders) {
     let value = resolveCatalogPlaceholderValue(ph, project, { applicantType });
     if (ph.token === "{{ZONE}}" || ph.id === "zone") {
@@ -1082,7 +1413,12 @@ export function catalogPlaceholderFieldMap(
       assignCatalogField(out, ph, value);
       continue;
     }
-    if (ph.token === "{{WARD_NO}}" || ph.id === "ward_no") {
+    if (
+      ph.token === "{{WARD_NO}}" ||
+      ph.id === "ward_no" ||
+      ph.token === "{{WARD}}" ||
+      ph.id === "ward"
+    ) {
       if (!value) continue;
       value = formatWardToken(value);
       if (!value) continue;
@@ -1105,6 +1441,8 @@ export function catalogPlaceholderFieldMap(
     }
     if (ph.token === "{{TPS_NO}}" || ph.id === "tps_no") {
       // Always assign (even "") so CS/CTS clears {{TPS_NO}} and hides the phrase.
+      // For slash-collapse value slots use the bare name; formatTpsNoToken keeps
+      // the “Town Planning Scheme No.” phrase for inline {{TPS_NO}} prose.
       assignCatalogField(out, ph, formatTpsNoToken(value, plotBelongs));
       continue;
     }
@@ -1115,13 +1453,7 @@ export function catalogPlaceholderFieldMap(
       assignCatalogField(out, ph, value);
       continue;
     }
-    if (ph.token === "{{VILLAGE}}" || ph.id === "village") {
-      if (!value) continue;
-      value = formatVillageDivisionToken(value, plotBelongs);
-      if (!value) continue;
-      assignCatalogField(out, ph, value);
-      continue;
-    }
+    // {{VILLAGE}} / {{DIVISION}} stay as bare place names (meta labels supply the type).
     if (!value) continue;
     assignCatalogField(out, ph, value);
   }

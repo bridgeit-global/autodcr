@@ -544,7 +544,7 @@ export default function DocumentPreviewModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[9999] flex justify-center items-start bg-black/50 backdrop-blur-sm p-4 pt-10"
+          className="fixed inset-0 z-[9999] flex justify-center items-start bg-black/50 p-4 pt-10"
           onClick={handleCloseAll}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -777,7 +777,7 @@ export default function DocumentPreviewModal({
 
             {(saveUiBusy || previewReloadBusy) && (
               <div
-                className="absolute inset-0 z-[70] flex flex-col items-center justify-center rounded-2xl bg-white/90 backdrop-blur-[3px]"
+                className="absolute inset-0 z-[70] flex flex-col items-center justify-center rounded-2xl bg-white/90"
                 role="status"
                 aria-live="polite"
                 aria-busy="true"

@@ -84,5 +84,7 @@ export {
 export {
   prCard,
   prCardSchema,
+  parsePrCardDownloadDate,
+  enrichPrCardDownloadDate,
   type PrCard,
 } from "./prCard";

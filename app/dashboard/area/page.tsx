@@ -206,9 +206,25 @@ export default function AreaDetailsPage() {
     );
   };
 
-  // Load saved plots from localStorage or project data
+  // Load saved plots from localStorage or project data.
+  // Pending Project Library autofill wins over stale server area_details (edit mode).
   useEffect(() => {
     if (isLoading) return;
+
+    const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
+    const dirtyArea = Boolean(loadDraft<boolean>("dirty-area-details", false));
+    const preferAutofillDraft =
+      dirtyArea && autofillAt > 0 && autofillAt >= lastAutofillHydratedRef.current;
+
+    if (preferAutofillDraft) {
+      const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
+      setPlots(saved);
+      lastAutofillHydratedRef.current = autofillAt;
+      clearPageSaved("saved-area-details");
+      setIsSaved(false);
+      plotsPersistReadyRef.current = true;
+      return;
+    }
 
     if (isEditMode && projectData) {
       const areaDetails = projectData.area_details || {};
@@ -235,10 +251,9 @@ export default function AreaDetailsPage() {
     plotsPersistReadyRef.current = true;
   }, [isEditMode, projectData, isLoading]);
 
-  // When Project Library extraction completes, reload prefilled plots.
+  // When Project Library extraction completes, reload prefilled plots (create + edit).
   useEffect(() => {
     return subscribeProjectAutofillApplied(() => {
-      if (isEditMode) return;
       const saved = loadDraft<PlotRow[]>("draft-area-details-plots", [createPlot(1)]);
       setPlots(saved);
       clearPageSaved("saved-area-details");
@@ -246,11 +261,11 @@ export default function AreaDetailsPage() {
       plotsPersistReadyRef.current = true;
       lastAutofillHydratedRef.current = loadDraft<number>("project-library-autofill-at", 0);
     });
-  }, [isEditMode]);
+  }, []);
 
   // If user navigates here after Library Save, hydrate from the latest autofill timestamp.
   useEffect(() => {
-    if (isEditMode || isLoading) return;
+    if (isLoading) return;
     const autofillAt = loadDraft<number>("project-library-autofill-at", 0);
     if (!autofillAt || autofillAt <= lastAutofillHydratedRef.current) return;
     lastAutofillHydratedRef.current = autofillAt;

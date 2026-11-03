@@ -1,0 +1,61 @@
+---
+description: Where to put global HTML preview rules (tokens, plot grammar, orphans)
+globs: app/templates/applicationPreview.ts,app/utils/applicationCatalog.ts,app/api/application-preview-html/**
+alwaysApply: false
+---
+
+# Application preview pipeline
+
+Put rules that must apply to **every** Storage/repo HTML here — not in one-off template edits.
+
+| Concern | Place |
+|---------|--------|
+| Ward / plot / village-TPS grammar | `applicationCatalog.ts` formatters + `normalizePlotTypeLabelsInTemplateHtml` |
+| Suburb from ward/region | `resolveCatalogPlaceholderValue` for `suburb` / `{{SUBURB}}` using `save_plot_details.region` or `inferLocationFromWard` from `app/lib/projectDocumentAutofill/utils.ts` |
+| BP address lines 1–3 | `mapToPdfFieldValues` in `applicationPreview.ts` — alias `{{BP_ADDRESS_LINE_*}}` from `resolveBuildingProposalOffice` (same as `$project_addressline*_BuildingProposal`) |
+| Empty address / unreplaced token lines | `removeEmptyAddressParagraphs` (and siblings) in `application-preview-html/route.ts` |
+| Date/CC orphans, letterhead first page, margins | `injectPaginatedStyles` in `applicationPreview.ts` |
+| Per-doc letterhead/QR on/off | `application_documents` catalog flags (`show_letterhead`, `letterhead_source`) |
+| Letterhead image URL | Strictly `application_documents.letterhead_source`: `owner` → owner URL; `architect_or_ls` / `consultant` → that appointed profile URL. **Never** viewer JWT, never cross-party fallback, never HTML/CSS scrape. Missing URL → no image and no reserved logo/footer space. Multi-doc apps (Document Checklist) resolve the selected document’s source via `templateTypeForLetterheadSource` |
+| DSC stamp slot in HTML | Only when `application_documents.sign` requires it; class `.dsc-stamp-slot` (owner: `--owner`) |
+
+## Letterhead: assigned person only (every application)
+
+1. Resolve letterhead from `letterhead_source` / acceptance vs appointment — **that party only**.
+2. Acceptance / `consultant` source: use `consultantLetterheadUrl`. If empty → **blank** (do **not** use owner).
+3. Appointment / `owner` source: use `ownerLetterheadUrl`. If empty → **blank**.
+4. When blank: omit letterhead CSS background **and** collapse first-page top / footer clearance (no empty band for a missing logo).
+5. Do not invent a default/shared letterhead image for any catalog document.
+
+## Suburb from ward (BMC To-block)
+
+`{{SUBURB}}` must never stay blank when ward/region is known.
+
+1. Read `project.save_plot_details.region` (`City` | `Western` | `Eastern`).
+2. If empty, `inferLocationFromWard(save_plot_details.ward)` (ward keys like `L Ward`).
+3. Print the region string as-is (`City` / `Western` / `Eastern`) — **do not** append “Suburb”.
+
+Reuse the existing ward→zone→region tables in `projectDocumentAutofill/utils.ts`; do not duplicate a second ward map in HTML.
+
+## Building Proposal address lines (Address Line 1/2/3)
+
+Same logic as Building Permission / appointment letters:
+
+1. Always fetch `building_proposal_offices` in `buildApplicationPreviewContext` (do **not** gate on `appointment_letter` / `includeConsultantProfiles`).
+2. Resolve office via `resolveBuildingProposalOffice(region, ward, offices)`.
+3. Fill `{{BP_ADDRESS_LINE_1}}` / `_2` / `_3` (and legacy `$project_addressline*_BuildingProposal`) from that office’s `line1`/`line2`/`line3` in `mapToPdfFieldValues`.
+4. Empty lines are dropped by `removeEmptyAddressParagraphs` after substitution.
+
+Do not invent a second address source for Document Checklist or other catalog forms.
+
+## Forms vs letters
+
+- Letters (`letter_variant` appointment/acceptance) get shared CSS from `html/_shared/application-templates.css`.
+- Forms skip that inject so large tables can split. Form keep-together must target **closing blocks only** (`.closing`, `.sig`, `.cc`) — never `break-inside: avoid` on every `p`/`table`.
+- Wrap `Thanking you` / `Yours Faithfully` + `.sig` (+ optional `.cc`) in `.closing` for structure/DSC markup. On **letterheaded forms**, do **not** use `break-inside`/`break-before: avoid` on `.closing` / `.sig` / signer blocks — nested avoids make Paged.js drop most of the body (empty page, signer remnant only). Densify rhythm for page-1 fit; allow normal splitting if content still overflows.
+- Letterheaded **forms** (Document Checklist annexures, etc.): first content line (`ANNEXURE …`, title, or `To,`) must clear the logo with the **same** first-page inset as appointment/acceptance — **115pt** `@page :first` top + **0** content top pad (`useLetterheadFirstPageClearance`). Do **not** add per-HTML `padding-top` / spacer paragraphs above ANNEXURE.
+- Letterhead **footer** clearance: bottom `@page` margin must keep body/signature/C.C. above the scanned footer (gold bar / address / contact). Letterheaded forms use ~**96pt** bottom (tuned with dense annexure CSS for page-1 fit + DSC 180×60). Prefer densifying body/meta/to-block/closing rhythm before cutting footer clearance further; overlapping the letterhead footer is wrong — spill to page 2 if content still cannot fit.
+
+## Plot slash-lists
+
+Rewrite at normalize time from `plotBelongsTo` so old HTML with four slash fields still collapses. Prefer teaching new HTML to use `{{PLOT_CS_CTS_NO}}` / `{{VILLAGE_DIVISION}}` for **inline prose**; meta-table rows keep slash lists so key/value split. Letter fields UI uses `collapsePlotBelongsPlaceholdersForLetterFields` so the panel shows one survey + one place row.
