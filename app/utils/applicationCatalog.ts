@@ -153,6 +153,15 @@ export function shouldSkipCatalogPlaceholderForLetterFields(
   if (/letterhead/i.test(ph.id) || /letterhead/i.test(ph.token)) return true;
   // Derived C.C. label (Owner vs Developer) — not a typed Letter field.
   if (ph.id === "owner_or_developer" || ph.token === "{{OWNER_OR_DEVELOPER}}") return true;
+  // Derived Architect vs L.S. role / reg label from roster — not typed fields.
+  if (
+    ph.id === "architect_or_ls_role" ||
+    ph.token === "{{ARCHITECT_OR_LS_ROLE}}" ||
+    ph.id === "architect_or_ls_reg_label" ||
+    ph.token === "{{ARCHITECT_OR_LS_REG_LABEL}}"
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -264,6 +273,31 @@ function isOptionalAddressLinePlaceholder(
 }
 
 /**
+ * Default accordion title when `section_label` is unset — from `placeholders.ui_group`.
+ * Explicit document `section_label` always wins in `buildCatalogLetterFieldRows`.
+ */
+export function sectionTitleFromUiGroup(uiGroup: string | null | undefined): string | null {
+  switch (String(uiGroup ?? "").trim().toLowerCase()) {
+    case "subject":
+      return "Subject";
+    case "reference":
+      return "Reference";
+    case "consultant":
+      return "Consultant";
+    case "client":
+      return "Client";
+    case "office":
+      return "Addressee";
+    case "other":
+      return "Other fields";
+    case "letterhead":
+      return null;
+    default:
+      return null;
+  }
+}
+
+/**
  * Build Letter fields panel rows from type ∪ document placeholders.
  * Includes empty values (unlike Create Application Key Variables), except
  * optional address lines 1/2/3 which are hidden when blank.
@@ -304,7 +338,9 @@ export function buildCatalogLetterFieldRows(
       value,
       required: ph.required,
       uiGroup: ph.ui_group,
-      sectionLabel: ph.sectionLabel?.trim() || null,
+      // Document section_label wins; otherwise group by ui_group (Subject / Reference / …).
+      sectionLabel:
+        ph.sectionLabel?.trim() || sectionTitleFromUiGroup(ph.ui_group) || null,
       readOnly,
     });
   }
@@ -950,7 +986,56 @@ export type CatalogProjectSource = {
   consultant_coa_expiry?: string | null;
   /** Session / auth LBS expiry when applicant rows omit it. */
   consultant_lbs_expiry?: string | null;
+  /**
+   * Application `created_at` (ISO) → `{{APPOINTMENT_DATE}}` on consultant /
+   * supervision memos (date the application was created).
+   */
+  application_created_at?: string | null;
 };
+
+/** Format ISO / Date-parseable value as DD/MM/YYYY for catalog letter dates. */
+export function formatCatalogDateDmy(value?: string | null): string {
+  if (!value?.trim()) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    const m = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return m ? value.trim() : "";
+  }
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+/** Prefer Architect on the roster; else Licensed Surveyor. */
+function findArchitectOrLsApplicant(
+  applicants: JsonRecord[] | undefined
+): JsonRecord | undefined {
+  return (
+    (findConsultantApplicantInList(applicants, "Architect") as JsonRecord | undefined) ||
+    (findConsultantApplicantInList(applicants, "Licensed Surveyor") as
+      | JsonRecord
+      | undefined)
+  );
+}
+
+/** Role title from project roster — never the combined "Architect/ Licensed Surveyor". */
+export function resolveArchitectOrLsRoleLabel(
+  applicants: JsonRecord[] | undefined
+): string {
+  if (findConsultantApplicantInList(applicants, "Architect")) return "Architect";
+  if (findConsultantApplicantInList(applicants, "Licensed Surveyor")) {
+    return "Licensed Surveyor";
+  }
+  return "";
+}
+
+function resolveArchitectOrLsRegLabel(applicants: JsonRecord[] | undefined): string {
+  const role = resolveArchitectOrLsRoleLabel(applicants);
+  if (role === "Licensed Surveyor") return "Reg. No.";
+  if (role === "Architect") return "COA Reg. No.";
+  return "";
+}
 
 function pickApplicant(
   applicants: JsonRecord[] | undefined,
@@ -1095,6 +1180,92 @@ export function resolveCatalogPlaceholderValue(
           project?.save_plot_details?.prc_download_date
       );
     }
+    // Notice / plinth / DCC — Building No. prints Project Details proposalNo.
+    if (placeholder.id === "building_no" || placeholder.token === "{{BUILDING_NO}}") {
+      return stringifyCatalogValue(
+        project?.project_info?.proposalNo ?? project?.project_info?.proposal_no
+      );
+    }
+    // Consultant / supervision memos — appointment letter date = application created_at.
+    if (
+      placeholder.id === "appointment_date" ||
+      placeholder.token === "{{APPOINTMENT_DATE}}"
+    ) {
+      return (
+        formatCatalogDateDmy(project?.application_created_at) ||
+        // Fallback: today when the application row has no created_at yet.
+        formatCatalogDateDmy(new Date().toISOString())
+      );
+    }
+    // Architect / L.S. firm (C.C. on Structural / Plumber / Site Supervisor memos).
+    if (
+      placeholder.id === "architect_ls_office" ||
+      placeholder.token === "{{ARCHITECT_LS_OFFICE}}"
+    ) {
+      const arch = findArchitectOrLsApplicant(applicants);
+      if (!arch) return "";
+      return stringifyCatalogValue(
+        arch.entity_name ??
+          arch.entityName ??
+          arch.firm_name ??
+          arch.firmName ??
+          arch.company_name ??
+          arch.companyName
+      );
+    }
+    // Single role from project — Architect OR Licensed Surveyor (not both).
+    if (
+      placeholder.id === "architect_or_ls_role" ||
+      placeholder.token === "{{ARCHITECT_OR_LS_ROLE}}"
+    ) {
+      return resolveArchitectOrLsRoleLabel(applicants);
+    }
+    if (
+      placeholder.id === "architect_or_ls_reg_label" ||
+      placeholder.token === "{{ARCHITECT_OR_LS_REG_LABEL}}"
+    ) {
+      return resolveArchitectOrLsRegLabel(applicants);
+    }
+    // Architect / L.S. registration no. (C.C. block — not the memo signer’s {{REG_NO}}).
+    if (
+      placeholder.id === "architect_ls_reg_no" ||
+      placeholder.token === "{{ARCHITECT_LS_REG_NO}}"
+    ) {
+      const arch = findArchitectOrLsApplicant(applicants);
+      if (!arch) return "";
+      return stringifyCatalogValue(
+        arch.registrationNumber ??
+          arch.registrationNo ??
+          arch.registration_number ??
+          arch.coa_reg_no ??
+          arch.coaRegNo ??
+          arch.lbs_license_no ??
+          arch.lbsLicenseNo
+      );
+    }
+    // Architect / L.S. validity for C.C. labeled blocks.
+    if (
+      placeholder.id === "architect_ls_validity" ||
+      placeholder.token === "{{ARCHITECT_LS_VALIDITY}}"
+    ) {
+      const arch = findArchitectOrLsApplicant(applicants);
+      const fromApplicant = arch
+        ? stringifyCatalogValue(
+            arch.validity ??
+              arch.registrationValidity ??
+              arch.registration_validity ??
+              arch.coa_expiry_date ??
+              arch.coaExpiryDate ??
+              arch.lbs_expiry_date ??
+              arch.lbsExpiryDate
+          )
+        : "";
+      const raw =
+        fromApplicant ||
+        stringifyCatalogValue(project?.consultant_coa_expiry) ||
+        stringifyCatalogValue(project?.consultant_lbs_expiry);
+      return formatCoaExpiryDisplay(raw) || raw;
+    }
     return "";
   }
   if (placeholder.source_table === "owner_applicant") {
@@ -1116,13 +1287,33 @@ export function resolveCatalogPlaceholderValue(
   }
   if (placeholder.source_table === "applicants") {
     let row = pickApplicant(applicants, opts?.applicantType ?? null, false);
-    // Document Checklist (and similar) has no applicant_type — resolve Architect / L.S.
-    // for architect letterhead annexures (name, firm, reg no.).
-    if (
+    const wantsArchitectOrLs =
+      placeholder.id === "architect_ls_name" ||
+      placeholder.id === "architects_name" ||
+      placeholder.id === "architect_ls_office" ||
+      placeholder.id === "architect_address_line_1" ||
+      placeholder.id === "architect_address_line_2" ||
+      placeholder.id === "architect_address_line_3" ||
+      placeholder.id === "architect_ls_reg_no" ||
+      placeholder.token === "{{ARCHITECT_LS_NAME}}" ||
+      placeholder.token === "{{ARCHITECTS_NAME}}" ||
+      placeholder.token === "{{ARCHITECT_LS_OFFICE}}" ||
+      placeholder.token === "{{ARCHITECT_ADDRESS_LINE_1}}" ||
+      placeholder.token === "{{ARCHITECT_ADDRESS_LINE_2}}" ||
+      placeholder.token === "{{ARCHITECT_ADDRESS_LINE_3}}" ||
+      placeholder.token === "{{ARCHITECT_LS_REG_NO}}";
+    // Always prefer Architect / L.S. for architect_* tokens (Supervision C.C., etc.) —
+    // Document Checklist has no applicant_type; other docs may resolve the signer role first.
+    if (wantsArchitectOrLs) {
+      row =
+        (findConsultantApplicantInList(applicants, "Architect") as JsonRecord | undefined) ||
+        (findConsultantApplicantInList(applicants, "Licensed Surveyor") as
+          | JsonRecord
+          | undefined) ||
+        row;
+    } else if (
       !row &&
-      (placeholder.id === "architect_ls_name" ||
-        placeholder.id === "architects_name" ||
-        placeholder.id === "consultant_firm" ||
+      (placeholder.id === "consultant_firm" ||
         placeholder.id === "consultant_name" ||
         placeholder.id === "reg_no")
     ) {
@@ -1134,12 +1325,13 @@ export function resolveCatalogPlaceholderValue(
     }
     if (!row) return "";
     const key = placeholder.source_column || "name";
+    const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
     const alt =
       key === "entity_name"
         ? row.entity_name ?? row.entityName
         : key === "registrationNumber"
           ? row.registrationNumber ?? row.registrationNo
-          : row[key];
+          : row[key] ?? row[camelKey];
     return stringifyCatalogValue(alt);
   }
   if (placeholder.source_table === "projects") {

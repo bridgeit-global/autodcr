@@ -44,21 +44,21 @@ const TEMPLATE_BUCKET =
   "Application_Templates";
 
 const TEMPLATE_PATH_MAP: Record<TemplateType, string> = {
-  Architect: "Appointment/architect.html",
-  "Licensed Surveyor": "Appointment/licensed-surveyor.html",
-  "Structural Engineer": "Appointment/structural-engineer.html",
-  "Fire Safety Consultant": "Appointment/fire-safety-consultant.html",
-  "M&E Consultant": "Appointment/me-consultant.html",
-  Plumber: "Appointment/plumber.html",
-  "Parking Consultant": "Appointment/parking-consultant.html",
-  "Rainwater Consultant": "Appointment/rainwater-consultant.html",
-  "Site Supervisor": "Appointment/site-supervisor.html",
-  Horticulturist: "Appointment/horticulturist.html",
-  "Landscape Consultant": "Appointment/landscape-consultant.html",
-  "Geotechnical Consultant": "Appointment/geotechnical-consultant.html",
-  "Environmental Consultant": "Appointment/environmental-consultant.html",
-  "Town Planner": "Appointment/town-planner.html",
-  "PMC / Project Manager": "Appointment/pmc-project-manager.html",
+  Architect: "General/consultants/architect/appointment.html",
+  "Licensed Surveyor": "General/consultants/licensed-surveyor/appointment.html",
+  "Structural Engineer": "General/consultants/structural-engineer/appointment.html",
+  "Fire Safety Consultant": "General/consultants/fire-safety-consultant/appointment.html",
+  "M&E Consultant": "General/consultants/me-consultant/appointment.html",
+  Plumber: "General/consultants/plumber/appointment.html",
+  "Parking Consultant": "General/consultants/parking-consultant/appointment.html",
+  "Rainwater Consultant": "General/consultants/rainwater-consultant/appointment.html",
+  "Site Supervisor": "General/consultants/site-supervisor/appointment.html",
+  Horticulturist: "General/consultants/horticulturist/appointment.html",
+  "Landscape Consultant": "General/consultants/landscape-consultant/appointment.html",
+  "Geotechnical Consultant": "General/consultants/geotechnical-consultant/appointment.html",
+  "Environmental Consultant": "General/consultants/environmental-consultant/appointment.html",
+  "Town Planner": "General/consultants/town-planner/appointment.html",
+  "PMC / Project Manager": "General/consultants/pmc-project-manager/appointment.html",
 };
 
 /** Storage errors sometimes expose `message` as JSON (e.g. `{ "url": "..." }`) — normalize for UI. */
@@ -93,7 +93,7 @@ function describeStorageTemplateDownloadError(
     looksLikeJsonOnlyUrl;
 
   if (likelyMissing) {
-    return `Missing template "${objectPath}" in Storage bucket "${bucket}". Upload it from your repo (e.g. html/Acceptance/architect_acceptance.html) or confirm the file name matches exactly.`;
+    return `Missing template "${objectPath}" in Storage bucket "${bucket}". Upload it from your repo (e.g. html/General/consultants/architect/acceptance.html) or confirm the file name matches exactly.`;
   }
 
   if (nestedMsg) return nestedMsg;
@@ -563,18 +563,18 @@ async function injectSavedPdfQrHtml(
 
 /** Maps each template type to its acceptance HTML object path. */
 const ACCEPTANCE_TEMPLATE_PATH_MAP: Partial<Record<TemplateType, string>> = {
-  Architect: "Acceptance/architect_acceptance.html",
-  "Licensed Surveyor": "Acceptance/licensed-surveyor_acceptance.html",
-  "Fire Safety Consultant": "Acceptance/fire-safety-consultant_acceptance.html",
-  "Landscape Consultant": "Acceptance/landscape-consultant_acceptance.html",
-  "Geotechnical Consultant": "Acceptance/geotechnical-consultant_acceptance.html",
-  "M&E Consultant": "Acceptance/me-consultant_acceptance.html",
-  Plumber: "Acceptance/plumber_acceptance.html",
-  "Town Planner": "Acceptance/town-planner_acceptance.html",
-  "Structural Engineer": "Acceptance/structural-engineer_acceptance.html",
-  "Environmental Consultant": "Acceptance/environmental-consultant_acceptance.html",
-  "PMC / Project Manager": "Acceptance/pmc-project-manager_acceptance.html",
-  "Site Supervisor": "Acceptance/site-supervisor_acceptance.html",
+  Architect: "General/consultants/architect/acceptance.html",
+  "Licensed Surveyor": "General/consultants/licensed-surveyor/acceptance.html",
+  "Fire Safety Consultant": "General/consultants/fire-safety-consultant/acceptance.html",
+  "Landscape Consultant": "General/consultants/landscape-consultant/acceptance.html",
+  "Geotechnical Consultant": "General/consultants/geotechnical-consultant/acceptance.html",
+  "M&E Consultant": "General/consultants/me-consultant/acceptance.html",
+  Plumber: "General/consultants/plumber/acceptance.html",
+  "Town Planner": "General/consultants/town-planner/acceptance.html",
+  "Structural Engineer": "General/consultants/structural-engineer/acceptance.html",
+  "Environmental Consultant": "General/consultants/environmental-consultant/acceptance.html",
+  "PMC / Project Manager": "General/consultants/pmc-project-manager/acceptance.html",
+  "Site Supervisor": "General/consultants/site-supervisor/acceptance.html",
 };
 
 /** Maps template type to its `application_urls` acceptance key for QR injection. */

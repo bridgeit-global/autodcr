@@ -28,8 +28,6 @@ import {
 import { supabase } from "@/app/utils/supabase";
 import {
   fetchApplicationCatalogTypes,
-  fetchDocumentsForApplicationType,
-  type ApplicationCatalogDocument,
   type ApplicationCatalogType,
 } from "@/app/utils/applicationCatalog";
 import { BTN_PRIMARY } from "@/app/utils/buttonClasses";
@@ -427,9 +425,6 @@ function ApplicationsHubContent() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [catalogTypes, setCatalogTypes] = useState<ApplicationCatalogType[]>([]);
-  const [documentsByTypeId, setDocumentsByTypeId] = useState<
-    Record<string, ApplicationCatalogDocument[]>
-  >({});
   const [selectedDepartmentKey, setSelectedDepartmentKey] = useState<string | null>(
     ALL_DEPARTMENTS
   );
@@ -545,41 +540,6 @@ function ApplicationsHubContent() {
     };
   }, []);
 
-  useEffect(() => {
-    const titles = new Set(
-      applications.map((app) => app.permissionType.trim().toLowerCase()).filter(Boolean)
-    );
-    const openTypeId =
-      selectedTypeKey && !selectedTypeKey.startsWith("letter:")
-        ? catalogTypes.find(
-            (type) => type.application_title.trim().toLowerCase() === selectedTypeKey
-          )?.id
-        : null;
-    const typeIds = catalogTypes
-      .filter((type) => {
-        const title = type.application_title.trim().toLowerCase();
-        if (!titles.has(title)) return false;
-        if (type.category === "appointment_letter") return true;
-        return Boolean(openTypeId && type.id === openTypeId);
-      })
-      .map((type) => type.id);
-    if (typeIds.length === 0) return;
-    let cancelled = false;
-    void Promise.all(
-      typeIds.map(async (id) => [id, await fetchDocumentsForApplicationType(id)] as const)
-    ).then((pairs) => {
-      if (cancelled) return;
-      setDocumentsByTypeId((current) => {
-        const next = { ...current };
-        for (const [id, docs] of pairs) next[id] = docs;
-        return next;
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [applications, catalogTypes, selectedTypeKey]);
-
   const typeByTitle = useMemo(
     () =>
       new Map(catalogTypes.map((type) => [type.application_title.trim().toLowerCase(), type])),
@@ -630,52 +590,30 @@ function ApplicationsHubContent() {
       department.types.set(typeKey, entry);
       departments.set(departmentKey, department);
     }
-    const appointment: DashboardApplication[] = [];
-    const acceptance: DashboardApplication[] = [];
+    // One Consultants folder (appointment + acceptance + supervision live as
+    // documents on each roster-matched appointment_letter app — not duplicate folders).
+    const consultants: DashboardApplication[] = [];
     let letterDepartment = "General";
     for (const app of filtered) {
       const type = typeByTitle.get(app.permissionType.trim().toLowerCase());
       if (!type || type.category !== "appointment_letter") continue;
       if (type.department?.trim()) letterDepartment = type.department.trim();
-      appointment.push(app);
-      const docs = documentsByTypeId[type.id] ?? [];
-      if (docs.some((doc) => doc.letter_variant === "acceptance")) acceptance.push(app);
+      consultants.push(app);
     }
-    const letterFolders: {
-      key: string;
-      title: string;
-      typeId: string | null;
-      applications: DashboardApplication[];
-      direct: boolean;
-    }[] = [];
-    if (appointment.length > 0) {
-      letterFolders.push({
-        key: "letter:appointment",
-        title: "Appointment",
-        typeId: null,
-        applications: appointment,
-        direct: true,
-      });
-    }
-    if (acceptance.length > 0) {
-      letterFolders.push({
-        key: "letter:acceptance",
-        title: "Acceptance",
-        typeId: null,
-        applications: acceptance,
-        direct: true,
-      });
-    }
-    if (letterFolders.length > 0) {
+    if (consultants.length > 0) {
       const letterKey = letterDepartment.toLowerCase();
       const existing = departments.get(letterKey) ?? {
         key: letterKey,
         title: letterDepartment,
         types: new Map(),
       };
-      for (const folder of letterFolders) {
-        existing.types.set(folder.key, folder);
-      }
+      existing.types.set("letter:consultants", {
+        key: "letter:consultants",
+        title: "Consultants",
+        typeId: null,
+        applications: consultants,
+        direct: true,
+      });
       departments.set(letterKey, existing);
     }
 
@@ -684,8 +622,7 @@ function ApplicationsHubContent() {
         key: department.key,
         title: department.title,
         types: [...department.types.values()].sort((a, b) => {
-          const rank = (title: string) =>
-            title === "Appointment" ? 0 : title === "Acceptance" ? 1 : 2;
+          const rank = (title: string) => (title === "Consultants" ? 0 : 1);
           const diff = rank(a.title) - rank(b.title);
           return diff !== 0 ? diff : a.title.localeCompare(b.title);
         }),
@@ -695,7 +632,7 @@ function ApplicationsHubContent() {
         if (b.title === "Building Permission") return 1;
         return a.title.localeCompare(b.title);
       });
-  }, [filtered, typeByTitle, documentsByTypeId]);
+  }, [filtered, typeByTitle]);
 
   const selectedDepartment =
     departmentFolders.find((folder) => folder.key === selectedDepartmentKey) ?? null;
