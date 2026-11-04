@@ -3607,6 +3607,7 @@ export default function ApplicationDetailsPage() {
                 pickLbsExpiryFromMeta(userMetadata) ||
                 pickLbsExpiryFromMeta(readLocalStoredUserMetadata()) ||
                 null,
+              application_created_at: applicationCreatedAt,
             },
             catalogType.applicant_type
           );

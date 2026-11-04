@@ -35,10 +35,13 @@ import {
   fetchDocumentsForApplicationType,
   fetchResolvedPlaceholdersForApplication,
   pickCatalogDocument,
+  formatCatalogDateDmy,
+  resolveArchitectOrLsRoleLabel,
   resolveCatalogDocumentForPreview,
   type ApplicationCatalogDocument,
   type CatalogLetterheadSource,
 } from "@/app/utils/applicationCatalog";
+import { findConsultantApplicantInList } from "@/app/utils/consultantTemplateTokens";
 import {
   isOwnerApplicantType,
   type PrincipalApplicantLabel,
@@ -1186,7 +1189,7 @@ export function labelForPdfFieldKey(key: string, templateType: TemplateType): st
     .trim();
 }
 
-/** Keys that fill the letter “Sub:” line (see e.g. `html/Appointment/architect.html`). */
+/** Keys that fill the letter “Sub:” line (see e.g. `html/General/consultants/architect/appointment.html`). */
 export const APPLICATION_LETTER_SUBJECT_FIELD_KEYS = [
   "project_Letter_Appointment_Role",
   "project_CS/CTSNos.",
@@ -3189,6 +3192,7 @@ export async function fetchApplicationPreviewHtmlRaw(
           | null,
         consultant_coa_expiry: source?.coaExpiryDate ?? null,
         consultant_lbs_expiry: source?.lbsExpiryDate ?? null,
+        application_created_at: source?.applicationCreatedAt ?? null,
       },
       source?.resolvedApplicantType
     );
@@ -3240,6 +3244,7 @@ export async function fetchApplicationPreviewHtmlRaw(
               | null,
             consultant_coa_expiry: source?.coaExpiryDate ?? null,
             consultant_lbs_expiry: source?.lbsExpiryDate ?? null,
+            application_created_at: source?.applicationCreatedAt ?? null,
           },
           catalogType.applicant_type
         );
@@ -3289,6 +3294,87 @@ export async function fetchApplicationPreviewHtmlRaw(
     if (prcDate) {
       formValues["{{DATE_OF_PRC}}"] = prcDate;
       formValues.date_of_prc = prcDate;
+    }
+  }
+  // {{BUILDING_NO}} = proposal number (catalog may still say computed until migration).
+  if (!(formValues["{{BUILDING_NO}}"] || "").trim()) {
+    const proposalNo = String(
+      source?.projectData?.project_info?.proposalNo ||
+        (source?.projectData?.project_info as Record<string, unknown> | null | undefined)
+          ?.proposal_no ||
+        ""
+    ).trim();
+    if (proposalNo) {
+      formValues["{{BUILDING_NO}}"] = proposalNo;
+      formValues.building_no = proposalNo;
+    }
+  }
+  // {{APPOINTMENT_DATE}} = application created_at (consultant / supervision memos).
+  if (!(formValues["{{APPOINTMENT_DATE}}"] || "").trim()) {
+    const appointmentDate =
+      formatCatalogDateDmy(source?.applicationCreatedAt) ||
+      formatCatalogDateDmy(new Date().toISOString());
+    if (appointmentDate) {
+      formValues["{{APPOINTMENT_DATE}}"] = appointmentDate;
+      formValues.appointment_date = appointmentDate;
+    }
+  }
+  // Architect OR L.S. from roster — role/reg for labeled C.C. / signer blocks.
+  {
+    const applicants = source?.projectData?.applicant_details?.applicants as
+      | Record<string, unknown>[]
+      | undefined;
+    const role = resolveArchitectOrLsRoleLabel(applicants);
+    if (role && !(formValues["{{ARCHITECT_OR_LS_ROLE}}"] || "").trim()) {
+      formValues["{{ARCHITECT_OR_LS_ROLE}}"] = role;
+    }
+    const regLabel =
+      role === "Licensed Surveyor"
+        ? "Reg. No."
+        : role === "Architect"
+          ? "COA Reg. No."
+          : "";
+    if (regLabel && !(formValues["{{ARCHITECT_OR_LS_REG_LABEL}}"] || "").trim()) {
+      formValues["{{ARCHITECT_OR_LS_REG_LABEL}}"] = regLabel;
+    }
+    const arch =
+      findConsultantApplicantInList(applicants, "Architect") ||
+      findConsultantApplicantInList(applicants, "Licensed Surveyor");
+    if (arch && !(formValues["{{ARCHITECT_LS_REG_NO}}"] || "").trim()) {
+      const reg = String(
+        arch.registrationNumber ??
+          arch.registrationNo ??
+          arch.registration_number ??
+          arch.coa_reg_no ??
+          arch.coaRegNo ??
+          arch.lbs_license_no ??
+          arch.lbsLicenseNo ??
+          ""
+      ).trim();
+      if (reg) formValues["{{ARCHITECT_LS_REG_NO}}"] = reg;
+    }
+    if (!(formValues["{{ARCHITECT_LS_VALIDITY}}"] || "").trim()) {
+      const fromArch = arch
+        ? String(
+            arch.validity ??
+              arch.registrationValidity ??
+              arch.registration_validity ??
+              arch.coa_expiry_date ??
+              arch.coaExpiryDate ??
+              arch.lbs_expiry_date ??
+              arch.lbsExpiryDate ??
+              ""
+          ).trim()
+        : "";
+      const raw =
+        fromArch ||
+        source?.coaExpiryDate?.trim() ||
+        source?.lbsExpiryDate?.trim() ||
+        "";
+      if (raw) {
+        formValues["{{ARCHITECT_LS_VALIDITY}}"] =
+          formatCoaExpiryDisplay(raw) || raw;
+      }
     }
   }
 

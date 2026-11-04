@@ -25,6 +25,8 @@ body{margin:0;background:#fff;color:#111;font-family:"Times New Roman",Times,ser
 .note{text-align:center;font-style:italic;margin:0 0 4px;font-size:10pt}
 .center{text-align:center}.right{text-align:right}.bold{font-weight:bold}.underline{text-decoration:underline}
 .value-bold{font-weight:bold}
+/* Static C.C. label — same as appointment .cc-label (normal weight, never value-bold). */
+.cc-label{font-weight:normal}
 .to-block{margin:1px 0 3px}
 .to-block .to-label{margin:0;padding:0;line-height:1.12}
 .to-block .to-content{margin-left:0.4in}
@@ -67,12 +69,24 @@ function dscSlot(role = "consultant") {
  * (role, Name, COA Reg. No., Valid upto). No salutation on the name line.
  */
 function architectSignerBlock({ includeDate = true } = {}) {
+  // Role + reg label from project roster (Architect OR Licensed Surveyor — never both).
   return `<div class="architect-block">
-<p class="signer-role">Architect</p>
+<p class="signer-role">${vb("{{ARCHITECT_OR_LS_ROLE}}")}</p>
 <p class="meta-line"><span class="meta-label">Name:</span> ${vb("{{ARCHITECT_LS_NAME}}")}</p>
-<p class="meta-line"><span class="meta-label">COA Reg. No.:</span> ${vb("{{REG_NO}}")}</p>
-<p class="meta-line"><span class="meta-label">Valid upto:</span> ${vb("{{VALIDITY}}")}</p>
+<p class="meta-line"><span class="meta-label">{{ARCHITECT_OR_LS_REG_LABEL}}:</span> ${vb("{{ARCHITECT_LS_REG_NO}}")}</p>
+<p class="meta-line"><span class="meta-label">Valid upto:</span> ${vb("{{ARCHITECT_LS_VALIDITY}}")}</p>
 ${includeDate ? `<p>Date: ${vb("{{LETTER_DATE}}")}</p>` : ""}
+</div>`;
+}
+
+/** C.C. Architect/L.S. block — same labeled lines as signer; role from project. */
+function architectCcBlock() {
+  return `<div class="architect-block">
+<p class="signer-role">${vb("{{ARCHITECT_OR_LS_ROLE}}")}</p>
+<p class="meta-line"><span class="meta-label">Name:</span> ${vb("{{ARCHITECT_LS_NAME}}")}</p>
+<p class="meta-line"><span class="meta-label">{{ARCHITECT_OR_LS_REG_LABEL}}:</span> ${vb("{{ARCHITECT_LS_REG_NO}}")}</p>
+<p class="meta-line"><span class="meta-label">Valid upto:</span> ${vb("{{ARCHITECT_LS_VALIDITY}}")}</p>
+<p>Date: ${vb("{{LETTER_DATE}}")}</p>
 </div>`;
 }
 
@@ -180,175 +194,6 @@ ${placeMetaRow()}
 ${closing(`<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
 ${dscSlot("consultant")}
 ${architectSignerBlock()}`)}
-`
-  ),
-
-  "Supervision Memo Of Architect.html": wrap(
-    "Supervision Memo Of Architect",
-    `
-<div class="annexure">ANNEXURE 2</div>
-<div class="form-title">FORM OF SUPERVISION ACCEPTANCE</div>
-${bpToBlock()}
-<p>Subject:&nbsp;&nbsp;${vb("Acceptance of Supervision")}</p>
-<p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
-<p>Dear Sir,</p>
-<p>The development work of the</p>
-<table class="meta-table">
-<tr><td class="lbl">Full Particular of the work</td><td>${vb("{{PROJECT_TITLE}}")}</td></tr>
-${surveyMetaRow()}
-${placeMetaRow()}
-<tr><td class="lbl">Type of Development</td><td>${vb("{{TYPE_OF_DEVELOPMENT}}")}</td></tr>
-<tr><td class="lbl">Road Name</td><td>${vb("{{PROPERTY_ADDRESS}}")}</td></tr>
-<tr><td class="lbl">Ward</td><td>${vb("{{WARD}}")}</td></tr>
-</table>
-<p>will be carried out under my supervision. All the materials (type and grade) and the workmanship of the work will generally tally with the general specifications submitted along with the plans and the work will be carried out according to the sanctioned plans. I shall be responsible for the execution of the work in all respects.</p>
-<p>This is for your information &amp; record please.</p>
-${closing(
-  `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
-${dscSlot("consultant")}
-${architectSignerBlock()}`,
-  {
-    cc: `<div class="cc">
-<p><span class="bold">C.C. to:</span>&nbsp;&nbsp;${vb("{{OWNER_OR_DEVELOPER}}")}</p>
-<p>${vb("{{APPLICANT_NAME}}")},</p>
-<p>${vb("{{OWNER_FIRM}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
-</div>`,
-  }
-)}
-`
-  ),
-
-  "Supervision Memo Of Structural Engineer.html": wrap(
-    "Supervision Memo Of Structural Engineer",
-    `
-<div class="annexure">ANNEXURE–5</div>
-<div class="form-title">SUPERVISION MEMO OF STRUCTURAL ENGINEER</div>
-${bpToBlock()}
-<p>Subject:&nbsp;&nbsp;${vb("Acceptance of Supervision")}</p>
-<p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
-<table class="meta-table">
-<tr><td class="lbl">Full Particular of the work</td><td>${vb("{{PROJECT_TITLE}}")}</td></tr>
-${surveyMetaRow()}
-${placeMetaRow()}
-<tr><td class="lbl">Type of Development</td><td>${vb("{{TYPE_OF_DEVELOPMENT}}")}</td></tr>
-<tr><td class="lbl">Road Name</td><td>${vb("{{PROPERTY_ADDRESS}}")}</td></tr>
-<tr><td class="lbl">Ward</td><td>${vb("{{WARD}}")}</td></tr>
-</table>
-<p>With reference to the letter of our appointment dated ${vb("{{APPOINTMENT_DATE}}")} addressed to you, by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm that I have agreed to act as the Consulting Structural Engineer for the above proposal.</p>
-<p>I further confirm that the structural design and calculations shall be in conformity with the provisions of I.S. Code nos. 1875, 1893 &amp; 4326 taking into consideration the Seismic Forces etc. as required by the planning authority.</p>
-<p>This is for your information &amp; record please.</p>
-${closing(
-  `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
-${dscSlot("consultant")}
-${consultantSignerBlock("Structural Engineer", "{{STRUCTURAL_ENGINEER}}")}`,
-  {
-    cc: `<div class="cc">
-<p><span class="bold">C.C. to:</span></p>
-<p>1. ${vb("{{OWNER_OR_DEVELOPER}}")}</p>
-<p>${vb("{{APPLICANT_NAME}}")},</p>
-<p>${vb("{{OWNER_FIRM}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
-<p>2. Architect/ Licensed Surveyor</p>
-<p>${vb("{{ARCHITECT_LS_NAME}}")}</p>
-<p>${vb("{{ARCHITECT_LS_OFFICE}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_3}}")}</p>
-</div>`,
-  }
-)}
-`
-  ),
-
-  "Supervision Memo Of Licensed Plumber.html": wrap(
-    "Supervision Memo Of Licensed Plumber",
-    `
-<div class="annexure">ANNEXURE–6</div>
-<div class="form-title">SUPERVISION MEMO OF LICENSED PLUMBER</div>
-${bpToBlock()}
-<p>Subject:&nbsp;&nbsp;${vb("Acceptance of Supervision")}</p>
-<p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
-<table class="meta-table">
-<tr><td class="lbl">Full Particular of the work</td><td>${vb("{{PROJECT_TITLE}}")}</td></tr>
-${surveyMetaRow()}
-${placeMetaRow()}
-<tr><td class="lbl">Type of Development</td><td>${vb("{{TYPE_OF_DEVELOPMENT}}")}</td></tr>
-<tr><td class="lbl">Road Name</td><td>${vb("{{PROPERTY_ADDRESS}}")}</td></tr>
-<tr><td class="lbl">Ward</td><td>${vb("{{WARD}}")}</td></tr>
-</table>
-<p>This is in reference to the letter of appointment issued by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm having agreed to act as Licensed Plumber for the above proposal.</p>
-<p>This is for your information &amp; record please.</p>
-${closing(
-  `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
-${dscSlot("consultant")}
-${consultantSignerBlock("Licensed Plumber", "{{LICENSED_PLUMBER}}")}`,
-  {
-    cc: `<div class="cc">
-<p><span class="bold">C.C. to:</span></p>
-<p>1. ${vb("{{OWNER_OR_DEVELOPER}}")}</p>
-<p>${vb("{{APPLICANT_NAME}}")},</p>
-<p>${vb("{{OWNER_FIRM}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
-<p>2. Architect/ Licensed Surveyor</p>
-<p>${vb("{{ARCHITECT_LS_NAME}}")}</p>
-<p>${vb("{{ARCHITECT_LS_OFFICE}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_3}}")}</p>
-</div>`,
-  }
-)}
-`
-  ),
-
-  "Supervision Memo Of Site Supervisor.html": wrap(
-    "Supervision Memo Of Site Supervisor",
-    `
-<div class="annexure">ANNEXURE–6</div>
-<div class="form-title">SUPERVISION MEMO OF SITE SUPERVISOR</div>
-${bpToBlock()}
-<p>Subject:&nbsp;&nbsp;${vb("Acceptance of Supervision")}</p>
-<p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
-<table class="meta-table">
-<tr><td class="lbl">Full Particular of the work</td><td>${vb("{{PROJECT_TITLE}}")}</td></tr>
-${surveyMetaRow()}
-${placeMetaRow()}
-<tr><td class="lbl">Type of Development</td><td>${vb("{{TYPE_OF_DEVELOPMENT}}")}</td></tr>
-<tr><td class="lbl">Road Name</td><td>${vb("{{PROPERTY_ADDRESS}}")}</td></tr>
-<tr><td class="lbl">Ward</td><td>${vb("{{WARD}}")}</td></tr>
-</table>
-<p>With reference to the letter of my appointment dated ${vb("{{APPOINTMENT_DATE}}")} addressed to you, by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm that, I have agreed to act as the Site Supervisor for the above proposal.</p>
-<p>I further confirm that the workmanship and material quality and material testing shall be in conformity with the provisions of I.S. standards and the development work shall be as per approved plans and the structural design etc.</p>
-<p>This is for your information &amp; record please.</p>
-${closing(
-  `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
-${dscSlot("consultant")}
-${consultantSignerBlock("Site Supervisor", "{{SITE_SUPERVISOR}}")}`,
-  {
-    cc: `<div class="cc">
-<p><span class="bold">C.C. to:</span></p>
-<p>1. ${vb("{{OWNER_OR_DEVELOPER}}")}</p>
-<p>${vb("{{APPLICANT_NAME}}")},</p>
-<p>${vb("{{OWNER_FIRM}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
-<p>2. Architect/ Licensed Surveyor</p>
-<p>${vb("{{ARCHITECT_LS_NAME}}")}</p>
-<p>${vb("{{ARCHITECT_LS_OFFICE}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{ARCHITECT_ADDRESS_LINE_3}}")}</p>
-</div>`,
-  }
-)}
 `
   ),
 

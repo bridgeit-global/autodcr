@@ -10,6 +10,7 @@ Put rules that must apply to **every** Storage/repo HTML here — not in one-off
 
 | Concern | Place |
 |---------|--------|
+| Letter-field accordion sections (DATE / SUBJECT / …) | `application_document_placeholders.section_label` (+ `ui_group` fallback via `sectionTitleFromUiGroup` / `buildCatalogLetterFieldRows`). No per-app React. |
 | Ward / plot / village-TPS grammar | `applicationCatalog.ts` formatters + `normalizePlotTypeLabelsInTemplateHtml` |
 | Suburb from ward/region | `resolveCatalogPlaceholderValue` for `suburb` / `{{SUBURB}}` using `save_plot_details.region` or `inferLocationFromWard` from `app/lib/projectDocumentAutofill/utils.ts` |
 | BP address lines 1–3 | `mapToPdfFieldValues` in `applicationPreview.ts` — alias `{{BP_ADDRESS_LINE_*}}` from `resolveBuildingProposalOffice` (same as `$project_addressline*_BuildingProposal`) |
@@ -54,7 +55,43 @@ Do not invent a second address source for Document Checklist or other catalog fo
 - Forms skip that inject so large tables can split. Form keep-together must target **closing blocks only** (`.closing`, `.sig`, `.cc`) — never `break-inside: avoid` on every `p`/`table`.
 - Wrap `Thanking you` / `Yours Faithfully` + `.sig` (+ optional `.cc`) in `.closing` for structure/DSC markup. On **letterheaded forms**, do **not** use `break-inside`/`break-before: avoid` on `.closing` / `.sig` / signer blocks — nested avoids make Paged.js drop most of the body (empty page, signer remnant only). Densify rhythm for page-1 fit; allow normal splitting if content still overflows.
 - Letterheaded **forms** (Document Checklist annexures, etc.): first content line (`ANNEXURE …`, title, or `To,`) must clear the logo with the **same** first-page inset as appointment/acceptance — **115pt** `@page :first` top + **0** content top pad (`useLetterheadFirstPageClearance`). Do **not** add per-HTML `padding-top` / spacer paragraphs above ANNEXURE.
-- Letterhead **footer** clearance: bottom `@page` margin must keep body/signature/C.C. above the scanned footer (gold bar / address / contact). Letterheaded forms use ~**96pt** bottom (tuned with dense annexure CSS for page-1 fit + DSC 180×60). Prefer densifying body/meta/to-block/closing rhythm before cutting footer clearance further; overlapping the letterhead footer is wrong — spill to page 2 if content still cannot fit.
+- Letterhead **footer** clearance: bottom `@page` margin must keep body/signature/C.C. above the scanned footer (gold bar / address / contact). Letterheaded forms use ~**84pt** bottom (tuned with dense annexure CSS for page-1 fit + DSC 180×60 + long multi-CTS). Prefer densifying body/meta/to-block/closing rhythm (meta values ~9pt, wrap `overflow-wrap:anywhere`) before cutting footer clearance further; overlapping the letterhead footer is wrong — spill to page 2 if content still cannot fit.
+- Long multi-CTS meta values: pipeline densify CSS must wrap tightly (`.meta-table td:last-child` / `.value-bold`) so closing + DSC stay visible. Do **not** reintroduce `break-inside:avoid` on `.closing`/`.sig` to “keep” them — that drops the body.
+
+## Letter-field sections (every catalog application)
+
+1. Accordion titles come from `application_document_placeholders.section_label` (document-scoped; Concession custom titles stay valid).
+2. If `section_label` is null, `buildCatalogLetterFieldRows` uses `sectionTitleFromUiGroup(ui_group)`: subject→Subject, reference→Reference, consultant→Consultant, client→Client, office→Addressee, other→Other fields.
+3. `groupCatalogLetterFieldRows` only falls back to a single **Details** accordion when **no** row has a resolved section label.
+4. New apps: seed `section_label` (and/or correct `ui_group`) in SQL — never add Application Details branches per `application_type`.
+
+## `{{APPOINTMENT_DATE}}` = application created date
+
+1. Catalog `appointment_date` resolves from `application_created_at` (ISO) via `formatCatalogDateDmy`.
+2. Application Details / preview pass `applicationCreatedAt` into `catalogPlaceholderFieldMap`.
+3. Preview hard-fills `{{APPOINTMENT_DATE}}` if still empty (created_at or today).
+4. Used on Document Checklist Structural / Site Supervisor memos (and any future consultant HTML with the token).
+
+## `{{BUILDING_NO}}` = proposal number
+
+1. Catalog placeholder `building_no` → `projects` / `project_info->>proposalNo` (same as `file_no` / `proposal_number`).
+2. Computed fallback in `resolveCatalogPlaceholderValue` + preview hard-fill from `project_info.proposalNo` if the DB row is still stale `computed`.
+3. Used on Document Checklist: Notice for Start of Work, Intimation upto Plinth, Development Completion Certificate.
+
+## DigiSatbara / `{{DATE_OF_PRC}}` (every checklist/PAC consumer)
+
+1. Extract `downloadDate` from primary PR card footer (`मिळकत पत्रिका डाउनलोड दिनांक`) via `parsePrCardDownloadDate` / `enrichPrCardDownloadDate` — not the DSC timestamp.
+2. `mergeSavePlot` writes `save_plot_details.prcDownloadDate` (prefer primary; else any remaining PR with a date).
+3. Project Library Save and Property Details Save **PUT** that key on the project (incl. draft projects).
+4. Preview/Letter fields: `mergeSavePlotDetailsForCatalog` overlays local draft over DB so checklist sees the date without a second save. `fetchApplicationPreviewHtmlRaw` also hard-fills `{{DATE_OF_PRC}}` from `prcDownloadDate` if the catalog row is missing.
+5. Put resolution in `applicationCatalog` / preview pipeline — **not** per-application HTML hacks.
+
+## Static vs filled chrome (every application)
+
+- Labels like `C.C. to:`, `To,`, `Subject:`, `Reference:` are **static** — normal weight / `.cc-label` / plain text. Never `.value-bold`.
+- `.value-bold` is only for substituted project/applicant values (names, addresses, CTS, dates, file nos.).
+- Computed role prose on C.C. (`{{OWNER_OR_DEVELOPER}}`) may use `.bold`, not `.value-bold`.
+- Architect C.C. / signer tokens: always resolve via Architect then L.S. roster row — never the Structural Engineer / Plumber / Site Supervisor signer. Use `{{ARCHITECT_OR_LS_ROLE}}` (single role), `{{ARCHITECT_OR_LS_REG_LABEL}}`, `{{ARCHITECT_LS_REG_NO}}`, `{{ARCHITECT_LS_VALIDITY}}` — never hardcode “Architect/ Licensed Surveyor”.
 
 ## Plot slash-lists
 
