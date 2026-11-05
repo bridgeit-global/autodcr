@@ -32,33 +32,33 @@ type ApplicantDetailsShape = {
   applicants?: ApplicantRow[];
 };
 
-/** Human-readable `applications.permission_type` for General appointment letters. */
+/** Human-readable `applications.permission_type` for consultant document packs. */
 export const APPOINTMENT_PERMISSION_ID_TO_TITLE: Record<string, string> = {
-  appointment_letter_for_architect: "Appointment Letter for Architect",
-  appointment_letter_for_licensed_surveyor: "Appointment Letter for Licensed Surveyor",
-  appointment_letter_for_fire_consultant: "Appointment Letter for Fire Consultant",
-  appointment_letter_for_landscape_consultant: "Appointment Letter for Landscape Consultant",
-  appointment_letter_for_geotechnical_consultant: "Appointment Letter for Geotechnical Consultant",
-  appointment_letter_for_pmc_project_manager: "Appointment Letter for PMC / Project Manager",
-  appointment_letter_for_mep_consultant: "Appointment Letter for MEP Consultant",
-  appointment_letter_for_plumber: "Appointment Letter for Plumber",
-  appointment_letter_for_town_planner: "Appointment Letter for Town Planner",
-  appointment_letter_for_structural_engineer: "Appointment Letter for Structural Engineer",
-  appointment_letter_for_site_supervisor: "Appointment Letter for Site Supervisor",
-  appointment_letter_for_environmental_consultant: "Appointment Letter for Environmental Consultant",
+  appointment_letter_for_architect: "Documents of Architect",
+  appointment_letter_for_licensed_surveyor: "Documents of Licensed Surveyor",
+  appointment_letter_for_fire_consultant: "Documents of Fire Consultant",
+  appointment_letter_for_landscape_consultant: "Documents of Landscape Consultant",
+  appointment_letter_for_geotechnical_consultant: "Documents of Geotechnical Consultant",
+  appointment_letter_for_pmc_project_manager: "Documents of PMC / Project Manager",
+  appointment_letter_for_mep_consultant: "Documents of MEP Consultant",
+  appointment_letter_for_plumber: "Documents of Plumber",
+  appointment_letter_for_town_planner: "Documents of Town Planner",
+  appointment_letter_for_structural_engineer: "Documents of Structural Engineer",
+  appointment_letter_for_site_supervisor: "Documents of Site Supervisor",
+  appointment_letter_for_environmental_consultant: "Documents of Environmental Consultant",
   // Legacy Pascal ids still resolve titles for older client caches.
-  Appointment_Letter_for_Architect: "Appointment Letter for Architect",
-  Appointment_Letter_for_Licensed_Surveyor: "Appointment Letter for Licensed Surveyor",
-  Appointment_Letter_for_Fire_Consultant: "Appointment Letter for Fire Consultant",
-  Appointment_Letter_for_Landscape_Consultant: "Appointment Letter for Landscape Consultant",
-  Appointment_Letter_for_Geotechnical_Consultant: "Appointment Letter for Geotechnical Consultant",
-  Appointment_Letter_for_PMC_Project_Manager: "Appointment Letter for PMC / Project Manager",
-  Appointment_Letter_for_MEP_Consultant: "Appointment Letter for MEP Consultant",
-  Appointment_Letter_for_Plumber: "Appointment Letter for Plumber",
-  Appointment_Letter_for_Town_Planner: "Appointment Letter for Town Planner",
-  Appointment_Letter_for_Structural_Engineer: "Appointment Letter for Structural Engineer",
-  Appointment_Letter_for_Site_Supervisor: "Appointment Letter for Site Supervisor",
-  Appointment_Letter_for_Environmental_Consultant: "Appointment Letter for Environmental Consultant",
+  Appointment_Letter_for_Architect: "Documents of Architect",
+  Appointment_Letter_for_Licensed_Surveyor: "Documents of Licensed Surveyor",
+  Appointment_Letter_for_Fire_Consultant: "Documents of Fire Consultant",
+  Appointment_Letter_for_Landscape_Consultant: "Documents of Landscape Consultant",
+  Appointment_Letter_for_Geotechnical_Consultant: "Documents of Geotechnical Consultant",
+  Appointment_Letter_for_PMC_Project_Manager: "Documents of PMC / Project Manager",
+  Appointment_Letter_for_MEP_Consultant: "Documents of MEP Consultant",
+  Appointment_Letter_for_Plumber: "Documents of Plumber",
+  Appointment_Letter_for_Town_Planner: "Documents of Town Planner",
+  Appointment_Letter_for_Structural_Engineer: "Documents of Structural Engineer",
+  Appointment_Letter_for_Site_Supervisor: "Documents of Site Supervisor",
+  Appointment_Letter_for_Environmental_Consultant: "Documents of Environmental Consultant",
 };
 
 const NORMALIZED_APPLICANT_TYPE_TO_PERMISSION_TITLE: Record<string, string> = Object.fromEntries(
@@ -195,9 +195,15 @@ export function permissionTypeMatchesTitle(
   const a = permissionType.trim().toLowerCase();
   const b = allowedTitle.trim().toLowerCase();
   if (a === b) return true;
-  // Loose match: "Appointment Letter for Architect" contains "architect"
-  const typeWord = b.replace(/^appointment letter for\s+/i, "").trim();
-  return typeWord.length > 0 && a.includes(typeWord);
+  // Loose match: "Documents of Architect" / legacy "Appointment Letter for Architect"
+  const typeWord = b
+    .replace(/^documents of\s+/i, "")
+    .replace(/^appointment letter for\s+/i, "")
+    .trim();
+  if (typeWord.length > 0 && a.includes(typeWord)) return true;
+  // Legacy permission_type still on older rows
+  const legacy = `appointment letter for ${typeWord}`;
+  return typeWord.length > 0 && a === legacy;
 }
 
 export function getAppointmentPermissionIdsFromApplicantDetails(

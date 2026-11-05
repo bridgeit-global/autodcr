@@ -595,13 +595,20 @@ function ApplicationsHubContent() {
     // One Consultants folder (appointment + acceptance + supervision live as
     // documents on each roster-matched appointment_letter app — not duplicate folders).
     const consultants: DashboardApplication[] = [];
-    let letterDepartment = "General";
+    // Department label from catalog (application_types.department), not a hardcoded string.
+    let letterDepartment = "";
     for (const app of filtered) {
       const type = typeByTitle.get(app.permissionType.trim().toLowerCase());
       if (!type || type.category !== "appointment_letter") continue;
-      if (type.department?.trim()) letterDepartment = type.department.trim();
+      if (!letterDepartment && type.department?.trim()) {
+        letterDepartment = type.department.trim();
+      }
       consultants.push(app);
     }
+    if (!letterDepartment && consultants[0]?.department?.trim()) {
+      letterDepartment = consultants[0].department.trim();
+    }
+    if (!letterDepartment) letterDepartment = "Other";
     if (consultants.length > 0) {
       const letterKey = letterDepartment.toLowerCase();
       const existing = departments.get(letterKey) ?? {

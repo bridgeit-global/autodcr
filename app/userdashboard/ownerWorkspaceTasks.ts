@@ -35,7 +35,7 @@ const DEPARTMENTS = [
   "Estate and Land Management",
   "Airport Authority of India",
   "MahaRERA",
-  "General",
+  "General", // legacy; active departments also come from application_types
 ];
 
 function mapApplicationRow(row: Record<string, unknown>): OwnerWorkspaceApplication {
