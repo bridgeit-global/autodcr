@@ -227,10 +227,10 @@
     margin: 0;
   }
   
-  /* Appointment letter body — keep flush with Sub / Dear Sir / signature left edge. */
+  /* Appointment narrative body — first-line tab (Sub / Dear Sir / Thanking you stay flush). */
   p.opening {
     text-align: justify;
-    text-indent: 0;
+    text-indent: 0.5in;
   }
   
   ol {
@@ -246,13 +246,22 @@
   /* Appointment closing lines — same left edge as signature block. */
   p.closing-line {
     margin-left: 0;
+    text-indent: 0;
   }
 
-  /* Acceptance body lines — flush with Dear Sir / Sub (override any inherited indent). */
-  .WordSection1 .eeb-tab-line,
-  .acceptance-letter-body .eeb-tab-line,
+  /* Acceptance narrative body — first-line tab; Thanking you / closing stay flush. */
+  .WordSection1 .eeb-tab-line.opening,
+  .acceptance-letter-body .eeb-tab-line.opening,
   .eeb-tab-line.opening,
-  .eeb-tab-line.acceptance-body,
+  .WordSection1 .eeb-tab-line.acceptance-body,
+  .acceptance-letter-body .eeb-tab-line.acceptance-body,
+  .eeb-tab-line.acceptance-body {
+    text-indent: 0.5in !important;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+  }
+  .WordSection1 .eeb-tab-line.closing-line,
+  .acceptance-letter-body .eeb-tab-line.closing-line,
   .eeb-tab-line.closing-line {
     text-indent: 0 !important;
     margin-left: 0 !important;

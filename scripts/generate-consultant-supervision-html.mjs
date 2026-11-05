@@ -1,5 +1,7 @@
 /**
  * Generate supervision-memo.html under html/General/consultants/<role>/.
+ * Also writes notice-start-of-work.html for each catalog appointment role, and
+ * architect-only plot-area-certificate.html (moved off Document Checklist).
  * Appointment/acceptance HTML are maintained as copies in the same folders.
  */
 import { mkdir, writeFile } from "node:fs/promises";
@@ -10,32 +12,35 @@ const ROOT = path.resolve(import.meta.dirname, "..", "html", "General", "consult
 const CSS = `
 @page { size:A4; margin:17mm; }
 *{box-sizing:border-box}
-body{margin:0;background:#fff;color:#111;font-family:"Times New Roman",Times,serif;font-size:10.5pt;line-height:1.14}
+/* Match pipeline densify: equal 10.5pt, tight lh, near-zero vertical air. */
+body{margin:0;background:#fff;color:#111;font-family:"Times New Roman",Times,serif;font-size:10.5pt;line-height:1.06}
 .page{width:210mm;min-height:0;margin:14px auto;background:#fff;padding:17mm}
-.form-title{text-align:center;font-weight:bold;text-decoration:underline;font-size:11.5pt;margin:0 0 2px}
-.annexure{text-align:center;font-weight:bold;margin:0 0 1px;line-height:1.12}
+.form-title{text-align:center;font-weight:bold;text-decoration:underline;font-size:11.5pt;margin:0 0 1px;line-height:1.05}
+.annexure{text-align:center;font-weight:bold;margin:0;line-height:1.05;font-size:10.5pt}
 .bold{font-weight:bold}
 .value-bold{font-weight:bold}
 .cc-label{font-weight:normal}
-.to-block{margin:1px 0 3px}
-.to-block .to-label{margin:0;padding:0;line-height:1.12}
+.to-block{margin:0 0 1px}
+.to-block .to-label{margin:0;padding:0;line-height:1.05}
 .to-block .to-content{margin-left:0.4in}
-.to-block .to-content p{margin:0;padding:0;line-height:1.12;font-weight:bold}
-p{margin:1px 0}
-.meta-table{border-collapse:collapse;width:100%;margin:1px 0 3px}
-.meta-table td{padding:0;vertical-align:top;line-height:1.08}
-.meta-table td:last-child,.meta-table .value-bold{font-size:9pt;line-height:1.08;word-break:break-word;overflow-wrap:anywhere}
-.meta-table .lbl{width:1%;white-space:nowrap;padding-right:6px;font-weight:normal;font-size:10pt}
-.closing{margin-top:1px}
-.closing>p{margin:0;line-height:1.12}
-.sig{margin-top:1px}
-.sig>p{margin:0;line-height:1.12}
-.sig .signer-role{margin:0;font-weight:bold;line-height:1.12}
-.sig .architect-block .meta-line,.sig .consultant-block .meta-line{margin:0;line-height:1.08}
+.to-block .to-content p{margin:0;padding:0;line-height:1.05;font-weight:bold}
+p{margin:0;line-height:1.06}
+.body-indent{text-indent:0.5in}
+.meta-table{border-collapse:collapse;width:100%;margin:0 0 1px}
+.meta-table td{padding:0;vertical-align:top;line-height:1.05;font-size:10.5pt;word-break:break-word;overflow-wrap:anywhere}
+.meta-table .lbl{width:1%;white-space:nowrap;padding-right:6px;font-weight:normal;font-size:10.5pt}
+.closing{margin-top:0}
+.closing>p{margin:0;line-height:1.05}
+.sig{margin-top:0}
+.sig>p{margin:0;line-height:1.05}
+.sig .signer-role{margin:0;font-weight:bold;line-height:1.05}
+.sig .architect-block .meta-line,.sig .consultant-block .meta-line{margin:0;line-height:1.05}
 .sig .meta-label{font-weight:normal}
-.cc{margin-top:2px}
-.cc p{margin:0;line-height:1.12}
-.dsc-stamp-slot{width:180px;height:60px;margin:4px 0}
+.cc{margin-top:0}
+.cc p{margin:0;line-height:1.05}
+.dsc-stamp-slot{width:180px;height:60px;margin:2px 0}
+.dsc-stamp-slot--owner{margin-top:2px;margin-bottom:2px}
+.form-subtitle{text-align:center;font-size:10.5pt;margin:0 0 2px;line-height:1.05}
 @media print{body{background:#fff}.page{width:auto;min-height:auto;margin:0;padding:0}}
 `.trim();
 
@@ -228,10 +233,10 @@ ${bpToBlock()}
 <p>Subject:&nbsp;&nbsp;${vb("Acceptance of Supervision")}</p>
 <p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
 <p>Dear Sir,</p>
-<p>The development work of the</p>
+<p class="body-indent">The development work of the</p>
 ${metaTable()}
-<p>will be carried out under my supervision. All the materials (type and grade) and the workmanship of the work will generally tally with the general specifications submitted along with the plans and the work will be carried out according to the sanctioned plans. I shall be responsible for the execution of the work in all respects.</p>
-<p>This is for your information &amp; record please.</p>
+<p class="body-indent">will be carried out under my supervision. All the materials (type and grade) and the workmanship of the work will generally tally with the general specifications submitted along with the plans and the work will be carried out according to the sanctioned plans. I shall be responsible for the execution of the work in all respects.</p>
+<p class="body-indent">This is for your information &amp; record please.</p>
 ${closing(
   `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
 ${dscSlot()}
@@ -251,9 +256,9 @@ ${architectSignerBlock()}`,
 function consultantBody(r) {
   const bodyPara =
     r.kind === "plumber"
-      ? `<p>This is in reference to the letter of appointment issued by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm having agreed to act as ${r.actAs} for the above proposal.</p>`
-      : `<p>With reference to the letter of our appointment dated ${vb("{{APPOINTMENT_DATE}}")} addressed to you, by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm that I have agreed to act as ${r.actAs} for the above proposal.</p>`;
-  const extra = r.extra ? `<p>${r.extra}</p>` : "";
+      ? `<p class="body-indent">This is in reference to the letter of appointment issued by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm having agreed to act as ${r.actAs} for the above proposal.</p>`
+      : `<p class="body-indent">With reference to the letter of our appointment dated ${vb("{{APPOINTMENT_DATE}}")} addressed to you, by the ${vb("{{OWNER_OR_DEVELOPER}}")}, I hereby confirm that I have agreed to act as ${r.actAs} for the above proposal.</p>`;
+  const extra = r.extra ? `<p class="body-indent">${r.extra}</p>` : "";
   return `
 <div class="annexure">${r.annexure}</div>
 <div class="form-title">SUPERVISION MEMO OF ${r.title.toUpperCase()}</div>
@@ -263,7 +268,7 @@ ${bpToBlock()}
 ${metaTable()}
 ${bodyPara}
 ${extra}
-<p>This is for your information &amp; record please.</p>
+<p class="body-indent">This is for your information &amp; record please.</p>
 ${closing(
   `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
 ${dscSlot()}
@@ -277,6 +282,27 @@ ${architectCcBlock()}
 `;
 }
 
+function plotAreaCertificateBody() {
+  return `
+<div class="annexure">ANNEXURE 3</div>
+<div class="form-title">PLOT AREA CERTIFICATE</div>
+${bpToBlock()}
+<p>Subject:&nbsp;&nbsp;${vb("Acceptance of Supervision")}</p>
+<p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
+${metaTable()}
+<p class="body-indent">I have submitted a proposal on behalf of my/our client Shri/M/s. ${vb("{{CLIENT_NAME}}")} for the proposed development on the above referred plot.</p>
+<p class="body-indent">The area of the plot is ${vb("{{PLOT_AREA}}")} sq. m as per the P.R. Cards obtained from city Survey office dated ${vb("{{DATE_OF_PRC}}")}.</p>
+<p class="body-indent">In order to verify the plot area, I/We have carried out the survey of the said plot through our staff to ascertain correctness of the area mentioned in the Property Register Card. The said survey has been carried out on the basis of the boundaries of the plot shown by the Owner/Client.</p>
+<p class="body-indent">The said area as per the survey now works out to ${vb("{{PLOT_AREA}}")} sq. m. and F.S.I. is claimed for the plot area ${vb("{{PLOT_AREA}}")} sq. m.</p>
+${closing(
+  `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
+${dscSlot()}
+${architectSignerBlock()}`,
+  ""
+)}
+`;
+}
+
 for (const r of roles) {
   const dir = path.join(ROOT, r.slug);
   await mkdir(dir, { recursive: true });
@@ -284,4 +310,66 @@ for (const r of roles) {
   const body = r.kind === "architect" ? architectBody() : consultantBody(r);
   await writeFile(path.join(dir, "supervision-memo.html"), wrap(title, body), "utf8");
   console.log("wrote", path.join("General/consultants", r.slug, "supervision-memo.html"));
+}
+
+function noticeStartOfWorkBody() {
+  return `
+<div class="annexure">ANNEXURE 13</div>
+<div class="form-subtitle">[Regulations No.11(2) and Section 347(i)(a) of the Mumbai Municipal Corporation Act, 1888]</div>
+<div class="form-title">Form of Notice for Start of Work</div>
+${bpToBlock()}
+<p>Sir,</p>
+<p class="body-indent">The development work/erection/re-erection/demolition or material alteration in/of Building No. ${vb("{{BUILDING_NO}}")} on/in ${vb("{{PLOT_CS_CTS_NO}}")} ${vb("{{VILLAGE_DIVISION}}")} situated at ${vb("{{PROPERTY_ADDRESS}}")} Road/Street ${vb("{{PROPERTY_ADDRESS}}")} Ward ${vb("{{WARD}}")} will start on ${vb("{{WORK_START_DATE}}")} in accordance with your permission No. ${vb("{{FILE_NO}}")} dated ${vb("{{LAST_APPROVAL_NO}}")}, under the supervision of ${vb("{{ARCHITECTS_NAME}}")} Licensed Surveyor/ Engineer /Structural Engineer/ Supervisor, or Architect License No. ${vb("{{ARCHITECT_LS_REG_NO}}")} and in accordance with the plans sanctioned.</p>
+<div class="closing">
+<p>Yours faithfully,</p>
+<div class="sig">
+<div class="dsc-stamp-slot dsc-stamp-slot--owner" aria-hidden="true"></div>
+<p>Name of the ${vb("{{OWNER_OR_DEVELOPER}}")}: ${vb("{{OWNER_NAME}}")}</p>
+<p>Address of ${vb("{{OWNER_OR_DEVELOPER}}")}: ${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
+<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
+<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
+<p>Date: ${vb("{{LETTER_DATE}}")}</p>
+</div>
+</div>
+`;
+}
+
+/** Roles that have an active appointment_letter catalog type (not parking/rainwater/hort). */
+const noticeRoles = roles.filter((r) =>
+  [
+    "architect",
+    "licensed-surveyor",
+    "structural-engineer",
+    "plumber",
+    "site-supervisor",
+    "fire-safety-consultant",
+    "me-consultant",
+    "landscape-consultant",
+    "geotechnical-consultant",
+    "environmental-consultant",
+    "town-planner",
+    "pmc-project-manager",
+  ].includes(r.slug)
+);
+
+for (const r of noticeRoles) {
+  const dir = path.join(ROOT, r.slug);
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    path.join(dir, "notice-start-of-work.html"),
+    wrap("Form of Notice for Start of Work", noticeStartOfWorkBody()),
+    "utf8"
+  );
+  console.log("wrote", path.join("General/consultants", r.slug, "notice-start-of-work.html"));
+}
+
+{
+  const dir = path.join(ROOT, "architect");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    path.join(dir, "plot-area-certificate.html"),
+    wrap("Plot Area Certificate", plotAreaCertificateBody()),
+    "utf8"
+  );
+  console.log("wrote", "General/consultants/architect/plot-area-certificate.html");
 }

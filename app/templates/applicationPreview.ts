@@ -2089,8 +2089,13 @@ function injectPaginatedStyles(
     ? resolveLetterheadUrlFromHtml(html, ownerLetterheadUrl)
     : "";
   const letterheadCssUrl = letterheadUrl ? escapeCssUrlValue(letterheadUrl) : "";
-  /** No assigned letterhead → no image and no reserved logo/footer band. */
+  /** Paint background-image only when the assigned party has a URL. */
   const hasLetterheadPaint = Boolean(letterheadCssUrl);
+  /**
+   * Catalog `show_letterhead` → always reserve logo/footer clearance (blank band
+   * when URL missing). Never fall back to another party’s image.
+   */
+  const reserveLetterheadChrome = showLetterhead;
   const previewOrigin = resolvePreviewAppOrigin();
   const isAcceptanceLetter =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body");
@@ -2111,12 +2116,13 @@ function injectPaginatedStyles(
     isArchitectTemplate || isAcceptanceLetter || isAuthorityAppointmentLetter;
   /*
    * Same first-page top for every letter-header template (authority appointment,
-   * acceptance, Architect appointment) — only when a letterhead image is present.
-   * Missing assigned letterhead must not leave a blank logo band.
+   * acceptance, Architect appointment) whenever catalog wants letterhead chrome —
+   * including a blank band when the assigned URL is missing.
    */
-  const useTightLetterheadFirstPageTop = hasLetterHeader && hasLetterheadPaint;
-  /* Annexure/checklist forms with letterhead (not appointment/acceptance). */
-  const isLetterheadedForm = hasLetterheadPaint && !letterLayout && !useArchitectLayout;
+  const useTightLetterheadFirstPageTop = hasLetterHeader && reserveLetterheadChrome;
+  /* Annexure/checklist/supervision forms with letterhead chrome (not appointment/acceptance). */
+  const isLetterheadedForm =
+    reserveLetterheadChrome && !letterLayout && !useArchitectLayout;
   /* First content line (ANNEXURE / title / To,) clears the scanned logo the same way
      as appointment + acceptance: 115pt @page :first and 0 content top pad.
      Do not invent per-HTML padding-top on .annexure / .form-title. */
@@ -2125,8 +2131,8 @@ function injectPaginatedStyles(
   /* First-page top must clear scanned letterhead logos (brand mark + firm name).
      Too little → content sits on the logo; too much → empty band. Tuned once for
      appointment/acceptance/letterheaded forms — not per-application.
-     Without a letterhead image, use a normal letter top inset. */
-  const pageMarginTopFirst = !hasLetterheadPaint
+     show_letterhead with no URL still reserves this band (blank). */
+  const pageMarginTopFirst = !reserveLetterheadChrome
     ? "18pt"
     : useArchitectLayout
       ? "96pt"
@@ -2142,8 +2148,8 @@ function injectPaginatedStyles(
      Acceptance / owner letterheads often have a tall gold+address+contact band —
      never shrink below that clearance (overlapping the footer is worse than page 2).
      Authority appointments stay short (one-line footer).
-     No letterhead → no footer band to clear. */
-  const pageMarginBottom = !hasLetterheadPaint
+     show_letterhead with no URL still reserves footer clearance. */
+  const pageMarginBottom = !reserveLetterheadChrome
     ? "24pt"
     : isAcceptanceLetter
       ? "120pt"
@@ -2160,7 +2166,7 @@ function injectPaginatedStyles(
   /* Page # sits in the clear strip under the letterhead footer (see background-size). */
   const letterheadPageNumStrip =
     isAuthorityAppointmentLetter || useLetterheadFirstPageClearance ? "16pt" : "18pt";
-  const bottomCenterPadding = hasLetterheadPaint
+  const bottomCenterPadding = reserveLetterheadChrome
     ? isAuthorityAppointmentLetter || useLetterheadFirstPageClearance
       ? "5pt"
       : "6pt"
@@ -2171,7 +2177,7 @@ function injectPaginatedStyles(
   /* Letterhead clearance owns top inset — no second content pad (would double the gap). */
   const contentPaddingTop = useLetterheadFirstPageClearance
     ? "0pt"
-    : !hasLetterheadPaint
+    : !reserveLetterheadChrome
       ? "12pt"
       : useArchitectLayout
         ? "48pt"
@@ -2194,7 +2200,8 @@ function injectPaginatedStyles(
    * Clear scanned letterhead logo + firm name above first content.
    * Letterhead JPEG is stretched to the page, so the brand mark often occupies the
    * top ~110–120pt. Appointment/acceptance letter-header and letterheaded annexures
-   * all use 115pt first-page margin and 0 content pad — only when painted.
+   * all use 115pt first-page margin and 0 content pad whenever show_letterhead
+   * (blank band if the assigned URL is missing).
    */
   const effectivePageMarginTopFirst = useLetterheadFirstPageClearance
     ? "115pt"
@@ -2207,11 +2214,10 @@ function injectPaginatedStyles(
   const acceptanceLetterBodyPagedCss =
     metaHtml.includes("eeb-tab-line") || metaHtml.includes("acceptance-letter-body")
       ? `
-  /* EEBP acceptance: flush left with Dear Sir / Sub / signature (no first-line tab). */
+  /* Acceptance: narrative paras get first-line tab; closing / Thanking you stay flush. */
   .pagedjs_page_content .eeb-tab-line {
     display: block !important;
     padding-left: 0 !important;
-    text-indent: 0 !important;
     margin: 0 0 4pt 0 !important;
     box-sizing: border-box !important;
     width: 100% !important;
@@ -2219,9 +2225,23 @@ function injectPaginatedStyles(
     text-align: justify !important;
     line-height: 1.3 !important;
   }
+  .pagedjs_page_content .eeb-tab-line.opening,
+  .pagedjs_page_content .eeb-tab-line.acceptance-body {
+    text-indent: 0.5in !important;
+  }
+  .pagedjs_page_content .eeb-tab-line.closing-line {
+    text-indent: 0 !important;
+  }
   .pagedjs_page_content .acceptance-letter-body {
     padding-left: 0 !important;
     box-sizing: border-box !important;
+  }
+  /* Appointment narrative body — same first-line tab as supervision/forms. */
+  .pagedjs_page_content p.opening {
+    text-indent: 0.5in !important;
+  }
+  .pagedjs_page_content p.closing-line {
+    text-indent: 0 !important;
   }
   .pagedjs_page_content .acceptance-sign-block,
   .pagedjs_page_content .acceptance-cc-box,
@@ -2735,89 +2755,98 @@ function injectPaginatedStyles(
     break-before: auto !important;
     page-break-before: auto !important;
   }
-  /* Keep appointment DSC pocket (180×60); tight air for page-1 fit. */
+  /* Keep appointment DSC pocket (180×60); minimal outer air for page-1 fit. */
   .pagedjs_page_content .dsc-stamp-slot {
     width: 180px !important;
     height: 60px !important;
-    margin-top: 4px !important;
-    margin-bottom: 4px !important;
+    margin-top: 2px !important;
+    margin-bottom: 2px !important;
   }
-  /* Checklist/annexure density — fit body + DSC above letterhead footer on page 1. */
+  /*
+   * Global densify for EVERY letterheaded form (Supervision, Document Checklist,
+   * Plot Area, Notice/Plinth/DCC, …). Equal 10.5pt; fit page 1 via tight lh /
+   * near-zero vertical margins — never shrink meta to 9pt.
+   */
   .pagedjs_page_content,
   .pagedjs_page_content .page,
   .pagedjs_page_content main.page {
     font-size: 10.5pt !important;
-    line-height: 1.14 !important;
+    line-height: 1.06 !important;
   }
   .pagedjs_page_content .annexure {
-    margin: 0 0 1px !important;
-    line-height: 1.12 !important;
+    margin: 0 !important;
+    line-height: 1.05 !important;
+    font-size: 10.5pt !important;
   }
   .pagedjs_page_content .form-title {
-    margin: 0 0 2px !important;
+    margin: 0 0 1px !important;
     font-size: 11.5pt !important;
-    line-height: 1.12 !important;
+    line-height: 1.05 !important;
+  }
+  .pagedjs_page_content .form-subtitle {
+    margin: 0 0 2px !important;
+    font-size: 10.5pt !important;
+    line-height: 1.05 !important;
   }
   .pagedjs_page_content .to-block {
-    margin: 1px 0 3px !important;
+    margin: 0 0 1px !important;
   }
   .pagedjs_page_content .to-block .to-label,
   .pagedjs_page_content .to-block .to-content p {
     margin: 0 !important;
-    line-height: 1.12 !important;
+    line-height: 1.05 !important;
   }
   .pagedjs_page_content .meta-table {
-    margin: 1px 0 3px !important;
+    margin: 0 0 1px !important;
   }
   .pagedjs_page_content .meta-table td {
     padding: 0 !important;
-    line-height: 1.08 !important;
+    line-height: 1.05 !important;
     vertical-align: top !important;
   }
-  /* Long multi-CTS values must wrap tightly so closing/DSC stay on the letter. */
   .pagedjs_page_content .meta-table td:last-child,
-  .pagedjs_page_content .meta-table .value-bold {
-    font-size: 9pt !important;
-    line-height: 1.08 !important;
+  .pagedjs_page_content .meta-table .value-bold,
+  .pagedjs_page_content .meta-table .lbl {
+    font-size: 10.5pt !important;
+    line-height: 1.05 !important;
     word-break: break-word !important;
     overflow-wrap: anywhere !important;
-  }
-  .pagedjs_page_content .meta-table .lbl {
-    font-size: 10pt !important;
-    line-height: 1.08 !important;
   }
   .pagedjs_page_content > p,
   .pagedjs_page_content .page > p,
   .pagedjs_page_content main.page > p {
-    margin: 1px 0 !important;
-    line-height: 1.14 !important;
+    margin: 0 !important;
+    line-height: 1.06 !important;
+  }
+  .pagedjs_page_content .body-indent {
+    text-indent: 0.5in !important;
   }
   .pagedjs_page_content .closing {
-    margin-top: 1px !important;
+    margin-top: 0 !important;
   }
   .pagedjs_page_content .closing > p {
     margin: 0 !important;
-    line-height: 1.12 !important;
+    line-height: 1.05 !important;
   }
   .pagedjs_page_content .sig {
-    margin-top: 1px !important;
+    margin-top: 0 !important;
   }
   .pagedjs_page_content .sig > p {
     margin: 0 !important;
-    line-height: 1.12 !important;
+    line-height: 1.05 !important;
   }
   .pagedjs_page_content .closing .cc {
-    margin-top: 2px !important;
+    margin-top: 0 !important;
   }
   .pagedjs_page_content .closing .cc p {
     margin: 0 !important;
-    line-height: 1.12 !important;
+    line-height: 1.05 !important;
   }
   .pagedjs_page_content .signer-role,
   .pagedjs_page_content .architect-block .meta-line,
   .pagedjs_page_content .consultant-block .meta-line {
     margin: 0 !important;
-    line-height: 1.08 !important;
+    line-height: 1.05 !important;
   }
   .pagedjs_page_content p {
     orphans: 1;
@@ -3296,17 +3325,30 @@ export async function fetchApplicationPreviewHtmlRaw(
       formValues.date_of_prc = prcDate;
     }
   }
-  // {{BUILDING_NO}} = proposal number (catalog may still say computed until migration).
-  if (!(formValues["{{BUILDING_NO}}"] || "").trim()) {
+  // {{BUILDING_NO}} / {{FILE_NO}} = Project Details proposal number.
+  {
     const proposalNo = String(
       source?.projectData?.project_info?.proposalNo ||
         (source?.projectData?.project_info as Record<string, unknown> | null | undefined)
           ?.proposal_no ||
+        formValues["{{PROPOSAL_NUMBER}}"] ||
+        formValues["{{FILE_NO}}"] ||
+        formValues["{{BUILDING_NO}}"] ||
         ""
     ).trim();
     if (proposalNo) {
-      formValues["{{BUILDING_NO}}"] = proposalNo;
-      formValues.building_no = proposalNo;
+      if (!(formValues["{{BUILDING_NO}}"] || "").trim()) {
+        formValues["{{BUILDING_NO}}"] = proposalNo;
+        formValues.building_no = proposalNo;
+      }
+      if (!(formValues["{{FILE_NO}}"] || "").trim()) {
+        formValues["{{FILE_NO}}"] = proposalNo;
+        formValues.file_no = proposalNo;
+      }
+      if (!(formValues["{{PROPOSAL_NUMBER}}"] || "").trim()) {
+        formValues["{{PROPOSAL_NUMBER}}"] = proposalNo;
+        formValues.proposal_number = proposalNo;
+      }
     }
   }
   // {{APPOINTMENT_DATE}} = application created_at (consultant / supervision memos).

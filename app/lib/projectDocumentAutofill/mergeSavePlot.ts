@@ -87,10 +87,21 @@ function pickFromExtractions(
   return pickString(...extractions.map((e) => selector(e.extracted)));
 }
 
+/** Primary DigiSatbara / library PR only — extras must not flood Save Plot CTS. */
+function primaryPrExtractions(
+  extractions: ProjectLibraryExtraction[]
+): ProjectLibraryExtraction[] {
+  const prCards = extractions.filter((e) => e.documentType === "pr-card");
+  const primary =
+    prCards.find((e) => e.slot === "pr-primary" || e.fixedIndex === 0) ||
+    prCards[0];
+  return primary ? [primary] : [];
+}
+
 function ctsFromPrExtractions(extractions: ProjectLibraryExtraction[]): string[] {
   const numbers = new Set<string>();
 
-  for (const extraction of extractions.filter((e) => e.documentType === "pr-card")) {
+  for (const extraction of primaryPrExtractions(extractions)) {
     for (const cts of splitCtsNumbers(extraction.extracted.proposedCtsNumber)) {
       numbers.add(cts);
     }
@@ -210,15 +221,27 @@ function supplementSavePlot(
   );
 
   /*
-   * CTS / SAC from the *current* extraction set only (full replace).
-   * Sticky union with a prior draft left deleted PR / assessment numbers behind.
+   * CTS: keep value from location PR / earlier patch (previous behaviour).
+   * Only fall back when empty — never union every DigiSatbara extra PR card.
+   * SAC: full replace from current assessment set so deleted numbers do not stick.
    */
-  const cts = [
-    ...splitCtsNumbers(pickFromExtractions(docs, (e) => e.proposedCtsNumber)),
-    ...ctsFromPrExtractions(docs),
-    ...hints.cts,
-  ];
-  next.proposedCtsNumber = sanitizeCtsNumbers([...new Set(cts)]);
+  if (
+    !next.proposedCtsNumber ||
+    !(next.proposedCtsNumber as string[]).length
+  ) {
+    const cts = [
+      ...splitCtsNumbers(
+        pickFromExtractions(primaryPrExtractions(docs), (e) => e.proposedCtsNumber)
+      ),
+      ...ctsFromPrExtractions(docs),
+      ...hints.cts,
+    ];
+    if (cts.length) {
+      next.proposedCtsNumber = sanitizeCtsNumbers([...new Set(cts)]);
+    }
+  } else {
+    next.proposedCtsNumber = sanitizeCtsNumbers(next.proposedCtsNumber);
+  }
   next.sacNo = sacFromAssessmentExtractions(docs);
 
   const ward = pickString(next.ward as string | undefined);
