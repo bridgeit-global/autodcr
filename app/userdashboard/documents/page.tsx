@@ -44,7 +44,8 @@ import {
   type ApplicationDocumentOption,
 } from "@/app/userdashboard/documentValidationClient";
 
-const GENERAL_DEPARTMENT = "General";
+/** Fallback only — prefer catalog `application_types.department` when creating. */
+const GENERAL_DEPARTMENT_FALLBACK = "Pre requisites documents";
 
 const ApplicationStoredPdfViewer = dynamic(
   () => import("@/app/components/ApplicationStoredPdfViewer"),
@@ -243,7 +244,7 @@ function DocumentGeneratorContent() {
 
       const titles = await fetchExistingPermissionTypesForProject(
         selectedProjectId,
-        GENERAL_DEPARTMENT,
+        GENERAL_DEPARTMENT_FALLBACK,
         ownerId
       );
       if (!cancelled) {
@@ -459,7 +460,12 @@ function DocumentGeneratorContent() {
       const result = await createApplicationForOwner(ownerId, {
         projectId: selectedProject.id,
         projectTitle: selectedProject.title,
-        department: GENERAL_DEPARTMENT,
+        department:
+          catalogTypes.find(
+            (t) =>
+              t.application_title.trim().toLowerCase() ===
+              selectedApplicationType.trim().toLowerCase()
+          )?.department?.trim() || GENERAL_DEPARTMENT_FALLBACK,
         permissionType: selectedApplicationType,
         workflowStage: "draft",
       });

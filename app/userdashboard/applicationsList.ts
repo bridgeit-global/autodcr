@@ -49,7 +49,7 @@ const DEPARTMENTS = [
   "Estate and Land Management",
   "Airport Authority of India",
   "MahaRERA",
-  "General",
+  "General", // legacy; active departments also come from application_types
 ];
 
 export function applicationHref(app: DashboardApplication) {

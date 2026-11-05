@@ -27,19 +27,19 @@ export type ApplicationDocumentOption = {
   documentTypes: DocumentTypeOption[];
 };
 
-/** Appointment letter names from the legacy General department table that map to bot docs. */
+/** Consultant document-pack titles (catalog / applications.permission_type). */
 const GENERAL_APPOINTMENT_TYPES = [
-  "Appointment Letter for Architect",
-  "Appointment Letter for Licensed Surveyor",
-  "Appointment Letter for Fire Consultant",
-  "Appointment Letter for MEP Consultant",
-  "Appointment Letter for Plumber",
-  "Appointment Letter for Town Planner",
-  "Appointment Letter for Structural Engineer",
-  "Appointment Letter for Environmental Consultant",
-  "Appointment Letter for Landscape Consultant",
-  "Appointment Letter for Geotechnical Consultant",
-  "Appointment Letter for PMC / Project Manager",
+  "Documents of Architect",
+  "Documents of Licensed Surveyor",
+  "Documents of Fire Consultant",
+  "Documents of MEP Consultant",
+  "Documents of Plumber",
+  "Documents of Town Planner",
+  "Documents of Structural Engineer",
+  "Documents of Environmental Consultant",
+  "Documents of Landscape Consultant",
+  "Documents of Geotechnical Consultant",
+  "Documents of PMC / Project Manager",
 ] as const;
 
 function toDocumentTypeOption(id: string): DocumentTypeOption | null {
@@ -71,6 +71,7 @@ export function listApplicationDocumentOptions(
     // Appointment letters without an APPLICATION_DOCUMENTS entry still use architect letter
     if (
       documentTypes.length === 0 &&
+      applicationType.startsWith("Documents of ") ||
       applicationType.startsWith("Appointment Letter for")
     ) {
       const arch = toDocumentTypeOption("architect-appointment-letter");
@@ -132,7 +133,10 @@ export function resolveDocumentTypeOptions(
     .map((id) => toDocumentTypeOption(id))
     .filter((x): x is DocumentTypeOption => Boolean(x));
   if (mapped.length > 0) return mapped;
-  if (applicationType.startsWith("Appointment Letter for")) {
+  if (
+    applicationType.startsWith("Documents of ") ||
+    applicationType.startsWith("Appointment Letter for")
+  ) {
     const arch = toDocumentTypeOption("architect-appointment-letter");
     return arch ? [arch] : [];
   }
