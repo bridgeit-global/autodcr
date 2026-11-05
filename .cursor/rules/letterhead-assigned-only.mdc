@@ -1,5 +1,5 @@
 ---
-description: Letterhead uses only letterhead_source party; never fall back or reserve empty logo space
+description: Letterhead uses only letterhead_source party; reserve blank chrome when URL missing
 alwaysApply: true
 ---
 
@@ -14,5 +14,5 @@ Applies to **every** application. Drive paint from `application_documents.letter
 | `consultant` | `consultantLetterheadUrl` (appointed consultant) |
 
 1. Resolve **only** that party’s profile letterhead — never viewer JWT/session, never another party, never HTML/CSS scrape.
-2. If that URL is missing → paint **nothing** and collapse logo/footer clearance in `injectPaginatedStyles`.
+2. If that URL is missing → paint **nothing**, but when `show_letterhead` is true still **reserve** logo/footer clearance in `injectPaginatedStyles` (blank band). Do not collapse first-page top / footer just because the image is absent.
 3. Implement via `catalogDocumentLetterheadSource` + `resolveLetterheadUrlForVariant` — never hardcode letterhead images in HTML.

@@ -17,15 +17,15 @@ Put rules that must apply to **every** Storage/repo HTML here — not in one-off
 | Empty address / unreplaced token lines | `removeEmptyAddressParagraphs` (and siblings) in `application-preview-html/route.ts` |
 | Date/CC orphans, letterhead first page, margins | `injectPaginatedStyles` in `applicationPreview.ts` |
 | Per-doc letterhead/QR on/off | `application_documents` catalog flags (`show_letterhead`, `letterhead_source`) |
-| Letterhead image URL | Strictly `application_documents.letterhead_source`: `owner` → owner URL; `architect_or_ls` / `consultant` → that appointed profile URL. **Never** viewer JWT, never cross-party fallback, never HTML/CSS scrape. Missing URL → no image and no reserved logo/footer space. Multi-doc apps (Document Checklist) resolve the selected document’s source via `templateTypeForLetterheadSource` |
+| Letterhead image URL | Strictly `application_documents.letterhead_source`: `owner` → owner URL; `architect_or_ls` / `consultant` → that appointed profile URL. **Never** viewer JWT, never cross-party fallback, never HTML/CSS scrape. Missing URL → no image, but when `show_letterhead` still reserve logo/footer clearance (blank band). Multi-doc apps resolve the selected document’s source via `templateTypeForLetterheadSource` |
 | DSC stamp slot in HTML | Only when `application_documents.sign` requires it; class `.dsc-stamp-slot` (owner: `--owner`) |
 
 ## Letterhead: assigned person only (every application)
 
 1. Resolve letterhead from `letterhead_source` / acceptance vs appointment — **that party only**.
-2. Acceptance / `consultant` source: use `consultantLetterheadUrl`. If empty → **blank** (do **not** use owner).
+2. Acceptance / `consultant` / `architect_or_ls` source: use `consultantLetterheadUrl`. If empty → **blank** (do **not** use owner).
 3. Appointment / `owner` source: use `ownerLetterheadUrl`. If empty → **blank**.
-4. When blank: omit letterhead CSS background **and** collapse first-page top / footer clearance (no empty band for a missing logo).
+4. When blank but `show_letterhead` is true: omit CSS background-image, **keep** first-page top (~115pt) and footer clearance (blank reserved band). `hasLetterheadPaint` gates the image; `reserveLetterheadChrome` (`showLetterhead`) gates margins.
 5. Do not invent a default/shared letterhead image for any catalog document.
 
 ## Suburb from ward (BMC To-block)
@@ -53,10 +53,12 @@ Do not invent a second address source for Document Checklist or other catalog fo
 
 - Letters (`letter_variant` appointment/acceptance) get shared CSS from `html/_shared/application-templates.css`.
 - Forms skip that inject so large tables can split. Form keep-together must target **closing blocks only** (`.closing`, `.sig`, `.cc`) — never `break-inside: avoid` on every `p`/`table`.
-- Wrap `Thanking you` / `Yours Faithfully` + `.sig` (+ optional `.cc`) in `.closing` for structure/DSC markup. On **letterheaded forms**, do **not** use `break-inside`/`break-before: avoid` on `.closing` / `.sig` / signer blocks — nested avoids make Paged.js drop most of the body (empty page, signer remnant only). Densify rhythm for page-1 fit; allow normal splitting if content still overflows.
-- Letterheaded **forms** (Document Checklist annexures, etc.): first content line (`ANNEXURE …`, title, or `To,`) must clear the logo with the **same** first-page inset as appointment/acceptance — **115pt** `@page :first` top + **0** content top pad (`useLetterheadFirstPageClearance`). Do **not** add per-HTML `padding-top` / spacer paragraphs above ANNEXURE.
-- Letterhead **footer** clearance: bottom `@page` margin must keep body/signature/C.C. above the scanned footer (gold bar / address / contact). Letterheaded forms use ~**84pt** bottom (tuned with dense annexure CSS for page-1 fit + DSC 180×60 + long multi-CTS). Prefer densifying body/meta/to-block/closing rhythm (meta values ~9pt, wrap `overflow-wrap:anywhere`) before cutting footer clearance further; overlapping the letterhead footer is wrong — spill to page 2 if content still cannot fit.
-- Long multi-CTS meta values: pipeline densify CSS must wrap tightly (`.meta-table td:last-child` / `.value-bold`) so closing + DSC stay visible. Do **not** reintroduce `break-inside:avoid` on `.closing`/`.sig` to “keep” them — that drops the body.
+- Wrap `Thanking you` / `Yours Faithfully` + `.sig` (+ optional `.cc`) in `.closing` for structure/DSC markup. On **letterheaded forms**, do **not** use `break-inside`/`break-before: avoid` on `.closing` / `.sig` / signer blocks — nested avoids make Paged.js drop most of the body (empty page, signer remnant only). Allow normal splitting if content still overflows after densify.
+- **Global densify** (every letterheaded form — Supervision, Architect Plot Area Certificate, Notice for Start of Work, Owner plinth/DCC/affidavit, any future non-`letterLayout` annexure): one `injectPaginatedStyles` block — equal **10.5pt**, line-height ~**1.05–1.06**, near-zero vertical margins, DSC **180×60** with **2px** outer air. Do **not** add per-app densify or shrink meta to 9pt for page-1 fit. New forms only need shared classes (`.meta-table`, `.to-block`, `.closing`, `.dsc-stamp-slot`, `.body-indent`).
+- Letterheaded **forms**: first content line (`ANNEXURE …`, title, or `To,`) must clear the logo with the **same** first-page inset as appointment/acceptance — **115pt** `@page :first` top + **0** content top pad (`useLetterheadFirstPageClearance`) whenever `show_letterhead` (including blank band with no image). Do **not** add per-HTML `padding-top` / spacer paragraphs above ANNEXURE.
+- Letterhead **footer** clearance: bottom `@page` margin must keep body/signature/C.C. above the scanned footer. Letterheaded forms use ~**84pt** bottom. Prefer densify (tight lh / margins) before cutting footer; never shrink font for fit; overlapping the footer is wrong — spill to page 2 if content still cannot fit.
+- Long multi-CTS meta values: keep labels/values at **10.5pt** and wrap (`overflow-wrap:anywhere`). Do **not** reintroduce `break-inside:avoid` on `.closing`/`.sig`.
+- Narrative body paragraphs use class `body-indent` (first-line **0.5in** tab). Subject / Reference / Dear Sir / To / closing / C.C. stay flush left.
 
 ## Letter-field sections (every catalog application)
 

@@ -567,6 +567,8 @@ function ApplicationsHubContent() {
     for (const app of filtered) {
       const title = app.permissionType.trim() || "Application";
       const typeKey = title.toLowerCase();
+      // Retired catalog titles (moved to Owner / Consultants) — hide orphans.
+      if (typeKey === "document checklist") continue;
       const type = typeByTitle.get(typeKey);
       if (type?.category === "appointment_letter") continue;
       const departmentTitle =
