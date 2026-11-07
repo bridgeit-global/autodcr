@@ -1094,6 +1094,90 @@ export function resolveSuburbFromPlotDetails(
   return "";
 }
 
+/** English words for plot area (e.g. 1453 → "One Thousand Four Hundred Fifty Three"). */
+export function numberToEnglishWords(raw: string | number | null | undefined): string {
+  const cleaned = String(raw ?? "")
+    .replace(/,/g, "")
+    .trim();
+  if (!cleaned) return "";
+  const num = Number(cleaned);
+  if (!Number.isFinite(num) || num < 0) return "";
+
+  const ones = [
+    "",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen",
+  ];
+  const tens = [
+    "",
+    "",
+    "Twenty",
+    "Thirty",
+    "Forty",
+    "Fifty",
+    "Sixty",
+    "Seventy",
+    "Eighty",
+    "Ninety",
+  ];
+
+  const underThousand = (n: number): string => {
+    if (n === 0) return "";
+    if (n < 20) return ones[n];
+    if (n < 100) {
+      const t = Math.floor(n / 10);
+      const o = n % 10;
+      return o ? `${tens[t]} ${ones[o]}` : tens[t];
+    }
+    const h = Math.floor(n / 100);
+    const rest = n % 100;
+    return rest
+      ? `${ones[h]} Hundred ${underThousand(rest)}`
+      : `${ones[h]} Hundred`;
+  };
+
+  const underMillion = (n: number): string => {
+    if (n === 0) return "Zero";
+    if (n < 1000) return underThousand(n);
+    if (n < 1_000_000) {
+      const th = Math.floor(n / 1000);
+      const rest = n % 1000;
+      const head = `${underThousand(th)} Thousand`;
+      return rest ? `${head} ${underThousand(rest)}` : head;
+    }
+    const mil = Math.floor(n / 1_000_000);
+    const rest = n % 1_000_000;
+    const head = `${underThousand(mil)} Million`;
+    return rest ? `${head} ${underMillion(rest)}` : head;
+  };
+
+  const [intPart, fracPart] = cleaned.split(".");
+  const whole = underMillion(Math.floor(Math.abs(Number(intPart) || 0)));
+  if (!fracPart || /^0+$/.test(fracPart)) return whole;
+  const decimals = fracPart
+    .split("")
+    .map((d) => ones[Number(d)] || "Zero")
+    .join(" ");
+  return `${whole} Point ${decimals}`;
+}
+
 export function resolveCatalogPlaceholderValue(
   placeholder: ApplicationCatalogPlaceholder,
   project: CatalogProjectSource | null | undefined,
@@ -1131,6 +1215,16 @@ export function resolveCatalogPlaceholderValue(
     // Suburb/region from plot (City | Western | Eastern) — no "Suburb" suffix.
     if (placeholder.id === "suburb" || placeholder.token === "{{SUBURB}}") {
       return resolveSuburbFromPlotDetails(project?.save_plot_details);
+    }
+    // Owner plot-area affidavit — words from numeric {{PLOT_AREA}} / grossPlotArea.
+    if (placeholder.id === "plot_area_words" || placeholder.token === "{{PLOT_AREA_WORDS}}") {
+      const area = stringifyCatalogValue(
+        project?.save_plot_details?.grossPlotArea ??
+          project?.save_plot_details?.gross_plot_area ??
+          project?.save_plot_details?.plotArea ??
+          project?.save_plot_details?.plot_area
+      );
+      return numberToEnglishWords(area);
     }
     // C.C. / prose: print Owner or Developer only — never "Owner/Developer".
     if (

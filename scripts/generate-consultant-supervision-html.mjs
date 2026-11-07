@@ -39,7 +39,7 @@ p{margin:0;line-height:1.06}
 .cc{margin-top:0}
 .cc p{margin:0;line-height:1.05}
 .dsc-stamp-slot{width:180px;height:60px;margin:2px 0}
-.dsc-stamp-slot--owner{margin-top:2px;margin-bottom:2px}
+.dsc-stamp-slot--owner,.dsc-stamp-slot--consultant{margin-top:2px;margin-bottom:2px}
 .form-subtitle{text-align:center;font-size:10.5pt;margin:0 0 2px;line-height:1.05}
 @media print{body{background:#fff}.page{width:auto;min-height:auto;margin:0;padding:0}}
 `.trim();
@@ -312,22 +312,38 @@ for (const r of roles) {
   console.log("wrote", path.join("General/consultants", r.slug, "supervision-memo.html"));
 }
 
-function noticeStartOfWorkBody() {
+/** Notice is signed by this consultant pack’s role (not the owner). */
+function noticeStartOfWorkBody(r) {
+  const isArchitect = r.kind === "architect";
+  const supervision = isArchitect
+    ? `under the supervision of ${vb("{{ARCHITECT_LS_NAME}}")}, ${vb("{{ARCHITECT_OR_LS_ROLE}}")}, License No. ${vb("{{ARCHITECT_LS_REG_NO}}")}`
+    : `under the supervision of ${vb(r.nameToken)}, ${r.title}, License No. ${vb("{{REG_NO}}")}`;
+  const roleLabel = isArchitect ? vb("{{ARCHITECT_OR_LS_ROLE}}") : r.title;
+  const nameTok = isArchitect ? vb("{{ARCHITECT_LS_NAME}}") : vb(r.nameToken);
+  const addr1 = isArchitect
+    ? vb("{{ARCHITECT_ADDRESS_LINE_1}}")
+    : vb("{{CONSULTANT_ADDRESS_LINE1}}");
+  const addr2 = isArchitect
+    ? vb("{{ARCHITECT_ADDRESS_LINE_2}}")
+    : vb("{{CONSULTANT_ADDRESS_LINE2}}");
+  const addr3 = isArchitect
+    ? vb("{{ARCHITECT_ADDRESS_LINE_3}}")
+    : vb("{{CONSULTANT_ADDRESS_LINE3}}");
   return `
 <div class="annexure">ANNEXURE 13</div>
 <div class="form-subtitle">[Regulations No.11(2) and Section 347(i)(a) of the Mumbai Municipal Corporation Act, 1888]</div>
 <div class="form-title">Form of Notice for Start of Work</div>
 ${bpToBlock()}
 <p>Sir,</p>
-<p class="body-indent">The development work/erection/re-erection/demolition or material alteration in/of Building No. ${vb("{{BUILDING_NO}}")} on/in ${vb("{{PLOT_CS_CTS_NO}}")} ${vb("{{VILLAGE_DIVISION}}")} situated at ${vb("{{PROPERTY_ADDRESS}}")} Road/Street ${vb("{{PROPERTY_ADDRESS}}")} Ward ${vb("{{WARD}}")} will start on ${vb("{{WORK_START_DATE}}")} in accordance with your permission No. ${vb("{{FILE_NO}}")} dated ${vb("{{LAST_APPROVAL_NO}}")}, under the supervision of ${vb("{{ARCHITECTS_NAME}}")} Licensed Surveyor/ Engineer /Structural Engineer/ Supervisor, or Architect License No. ${vb("{{ARCHITECT_LS_REG_NO}}")} and in accordance with the plans sanctioned.</p>
+<p class="body-indent">The development work/erection/re-erection/demolition or material alteration in/of Building No. ${vb("{{BUILDING_NO}}")} on/in ${vb("{{PLOT_CS_CTS_NO}}")} ${vb("{{VILLAGE_DIVISION}}")} situated at ${vb("{{PROPERTY_ADDRESS}}")} Ward ${vb("{{WARD}}")} will start on ${vb("{{WORK_START_DATE}}")} in accordance with your permission No. ${vb("{{FILE_NO}}")} dated ${vb("{{LAST_APPROVAL_NO}}")}, ${supervision} and in accordance with the plans sanctioned.</p>
 <div class="closing">
 <p>Yours faithfully,</p>
 <div class="sig">
-<div class="dsc-stamp-slot dsc-stamp-slot--owner" aria-hidden="true"></div>
-<p>Name of the ${vb("{{OWNER_OR_DEVELOPER}}")}: ${vb("{{OWNER_NAME}}")}</p>
-<p>Address of ${vb("{{OWNER_OR_DEVELOPER}}")}: ${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
-<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
+<div class="dsc-stamp-slot dsc-stamp-slot--consultant" aria-hidden="true"></div>
+<p>Name of the ${roleLabel}: ${nameTok}</p>
+<p>Address of ${roleLabel}: ${addr1}</p>
+<p>${addr2}</p>
+<p>${addr3}</p>
 <p>Date: ${vb("{{LETTER_DATE}}")}</p>
 </div>
 </div>
@@ -357,7 +373,7 @@ for (const r of noticeRoles) {
   await mkdir(dir, { recursive: true });
   await writeFile(
     path.join(dir, "notice-start-of-work.html"),
-    wrap("Form of Notice for Start of Work", noticeStartOfWorkBody()),
+    wrap("Form of Notice for Start of Work", noticeStartOfWorkBody(r)),
     "utf8"
   );
   console.log("wrote", path.join("General/consultants", r.slug, "notice-start-of-work.html"));
