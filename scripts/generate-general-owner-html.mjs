@@ -1,11 +1,20 @@
 /**
  * Generate owner annexure HTML under html/General/owner/.
- * (Plinth + Development Completion are also catalogued on Architect.)
+ * Plinth + Development Completion also get Architect-pack copies under
+ * html/General/consultants/architect/ (signer + letterhead follow each pack).
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const OUT = path.resolve(import.meta.dirname, "..", "html", "General", "owner");
+const ARCH_OUT = path.resolve(
+  import.meta.dirname,
+  "..",
+  "html",
+  "General",
+  "consultants",
+  "architect"
+);
 
 const CSS = `
 @page { size:A4; margin:17mm; }
@@ -40,7 +49,7 @@ p{margin:0;line-height:1.06}
 .cc{margin-top:0}
 .cc p{margin:0;line-height:1.05}
 .dsc-stamp-slot{width:180px;height:60px;margin:2px 0}
-.dsc-stamp-slot--owner{margin-top:2px;margin-bottom:2px}
+.dsc-stamp-slot--owner,.dsc-stamp-slot--consultant{margin-top:2px;margin-bottom:2px}
 .stamp-note{text-align:center;font-weight:bold;margin:0 0 4px;text-transform:uppercase;font-size:10.5pt}
 .field-row{margin:0;line-height:1.15}
 .field-row .lbl{font-weight:normal}
@@ -57,7 +66,9 @@ function dscSlot(role = "consultant") {
   const cls =
     role === "owner"
       ? "dsc-stamp-slot dsc-stamp-slot--owner"
-      : "dsc-stamp-slot";
+      : role === "consultant"
+        ? "dsc-stamp-slot dsc-stamp-slot--consultant"
+        : "dsc-stamp-slot";
   return `<div class="${cls}" aria-hidden="true"></div>`;
 }
 
@@ -69,6 +80,22 @@ function architectSignerBlock({ includeDate = true } = {}) {
 <p class="meta-line"><span class="meta-label">Valid upto:</span> ${vb("{{ARCHITECT_LS_VALIDITY}}")}</p>
 ${includeDate ? `<p>Date: ${vb("{{LETTER_DATE}}")}</p>` : ""}
 </div>`;
+}
+
+/** Owner-pack closing (Notice-style Name / Address). */
+function ownerSignerBlock({ includeDate = true } = {}) {
+  return `${dscSlot("owner")}
+<p>Name of the ${vb("{{OWNER_OR_DEVELOPER}}")}: ${vb("{{OWNER_NAME}}")}</p>
+<p>Address of ${vb("{{OWNER_OR_DEVELOPER}}")}: ${vb("{{OWNER_ADDRESS_LINE_1}}")}</p>
+<p>${vb("{{OWNER_ADDRESS_LINE_2}}")}</p>
+<p>${vb("{{OWNER_ADDRESS_LINE_3}}")}</p>
+${includeDate ? `<p>Date: ${vb("{{LETTER_DATE}}")}</p>` : ""}`;
+}
+
+function architectClosingSig({ includeDate = true } = {}) {
+  return `<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
+${dscSlot("consultant")}
+${architectSignerBlock({ includeDate })}`;
 }
 
 function closing(sigInner, { cc = "", yours = "Yours Faithfully,", thanking = true } = {}) {
@@ -124,10 +151,8 @@ ${body}
 `;
 }
 
-const files = {
-  "plinth-completion.html": wrap(
-    "Intimation of Completion of Work upto Plinth Level",
-    `
+function plinthBody(sigInner) {
+  return `
 <div class="annexure">ANNEXURE 14</div>
 <div class="form-subtitle">[Regulations No.11(4)]</div>
 <div class="form-title">Form of intimation of Completion of Work upto Plinth Level</div>
@@ -135,39 +160,68 @@ ${bpToBlock()}
 <p>Sir,</p>
 <p class="body-indent">The construction upto plinth/column upto plinth level has been completed in Building No. ${vb("{{BUILDING_NO}}")} on/in ${plotLine()} ${divisionLine()} Road/Street ${vb("{{PROPERTY_ADDRESS}}")} Ward ${vb("{{WARD}}")} in accordance with your permission No. ${vb("{{FILE_NO}}")} dated ${vb("{{LAST_APPROVAL_NO}}")} under my supervision and in accordance with the sanctioned plan.</p>
 <p class="body-indent">Please check the completed work and permit me to proceed with the rest of the work.</p>
-${closing(`<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
-${dscSlot("consultant")}
-${architectSignerBlock({ includeDate: false })}`)}
-`
-  ),
+${closing(sigInner)}
+`;
+}
 
-  "development-completion-certificate.html": wrap(
-    "Development completion certificate",
-    `
+function dccBody(sigInner) {
+  return `
 <div class="annexure">ANNEXURE 14</div>
 <div class="form-subtitle">(Regulations No.11(6)&amp; (7))</div>
 <div class="form-title">Form for Development completion certificate</div>
 ${bpToBlock()}
 <p>Sir,</p>
-<p class="body-indent">I certify that the erection/re-erection or part/full development work in/on building/ part building No. ${vb("{{BUILDING_NO}}")} on/in ${plotLine()} ${divisionLine()} situated at ${vb("{{PROPERTY_ADDRESS}}")} Road/Street ${vb("{{PROPERTY_ADDRESS}}")} Ward ${vb("{{WARD}}")} has been supervised by me and has been completed on according to the plans sanctioned (office communication No. ${vb("{{FILE_NO}}")} dated ${vb("{{LAST_APPROVAL_NO}}")}).</p>
+<p class="body-indent">I certify that the erection/re-erection or part/full development work in/on building/ part building No. ${vb("{{BUILDING_NO}}")} on/in ${plotLine()} ${divisionLine()} situated at ${vb("{{PROPERTY_ADDRESS}}")} Ward ${vb("{{WARD}}")} has been supervised by me and has been completed on according to the plans sanctioned (office communication No. ${vb("{{FILE_NO}}")} dated ${vb("{{LAST_APPROVAL_NO}}")}).</p>
 <p class="body-indent">The work has been completed to my best satisfaction the workmanship and all the materials (type and grade) have been used strictly in accordance with general and detailed specifications. No provisions of the Act or Development Control Regulations or no requisitions made, conditions prescribed or orders issued thereunder have been transgressed in the course of the work. I am enclosing three copies of the completion plans, one of which is cloth mounted. The building is fit for occupancy for which it has been erected/re-erected or altered, constructed and enlarged.</p>
 <p class="body-indent">I have to request you to arrange for the inspection and give permission for the occupation of the building.</p>
-${closing(`<p>For ${vb("{{CONSULTANT_FIRM}}")},</p>
-${dscSlot("consultant")}
-${architectSignerBlock()}`)}
-`
+${closing(sigInner)}
+`;
+}
+
+const files = {
+  "plinth-completion.html": wrap(
+    "Intimation of Completion of Work upto Plinth Level",
+    plinthBody(ownerSignerBlock({ includeDate: false }))
   ),
+
+  "development-completion-certificate.html": wrap(
+    "Development completion certificate",
+    dccBody(ownerSignerBlock())
+  ),
+
+  // Architect-pack copies (same body; Architect/L.S. closes)
+  "__arch__/plinth-completion.html": wrap(
+    "Intimation of Completion of Work upto Plinth Level",
+    plinthBody(architectClosingSig({ includeDate: false }))
+  ),
+
+  "__arch__/development-completion-certificate.html": wrap(
+    "Development completion certificate",
+    dccBody(architectClosingSig())
+  ),
+
 
   "owners-plot-area-affidavit.html": wrap(
     "Owner's Plot Area Affidavit",
     `
-<div class="stamp-note">ON Rs. 100/- Stamp paper and not on letter head</div>
 <div class="annexure">ANNEXURE 4</div>
 <div class="form-title">Owner's Plot Area Affidavit</div>
 ${bpToBlock()}
-<p>Subject:&nbsp;&nbsp;${vb("{{PROJECT_TITLE}}")}</p>
-<p>Reference:&nbsp;&nbsp;Proposal File No. ${vb("{{FILE_NO}}")}</p>
-<p class="body-indent">I/We, ${vb("{{SALUTATION}}")}${vb("{{APPLICANT_NAME}}")}}, ${vb("{{SIGNATORY_DESIGNATION}}")}, ${vb("{{OWNER_FIRM}}")} having its office at ${vb("{{COMMUNICATION_ADDRESS}}")} and possessing the rights of development by virtue Conveyance/ Lease/ Development Agreement/ Power of Attorney dated ${vb("{{DEVELOPMENT_RIGHTS_DATE}}")} for the property bearing Survey No. ${vb("{{S_NO}}")}, Hissa No. ${vb("{{H_NO}}")} &amp; ${plotLine()} of Village- ${vb("{{VILLAGE}}")} at ${vb("{{PROPERTY_ADDRESS}}")} in ${vb("{{WARD}}")} Ward, and having my residence/office at ${vb("{{OWNER_ADDRESS_LINE_1}}")}, do solemnly affirm and say as under:</p>
+<table class="subject-reference-table">
+  <tr>
+    <td class="sr-label">Subject:</td>
+    <td class="sr-value"><span class="value-bold">Owner's Plot Area Affidavit.</span></td>
+  </tr>
+  <tr>
+    <td class="sr-label">Project:</td>
+    <td class="sr-value">Proposed redevelopment on plot bearing ${vb("{{PLOT_CS_CTS_NO}}")} of Village- ${vb("{{VILLAGE}}")} at ${vb("{{PROPERTY_ADDRESS}}")} in ${vb("{{WARD}}")} Ward.</td>
+  </tr>
+  <tr>
+    <td class="sr-label">Ref:</td>
+    <td class="sr-value">${vb("{{PLANNING_AUTHORITY}}")} Proposal No. ${vb("{{FILE_NO}}")}</td>
+  </tr>
+</table>
+<p class="body-indent">I/We, ${vb("{{SALUTATION}}")} ${vb("{{APPLICANT_NAME}}")}, ${vb("{{SIGNATORY_DESIGNATION}}")}, ${vb("{{OWNER_FIRM}}")} having its office at ${vb("{{COMMUNICATION_ADDRESS}}")} and possessing the rights of development by virtue Conveyance/ Lease/ Development Agreement/ Power of Attorney dated ${vb("{{DEVELOPMENT_RIGHTS_DATE}}")} for the property bearing Survey No. ${vb("{{S_NO}}")}, Hissa No. ${vb("{{H_NO}}")} &amp; ${plotLine()} of Village- ${vb("{{VILLAGE}}")} at ${vb("{{PROPERTY_ADDRESS}}")} in ${vb("{{WARD}}")} Ward, and having my residence/office at ${vb("{{OWNER_ADDRESS_LINE_1}}")}, do solemnly affirm and say as under:</p>
 <p class="body-indent">I have submitted the plans through my Architect/Licensed Surveyor ${vb("{{ARCHITECT_LS_NAME}}")} having License No. ${vb("{{ARCHITECT_LS_REG_NO}}")} for development of the aforesaid property.</p>
 <p class="body-indent">In order to verify the area, I have also carried out survey of the said plot through my Architect/ Licensed surveyor to ascertain the correctness of the area.</p>
 <p class="body-indent">I say that my Architect/Licensed Surveyor has certified the said area on the basis of the property register card duly certified by the Superintendent of Land Records and/or on the basis survey carried out as per the boundaries of the property shown by me/us.</p>
@@ -222,9 +276,12 @@ ${dscSlot("owner")}
 };
 
 await mkdir(OUT, { recursive: true });
+await mkdir(ARCH_OUT, { recursive: true });
 for (const [name, html] of Object.entries(files)) {
-  const dest = path.join(OUT, name);
+  const isArch = name.startsWith("__arch__/");
+  const destName = isArch ? name.slice("__arch__/".length) : name;
+  const dest = path.join(isArch ? ARCH_OUT : OUT, destName);
   await writeFile(dest, html, "utf8");
-  console.log("wrote", name);
+  console.log("wrote", isArch ? path.join("consultants/architect", destName) : destName);
 }
-console.log("done", Object.keys(files).length, "files →", OUT);
+console.log("done", Object.keys(files).length, "files");
